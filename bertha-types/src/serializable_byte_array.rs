@@ -9,7 +9,16 @@ use crate::parse_hex_error::ParseHexError;
 /// Fixed-size binary data that can be de-/serialized from and to hex strings, using a fixed-length
 /// encoding. Used for opaque fields that are only required for computing block hashes.
 #[derive(
-    PartialEq, Eq, PartialOrd, Ord, Debug, Clone, RlpDecodableWrapper, RlpEncodableWrapper,
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    RlpDecodableWrapper,
+    RlpEncodableWrapper,
 )]
 pub struct SerializableByteArray<const N: usize>([u8; N]);
 

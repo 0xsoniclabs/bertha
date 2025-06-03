@@ -1,13 +1,27 @@
 use std::fmt;
 
-use alloy_rlp::Encodable;
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use serde::{Deserialize, Serialize};
 
 use crate::{SerializableByteArray, parse_hex_error::ParseHexError};
 
 /// Address is a 20-byte identifier used in Ethereum-compatible blockchains to identify smart
 /// contracts and externally owned accounts.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+)]
 pub struct Address(SerializableByteArray<20>);
 
 impl Address {
@@ -34,14 +48,10 @@ impl fmt::Display for Address {
     }
 }
 
-impl Encodable for Address {
-    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        self.0.encode(out);
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use alloy_rlp::Encodable;
+
     use super::*;
 
     #[test]

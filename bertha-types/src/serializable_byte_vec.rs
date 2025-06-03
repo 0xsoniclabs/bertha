@@ -1,6 +1,6 @@
 use std::fmt;
 
-use alloy_rlp::{Encodable, RlpDecodableWrapper};
+use alloy_rlp::{Decodable, Encodable};
 use const_hex::FromHexError;
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +8,7 @@ use crate::parse_hex_error::ParseHexError;
 
 /// Variable-size binary data that can be de-/serialized from and to hex strings, using a
 /// fixed-length encoding.
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, RlpDecodableWrapper)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SerializableByteVec(Vec<u8>);
 
 impl SerializableByteVec {
@@ -68,6 +68,13 @@ impl<'de> Deserialize<'de> for SerializableByteVec {
 impl Encodable for SerializableByteVec {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.0.as_slice().encode(out);
+    }
+}
+
+impl Decodable for SerializableByteVec {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let bytes = alloy_rlp::Header::decode_bytes(buf, false)?.to_vec();
+        Ok(Self(bytes))
     }
 }
 
@@ -161,6 +168,18 @@ mod test {
         let b: SerializableByteVec = SerializableByteVec([0; 4].to_vec());
         let rlp = alloy_rlp::encode(b);
         assert_eq!(rlp, const_hex::decode("8400000000").unwrap());
+    }
+
+    #[test]
+    fn can_be_deserialized_from_rlp() {
+        let rlp = vec![0x82, 0x12, 0x34];
+        let s: SerializableByteVec = alloy_rlp::decode_exact(&rlp).unwrap();
+        assert_eq!(s, SerializableByteVec([0x12, 0x34].to_vec()));
+
+        // Encoding has fixed length
+        let rlp = vec![0x84, 0x00, 0x00, 0x00, 0x00];
+        let s: SerializableByteVec = alloy_rlp::decode_exact(&rlp).unwrap();
+        assert_eq!(s, SerializableByteVec([0; 4].to_vec()));
     }
 
     #[test]

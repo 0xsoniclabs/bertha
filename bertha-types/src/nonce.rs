@@ -16,6 +16,7 @@ use crate::{SerializableU64, parse_hex_error::ParseHexError};
     Eq,
     PartialOrd,
     Ord,
+    Hash,
     Serialize,
     Deserialize,
     RlpDecodableWrapper,

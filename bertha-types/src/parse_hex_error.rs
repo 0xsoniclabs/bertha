@@ -2,7 +2,7 @@ use std::num::IntErrorKind;
 
 use thiserror::Error;
 
-#[derive(PartialEq, Eq, Error, Debug)]
+#[derive(Debug, PartialEq, Eq, Error)]
 pub enum ParseHexError {
     #[error("hex string contains invalid character(s)")]
     InvalidCharacter,

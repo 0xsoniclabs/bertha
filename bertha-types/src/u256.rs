@@ -12,7 +12,7 @@ use super::parse_hex_error::ParseHexError;
 
 /// Unsigned integer type that can be de-/serialized from and to hex strings, using a
 /// variable-length encoding.
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct U256(BnumU256);
 
 impl U256 {

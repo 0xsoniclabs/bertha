@@ -15,20 +15,12 @@ pub struct ReceiptVerificationError;
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactionReceipt {
-    //pub block_hash: Hash,
-    //pub block_number: BlockNumber,
     pub cumulative_gas_used: SerializableU64,
-    //pub effective_gas_price: SerializableU64,
-    //pub from: Address,
-    //pub gas_used: SerializableU64,
     pub logs: Vec<Log>,
     pub logs_bloom: Bloom,
     pub status: SerializableU64,
-    //pub to: Address,
-    //pub transaction_hash: Hash,
     pub transaction_index: SerializableU64,
     pub type_: SerializableU64,
-    //pub contract_address: Option<Address>,
 }
 
 impl Encodable for TransactionReceipt {
@@ -212,10 +204,9 @@ mod tests {
             .unwrap(),
         ];
         let log = Log {
-            address: address.clone(),
+            address,
             topics: topics.clone(),
             data: SerializableByteVec::default(),
-            transaction_index: SerializableU64::from(0u64),
         };
         let receipt = TransactionReceipt {
             status: SerializableU64::from(0u8),
@@ -308,7 +299,6 @@ mod tests {
                             ]
                             .as_slice(),
                         ),
-                        transaction_index: SerializableU64::from(0u64),
                     },
                     Log {
                         address: Address::try_from_hex("61a2777db1271ef53329a13d05098f47ceaa7021")
@@ -335,7 +325,6 @@ mod tests {
                             ]
                             .as_slice(),
                         ),
-                        transaction_index: SerializableU64::from(0u64),
                     },
                     Log {
                         address: Address::try_from_hex(
@@ -370,7 +359,6 @@ mod tests {
                             ]
                             .as_slice(),
                         ),
-                        transaction_index: SerializableU64::from(0u64),
                     },
                 ],
                 logs_bloom: Bloom::from([

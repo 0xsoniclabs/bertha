@@ -9,12 +9,13 @@ use crate::parse_hex_error::ParseHexError;
 #[derive(
     Debug,
     Clone,
+    Copy,
     Default,
     PartialEq,
     Eq,
     PartialOrd,
     Ord,
-    Copy,
+    Hash,
     RlpDecodableWrapper,
     RlpEncodableWrapper,
 )]

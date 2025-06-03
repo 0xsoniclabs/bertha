@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use alloy_rlp::RlpEncodableWrapper;
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use serde::{Deserialize, Serialize};
 
 use crate::{SerializableU64, parse_hex_error::ParseHexError};
@@ -10,14 +10,17 @@ use crate::{SerializableU64, parse_hex_error::ParseHexError};
 #[derive(
     Debug,
     Clone,
+    Copy,
     Default,
     PartialEq,
     Eq,
+    PartialOrd,
+    Ord,
+    Hash,
     Serialize,
     Deserialize,
     RlpEncodableWrapper,
-    PartialOrd,
-    Ord,
+    RlpDecodableWrapper,
 )]
 pub struct BlockNumber(SerializableU64);
 

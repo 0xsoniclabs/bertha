@@ -1,4 +1,4 @@
-use alloy_rlp::RlpEncodable;
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use ethbloom::{BloomRef, Input};
 use serde::{Deserialize, Serialize};
 use sha3::Digest;
@@ -10,7 +10,18 @@ use crate::{
 
 /// An Ethereum-compatible block header.
 #[derive(
-    Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, RlpEncodable, PartialOrd, Ord,
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    RlpEncodable,
+    RlpDecodable,
 )]
 #[serde(rename_all = "camelCase")]
 #[rlp(trailing)]
@@ -300,7 +311,7 @@ mod tests {
         );
         for topic in &topics {
             assert!(
-                block.may_contain_logs(None, &[topic.clone()]),
+                block.may_contain_logs(None, &[*topic]),
                 "filter does not match topic which is contained in it"
             );
         }
