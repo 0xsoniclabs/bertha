@@ -3,7 +3,7 @@ use std::fmt;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use serde::{Deserialize, Serialize};
 
-use crate::types::{SerializableU64, parse_hex_error::ParseHexError};
+use crate::{SerializableU64, parse_hex_error::ParseHexError};
 
 /// Nonce is a 64-bit unsigned integer used to represent the nonce of a transaction in
 /// Ethereum-compatible blockchains. The nonce is a unique identifier for each transaction sent from
@@ -24,11 +24,11 @@ use crate::types::{SerializableU64, parse_hex_error::ParseHexError};
 pub struct Nonce(SerializableU64);
 
 impl Nonce {
-    pub(crate) fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
+    pub fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
         SerializableU64::try_from_hex(value).map(Self)
     }
 
-    fn to_hex(&self) -> String {
+    pub fn to_hex(&self) -> String {
         self.0.to_hex()
     }
 }

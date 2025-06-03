@@ -1,7 +1,7 @@
 use alloy_rlp::RlpEncodable;
 use serde::{Deserialize, Serialize};
 
-use crate::types::{Address, Hash, SerializableByteVec, SerializableU64};
+use crate::{Address, Hash, SerializableByteVec, SerializableU64};
 
 #[derive(Debug, Clone, Deserialize, Serialize, RlpEncodable, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "camelCase")]

@@ -3,7 +3,7 @@ use std::fmt;
 use alloy_rlp::Encodable;
 use serde::{Deserialize, Serialize};
 
-use crate::types::{SerializableByteArray, parse_hex_error::ParseHexError};
+use crate::{SerializableByteArray, parse_hex_error::ParseHexError};
 
 /// Address is a 20-byte identifier used in Ethereum-compatible blockchains to identify smart
 /// contracts and externally owned accounts.

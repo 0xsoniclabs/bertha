@@ -3,7 +3,7 @@ use std::fmt::Display;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use serde::{Deserialize, Serialize};
 
-use crate::types::parse_hex_error::ParseHexError;
+use crate::parse_hex_error::ParseHexError;
 
 /// u64 that can be serialized to and deserialized from a hex string.
 #[derive(
@@ -125,7 +125,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             e,
-            crate::types::parse_hex_error::ParseHexError::IntError(IntErrorKind::PosOverflow)
+            crate::parse_hex_error::ParseHexError::IntError(IntErrorKind::PosOverflow)
         );
     }
 

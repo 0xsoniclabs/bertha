@@ -3,7 +3,7 @@ use alloy_trie::{HashBuilder, Nibbles};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::types::{Address, Bloom, Hash, Log, SerializableU64};
+use crate::{Address, Bloom, Hash, Log, SerializableU64};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Error)]
 #[error("the computed receipt root did not match the receipt root of the block header")]
@@ -139,7 +139,7 @@ impl VerifiedBlockReceipt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Hash, serializable_byte_vec::SerializableByteVec};
+    use crate::{Hash, serializable_byte_vec::SerializableByteVec};
 
     #[test]
 

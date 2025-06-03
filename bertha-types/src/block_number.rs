@@ -3,7 +3,7 @@ use std::fmt::Display;
 use alloy_rlp::RlpEncodableWrapper;
 use serde::{Deserialize, Serialize};
 
-use crate::types::{SerializableU64, parse_hex_error::ParseHexError};
+use crate::{SerializableU64, parse_hex_error::ParseHexError};
 
 /// BlockNumber is a 64-bit unsigned integer used to represent block numbers in Ethereum-compatible
 /// blockchains.
@@ -56,7 +56,7 @@ impl Display for BlockNumber {
 mod tests {
     use alloy_rlp::Encodable;
 
-    use crate::types::{BlockNumber, serializable_u64::SerializableU64};
+    use crate::{BlockNumber, serializable_u64::SerializableU64};
 
     #[test]
     fn zero_initializes_block_number_to_zero() {

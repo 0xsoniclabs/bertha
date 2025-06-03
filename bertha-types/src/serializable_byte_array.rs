@@ -4,7 +4,7 @@ use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use const_hex::FromHexError;
 use serde::{Deserialize, Serialize};
 
-use crate::types::parse_hex_error::ParseHexError;
+use crate::parse_hex_error::ParseHexError;
 
 /// Fixed-size binary data that can be de-/serialized from and to hex strings, using a fixed-length
 /// encoding. Used for opaque fields that are only required for computing block hashes.
@@ -92,6 +92,7 @@ mod test {
         assert_eq!(b.0, [0x12, 0x34]);
     }
 
+    #[test]
     fn can_be_default_initialized() {
         let b: SerializableByteArray<2> = SerializableByteArray::default();
         assert_eq!(b.0, [0x0, 0x0]);

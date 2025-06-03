@@ -4,7 +4,7 @@ use alloy_rlp::{Encodable, RlpDecodableWrapper};
 use const_hex::FromHexError;
 use serde::{Deserialize, Serialize};
 
-use crate::types::parse_hex_error::ParseHexError;
+use crate::parse_hex_error::ParseHexError;
 
 /// Variable-size binary data that can be de-/serialized from and to hex strings, using a
 /// fixed-length encoding.

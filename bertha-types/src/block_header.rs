@@ -3,7 +3,7 @@ use ethbloom::{BloomRef, Input};
 use serde::{Deserialize, Serialize};
 use sha3::Digest;
 
-use crate::types::{
+use crate::{
     Address, BlockNumber, Bloom, Hash, SerializableByteVec, SerializableU64,
     serializable_byte_array::SerializableByteArray, u256::U256,
 };
@@ -35,7 +35,7 @@ pub struct BlockHeader {
     /// The block nonce is a legacy field that was used for proof of work.
     /// For proof of stake it should always be "0x0000000000000000".
     ///
-    /// NOTE: We don't use the [crate::types::Nonce] type for this field,
+    /// NOTE: We don't use the [crate::Nonce] type for this field,
     /// because that uses a u64 RLP encoding, where this fields needs to be
     /// encoded to a fixed length array of 8 bytes.
     pub nonce: SerializableByteArray<8>, // Nonce
