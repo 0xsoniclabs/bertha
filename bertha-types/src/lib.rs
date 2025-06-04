@@ -9,6 +9,7 @@ mod serializable_byte_array;
 mod serializable_byte_vec;
 mod serializable_u64;
 mod u256;
+mod wei;
 
 pub use address::Address;
 pub use block_header::BlockHeader;
@@ -20,6 +21,7 @@ pub use serializable_byte_array::SerializableByteArray;
 pub use serializable_byte_vec::SerializableByteVec;
 pub use serializable_u64::SerializableU64;
 pub use u256::U256;
+pub use wei::Wei;
 
 pub type Bloom = SerializableByteArray<256>;
 pub type Hash = SerializableByteArray<32>;
