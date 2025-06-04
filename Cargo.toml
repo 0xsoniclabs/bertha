@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["blockserver"]
+members = ["bertha-types", "blockserver"]
 
 [workspace.lints.rust]
 macro_use_extern_crate = "warn"
