@@ -12,7 +12,7 @@ pub struct ReceiptVerificationError;
 /// Receipt for a transaction.
 /// The receipt provides information about the execution of the transaction like the amount of gas
 /// that was used or the emitted logs.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 #[serde(from = "JsonRpcTransactionReceipt", into = "JsonRpcTransactionReceipt")]
 pub struct TransactionReceipt {
     pub transaction_type: TransactionType,
