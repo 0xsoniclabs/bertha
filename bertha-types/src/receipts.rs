@@ -3,7 +3,7 @@ use alloy_trie::{HashBuilder, Nibbles};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{Address, Bloom, Hash, Log, SerializableU64};
+use crate::{Address, AsHex, Bloom, Hash, Log};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Error)]
 #[error("the computed receipt root did not match the receipt root of the block header")]
@@ -12,15 +12,15 @@ pub struct ReceiptVerificationError;
 /// Receipt for a transaction.
 /// The receipt provides information about the execution of the transaction like the amount of gas
 /// that was used or the emitted logs.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(from = "JsonRpcTransactionReceipt", into = "JsonRpcTransactionReceipt")]
 pub struct TransactionReceipt {
-    pub cumulative_gas_used: SerializableU64,
+    pub cumulative_gas_used: u64,
     pub logs: Vec<Log>,
     pub logs_bloom: Bloom,
-    pub status: SerializableU64,
-    pub transaction_index: SerializableU64,
-    pub type_: SerializableU64,
+    pub status: u64,
+    pub transaction_index: u64,
+    pub type_: u64,
 }
 
 impl Encodable for TransactionReceipt {
@@ -32,8 +32,8 @@ impl Encodable for TransactionReceipt {
     fn encode(&self, out: &mut dyn BufMut) {
         // see: https://github.com/ethereum/go-ethereum/blob/a511553e448c947a0fe8f34acf7bb6f9818c2b49/core/types/receipt.go#L122-L140
         const LEGACY_TRANSACTION_TYPE: u8 = 0;
-        if self.type_ != SerializableU64::from(LEGACY_TRANSACTION_TYPE) {
-            out.put_u8(Into::<u64>::into(self.type_) as u8);
+        if self.type_ != LEGACY_TRANSACTION_TYPE as u64 {
+            out.put_u8(self.type_ as u8);
         }
         Header {
             list: true,
@@ -65,6 +65,52 @@ impl TransactionReceipt {
         let mut v = Vec::new();
         self.encode(&mut v);
         v
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JsonRpcTransactionReceipt {
+    pub cumulative_gas_used: AsHex<u64>,
+    pub logs: Vec<Log>,
+    pub logs_bloom: AsHex<Bloom>,
+    pub status: AsHex<u64>,
+    pub transaction_index: AsHex<u64>,
+    pub type_: AsHex<u64>,
+    // Fields that are part of the JSON RPC response but we currently don't use:
+    // pub block_hash: AsHex<Hash>,
+    // pub block_number: AsHex<u64>,
+    // pub contract_address: Option<AsHex<Address>>,
+    // pub effective_gas_price: Option<AsHex<u64>>,
+    // pub from: AsHex<Address>,
+    // pub gas_used: AsHex<u64>,
+    // pub to: Option<AsHex<Address>>,
+    // pub transaction_hash: AsHex<Hash>,
+}
+
+impl From<JsonRpcTransactionReceipt> for TransactionReceipt {
+    fn from(value: JsonRpcTransactionReceipt) -> Self {
+        Self {
+            cumulative_gas_used: value.cumulative_gas_used.0,
+            logs: value.logs,
+            logs_bloom: value.logs_bloom.0,
+            status: value.status.0,
+            transaction_index: value.transaction_index.0,
+            type_: value.type_.0,
+        }
+    }
+}
+
+impl From<TransactionReceipt> for JsonRpcTransactionReceipt {
+    fn from(value: TransactionReceipt) -> Self {
+        Self {
+            cumulative_gas_used: AsHex(value.cumulative_gas_used),
+            logs: value.logs,
+            logs_bloom: AsHex(value.logs_bloom),
+            status: AsHex(value.status),
+            transaction_index: AsHex(value.transaction_index),
+            type_: AsHex(value.type_),
+        }
     }
 }
 
@@ -131,34 +177,24 @@ impl VerifiedBlockReceipt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Hash, serializable_byte_vec::SerializableByteVec};
+    use crate::{Hash, HexConvert};
 
     #[test]
 
     fn encode_key_encodes_transaction_index_in_rlp() {
         let mut receipt = TransactionReceipt {
-            status: SerializableU64::from(1u8),
-            cumulative_gas_used: SerializableU64::from(21000u64),
-            logs_bloom: Bloom::default(),
+            status: 1,
+            cumulative_gas_used: 21000,
+            logs_bloom: [0; 256],
             logs: vec![],
-            transaction_index: SerializableU64::from(0u8),
-            type_: SerializableU64::from(0u8),
+            transaction_index: 0,
+            type_: 0,
         };
 
-        assert_eq!(
-            &receipt.encode_key(),
-            SerializableByteVec::try_from_hex("0x80")
-                .unwrap()
-                .as_bytes()
-        );
+        assert_eq!(receipt.encode_key(), Vec::try_from_hex("0x80").unwrap());
 
-        receipt.transaction_index = SerializableU64::from(1u64);
-        assert_eq!(
-            &receipt.encode_key(),
-            SerializableByteVec::try_from_hex("0x01")
-                .unwrap()
-                .as_bytes()
-        );
+        receipt.transaction_index = 1;
+        assert_eq!(receipt.encode_key(), Vec::try_from_hex("0x01").unwrap());
     }
 
     #[test]
@@ -166,24 +202,24 @@ mod tests {
     fn encode_value_encodes_transaction_receipt_in_rlp_and_respects_different_encoding_depending_on_type()
      {
         let mut receipt = TransactionReceipt {
-            status: SerializableU64::from(1u8),
-            cumulative_gas_used: SerializableU64::from(21000u64),
-            logs_bloom: Bloom::default(),
+            status: 1,
+            cumulative_gas_used: 21000,
+            logs_bloom: [0; 256],
             logs: vec![],
-            transaction_index: SerializableU64::from(0u8),
-            type_: SerializableU64::from(0u8),
+            transaction_index: 0,
+            type_: 0,
         };
 
         // if the type == legacy transaction type (0) -> type field not encoded
-        assert_eq!(&receipt.encode_value(), SerializableByteVec::try_from_hex("0xf9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap().as_bytes());
+        assert_eq!(receipt.encode_value(), Vec::try_from_hex("0xf9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
 
         // if the type != legacy transaction type (0) -> type field encoded
-        receipt.type_ = SerializableU64::from(1u8);
-        assert_eq!(&receipt.encode_value(), SerializableByteVec::try_from_hex("0x01f9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap().as_bytes());
+        receipt.type_ = 1;
+        assert_eq!(receipt.encode_value(), Vec::try_from_hex("0x01f9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
 
         // if the type != legacy transaction type (0) -> type field encoded
-        receipt.type_ = SerializableU64::from(2u8);
-        assert_eq!(&receipt.encode_value(), SerializableByteVec::try_from_hex("0x02f9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap().as_bytes());
+        receipt.type_ = 2;
+        assert_eq!(receipt.encode_value(), Vec::try_from_hex("0x02f9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
     }
 
     #[test]
@@ -206,15 +242,15 @@ mod tests {
         let log = Log {
             address,
             topics: topics.clone(),
-            data: SerializableByteVec::default(),
+            data: Vec::default(),
         };
         let receipt = TransactionReceipt {
-            status: SerializableU64::from(0u8),
-            cumulative_gas_used: SerializableU64::from(0u64),
-            logs_bloom: Bloom::default(),
+            status: 0,
+            cumulative_gas_used: 0,
+            logs_bloom: [0; 256],
             logs: vec![log.clone()],
-            transaction_index: SerializableU64::from(0u8),
-            type_: SerializableU64::from(0u8),
+            transaction_index: 0,
+            type_: 0,
         };
         let block_receipt = VerifiedBlockReceipt(vec![receipt]);
 
@@ -270,7 +306,7 @@ mod tests {
     fn verify_computes_root_hash_correctly_and_compares_it_with_specified_root() {
         let receipt = BlockReceipt(vec![
             TransactionReceipt {
-                cumulative_gas_used: SerializableU64::from(77081u64),
+                cumulative_gas_used: 77081,
                 logs: vec![
                     Log {
                         address: Address::try_from_hex(
@@ -292,13 +328,10 @@ mod tests {
                                 173, 216, 155, 97, 58, 88, 238, 226, 196, 103, 80, 162,
                             ]),
                         ],
-                        data: SerializableByteVec::from(
-                            [
-                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                0, 0, 0, 35, 134, 242, 111, 193, 0, 0,
-                            ]
-                            .as_slice(),
-                        ),
+                        data: vec![
+                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                            0, 35, 134, 242, 111, 193, 0, 0,
+                        ],
                     },
                     Log {
                         address: Address::try_from_hex("61a2777db1271ef53329a13d05098f47ceaa7021")
@@ -318,13 +351,10 @@ mod tests {
                                 58, 42, 67, 155, 205, 104, 92, 22, 153, 213, 74, 149, 176,
                             ]),
                         ],
-                        data: SerializableByteVec::from(
-                            [
-                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                0, 0, 5, 132, 222, 161, 181, 103, 77, 16,
-                            ]
-                            .as_slice(),
-                        ),
+                        data: vec![
+                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                            5, 132, 222, 161, 181, 103, 77, 16,
+                        ],
                     },
                     Log {
                         address: Address::try_from_hex(
@@ -350,15 +380,11 @@ mod tests {
                                 245, 51, 41, 161, 61, 5, 9, 143, 71, 206, 170, 112, 33,
                             ]),
                         ],
-                        data: SerializableByteVec::from(
-                            [
-                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                0, 0, 0, 35, 134, 242, 111, 193, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 132, 222, 161, 181,
-                                103, 77, 16,
-                            ]
-                            .as_slice(),
-                        ),
+                        data: vec![
+                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                            0, 35, 134, 242, 111, 193, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 132, 222, 161, 181, 103, 77, 16,
+                        ],
                     },
                 ],
                 logs_bloom: Bloom::from([
@@ -373,12 +399,12 @@ mod tests {
                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                     0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 ]),
-                status: SerializableU64::from(1u64),
-                transaction_index: SerializableU64::from(0u64),
-                type_: SerializableU64::from(2u64),
+                status: 1,
+                transaction_index: 0,
+                type_: 2,
             },
             TransactionReceipt {
-                cumulative_gas_used: SerializableU64::from(98081u64),
+                cumulative_gas_used: 98081,
                 logs: vec![],
                 logs_bloom: Bloom::from([
                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -392,9 +418,9 @@ mod tests {
                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 ]),
-                status: SerializableU64::from(1u64),
-                transaction_index: SerializableU64::from(1u64),
-                type_: SerializableU64::from(2u64),
+                status: 1,
+                transaction_index: 1,
+                type_: 2,
             },
         ]);
 
@@ -407,5 +433,96 @@ mod tests {
 
         let receipts_root = Hash::default();
         assert!(receipt.verify(&receipts_root).is_err());
+    }
+
+    #[test]
+    fn can_be_serialized_to_json() {
+        let address_hex = "0x1234567890abcdef1234567890abcdef12345678";
+        let topic1_hex = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef12345678ababaabababaab";
+        let topic2_hex = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef12345678ababaabababaab";
+        let bloom_hex = "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+        let log = Log {
+            address: Address::try_from_hex(address_hex).unwrap(),
+            topics: vec![
+                Hash::try_from_hex(topic1_hex).unwrap(),
+                Hash::try_from_hex(topic2_hex).unwrap(),
+            ],
+            data: vec![1, 2, 3, 4, 5],
+        };
+
+        let receipt = TransactionReceipt {
+            cumulative_gas_used: 12345,
+            logs: vec![log.clone()],
+            logs_bloom: [0; 256],
+            status: 1,
+            transaction_index: 0,
+            type_: 2,
+        };
+
+        let expected_json = format!(
+            r#"{{
+            "cumulativeGasUsed":"0x3039",
+            "logs":[{{
+                "address":"{address_hex}",
+                "topics":["{topic1_hex}","{topic2_hex}"],
+                "data":"0x0102030405"
+            }}],
+            "logsBloom":"{bloom_hex}",
+            "status":"0x1",
+            "transactionIndex":"0x0",
+            "type":"0x2"
+            }}"#,
+        )
+        .replace(" ", "")
+        .replace("\n", "");
+
+        assert_eq!(serde_json::to_string(&receipt).unwrap(), expected_json);
+    }
+
+    #[test]
+    fn can_be_deserialized_from_json() {
+        let address_hex = "0x1234567890abcdef1234567890abcdef12345678";
+        let topic1_hex = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef12345678ababaabababaab";
+        let topic2_hex = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef12345678ababaabababaab";
+        let bloom_hex = "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+        let json = format!(
+            r#"{{
+            "cumulativeGasUsed":"0x3039",
+            "logs":[{{
+                "address":"{address_hex}",
+                "topics":["{topic1_hex}","{topic2_hex}"],
+                "data":"0x0102030405"
+            }}],
+            "logsBloom":"{bloom_hex}",
+            "status":"0x1",
+            "transactionIndex":"0x0",
+            "type":"0x2"
+            }}"#,
+        );
+
+        let expected_log = Log {
+            address: Address::try_from_hex(address_hex).unwrap(),
+            topics: vec![
+                Hash::try_from_hex(topic1_hex).unwrap(),
+                Hash::try_from_hex(topic2_hex).unwrap(),
+            ],
+            data: vec![1, 2, 3, 4, 5],
+        };
+
+        let expected_receipt = TransactionReceipt {
+            cumulative_gas_used: 12345,
+            logs: vec![expected_log.clone()],
+            logs_bloom: [0; 256],
+            status: 1,
+            transaction_index: 0,
+            type_: 2,
+        };
+
+        assert_eq!(
+            serde_json::from_str::<TransactionReceipt>(&json).unwrap(),
+            expected_receipt
+        );
     }
 }

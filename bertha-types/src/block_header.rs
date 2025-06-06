@@ -1,67 +1,258 @@
-use alloy_rlp::{RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, Encodable};
 use ethbloom::{BloomRef, Input};
 use serde::{Deserialize, Serialize};
 use sha3::Digest;
 
-use crate::{
-    Address, BlockNumber, Bloom, Hash, SerializableByteVec, SerializableU64,
-    serializable_byte_array::SerializableByteArray, u256::U256,
-};
+use crate::{Address, AsHex, Bloom, Hash, U256};
 
 /// An Ethereum-compatible block header.
-#[derive(
-    Debug,
-    Clone,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Serialize,
-    Deserialize,
-    RlpEncodable,
-    RlpDecodable,
-)]
-#[serde(rename_all = "camelCase")]
-#[rlp(trailing)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+#[serde(from = "JsonRpcBlockHeader", into = "JsonRpcBlockHeader")]
 pub struct BlockHeader {
     // The field names correspond to the names returned in the JSON RPC payload.
     // Go-ethereum uses different names for some of them, see the comment on each line.
-    pub parent_hash: Hash,               // ParentHash
-    pub sha3_uncles: Hash,               // UncleHash
-    pub miner: Address,                  // Coinbase
-    pub state_root: Hash,                // Root
-    pub transactions_root: Hash,         // TxHash
-    pub receipts_root: Hash,             // ReceiptHash
-    pub logs_bloom: Bloom,               // Bloom
-    pub difficulty: U256,                // Difficulty
-    pub number: BlockNumber,             // Number
-    pub gas_limit: SerializableU64,      // GasLimit
-    pub gas_used: SerializableU64,       // GasUsed
-    pub timestamp: SerializableU64,      // Time
-    pub extra_data: SerializableByteVec, // Extra
-    pub mix_hash: Hash,                  // MixDigest
+    pub parent_hash: Hash,       // ParentHash
+    pub sha3_uncles: Hash,       // UncleHash
+    pub miner: Address,          // Coinbase
+    pub state_root: Hash,        // Root
+    pub transactions_root: Hash, // TxHash
+    pub receipts_root: Hash,     // ReceiptHash
+    pub logs_bloom: Bloom,       // Bloom
+    pub difficulty: U256,        // Difficulty
+    pub number: u64,             // Number
+    pub gas_limit: u64,          // GasLimit
+    pub gas_used: u64,           // GasUsed
+    pub timestamp: u64,          // Time
+    pub extra_data: Vec<u8>,     // Extra
+    pub mix_hash: Hash,          // MixDigest
 
     /// The block nonce is a legacy field that was used for proof of work.
     /// For proof of stake it should always be "0x0000000000000000".
     ///
-    /// NOTE: We don't use the [crate::Nonce] type for this field,
-    /// because that uses a u64 RLP encoding, where this fields needs to be
+    /// NOTE: We don't use a [u64] type for this field,
+    /// because that uses a variable length RLP encoding, where this fields needs to be
     /// encoded to a fixed length array of 8 bytes.
-    pub nonce: SerializableByteArray<8>, // Nonce
+    pub nonce: [u8; 8], // Nonce
 
     // Optional fields that have been added by EIP-1559, EIP-4895 and EIP-4844 and may not be
     // present in older blocks.
     pub base_fee_per_gas: Option<U256>, // BaseFee
     pub withdrawals_root: Option<Hash>, // WithdrawalsHash
-    #[serde(default)]
-    pub blob_gas_used: Option<SerializableU64>, // BlobGasUsed
-    #[serde(default)]
-    pub excess_blob_gas: Option<SerializableU64>, // ExcessBlobGas
+    pub blob_gas_used: Option<u64>,     // BlobGasUsed
+    pub excess_blob_gas: Option<u64>,   // ExcessBlobGas
+}
+
+impl Default for BlockHeader {
+    fn default() -> Self {
+        Self {
+            parent_hash: Hash::default(),
+            sha3_uncles: Hash::default(),
+            miner: Address::default(),
+            state_root: Hash::default(),
+            transactions_root: Hash::default(),
+            receipts_root: Hash::default(),
+            logs_bloom: [0; 256],
+            difficulty: U256::default(),
+            number: u64::default(),
+            gas_limit: 0,
+            gas_used: 0,
+            timestamp: 0,
+            extra_data: Vec::new(),
+            mix_hash: Hash::default(),
+            nonce: <[u8; 8]>::default(),
+            base_fee_per_gas: None,
+            withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
+        }
+    }
+}
+
+impl Encodable for BlockHeader {
+    fn length(&self) -> usize {
+        let payload_length = self.alloy_rlp_payload_length();
+        payload_length + alloy_rlp::length_of_length(payload_length)
+    }
+
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        alloy_rlp::Header {
+            list: true,
+            payload_length: self.alloy_rlp_payload_length(),
+        }
+        .encode(out);
+        Encodable::encode(&self.parent_hash, out);
+        Encodable::encode(&self.sha3_uncles, out);
+        Encodable::encode(&self.miner, out);
+        Encodable::encode(&self.state_root, out);
+        Encodable::encode(&self.transactions_root, out);
+        Encodable::encode(&self.receipts_root, out);
+        Encodable::encode(&self.logs_bloom, out);
+        Encodable::encode(&self.difficulty, out);
+        Encodable::encode(&self.number, out);
+        Encodable::encode(&self.gas_limit, out);
+        Encodable::encode(&self.gas_used, out);
+        Encodable::encode(&self.timestamp, out);
+        Encodable::encode(&self.extra_data.as_slice(), out); // <- needs custom encoding
+        Encodable::encode(&self.mix_hash, out);
+        Encodable::encode(&self.nonce, out);
+        if let Some(val) = self.base_fee_per_gas.as_ref() {
+            Encodable::encode(val, out)
+        } else if self.withdrawals_root.is_some()
+            || self.blob_gas_used.is_some()
+            || self.excess_blob_gas.is_some()
+        {
+            out.put_u8(alloy_rlp::EMPTY_STRING_CODE);
+        }
+        if let Some(val) = self.withdrawals_root.as_ref() {
+            Encodable::encode(val, out)
+        } else if self.blob_gas_used.is_some() || self.excess_blob_gas.is_some() {
+            out.put_u8(alloy_rlp::EMPTY_STRING_CODE);
+        }
+        if let Some(val) = self.blob_gas_used.as_ref() {
+            Encodable::encode(val, out)
+        } else if self.excess_blob_gas.is_some() {
+            out.put_u8(alloy_rlp::EMPTY_STRING_CODE);
+        }
+        if let Some(val) = self.excess_blob_gas.as_ref() {
+            Encodable::encode(val, out)
+        }
+    }
+}
+
+impl Decodable for BlockHeader {
+    fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let alloy_rlp::Header {
+            list,
+            payload_length,
+        } = alloy_rlp::Header::decode(b)?;
+        if !list {
+            return Err(alloy_rlp::Error::UnexpectedString);
+        }
+        let started_len = b.len();
+        if started_len < payload_length {
+            return Err(alloy_rlp::Error::InputTooShort);
+        }
+        let this = Self {
+            parent_hash: Decodable::decode(b)?,
+            sha3_uncles: Decodable::decode(b)?,
+            miner: Decodable::decode(b)?,
+            state_root: Decodable::decode(b)?,
+            transactions_root: Decodable::decode(b)?,
+            receipts_root: Decodable::decode(b)?,
+            logs_bloom: Decodable::decode(b)?,
+            difficulty: Decodable::decode(b)?,
+            number: Decodable::decode(b)?,
+            gas_limit: Decodable::decode(b)?,
+            gas_used: Decodable::decode(b)?,
+            timestamp: Decodable::decode(b)?,
+            extra_data: alloy_rlp::Header::decode_bytes(b, false)?.to_vec(), // custom
+            mix_hash: Decodable::decode(b)?,
+            nonce: Decodable::decode(b)?,
+            base_fee_per_gas: if started_len - b.len() < payload_length {
+                if alloy_rlp::private::Option::map_or(b.first(), false, |b| {
+                    *b == alloy_rlp::EMPTY_STRING_CODE
+                }) {
+                    alloy_rlp::Buf::advance(b, 1);
+                    None
+                } else {
+                    Some(Decodable::decode(b)?)
+                }
+            } else {
+                None
+            },
+            withdrawals_root: if started_len - b.len() < payload_length {
+                if alloy_rlp::private::Option::map_or(b.first(), false, |b| {
+                    *b == alloy_rlp::EMPTY_STRING_CODE
+                }) {
+                    alloy_rlp::Buf::advance(b, 1);
+                    None
+                } else {
+                    Some(Decodable::decode(b)?)
+                }
+            } else {
+                None
+            },
+            blob_gas_used: if started_len - b.len() < payload_length {
+                if alloy_rlp::private::Option::map_or(b.first(), false, |b| {
+                    *b == alloy_rlp::EMPTY_STRING_CODE
+                }) {
+                    alloy_rlp::Buf::advance(b, 1);
+                    None
+                } else {
+                    Some(Decodable::decode(b)?)
+                }
+            } else {
+                None
+            },
+            excess_blob_gas: if started_len - b.len() < payload_length {
+                if alloy_rlp::private::Option::map_or(b.first(), false, |b| {
+                    *b == alloy_rlp::EMPTY_STRING_CODE
+                }) {
+                    alloy_rlp::Buf::advance(b, 1);
+                    None
+                } else {
+                    Some(Decodable::decode(b)?)
+                }
+            } else {
+                None
+            },
+        };
+        let consumed = started_len - b.len();
+        if consumed != payload_length {
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: payload_length,
+                got: consumed,
+            });
+        }
+        Ok(this)
+    }
 }
 
 impl BlockHeader {
+    fn alloy_rlp_payload_length(&self) -> usize {
+        Encodable::length(&self.parent_hash)
+            + Encodable::length(&self.sha3_uncles)
+            + Encodable::length(&self.miner)
+            + Encodable::length(&self.state_root)
+            + Encodable::length(&self.transactions_root)
+            + Encodable::length(&self.receipts_root)
+            + Encodable::length(&self.logs_bloom)
+            + Encodable::length(&self.difficulty)
+            + Encodable::length(&self.number)
+            + Encodable::length(&self.gas_limit)
+            + Encodable::length(&self.gas_used)
+            + Encodable::length(&self.timestamp)
+            + Encodable::length(&self.extra_data.as_slice()) // custom
+            + Encodable::length(&self.mix_hash)
+            + Encodable::length(&self.nonce)
+            + self
+                .base_fee_per_gas
+                .as_ref()
+                .map(Encodable::length)
+                .unwrap_or(
+                    (self.withdrawals_root.is_some()
+                        || self.blob_gas_used.is_some()
+                        || self.excess_blob_gas.is_some()) as usize,
+                )
+            + self
+                .withdrawals_root
+                .as_ref()
+                .map(Encodable::length)
+                .unwrap_or(
+                    (self.blob_gas_used.is_some() || self.excess_blob_gas.is_some()) as usize,
+                )
+            + self
+                .blob_gas_used
+                .as_ref()
+                .map(Encodable::length)
+                .unwrap_or((self.excess_blob_gas.is_some()) as usize)
+            + self
+                .excess_blob_gas
+                .as_ref()
+                .map(Encodable::length)
+                .unwrap_or(0)
+    }
+
     pub fn compute_hash(&self) -> Hash {
         let rlp = alloy_rlp::encode(self);
         let mut hasher = sha3::Keccak256::new();
@@ -75,17 +266,101 @@ impl BlockHeader {
     pub fn may_contain_logs(&self, address: Option<&Address>, topics: &[Hash]) -> bool {
         let mut may_contain = true;
 
-        let bloom = BloomRef::from(self.logs_bloom.as_bytes());
+        let bloom = BloomRef::from(&self.logs_bloom);
         if let Some(address) = address {
-            let input = Input::Raw(address.as_bytes());
+            let input = Input::Raw(address);
             may_contain &= bloom.contains_input(input);
         }
         for topic in topics {
-            let input = Input::Raw(topic.as_bytes());
+            let input = Input::Raw(topic);
             may_contain &= bloom.contains_input(input);
         }
 
         may_contain
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonRpcBlockHeader {
+    pub parent_hash: AsHex<Hash>,
+    pub sha3_uncles: AsHex<Hash>,
+    pub miner: AsHex<Address>,
+    pub state_root: AsHex<Hash>,
+    pub transactions_root: AsHex<Hash>,
+    pub receipts_root: AsHex<Hash>,
+    pub logs_bloom: AsHex<Bloom>,
+    pub difficulty: AsHex<U256>,
+    pub number: AsHex<u64>,
+    pub gas_limit: AsHex<u64>,
+    pub gas_used: AsHex<u64>,
+    pub timestamp: AsHex<u64>,
+    pub extra_data: AsHex<Vec<u8>>,
+    pub mix_hash: AsHex<Hash>,
+    pub nonce: AsHex<[u8; 8]>,
+    pub base_fee_per_gas: Option<AsHex<U256>>,
+    pub withdrawals_root: Option<AsHex<Hash>>,
+    pub blob_gas_used: Option<AsHex<u64>>,
+    pub excess_blob_gas: Option<AsHex<u64>>,
+    // Fields that are part of the JSON RPC response but we currently don't use:
+    // pub timestamp_nano: AsHex<u64>,
+    // pub hash: AsHex<Hash>,
+    // pub epoch: AsHex<u64>,
+    // pub total_difficulty: AsHex<u64>,
+    // pub transactions: Vec<?> // Type of this depends on query parameter (either hash or struct)
+    // pub size: AsHex<u64>,
+    // pub uncles: Vec<?>
+}
+
+impl From<JsonRpcBlockHeader> for BlockHeader {
+    fn from(value: JsonRpcBlockHeader) -> Self {
+        Self {
+            parent_hash: value.parent_hash.0,
+            sha3_uncles: value.sha3_uncles.0,
+            miner: value.miner.0,
+            state_root: value.state_root.0,
+            transactions_root: value.transactions_root.0,
+            receipts_root: value.receipts_root.0,
+            logs_bloom: value.logs_bloom.0,
+            difficulty: value.difficulty.0,
+            number: value.number.0,
+            gas_limit: value.gas_limit.0,
+            gas_used: value.gas_used.0,
+            timestamp: value.timestamp.0,
+            extra_data: value.extra_data.0,
+            mix_hash: value.mix_hash.0,
+            nonce: value.nonce.0,
+            base_fee_per_gas: value.base_fee_per_gas.map(|v| v.0),
+            withdrawals_root: value.withdrawals_root.map(|v| v.0),
+            blob_gas_used: value.blob_gas_used.map(|v| v.0),
+            excess_blob_gas: value.excess_blob_gas.map(|v| v.0),
+        }
+    }
+}
+
+impl From<BlockHeader> for JsonRpcBlockHeader {
+    fn from(value: BlockHeader) -> Self {
+        Self {
+            parent_hash: AsHex(value.parent_hash),
+            sha3_uncles: AsHex(value.sha3_uncles),
+            miner: AsHex(value.miner),
+            state_root: AsHex(value.state_root),
+            transactions_root: AsHex(value.transactions_root),
+            receipts_root: AsHex(value.receipts_root),
+            logs_bloom: AsHex(value.logs_bloom),
+            difficulty: AsHex(value.difficulty),
+            number: AsHex(value.number),
+            gas_limit: AsHex(value.gas_limit),
+            gas_used: AsHex(value.gas_used),
+            timestamp: AsHex(value.timestamp),
+            extra_data: AsHex(value.extra_data),
+            mix_hash: AsHex(value.mix_hash),
+            nonce: AsHex(value.nonce),
+            base_fee_per_gas: value.base_fee_per_gas.map(AsHex),
+            withdrawals_root: value.withdrawals_root.map(AsHex),
+            blob_gas_used: value.blob_gas_used.map(AsHex),
+            excess_blob_gas: value.excess_blob_gas.map(AsHex),
+        }
     }
 }
 
@@ -94,6 +369,7 @@ mod tests {
     use ethbloom::Bloom as EthBloom;
 
     use super::*;
+    use crate::hex_convert::HexConvert;
 
     const REQUIRED_FIELDS: &str = r#"
         "parentHash": "0x4849bafd75ec931bd8b95e168ad52aa45eb942a7b0e294825b77696f95d33f67",
@@ -186,25 +462,13 @@ mod tests {
             ).unwrap()
         );
         assert_eq!(header.difficulty, U256::try_from_hex("0x0").unwrap());
-        assert_eq!(
-            header.number,
-            BlockNumber::try_from_hex("0x11d5c59").unwrap()
-        );
-        assert_eq!(
-            header.gas_limit,
-            SerializableU64::try_from_hex("0x12a05f200").unwrap()
-        );
-        assert_eq!(
-            header.gas_used,
-            SerializableU64::try_from_hex("0x187e67").unwrap()
-        );
-        assert_eq!(
-            header.timestamp,
-            SerializableU64::try_from_hex("0x67f3a650").unwrap()
-        );
+        assert_eq!(header.number, u64::try_from_hex("0x11d5c59").unwrap());
+        assert_eq!(header.gas_limit, u64::try_from_hex("0x12a05f200").unwrap());
+        assert_eq!(header.gas_used, u64::try_from_hex("0x187e67").unwrap());
+        assert_eq!(header.timestamp, u64::try_from_hex("0x67f3a650").unwrap());
         assert_eq!(
             header.extra_data,
-            SerializableByteVec::try_from_hex("0x26a0531500000000125a1be0").unwrap()
+            Vec::try_from_hex("0x26a0531500000000125a1be0").unwrap()
         );
         assert_eq!(
             header.mix_hash,
@@ -215,7 +479,7 @@ mod tests {
         );
         assert_eq!(
             header.nonce,
-            SerializableByteArray::try_from_hex("0x0000000000000000").unwrap()
+            <[u8; 8]>::try_from_hex("0x0000000000000000").unwrap()
         );
         assert_eq!(
             header.base_fee_per_gas,
@@ -230,8 +494,115 @@ mod tests {
                 .unwrap()
             )
         );
-        assert_eq!(header.blob_gas_used, Some(0u64.into()));
-        assert_eq!(header.excess_blob_gas, Some(0u64.into()));
+        assert_eq!(header.blob_gas_used, Some(0));
+        assert_eq!(header.excess_blob_gas, Some(0));
+    }
+
+    #[test]
+    fn can_be_serialized_to_json() {
+        let header: BlockHeader = BlockHeader {
+            parent_hash: Hash::try_from_hex("0x4849bafd75ec931bd8b95e168ad52aa45eb942a7b0e294825b77696f95d33f67").unwrap(),
+            sha3_uncles: Hash::try_from_hex("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347").unwrap(),
+            miner: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
+            state_root: Hash::try_from_hex("0x794ae8d5b4758807b0a043bf938ea7c3cbbaccfca400e2e6c5496f9974be45b5").unwrap(),
+            transactions_root: Hash::try_from_hex("0x4caf573d465dd16b43dd8e7472e6d29cba30ccda22746f0273d10fd3360f17f8").unwrap(),
+            receipts_root: Hash::try_from_hex("0x5f3e0100ab247f520f5a123792f54d8e15f44e9f1e00c43a28f40aad2897a1b1").unwrap(),
+            logs_bloom: Bloom::try_from_hex(
+                "0x01200000000000400000102000008080000000010000080000000000402010000200100000000801001000400008000008010000000000000400000000800000000000800100000000402008004000000000000000000000500000000002000000000000020000000000020000000800000820000800000200000210000010000000200208000000820000000000000000000000000100000000000000000000000000000000000000000800000400000000040000010001000000003040000000000002200000800008080000000000000040000000000000000080000020100000000000000000040010100000000000000100050000000000800020008800"
+            ).unwrap(),
+            difficulty: U256::try_from_hex("0x0").unwrap(),
+            number: u64::try_from_hex("0x11d5c59").unwrap(),
+            gas_limit: u64::try_from_hex("0x12a05f200").unwrap(),
+            gas_used: u64::try_from_hex("0x187e67").unwrap(),
+            timestamp: u64::try_from_hex("0x67f3a650").unwrap(),
+            extra_data: Vec::try_from_hex("0x26a0531500000000125a1be0").unwrap(),
+            mix_hash: Hash::try_from_hex("0xa6e19a868c8d649c9624a52842417e1ba84bc11024fbe8ef9c9c4c596ae59a1c").unwrap(),
+            nonce: <[u8; 8]>::try_from_hex("0x0000000000000000").unwrap(),
+            base_fee_per_gas: Some(U256::try_from_hex("0xba43b7400").unwrap()),
+            withdrawals_root: Some(Hash::try_from_hex("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").unwrap()),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+        };
+        let serialized = serde_json::to_string(&header).unwrap();
+        let json: String = format!("{{{REQUIRED_FIELDS},{OPTIONAL_FIELDS}}}");
+        let json = json.replace(" ", "").replace("\n", "");
+        assert_eq!(serialized, json);
+    }
+
+    #[test]
+    fn can_be_encoded_to_rlp() {
+        let mut header = BlockHeader {
+            parent_hash: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            sha3_uncles: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            miner: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
+            state_root: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            transactions_root: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            receipts_root: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            logs_bloom: Bloom::try_from_hex("0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            difficulty: U256::default(),
+            number: 0,
+            gas_limit: u64::try_from_hex("0x0").unwrap(),
+            gas_used: u64::try_from_hex("0x0").unwrap(),
+            timestamp: u64::try_from_hex("0x0").unwrap(),
+            extra_data: Vec::try_from_hex("0x").unwrap(),
+            mix_hash: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            nonce: <[u8; 8]>::try_from_hex("0x0000000000000000").unwrap(),
+            base_fee_per_gas: None,
+            withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
+        };
+        let rlp = const_hex::decode(
+            "f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
+            ).unwrap();
+        assert_eq!(alloy_rlp::encode(&header), rlp.as_slice());
+
+        header.extra_data = Vec::try_from_hex("0x01").unwrap();
+        let rlp = const_hex::decode(
+            "f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808001a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
+            ).unwrap();
+        assert_eq!(alloy_rlp::encode(&header), rlp.as_slice());
+    }
+
+    #[test]
+    fn can_be_decoded_from_rlp() {
+        let mut header = BlockHeader {
+            parent_hash: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            sha3_uncles: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            miner: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
+            state_root: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            transactions_root: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            receipts_root: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            logs_bloom: Bloom::try_from_hex("0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            difficulty: U256::default(),
+            number: 0,
+            gas_limit: u64::try_from_hex("0x0").unwrap(),
+            gas_used: u64::try_from_hex("0x0").unwrap(),
+            timestamp: u64::try_from_hex("0x0").unwrap(),
+            extra_data: Vec::try_from_hex("0x").unwrap(),
+            mix_hash: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            nonce: <[u8; 8]>::try_from_hex("0x0000000000000000").unwrap(),
+            base_fee_per_gas: None,
+            withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
+        };
+        let rlp = const_hex::decode(
+            "f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
+            ).unwrap();
+        assert_eq!(
+            alloy_rlp::decode_exact::<BlockHeader>(&rlp).unwrap(),
+            header
+        );
+
+        header.extra_data = Vec::try_from_hex("0x01").unwrap();
+        let rlp = const_hex::decode(
+            "f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808001a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
+            ).unwrap();
+        assert_eq!(
+            alloy_rlp::decode_exact::<BlockHeader>(&rlp).unwrap(),
+            header
+        );
     }
 
     #[test]
@@ -243,7 +614,7 @@ mod tests {
         assert_eq!(header.blob_gas_used, None);
         assert_eq!(header.excess_blob_gas, None);
 
-        let json: String = format!("{{{REQUIRED_FIELDS}, \"baseFeelPerGas\": null }}");
+        let json: String = format!("{{{REQUIRED_FIELDS}, \"baseFeePerGas\": null }}");
         let header: BlockHeader = serde_json::from_str(json.as_str()).unwrap();
         assert_eq!(header.base_fee_per_gas, None);
     }
@@ -259,7 +630,7 @@ mod tests {
         );
 
         let mut header = header;
-        header.gas_used = SerializableU64::from(Into::<u64>::into(header.gas_used) + 1);
+        header.gas_used += 1;
         assert_ne!(header.compute_hash(), hash);
     }
 
@@ -291,9 +662,9 @@ mod tests {
         ];
 
         let mut bloom = EthBloom::zero();
-        bloom.accrue(Input::Raw(address.as_bytes()));
+        bloom.accrue(Input::Raw(&address));
         for topic in &topics {
-            bloom.accrue(Input::Raw(topic.as_bytes()));
+            bloom.accrue(Input::Raw(topic.as_slice()));
         }
 
         let block = BlockHeader {

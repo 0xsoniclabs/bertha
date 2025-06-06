@@ -6,9 +6,9 @@ use std::{
 
 use alloy_rlp::{Decodable, Encodable};
 use bnum::types::U256 as BnumU256;
-use serde::{Deserialize, Serialize};
 
 use super::parse_hex_error::ParseHexError;
+use crate::HexConvert;
 
 /// Unsigned integer type that can be de-/serialized from and to hex strings, using a
 /// variable-length encoding.
@@ -18,14 +18,16 @@ pub struct U256(BnumU256);
 impl U256 {
     pub const ZERO: Self = U256(BnumU256::ZERO);
     pub const MAX: Self = U256(BnumU256::MAX);
+}
 
-    pub fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
+impl HexConvert for U256 {
+    fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
         BnumU256::from_str_radix(value.trim_start_matches("0x"), 16)
             .map(Self)
             .map_err(Into::<ParseHexError>::into)
     }
 
-    pub fn to_hex(&self) -> String {
+    fn to_hex(&self) -> String {
         format!("0x{:x}", self.0)
     }
 }
@@ -73,25 +75,6 @@ impl Sub for U256 {
             .checked_sub(rhs.0)
             .map(U256)
             .ok_or(IntErrorKind::NegOverflow)
-    }
-}
-
-impl Serialize for U256 {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.to_hex().as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for U256 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let hex_str: &str = Deserialize::deserialize(deserializer)?;
-        U256::try_from_hex(hex_str).map_err(serde::de::Error::custom)
     }
 }
 
@@ -242,29 +225,6 @@ mod test {
     }
 
     #[test]
-    fn can_be_serialized_to_json() {
-        let x = U256::try_from_hex("0xdeadbeef").unwrap();
-        let json = serde_json::to_string(&x).unwrap();
-        assert_eq!(json, "\"0xdeadbeef\"");
-
-        // Serialized string has variable length
-        let x = U256::try_from_hex("0x1").unwrap();
-        let json = serde_json::to_string(&x).unwrap();
-        assert_eq!(json, "\"0x1\"");
-
-        // Invalid JSON causes error
-        let json = ";$";
-        let e = serde_json::from_str::<U256>(json).unwrap_err();
-        assert_eq!(e.to_string(), "expected value at line 1 column 1");
-    }
-
-    #[test]
-    fn can_be_deserialized_from_json() {
-        let x: U256 = serde_json::from_str("\"0xdeadbeef\"").unwrap();
-        assert_eq!(x.0, BnumU256::from(3735928559u64));
-    }
-
-    #[test]
     fn can_be_serialized_to_rlp() {
         let x = U256::try_from_hex("0xdeadbeef").unwrap();
         let rlp = alloy_rlp::encode(x);
@@ -273,5 +233,21 @@ mod test {
         let x = U256::from(0u8);
         let rlp = alloy_rlp::encode(x);
         assert_eq!(rlp, const_hex::decode("80").unwrap());
+    }
+
+    #[test]
+    fn can_be_deserialized_from_rlp() {
+        assert_eq!(
+            U256::decode(&mut [0x80].as_slice()).unwrap(),
+            U256::from(0u64)
+        );
+        assert_eq!(
+            U256::decode(&mut [0x01].as_slice()).unwrap(),
+            U256::from(1u64)
+        );
+        assert_eq!(
+            U256::decode(&mut [0x84, 0xde, 0xad, 0xbe, 0xef].as_slice()).unwrap(),
+            U256::from(3735928559u64)
+        );
     }
 }
