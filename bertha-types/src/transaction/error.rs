@@ -6,4 +6,6 @@ use crate::transaction::TransactionType;
 pub enum TransactionError {
     #[error("couldn't convert transaction to type {0}")]
     ConversionError(TransactionType),
+    #[error("invalid transaction type: {0}")]
+    InvalidTransactionType(u8),
 }

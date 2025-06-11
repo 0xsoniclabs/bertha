@@ -1,27 +1,40 @@
+use serde::Serialize;
+
 use crate::{
-    Address, Hash, Transaction, U256,
+    Address, AsHex, Hash, Transaction, U256,
     transaction::{AccessTuple, TransactionError, TransactionType},
 };
 
 /// The Blob Ethereum transaction, defined in the EIP 4844.
 /// Source: https://eips.ethereum.org/EIPS/eip-4844
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct BlobTx {
-    pub chain_id: U256,
-    pub nonce: u64,
-    pub max_priority_fee_per_gas: U256,
-    pub max_fee_per_gas: U256,
-    pub gas_limit: u64,
-    pub to: Address,
-    pub value: U256,
-    pub data: Vec<u8>,
+    pub chain_id: AsHex<U256>,
+    pub nonce: AsHex<u64>,
+    pub max_priority_fee_per_gas: AsHex<U256>,
+    pub max_fee_per_gas: AsHex<U256>,
+    #[serde(rename = "gas")]
+    pub gas_limit: AsHex<u64>,
+    pub to: AsHex<Address>,
+    pub value: AsHex<U256>,
+    #[serde(rename = "input")]
+    pub data: AsHex<Vec<u8>>,
     pub access_list: Vec<AccessTuple>,
-    pub max_fee_per_blob_gas: U256,
-    pub blob_versioned_hashes: Vec<Hash>,
+    pub max_fee_per_blob_gas: AsHex<U256>,
+    pub blob_versioned_hashes: Vec<AsHex<Hash>>,
     // sidecar is not included in the RLP encoding
-    pub y_parity: U256,
-    pub r: U256,
-    pub s: U256,
+    #[serde(rename = "v")]
+    pub y_parity: AsHex<U256>,
+    pub r: AsHex<U256>,
+    pub s: AsHex<U256>,
+}
+
+impl BlobTx {
+    /// A function to check if the transaction can be converted to a Blob transaction.
+    pub fn is_constructible_from(tx: &Transaction) -> bool {
+        tx.transaction_type == TransactionType::Blob && tx.to.is_some()
+    }
 }
 
 impl TryFrom<Transaction> for BlobTx {
@@ -33,22 +46,23 @@ impl TryFrom<Transaction> for BlobTx {
         }
 
         Ok(BlobTx {
-            chain_id: tx.chain_id,
-            nonce: tx.nonce,
-            max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
-            max_fee_per_gas: tx.max_fee_per_gas,
-            gas_limit: tx.gas_limit,
+            chain_id: AsHex(tx.chain_id),
+            nonce: AsHex(tx.nonce),
+            max_priority_fee_per_gas: AsHex(tx.max_priority_fee_per_gas),
+            max_fee_per_gas: AsHex(tx.max_fee_per_gas),
+            gas_limit: AsHex(tx.gas_limit),
             to: tx
                 .to
+                .map(AsHex)
                 .ok_or(TransactionError::ConversionError(TransactionType::Blob))?,
-            value: tx.value,
-            data: tx.data,
+            value: AsHex(tx.value),
+            data: AsHex(tx.data),
             access_list: tx.access_list,
-            max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
-            blob_versioned_hashes: tx.blob_versioned_hashes,
-            y_parity: tx.y_parity,
-            r: tx.r,
-            s: tx.s,
+            max_fee_per_blob_gas: AsHex(tx.max_fee_per_blob_gas),
+            blob_versioned_hashes: tx.blob_versioned_hashes.into_iter().map(AsHex).collect(),
+            y_parity: AsHex(tx.y_parity),
+            r: AsHex(tx.r),
+            s: AsHex(tx.s),
         })
     }
 }
@@ -57,22 +71,22 @@ impl From<BlobTx> for Transaction {
     fn from(tx: BlobTx) -> Self {
         Transaction {
             transaction_type: TransactionType::Blob,
-            chain_id: tx.chain_id,
-            nonce: tx.nonce,
+            chain_id: tx.chain_id.0,
+            nonce: tx.nonce.0,
             gas_price: U256::default(),
-            gas_limit: tx.gas_limit,
-            to: Some(tx.to),
-            value: tx.value,
-            data: tx.data,
+            gas_limit: tx.gas_limit.0,
+            to: Some(tx.to.0),
+            value: tx.value.0,
+            data: tx.data.0,
             access_list: tx.access_list,
-            max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
-            max_fee_per_gas: tx.max_fee_per_gas,
-            max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
-            blob_versioned_hashes: tx.blob_versioned_hashes,
+            max_priority_fee_per_gas: tx.max_priority_fee_per_gas.0,
+            max_fee_per_gas: tx.max_fee_per_gas.0,
+            max_fee_per_blob_gas: tx.max_fee_per_blob_gas.0,
+            blob_versioned_hashes: tx.blob_versioned_hashes.into_iter().map(|h| h.0).collect(),
             authorization_list: Vec::new(),
-            y_parity: tx.y_parity,
-            r: tx.r,
-            s: tx.s,
+            y_parity: tx.y_parity.0,
+            r: tx.r.0,
+            s: tx.s.0,
         }
     }
 }
@@ -114,6 +128,35 @@ mod tests {
         assert_eq!(
             error,
             TransactionError::ConversionError(TransactionType::Blob)
+        );
+    }
+
+    #[test]
+    fn is_constructible_from_returns_correct_value() {
+        assert!(
+            BlobTx::is_constructible_from(&Transaction {
+                transaction_type: TransactionType::Blob,
+                to: Some(Address::default()),
+                ..Default::default()
+            }),
+            "BlobTx should be constructible from a correct Blob transaction"
+        );
+        // Mismatched transaction type
+        assert!(
+            !BlobTx::is_constructible_from(&Transaction {
+                transaction_type: TransactionType::Legacy,
+                ..Default::default()
+            }),
+            "BlobTx should not be constructible from a transaction with a mismatched type"
+        );
+        // Missing 'to' field
+        assert!(
+            !BlobTx::is_constructible_from(&Transaction {
+                transaction_type: TransactionType::Blob,
+                to: None,
+                ..Default::default()
+            }),
+            "BlobTx should not be constructible from a transaction with missing 'to' field"
         );
     }
 }
