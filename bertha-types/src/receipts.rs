@@ -30,7 +30,7 @@ impl TransactionReceipt {
                 bloom.accrue(ethbloom::Input::Raw(topic));
             }
         }
-        Bloom::from(bloom.0)
+        bloom.0
     }
 }
 
