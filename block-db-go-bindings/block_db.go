@@ -15,6 +15,7 @@ type Db struct {
 	secondaryPath string
 }
 
+// Open the database for reading.
 func OpenDb(path string) (Db, error) {
 	secondaryPath, err := os.MkdirTemp("", "blockdb-secondary-*")
 	if err != nil {
@@ -28,6 +29,7 @@ func OpenDb(path string) (Db, error) {
 	return Db{db: db, secondaryPath: secondaryPath}, nil
 }
 
+// Clone the database.
 func (db Db) Close() error {
 	if db.db != nil {
 		db.db.Close()
@@ -47,6 +49,8 @@ func computeKey(chainId uint64, blockNumber uint64) []byte {
 	return key
 }
 
+// Retrieve a single block by chain ID and block number.
+// If the block does not exist, it returns nil.
 func (db Db) GetBlock(chainId uint64, blockNumber uint64) (*Block, error) {
 	key := computeKey(chainId, blockNumber)
 
@@ -68,6 +72,9 @@ func (db Db) GetBlock(chainId uint64, blockNumber uint64) (*Block, error) {
 	return &block, nil
 }
 
+// Retrieve multiple block by chain ID and block number.
+// This function returns an iterator that yields blocks in the specified range.
+// If there are no blocks in the range in the database, the iterator will not yield any blocks.
 func (db Db) GetBlocks(chainId uint64, startBlockNumber uint64, endBlockNumber uint64) iter.Seq[*Block] {
 	startKey := computeKey(chainId, startBlockNumber)
 	endKey := computeKey(chainId, endBlockNumber)
