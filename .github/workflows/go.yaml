@@ -7,14 +7,14 @@ permissions:
 on:
   push:
     branches: [ main ]
-    paths:
-      - '.github/workflows/go.yaml'
-      - 'block-db-go-bindings/**'
+    #paths:
+      #- '.github/workflows/go.yaml'
+      #- 'block-db-go-bindings/**'
   pull_request:
     branches: [ main ]
-    paths:
-      - '.github/workflows/go.yaml'
-      - 'block-db-go-bindings/**'
+    #paths:
+      #- '.github/workflows/go.yaml'
+      #- 'block-db-go-bindings/**'
 
 jobs:
   lint:
@@ -24,6 +24,10 @@ jobs:
     steps:
     - name: checkout
       uses: actions/checkout@v4
+    - name: setup go
+      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      with:
+        go-version: "1.24.2"
     - name: install deps
       run: |
         sudo apt-get install librocksdb-dev protobuf-compiler
@@ -41,6 +45,10 @@ jobs:
     steps:
     - name: checkout
       uses: actions/checkout@v4
+    - name: setup go
+      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      with:
+        go-version: "1.24.2"
     - name: install deps
       run: sudo apt-get install librocksdb-dev protobuf-compiler
     - name: go test
@@ -54,6 +62,10 @@ jobs:
     steps:
     - name: checkout
       uses: actions/checkout@v4
+    - name: setup go
+      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      with:
+        go-version: "1.24.2"
     - name: install deps
       run: |
         sudo apt-get install protobuf-compiler
