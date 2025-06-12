@@ -19,8 +19,6 @@ pub struct TransactionReceipt {
     pub status: u64,
     pub cumulative_gas_used: u64,
     pub logs: Vec<Log>,
-
-    pub transaction_index: u64,
 }
 
 impl TransactionReceipt {
@@ -68,12 +66,6 @@ impl TransactionReceipt {
             + self.logs.length()
     }
 
-    fn encode_key(&self) -> Vec<u8> {
-        let mut v = Vec::new();
-        self.transaction_index.encode(&mut v);
-        v
-    }
-
     fn encode_value(&self) -> Vec<u8> {
         let mut v = Vec::new();
         self.encode(&mut v);
@@ -83,14 +75,12 @@ impl TransactionReceipt {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct JsonRpcTransactionReceipt {
+struct JsonRpcTransactionReceipt {
     pub type_: AsHex<u64>,
     pub status: AsHex<u64>,
     pub cumulative_gas_used: AsHex<u64>,
     pub logs_bloom: AsHex<Bloom>,
     pub logs: Vec<Log>,
-
-    pub transaction_index: AsHex<u64>,
     // Fields that are part of the JSON RPC response but we currently don't use:
     // pub block_hash: AsHex<Hash>,
     // pub block_number: AsHex<u64>,
@@ -100,6 +90,7 @@ pub struct JsonRpcTransactionReceipt {
     // pub gas_used: AsHex<u64>,
     // pub to: Option<AsHex<Address>>,
     // pub transaction_hash: AsHex<Hash>,
+    // pub transaction_index: AsHex<u64>,
 }
 
 impl From<JsonRpcTransactionReceipt> for TransactionReceipt {
@@ -109,7 +100,6 @@ impl From<JsonRpcTransactionReceipt> for TransactionReceipt {
             status: value.status.0,
             cumulative_gas_used: value.cumulative_gas_used.0,
             logs: value.logs,
-            transaction_index: value.transaction_index.0,
         }
     }
 }
@@ -122,7 +112,6 @@ impl From<TransactionReceipt> for JsonRpcTransactionReceipt {
             cumulative_gas_used: AsHex(value.cumulative_gas_used),
             logs_bloom: AsHex(value.logs_bloom()),
             logs: value.logs,
-            transaction_index: AsHex(value.transaction_index),
         }
     }
 }
@@ -142,10 +131,16 @@ impl BlockReceipt {
         receipts_root: &Hash,
     ) -> Result<VerifiedBlockReceipt, ReceiptVerificationError> {
         let mut trie = HashBuilder::default();
+        let encode_key = |key: usize| {
+            let mut v = Vec::new();
+            key.encode(&mut v);
+            v
+        };
         let mut leaves: Vec<_> = self
             .0
             .iter()
-            .map(|r| (Nibbles::unpack(r.encode_key()), r.encode_value()))
+            .enumerate()
+            .map(|(i, r)| (Nibbles::unpack(encode_key(i)), r.encode_value()))
             .collect();
         leaves.sort_by(|l, r| l.0.cmp(&r.0));
         leaves.into_iter().for_each(|l| trie.add_leaf(l.0, &l.1));
@@ -194,30 +189,12 @@ mod tests {
 
     #[test]
 
-    fn encode_key_encodes_transaction_index_in_rlp() {
-        let mut receipt = TransactionReceipt {
-            status: 1,
-            cumulative_gas_used: 21000,
-            logs: vec![],
-            transaction_index: 0,
-            type_: 0,
-        };
-
-        assert_eq!(receipt.encode_key(), Vec::try_from_hex("0x80").unwrap());
-
-        receipt.transaction_index = 1;
-        assert_eq!(receipt.encode_key(), Vec::try_from_hex("0x01").unwrap());
-    }
-
-    #[test]
-
     fn encode_value_encodes_transaction_receipt_in_rlp_and_respects_different_encoding_depending_on_type()
      {
         let mut receipt = TransactionReceipt {
             status: 1,
             cumulative_gas_used: 21000,
             logs: vec![],
-            transaction_index: 0,
             type_: 0,
         };
 
@@ -259,7 +236,6 @@ mod tests {
             status: 0,
             cumulative_gas_used: 0,
             logs: vec![log.clone()],
-            transaction_index: 0,
             type_: 0,
         };
         let block_receipt = VerifiedBlockReceipt(vec![receipt]);
@@ -354,14 +330,12 @@ mod tests {
                     },
                 ],
                 status: 1,
-                transaction_index: 0,
                 type_: 2,
             },
             TransactionReceipt {
                 cumulative_gas_used: 98081,
                 logs: vec![],
                 status: 1,
-                transaction_index: 1,
                 type_: 2,
             },
         ])
@@ -415,7 +389,6 @@ mod tests {
             cumulative_gas_used: 12345,
             logs: vec![log.clone()],
             status: 1,
-            transaction_index: 0,
             type_: 2,
         };
 
@@ -429,8 +402,7 @@ mod tests {
                 "address":"{address_hex}",
                 "topics":["{topic1_hex}","{topic2_hex}"],
                 "data":"0x0102030405"
-            }}],
-            "transactionIndex":"0x0"
+            }}]
             }}"#,
         )
         .replace(" ", "")
@@ -474,7 +446,6 @@ mod tests {
             cumulative_gas_used: 12345,
             logs: vec![expected_log.clone()],
             status: 1,
-            transaction_index: 0,
             type_: 2,
         };
 
