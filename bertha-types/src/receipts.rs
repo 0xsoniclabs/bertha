@@ -15,12 +15,25 @@ pub struct ReceiptVerificationError;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(from = "JsonRpcTransactionReceipt", into = "JsonRpcTransactionReceipt")]
 pub struct TransactionReceipt {
+    pub type_: u64,
+    pub status: u64,
     pub cumulative_gas_used: u64,
     pub logs: Vec<Log>,
-    pub logs_bloom: Bloom,
-    pub status: u64,
+
     pub transaction_index: u64,
-    pub type_: u64,
+}
+
+impl TransactionReceipt {
+    pub fn logs_bloom(&self) -> Bloom {
+        let mut bloom = ethbloom::Bloom([0; 256]);
+        for log in &self.logs {
+            bloom.accrue(ethbloom::Input::Raw(&log.address));
+            for topic in &log.topics {
+                bloom.accrue(ethbloom::Input::Raw(topic));
+            }
+        }
+        Bloom::from(bloom.0)
+    }
 }
 
 impl Encodable for TransactionReceipt {
@@ -42,7 +55,7 @@ impl Encodable for TransactionReceipt {
         .encode(out);
         self.status.encode(out);
         self.cumulative_gas_used.encode(out);
-        self.logs_bloom.encode(out);
+        self.logs_bloom().encode(out);
         self.logs.encode(out);
     }
 }
@@ -51,7 +64,7 @@ impl TransactionReceipt {
     fn rlp_payload_length(&self) -> usize {
         self.status.length()
             + self.cumulative_gas_used.length()
-            + self.logs_bloom.length()
+            + self.logs_bloom().length()
             + self.logs.length()
     }
 
@@ -71,12 +84,13 @@ impl TransactionReceipt {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JsonRpcTransactionReceipt {
-    pub cumulative_gas_used: AsHex<u64>,
-    pub logs: Vec<Log>,
-    pub logs_bloom: AsHex<Bloom>,
-    pub status: AsHex<u64>,
-    pub transaction_index: AsHex<u64>,
     pub type_: AsHex<u64>,
+    pub status: AsHex<u64>,
+    pub cumulative_gas_used: AsHex<u64>,
+    pub logs_bloom: AsHex<Bloom>,
+    pub logs: Vec<Log>,
+
+    pub transaction_index: AsHex<u64>,
     // Fields that are part of the JSON RPC response but we currently don't use:
     // pub block_hash: AsHex<Hash>,
     // pub block_number: AsHex<u64>,
@@ -91,12 +105,11 @@ pub struct JsonRpcTransactionReceipt {
 impl From<JsonRpcTransactionReceipt> for TransactionReceipt {
     fn from(value: JsonRpcTransactionReceipt) -> Self {
         Self {
+            type_: value.type_.0,
+            status: value.status.0,
             cumulative_gas_used: value.cumulative_gas_used.0,
             logs: value.logs,
-            logs_bloom: value.logs_bloom.0,
-            status: value.status.0,
             transaction_index: value.transaction_index.0,
-            type_: value.type_.0,
         }
     }
 }
@@ -104,12 +117,12 @@ impl From<JsonRpcTransactionReceipt> for TransactionReceipt {
 impl From<TransactionReceipt> for JsonRpcTransactionReceipt {
     fn from(value: TransactionReceipt) -> Self {
         Self {
-            cumulative_gas_used: AsHex(value.cumulative_gas_used),
-            logs: value.logs,
-            logs_bloom: AsHex(value.logs_bloom),
-            status: AsHex(value.status),
-            transaction_index: AsHex(value.transaction_index),
             type_: AsHex(value.type_),
+            status: AsHex(value.status),
+            cumulative_gas_used: AsHex(value.cumulative_gas_used),
+            logs_bloom: AsHex(value.logs_bloom()),
+            logs: value.logs,
+            transaction_index: AsHex(value.transaction_index),
         }
     }
 }
@@ -185,7 +198,6 @@ mod tests {
         let mut receipt = TransactionReceipt {
             status: 1,
             cumulative_gas_used: 21000,
-            logs_bloom: [0; 256],
             logs: vec![],
             transaction_index: 0,
             type_: 0,
@@ -204,7 +216,6 @@ mod tests {
         let mut receipt = TransactionReceipt {
             status: 1,
             cumulative_gas_used: 21000,
-            logs_bloom: [0; 256],
             logs: vec![],
             transaction_index: 0,
             type_: 0,
@@ -247,7 +258,6 @@ mod tests {
         let receipt = TransactionReceipt {
             status: 0,
             cumulative_gas_used: 0,
-            logs_bloom: [0; 256],
             logs: vec![log.clone()],
             transaction_index: 0,
             type_: 0,
@@ -302,9 +312,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn verify_computes_root_hash_correctly_and_compares_it_with_specified_root() {
-        let receipt = BlockReceipt(vec![
+    fn get_real_block_receipt() -> BlockReceipt {
+        BlockReceipt(vec![
             TransactionReceipt {
                 cumulative_gas_used: 77081,
                 logs: vec![
@@ -314,47 +323,21 @@ mod tests {
                         )
                         .unwrap(),
                         topics: vec![
-                            Hash::from([
-                                221, 242, 82, 173, 27, 226, 200, 155, 105, 194, 176, 104, 252, 55,
-                                141, 170, 149, 43, 167, 241, 99, 196, 161, 22, 40, 245, 90, 77,
-                                245, 35, 179, 239,
-                            ]),
-                            Hash::from([
-                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 35, 65, 114, 36, 124, 148, 114,
-                                58, 42, 67, 155, 205, 104, 92, 22, 153, 213, 74, 149, 176,
-                            ]),
-                            Hash::from([
-                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 153, 163, 90, 99, 1, 4, 58, 2,
-                                173, 216, 155, 97, 58, 88, 238, 226, 196, 103, 80, 162,
-                            ]),
+                            Hash::try_from_hex("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap(),
+                            Hash::try_from_hex("0x000000000000000000000000234172247c94723a2a439bcd685c1699d54a95b0").unwrap(),
+                            Hash::try_from_hex("0x00000000000000000000000099a35a6301043a02add89b613a58eee2c46750a2").unwrap(),
                         ],
-                        data: vec![
-                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                            0, 35, 134, 242, 111, 193, 0, 0,
-                        ],
+                        data: Vec::try_from_hex("0x000000000000000000000000000000000000000000000000002386f26fc10000").unwrap(),
                     },
                     Log {
                         address: Address::try_from_hex("61a2777db1271ef53329a13d05098f47ceaa7021")
                             .unwrap(),
                         topics: vec![
-                            Hash::from([
-                                221, 242, 82, 173, 27, 226, 200, 155, 105, 194, 176, 104, 252, 55,
-                                141, 170, 149, 43, 167, 241, 99, 196, 161, 22, 40, 245, 90, 77,
-                                245, 35, 179, 239,
-                            ]),
-                            Hash::from([
-                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 153, 163, 90, 99, 1, 4, 58, 2,
-                                173, 216, 155, 97, 58, 88, 238, 226, 196, 103, 80, 162,
-                            ]),
-                            Hash::from([
-                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 35, 65, 114, 36, 124, 148, 114,
-                                58, 42, 67, 155, 205, 104, 92, 22, 153, 213, 74, 149, 176,
-                            ]),
+                            Hash::try_from_hex("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap(),
+                            Hash::try_from_hex("0x00000000000000000000000099a35a6301043a02add89b613a58eee2c46750a2").unwrap(),
+                            Hash::try_from_hex("0x000000000000000000000000234172247c94723a2a439bcd685c1699d54a95b0").unwrap(),
                         ],
-                        data: vec![
-                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                            5, 132, 222, 161, 181, 103, 77, 16,
-                        ],
+                        data: Vec::try_from_hex("0x0000000000000000000000000000000000000000000000000584dea1b5674d10").unwrap(),
                     },
                     Log {
                         address: Address::try_from_hex(
@@ -362,43 +345,14 @@ mod tests {
                         )
                         .unwrap(),
                         topics: vec![
-                            Hash::from([
-                                205, 56, 41, 163, 129, 61, 195, 205, 209, 136, 253, 61, 1, 220,
-                                243, 38, 140, 22, 190, 47, 221, 45, 210, 29, 6, 101, 65, 136, 22,
-                                228, 96, 98,
-                            ]),
-                            Hash::from([
-                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 35, 65, 114, 36, 124, 148, 114,
-                                58, 42, 67, 155, 205, 104, 92, 22, 153, 213, 74, 149, 176,
-                            ]),
-                            Hash::from([
-                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 90, 145, 211, 4, 43, 113, 169,
-                                47, 103, 87, 250, 147, 119, 99, 208, 60, 198, 94, 216, 188,
-                            ]),
-                            Hash::from([
-                                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 97, 162, 119, 125, 177, 39, 30,
-                                245, 51, 41, 161, 61, 5, 9, 143, 71, 206, 170, 112, 33,
-                            ]),
+                            Hash::try_from_hex("0xcd3829a3813dc3cdd188fd3d01dcf3268c16be2fdd2dd21d0665418816e46062").unwrap(),
+                            Hash::try_from_hex("0x000000000000000000000000234172247c94723a2a439bcd685c1699d54a95b0").unwrap(),
+                            Hash::try_from_hex("0x0000000000000000000000005a91d3042b71a92f6757fa937763d03cc65ed8bc").unwrap(),
+                            Hash::try_from_hex("0x00000000000000000000000061a2777db1271ef53329a13d05098f47ceaa7021").unwrap(),
                         ],
-                        data: vec![
-                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                            0, 35, 134, 242, 111, 193, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 132, 222, 161, 181, 103, 77, 16,
-                        ],
+                        data: Vec::try_from_hex("0x000000000000000000000000000000000000000000000000002386f26fc100000000000000000000000000000000000000000000000000000584dea1b5674d10").unwrap(),
                     },
                 ],
-                logs_bloom: Bloom::from([
-                    0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 32, 0, 0, 0, 8, 4, 0,
-                    0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0,
-                    32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 0, 0, 0, 1, 0, 0, 0, 8, 16, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 128, 0, 128, 0, 0, 64, 0, 0,
-                    128, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0, 0, 128, 0, 0,
-                    2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 4, 8, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                ]),
                 status: 1,
                 transaction_index: 0,
                 type_: 2,
@@ -406,29 +360,35 @@ mod tests {
             TransactionReceipt {
                 cumulative_gas_used: 98081,
                 logs: vec![],
-                logs_bloom: Bloom::from([
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                ]),
                 status: 1,
                 transaction_index: 1,
                 type_: 2,
             },
-        ]);
+        ])
+    }
+
+    #[test]
+    fn logs_bloom_is_computed_correctly() {
+        let block_receipt = get_real_block_receipt();
+
+        let expected = Bloom::try_from_hex("0x00100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000004000000000002000000008040000000000000000040000000000000000000001000000000000002000000000000000000020000000010000000810000000000000000000000000000000000000000000800080000040000080000000000000000400000000000008000000000000800000020000000000000000000000000000000003040800000000000000000000000000000000400000000000000000000000000000000000080000000000000000000000000000000000000000000000").unwrap();
+        let received = block_receipt.0[0].logs_bloom();
+        assert_eq!(received, expected);
+
+        let expected = [0; 256];
+        let received = block_receipt.0[1].logs_bloom();
+        assert_eq!(received, expected);
+    }
+
+    #[test]
+    fn block_receipt_verify_computes_root_hash_correctly_and_compares_it_with_specified_root() {
+        let receipt = get_real_block_receipt();
 
         // Receipts hash fetched from the SONIC chain
-        let receipts_root = Hash::from([
-            21, 140, 135, 208, 94, 73, 250, 151, 10, 36, 206, 228, 210, 9, 255, 54, 199, 207, 31,
-            58, 195, 10, 152, 23, 85, 130, 190, 184, 47, 68, 248, 179,
-        ]);
+        let receipts_root = Hash::try_from_hex(
+            "0x158c87d05e49fa970a24cee4d209ff36c7cf1f3ac30a98175582beb82f44f8b3",
+        )
+        .unwrap();
         assert!(receipt.clone().verify(&receipts_root).is_ok());
 
         let receipts_root = Hash::default();
@@ -440,7 +400,7 @@ mod tests {
         let address_hex = "0x1234567890abcdef1234567890abcdef12345678";
         let topic1_hex = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef12345678ababaabababaab";
         let topic2_hex = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef12345678ababaabababaab";
-        let bloom_hex = "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+        let bloom_hex = "0x00000000000000000000800000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
         let log = Log {
             address: Address::try_from_hex(address_hex).unwrap(),
@@ -454,7 +414,6 @@ mod tests {
         let receipt = TransactionReceipt {
             cumulative_gas_used: 12345,
             logs: vec![log.clone()],
-            logs_bloom: [0; 256],
             status: 1,
             transaction_index: 0,
             type_: 2,
@@ -462,16 +421,16 @@ mod tests {
 
         let expected_json = format!(
             r#"{{
+            "type":"0x2",
+            "status":"0x1",
             "cumulativeGasUsed":"0x3039",
+            "logsBloom":"{bloom_hex}",
             "logs":[{{
                 "address":"{address_hex}",
                 "topics":["{topic1_hex}","{topic2_hex}"],
                 "data":"0x0102030405"
             }}],
-            "logsBloom":"{bloom_hex}",
-            "status":"0x1",
-            "transactionIndex":"0x0",
-            "type":"0x2"
+            "transactionIndex":"0x0"
             }}"#,
         )
         .replace(" ", "")
@@ -514,7 +473,6 @@ mod tests {
         let expected_receipt = TransactionReceipt {
             cumulative_gas_used: 12345,
             logs: vec![expected_log.clone()],
-            logs_bloom: [0; 256],
             status: 1,
             transaction_index: 0,
             type_: 2,

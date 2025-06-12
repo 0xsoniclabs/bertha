@@ -1,4 +1,5 @@
 mod as_hex;
+mod block;
 mod block_header;
 mod hex_convert;
 mod log;
@@ -7,6 +8,7 @@ mod receipts;
 mod u256;
 
 pub use as_hex::AsHex;
+pub use block::Block;
 pub use block_header::BlockHeader;
 pub use hex_convert::HexConvert;
 pub use log::Log;
