@@ -1,4 +1,7 @@
-package block_db
+// Package blockdb provides bindings for interacting with a RocksDB-backed block database.
+// It supports opening the database in secondary (read-only) mode, retrieving individual blocks
+// or ranges of blocks by chain ID and block number.
+package blockdb
 
 import (
 	"encoding/binary"
@@ -10,27 +13,27 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-type Db struct {
+type DB struct {
 	db            *grocksdb.DB
 	secondaryPath string
 }
 
-// Open the database for reading.
-func OpenDb(path string) (Db, error) {
+// OpenDB opens the database for reading.
+func OpenDB(path string) (DB, error) {
 	secondaryPath, err := os.MkdirTemp("", "blockdb-secondary-*")
 	if err != nil {
-		return Db{}, err
+		return DB{}, err
 	}
 	options := grocksdb.NewDefaultOptions()
 	db, err := grocksdb.OpenDbAsSecondary(options, path, secondaryPath)
 	if err != nil {
-		return Db{}, err
+		return DB{}, err
 	}
-	return Db{db: db, secondaryPath: secondaryPath}, nil
+	return DB{db: db, secondaryPath: secondaryPath}, nil
 }
 
-// Clone the database.
-func (db Db) Close() error {
+// Close closes the database.
+func (db DB) Close() error {
 	if db.db != nil {
 		db.db.Close()
 	}
@@ -42,17 +45,17 @@ func (db Db) Close() error {
 	return nil
 }
 
-func computeKey(chainId uint64, blockNumber uint64) []byte {
+func computeKey(chainID uint64, blockNumber uint64) []byte {
 	key := make([]byte, 16)
-	binary.BigEndian.PutUint64(key[:8], chainId)
+	binary.BigEndian.PutUint64(key[:8], chainID)
 	binary.BigEndian.PutUint64(key[8:], blockNumber)
 	return key
 }
 
-// Retrieve a single block by chain ID and block number.
+// GetBlock retrieves a single block by chain ID and block number.
 // If the block does not exist, it returns nil.
-func (db Db) GetBlock(chainId uint64, blockNumber uint64) (*Block, error) {
-	key := computeKey(chainId, blockNumber)
+func (db DB) GetBlock(chainID uint64, blockNumber uint64) (*Block, error) {
+	key := computeKey(chainID, blockNumber)
 
 	readOptions := grocksdb.NewDefaultReadOptions()
 	defer readOptions.Destroy()
@@ -72,12 +75,12 @@ func (db Db) GetBlock(chainId uint64, blockNumber uint64) (*Block, error) {
 	return &block, nil
 }
 
-// Retrieve multiple block by chain ID and block number.
+// GetBlocks retrieves multiple block by chain ID and block number.
 // This function returns an iterator that yields blocks in the specified range.
 // If there are no blocks in the range in the database, the iterator will not yield any blocks.
-func (db Db) GetBlocks(chainId uint64, startBlockNumber uint64, endBlockNumber uint64) iter.Seq[*Block] {
-	startKey := computeKey(chainId, startBlockNumber)
-	endKey := computeKey(chainId, endBlockNumber)
+func (db DB) GetBlocks(chainID uint64, startBlockNumber uint64, endBlockNumber uint64) iter.Seq[*Block] {
+	startKey := computeKey(chainID, startBlockNumber)
+	endKey := computeKey(chainID, endBlockNumber)
 
 	readOptions := grocksdb.NewDefaultReadOptions()
 	it := db.db.NewIterator(readOptions)
@@ -110,34 +113,34 @@ func (db Db) GetBlocks(chainId uint64, startBlockNumber uint64, endBlockNumber u
 
 // for testing purposes
 
-type writeDb struct {
+type writeDB struct {
 	db *grocksdb.DB
 }
 
-func createDb(path string) (writeDb, error) {
+func createDB(path string) (writeDB, error) {
 	options := grocksdb.NewDefaultOptions()
 	options.SetCreateIfMissing(true)
 	db, err := grocksdb.OpenDb(options, path)
 	if err != nil {
-		return writeDb{}, err
+		return writeDB{}, err
 	}
-	return writeDb{db: db}, nil
+	return writeDB{db: db}, nil
 }
 
-func (db writeDb) close() {
+func (db writeDB) close() {
 	if db.db != nil {
 		db.db.Close()
 	}
 }
 
-func (db writeDb) putRaw(key []byte, value []byte) error {
+func (db writeDB) putRaw(key []byte, value []byte) error {
 	writeOptions := grocksdb.NewDefaultWriteOptions()
 	defer writeOptions.Destroy()
 	return db.db.Put(writeOptions, key, value)
 }
 
-func (db writeDb) putBlock(chainId uint64, block *Block) error {
-	key := computeKey(chainId, block.Number)
+func (db writeDB) putBlock(chainID uint64, block *Block) error {
+	key := computeKey(chainID, block.Number)
 	data, err := proto.Marshal(block)
 	if err != nil {
 		return err

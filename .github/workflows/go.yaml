@@ -17,17 +17,6 @@ on:
       - 'block-db-go-bindings/**'
 
 jobs:
-  format:
-    name: format
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: checkout
-      uses: actions/checkout@v4
-    - name: go fmt
-      working-directory: block-db-go-bindings
-      run: gofmt -s -d .
-
   lint:
     name: lint
     runs-on: ubuntu-latest
@@ -36,10 +25,14 @@ jobs:
     - name: checkout
       uses: actions/checkout@v4
     - name: install deps
-      run: sudo apt-get install librocksdb-dev protobuf-compiler
-    - name: go vet
+      run: |
+        sudo apt-get install librocksdb-dev protobuf-compiler
+        go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
+    - name: golangci
       working-directory: block-db-go-bindings
-      run: go vet
+      run: |
+        export PATH="${PATH}:$(go env GOPATH)/bin"
+        golangci-lint run .
 
   test:
     name: test

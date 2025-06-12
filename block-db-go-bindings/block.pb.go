@@ -4,7 +4,7 @@
 // 	protoc        v3.21.12
 // source: block.proto
 
-package block_db
+package blockdb
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -730,8 +730,7 @@ const file_block_proto_rawDesc = "" +
 	"\x03Log\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\fR\aaddress\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x16\n" +
-	"\x06topics\x18\x03 \x03(\fR\x06topicsB\fZ\n" +
-	".;block_dbb\x06proto3"
+	"\x06topics\x18\x03 \x03(\fR\x06topicsB\vZ\t.;blockdbb\x06proto3"
 
 var (
 	file_block_proto_rawDescOnce sync.Once

@@ -1,4 +1,4 @@
-module github.com/0xsoniclabs/block_db
+module github.com/0xsoniclabs/blockdb
 
 go 1.24.2
 

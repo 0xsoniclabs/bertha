@@ -1,24 +1,24 @@
-package block_db
+package blockdb
 
 import (
 	"os"
 	"testing"
 )
 
-func fillDbWithBlocks(chainId uint64, blockNumbers []uint64) (string, error) {
+func fillDBWithBlocks(chainID uint64, blockNumbers []uint64) (string, error) {
 	path, err := os.MkdirTemp("", "blockdb-*")
 	if err != nil {
 		return "", err
 	}
 
-	db, err := createDb(path)
+	db, err := createDB(path)
 	if err != nil {
 		return "", err
 	}
 
 	for _, num := range blockNumbers {
 		block := Block{Number: num}
-		if err := db.putBlock(chainId, &block); err != nil {
+		if err := db.putBlock(chainID, &block); err != nil {
 			return "", err
 		}
 	}
@@ -29,17 +29,17 @@ func fillDbWithBlocks(chainId uint64, blockNumbers []uint64) (string, error) {
 }
 
 func TestGetBlocksReturnsBlockIfItExists(t *testing.T) {
-	chainId := uint64(3)
+	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3}
 
-	path, err := fillDbWithBlocks(chainId, blockNumbers)
+	path, err := fillDBWithBlocks(chainID, blockNumbers)
 	if err != nil {
 		t.Fatalf("failed to create db: %v", err)
 	}
 
 	// db now contains blocks 1, 2, and 3 for chainId 3
 
-	db, err := OpenDb(path)
+	db, err := OpenDB(path)
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)
 	}
@@ -51,13 +51,13 @@ func TestGetBlocksReturnsBlockIfItExists(t *testing.T) {
 	}
 
 	// try to get block with non-existing block number
-	block, _ = db.GetBlock(chainId, 4)
+	block, _ = db.GetBlock(chainID, 4)
 	if block != nil {
 		t.Fatalf("got block but db contains no blocks with block number 4")
 	}
 
 	// get existing block
-	block, err = db.GetBlock(chainId, 1)
+	block, err = db.GetBlock(chainID, 1)
 	if err != nil {
 		t.Fatalf("failed to retrieve block: %v", err)
 	}
@@ -68,21 +68,24 @@ func TestGetBlocksReturnsBlockIfItExists(t *testing.T) {
 		t.Fatalf("expected block number 1, got %d", block.Number)
 	}
 
-	db.Close()
+	err = db.Close()
+	if err != nil {
+		t.Fatalf("failed to close db %d", err)
+	}
 }
 
 func TestGetBlocksReturnsExistingSubRange(t *testing.T) {
-	chainId := uint64(3)
+	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3}
 
-	path, err := fillDbWithBlocks(chainId, blockNumbers)
+	path, err := fillDBWithBlocks(chainID, blockNumbers)
 	if err != nil {
 		t.Fatalf("failed to create db: %v", err)
 	}
 
 	// db now contains blocks 1, 2, and 3 for chainId 3
 
-	db, err := OpenDb(path)
+	db, err := OpenDB(path)
 	if err != nil {
 		t.Fatalf("failed to open db: %v", err)
 	}
@@ -98,7 +101,7 @@ func TestGetBlocksReturnsExistingSubRange(t *testing.T) {
 
 	// get blocks for range outside of existing blocks
 	count = 0
-	for range db.GetBlocks(chainId, 1000, 1005) {
+	for range db.GetBlocks(chainID, 1000, 1005) {
 		count++
 	}
 	if count > 0 {
@@ -107,7 +110,7 @@ func TestGetBlocksReturnsExistingSubRange(t *testing.T) {
 
 	// get blocks for for range which contains existing blocks
 	count = 0
-	for range db.GetBlocks(chainId, 0, 6) {
+	for range db.GetBlocks(chainID, 0, 6) {
 		count++
 	}
 	if count != 3 {
@@ -117,7 +120,7 @@ func TestGetBlocksReturnsExistingSubRange(t *testing.T) {
 	// get blocks for range which starts before existing blocks
 	// and ends within existing blocks
 	count = 0
-	for range db.GetBlocks(chainId, 0, 2) {
+	for range db.GetBlocks(chainID, 0, 2) {
 		count++
 	}
 	if count != 2 {
@@ -127,12 +130,15 @@ func TestGetBlocksReturnsExistingSubRange(t *testing.T) {
 	// get blocks for range which starts within existing blocks
 	// and ends after existing blocks
 	count = 0
-	for range db.GetBlocks(chainId, 2, 6) {
+	for range db.GetBlocks(chainID, 2, 6) {
 		count++
 	}
 	if count != 2 {
 		t.Fatalf("got invalid number of blocks")
 	}
 
-	db.Close()
+	err = db.Close()
+	if err != nil {
+		t.Fatalf("failed to close db %d", err)
+	}
 }
