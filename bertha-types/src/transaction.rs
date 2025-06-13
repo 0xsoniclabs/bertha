@@ -24,10 +24,6 @@ pub struct Transaction {
     pub value: U256,
     pub data: Vec<u8>, // Called init for contract creation, data for message call transactions
     pub access_list: Vec<AccessTuple>,
-    /// geth: v
-    pub y_parity: U256,
-    pub r: U256,
-    pub s: U256,
     // The following fields are in EIP order
     /// geth: GasFeeCap
     pub max_fee_per_gas: U256, // DynamicFeeTx, BlobTx, SetCodeTx
@@ -39,6 +35,10 @@ pub struct Transaction {
     pub max_fee_per_blob_gas: U256, // BlobTx
     /// geth: AuthList
     pub authorization_list: Vec<SetCodeAuthorization>, // SetCodeTx
+    /// geth: v
+    pub y_parity: U256,
+    pub r: U256,
+    pub s: U256,
 }
 
 /// The Ethereum transaction types, as defined by EIP 2718, EIP 2930, EIP 1559, EIP 4844, and EIP 7702.
@@ -208,9 +208,6 @@ impl From<LegacyTx> for Transaction {
             to: tx.to,
             value: tx.value,
             data: tx.data,
-            y_parity: tx.w,
-            r: tx.r,
-            s: tx.s,
             chain_id: U256::default(),
             max_priority_fee_per_gas: U256::default(),
             max_fee_per_gas: U256::default(),
@@ -218,6 +215,9 @@ impl From<LegacyTx> for Transaction {
             max_fee_per_blob_gas: U256::default(),
             blob_versioned_hashes: Vec::new(),
             authorization_list: Vec::new(),
+            y_parity: tx.w,
+            r: tx.r,
+            s: tx.s,
         }
     }
 }
@@ -260,14 +260,14 @@ impl From<DynamicFeeTx> for Transaction {
             value: tx.value,
             data: tx.data,
             access_list: tx.access_list,
-            y_parity: tx.y_parity,
-            r: tx.r,
-            s: tx.s,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
             max_fee_per_gas: tx.max_fee_per_gas,
             max_fee_per_blob_gas: U256::default(),
             blob_versioned_hashes: Vec::new(),
             authorization_list: Vec::new(),
+            y_parity: tx.y_parity,
+            r: tx.r,
+            s: tx.s,
         }
     }
 }
@@ -309,14 +309,14 @@ impl From<AccessListTx> for Transaction {
             value: tx.value,
             data: tx.data,
             access_list: tx.access_list,
-            y_parity: tx.y_parity,
-            r: tx.r,
-            s: tx.s,
             max_priority_fee_per_gas: U256::default(),
             max_fee_per_gas: U256::default(),
             max_fee_per_blob_gas: U256::default(),
             blob_versioned_hashes: Vec::new(),
             authorization_list: Vec::new(),
+            y_parity: tx.y_parity,
+            r: tx.r,
+            s: tx.s,
         }
     }
 }
@@ -362,14 +362,14 @@ impl From<BlobTx> for Transaction {
             value: tx.value,
             data: tx.data,
             access_list: tx.access_list,
-            y_parity: tx.y_parity,
-            r: tx.r,
-            s: tx.s,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
             max_fee_per_gas: tx.max_fee_per_gas,
             max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
             blob_versioned_hashes: tx.blob_versioned_hashes,
             authorization_list: Vec::new(),
+            y_parity: tx.y_parity,
+            r: tx.r,
+            s: tx.s,
         }
     }
 }
@@ -414,14 +414,14 @@ impl From<SetCodeTx> for Transaction {
             value: tx.value,
             data: tx.data,
             access_list: tx.access_list,
-            y_parity: tx.y_parity,
-            r: tx.r,
-            s: tx.s,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
             max_fee_per_gas: tx.max_fee_per_gas,
             max_fee_per_blob_gas: U256::default(),
             blob_versioned_hashes: Vec::new(),
             authorization_list: tx.authorization_list,
+            y_parity: tx.y_parity,
+            r: tx.r,
+            s: tx.s,
         }
     }
 }
@@ -443,14 +443,14 @@ mod tests {
                 value: U256::default(),
                 data: Vec::new(),
                 access_list: Vec::new(),
-                y_parity: U256::default(),
-                r: U256::default(),
-                s: U256::default(),
                 max_fee_per_gas: U256::default(),
                 max_priority_fee_per_gas: U256::default(),
                 blob_versioned_hashes: Vec::new(),
                 max_fee_per_blob_gas: U256::default(),
                 authorization_list: Vec::new(),
+                y_parity: U256::default(),
+                r: U256::default(),
+                s: U256::default(),
             }
         }
     }
