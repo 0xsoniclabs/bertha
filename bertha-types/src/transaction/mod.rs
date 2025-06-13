@@ -5,6 +5,7 @@ mod error;
 mod legacy_tx;
 mod set_code_tx;
 
+use alloy_rlp::{Decodable, Encodable, Header};
 use serde::{Deserialize, Serialize};
 
 pub use crate::transaction::{
@@ -50,6 +51,62 @@ pub struct Transaction {
     pub y_parity: U256,
     pub r: U256,
     pub s: U256,
+}
+
+impl Decodable for Transaction {
+    fn decode(rlp: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
+        let header = Header::decode(rlp)?;
+        if header.list {
+            Ok(LegacyTx::decode(rlp, header.payload_length)?.into())
+        } else {
+            if rlp.is_empty() {
+                return Err(alloy_rlp::Error::InputTooShort);
+            }
+            let type_ = rlp[0];
+            let mut inner_data = &rlp[1..header.payload_length];
+            *rlp = &rlp[header.payload_length..];
+            match type_ {
+                1 => Ok(AccessListTx::decode(&mut inner_data)?.into()),
+                2 => Ok(DynamicFeeTx::decode(&mut inner_data)?.into()),
+                3 => Ok(BlobTx::decode(&mut inner_data)?.into()),
+                4 => Ok(SetCodeTx::decode(&mut inner_data)?.into()),
+                _ => Err(alloy_rlp::Error::Custom("invalid transaction type")),
+            }
+        }
+    }
+}
+
+impl Encodable for Transaction {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        fn encode_with_type_as_rlp_string<T: Encodable>(
+            transaction_type: TransactionType,
+            tx: T,
+            out: &mut dyn alloy_rlp::BufMut,
+        ) {
+            let mut buf = Vec::new();
+            buf.push(transaction_type as u8);
+            tx.encode(&mut buf);
+            RlpString(buf).encode(out);
+        }
+
+        match self.transaction_type {
+            TransactionType::Legacy => LegacyTx::try_from(self.clone())
+                .map(|tx| tx.encode(out))
+                .unwrap_or_else(|_| "".encode(out)),
+            TransactionType::AccessList => AccessListTx::try_from(self.clone())
+                .map(|tx| encode_with_type_as_rlp_string(self.transaction_type, tx, out))
+                .unwrap_or_else(|_| "".encode(out)),
+            TransactionType::DynamicFee => DynamicFeeTx::try_from(self.clone())
+                .map(|tx| encode_with_type_as_rlp_string(self.transaction_type, tx, out))
+                .unwrap_or_else(|_| "".encode(out)),
+            TransactionType::Blob => BlobTx::try_from(self.clone())
+                .map(|tx| encode_with_type_as_rlp_string(self.transaction_type, tx, out))
+                .unwrap_or_else(|_| "".encode(out)),
+            TransactionType::SetCode => SetCodeTx::try_from(self.clone())
+                .map(|tx| encode_with_type_as_rlp_string(self.transaction_type, tx, out))
+                .unwrap_or_else(|_| "".encode(out)),
+        };
+    }
 }
 
 /// The Ethereum transaction types, as defined by EIP 2718, EIP 2930, EIP 1559, EIP 4844, and EIP
@@ -106,7 +163,7 @@ pub struct JsonRpcTransaction {
     pub gas_price: AsHex<U256>,
     pub gas: AsHex<u64>,
     #[serde(default)]
-    pub to: Option<AsHex<Address>>,
+    pub to: AsHex<Nil<Address>>,
     pub value: AsHex<U256>,
     pub input: AsHex<Vec<u8>>,
     #[serde(default)]
@@ -137,7 +194,7 @@ impl TryFrom<JsonRpcTransaction> for Transaction {
             nonce: value.nonce.0,
             gas_price: value.gas_price.0,
             gas_limit: value.gas.0,
-            to: value.to.map(|addr| addr.0),
+            to: value.to.0.0,
             value: value.value.0,
             data: value.input.0,
             y_parity: value.v.0,
@@ -168,7 +225,7 @@ impl From<Transaction> for JsonRpcTransaction {
             nonce: AsHex(value.nonce),
             gas_price: AsHex(value.gas_price),
             gas: AsHex(value.gas_limit),
-            to: value.to.map(AsHex),
+            to: AsHex(Nil(value.to)),
             value: AsHex(value.value),
             input: AsHex(value.data),
             v: AsHex(value.y_parity),
@@ -268,6 +325,83 @@ where
 {
     let value: Option<T> = Option::deserialize(deserializer)?;
     Ok(value.unwrap_or_default())
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Nil<T>(pub Option<T>);
+
+impl<T: Decodable> Decodable for Nil<T> {
+    fn decode(from: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
+        if from.starts_with(&[0x80]) {
+            *from = &from[1..];
+            Ok(Nil(None))
+        } else {
+            Ok(Nil(Some(T::decode(from)?)))
+        }
+    }
+}
+
+impl<T: Encodable> Encodable for Nil<T> {
+    fn length(&self) -> usize {
+        match &self.0 {
+            Some(value) => value.length(),
+            None => 1, // Empty address is encoded as a single byte
+        }
+    }
+
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        match &self.0 {
+            Some(value) => value.encode(out),
+            None => out.put_bytes(alloy_rlp::EMPTY_STRING_CODE, 1),
+        }
+    }
+}
+
+impl<T: HexConvert> HexConvert for Nil<T> {
+    fn to_hex(&self) -> String {
+        match &self.0 {
+            Some(value) => value.to_hex(),
+            None => "0x".to_string(),
+        }
+    }
+
+    fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
+        Ok(Self(Some(T::try_from_hex(value)?)))
+    }
+}
+
+impl<T: HexConvert> AsHex<Nil<T>> {
+    pub fn is_none(&self) -> bool {
+        self.0.0.is_none()
+    }
+}
+
+/// A wrapper type to encode and decode [Vec<u8>] as a RLP string and not as a RLP list.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RlpString(pub Vec<u8>);
+
+impl Encodable for RlpString {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.0.as_slice().encode(out);
+    }
+}
+
+impl Decodable for RlpString {
+    fn decode(rlp: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
+        Ok(Self(alloy_rlp::Header::decode_bytes(rlp, false)?.to_vec()))
+    }
+}
+
+impl HexConvert for RlpString {
+    fn to_hex(&self) -> String {
+        self.0.to_hex()
+    }
+
+    fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
+        Vec::try_from_hex(value).map(Self)
+    }
 }
 
 #[cfg(test)]

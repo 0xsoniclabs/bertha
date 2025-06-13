@@ -1,12 +1,13 @@
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde::Serialize;
 
 use crate::{
     Address, AsHex, Hash, Transaction, U256,
-    transaction::{AccessListEntry, TransactionError, TransactionType},
+    transaction::{AccessListEntry, RlpString, TransactionError, TransactionType},
 };
 
 /// A "blob-carrying" Ethereum transaction, as defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, RlpEncodable, RlpDecodable)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BlobTx {
     pub chain_id: AsHex<U256>,
@@ -18,7 +19,7 @@ pub(crate) struct BlobTx {
     pub to: AsHex<Address>,
     pub value: AsHex<U256>,
     #[serde(rename = "input")]
-    pub data: AsHex<Vec<u8>>,
+    pub data: AsHex<RlpString>,
     pub access_list: Vec<AccessListEntry>,
     pub max_fee_per_blob_gas: AsHex<U256>,
     pub blob_versioned_hashes: Vec<AsHex<Hash>>,
@@ -62,7 +63,7 @@ impl TryFrom<Transaction> for BlobTx {
             // Safe to unwrap as is_constructible_from checks for None
             to: tx.to.map(AsHex).unwrap(),
             value: AsHex(tx.value),
-            data: AsHex(tx.data),
+            data: AsHex(RlpString(tx.data)),
             access_list: tx.access_list,
             max_fee_per_blob_gas: AsHex(tx.max_fee_per_blob_gas),
             blob_versioned_hashes: tx.blob_versioned_hashes.into_iter().map(AsHex).collect(),
@@ -83,7 +84,7 @@ impl From<BlobTx> for Transaction {
             gas_limit: tx.gas_limit.0,
             to: Some(tx.to.0),
             value: tx.value.0,
-            data: tx.data.0,
+            data: tx.data.0.0,
             access_list: tx.access_list,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas.0,
             max_fee_per_gas: tx.max_fee_per_gas.0,

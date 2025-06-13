@@ -1,12 +1,13 @@
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 
 use crate::{
     Address, AsHex, Hash, Transaction, U256,
-    transaction::{TransactionError, TransactionType},
+    transaction::{Nil, RlpString, TransactionError, TransactionType},
 };
 
 /// An Ethereum transaction with an optional access list, as defined in [EIP-2930](https://eips.ethereum.org/EIPS/eip-2930).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, RlpEncodable, RlpDecodable)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AccessListTx {
     pub chain_id: AsHex<U256>,
@@ -14,11 +15,11 @@ pub(crate) struct AccessListTx {
     pub gas_price: AsHex<U256>,
     #[serde(rename = "gas")]
     pub gas_limit: AsHex<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub to: Option<AsHex<Address>>,
+    #[serde(skip_serializing_if = "AsHex::is_none")]
+    pub to: AsHex<Nil<Address>>,
     pub value: AsHex<U256>,
     #[serde(rename = "input")]
-    pub data: AsHex<Vec<u8>>,
+    pub data: AsHex<RlpString>,
     pub access_list: Vec<AccessListEntry>,
 
     #[serde(rename = "v")]
@@ -29,7 +30,9 @@ pub(crate) struct AccessListTx {
 
 /// An entry in the EIP-2930 access list.
 /// It contains the address and a list of storage keys that the transaction plans to access.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize, RlpEncodable, RlpDecodable,
+)]
 #[serde(from = "JsonRpcAccessListEntry", into = "JsonRpcAccessListEntry")]
 pub struct AccessListEntry {
     pub address: Address,
@@ -52,6 +55,7 @@ impl From<JsonRpcAccessListEntry> for AccessListEntry {
         }
     }
 }
+
 impl From<AccessListEntry> for JsonRpcAccessListEntry {
     fn from(value: AccessListEntry) -> Self {
         JsonRpcAccessListEntry {
@@ -85,9 +89,9 @@ impl TryFrom<Transaction> for AccessListTx {
             nonce: AsHex(tx.nonce),
             gas_price: AsHex(tx.gas_price),
             gas_limit: AsHex(tx.gas_limit),
-            to: tx.to.map(AsHex),
+            to: AsHex(Nil(tx.to)),
             value: AsHex(tx.value),
-            data: AsHex(tx.data),
+            data: AsHex(RlpString(tx.data)),
             access_list: tx.access_list,
             y_parity: AsHex(tx.y_parity),
             r: AsHex(tx.r),
@@ -104,9 +108,9 @@ impl From<AccessListTx> for Transaction {
             nonce: tx.nonce.0,
             gas_price: tx.gas_price.0,
             gas_limit: tx.gas_limit.0,
-            to: tx.to.map(|addr| addr.0),
+            to: tx.to.0.0,
             value: tx.value.0,
-            data: tx.data.0,
+            data: tx.data.0.0,
             access_list: tx.access_list,
             max_priority_fee_per_gas: U256::default(),
             max_fee_per_gas: U256::default(),
