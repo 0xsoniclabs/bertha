@@ -1,4 +1,5 @@
 use std::fmt::Display;
+
 use thiserror::Error;
 
 use crate::{Address, Hash, U256};
@@ -11,8 +12,8 @@ pub enum TransactionError {
 
 /// An Ethereum-compatible transaction.
 /// It contains all the fields required for different transaction types.
-/// Fields are named according to the Ethereum Yellow Paper Shanghai version (except for EIP-7702 fields).
-/// Go-ethereum names, where they differ, are indicated through doc comments on each field.
+/// Fields are named according to the Ethereum Yellow Paper Shanghai version (except for EIP-7702
+/// fields). Go-ethereum names, where they differ, are indicated through doc comments on each field.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Transaction {
     pub transaction_type: TransactionType,
@@ -41,7 +42,8 @@ pub struct Transaction {
     pub s: U256,
 }
 
-/// The Ethereum transaction types, as defined by EIP 2718, EIP 2930, EIP 1559, EIP 4844, and EIP 7702.
+/// The Ethereum transaction types, as defined by EIP 2718, EIP 2930, EIP 1559, EIP 4844, and EIP
+/// 7702.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TransactionType {
     Legacy = 0,
