@@ -1,13 +1,8 @@
 use alloy_rlp::{BufMut, Encodable, Header};
 use alloy_trie::{HashBuilder, Nibbles};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
-use crate::{Address, AsHex, Bloom, Hash, Log, transaction::TransactionType};
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Error)]
-#[error("the computed receipt root did not match the receipt root of the block header")]
-pub struct ReceiptVerificationError;
+use crate::{Address, AsHex, Bloom, Hash, Log, TransactionType, VerificationError};
 
 /// Receipt for a transaction.
 /// The receipt provides information about the execution of the transaction like the amount of gas
@@ -125,10 +120,7 @@ pub struct BlockReceipt(Vec<TransactionReceipt>);
 impl BlockReceipt {
     /// Verifies the block receipt by computing the receipts root hash and comparing it with the
     /// provided one.
-    pub fn verify(
-        self,
-        receipts_root: &Hash,
-    ) -> Result<VerifiedBlockReceipt, ReceiptVerificationError> {
+    pub fn verify(self, receipts_root: &Hash) -> Result<VerifiedBlockReceipt, VerificationError> {
         let mut trie = HashBuilder::default();
         let encode_key = |key: usize| {
             let mut v = Vec::new();
@@ -150,7 +142,7 @@ impl BlockReceipt {
         if root == *receipts_root {
             Ok(VerifiedBlockReceipt(self.0))
         } else {
-            Err(ReceiptVerificationError)
+            Err(VerificationError::ReceiptVerificationError)
         }
     }
 }

@@ -1,6 +1,7 @@
 mod as_hex;
 mod block;
 mod block_header;
+mod error;
 mod hex_convert;
 mod known_hashes;
 mod log;
@@ -13,10 +14,11 @@ mod u256;
 pub use as_hex::AsHex;
 pub use block::Block;
 pub use block_header::BlockHeader;
+pub use error::VerificationError;
 pub use hex_convert::HexConvert;
 pub use known_hashes::*;
 pub use log::Log;
-pub use receipts::{BlockReceipt, ReceiptVerificationError, TransactionReceipt};
+pub use receipts::{BlockReceipt, TransactionReceipt};
 pub use transaction::{AccessListEntry, SetCodeAuthorization, Transaction, TransactionType};
 pub use u256::U256;
 
