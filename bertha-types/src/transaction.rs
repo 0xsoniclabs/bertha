@@ -5,15 +5,44 @@ use crate::{Address, Hash, U256};
 
 #[derive(Debug, Error)]
 pub enum TransactionError {
-    #[error("Couldn't convert transaction. Expected type {0}, found {1}")]
-    TransactionTypeMismatch(TransactionType, TransactionType),
-    #[error("Couldn't construct transaction {0}")]
-    InvalidTransactionError(TransactionType),
+    #[error("couldn't convert transaction to type {0}")]
+    ConversionError(TransactionType),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+/// An Ethereum-compatible transaction.
+/// It contains all the fields required for different transaction types.
+/// Fields are named according to the Ethereum Yellow Paper Shanghai version (except for EIP-7702 fields).
+/// Go-ethereum names, where they differ, are indicated through doc comments on each field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Transaction {
+    pub transaction_type: TransactionType,
+    pub nonce: u64,
+    pub gas_limit: u64,
+    pub to: Option<Address>,
+    pub value: U256,
+    pub r: U256,
+    pub s: U256,
+    pub access_list: Vec<AccessTuple>,
+    pub chain_id: U256,
+    /// geth: v
+    pub y_parity: U256,
+    /// geth: GasFeeCap
+    pub max_fee_per_gas: U256, // DynamicFeeTx, BlobTx, SetCodeTx
+    /// geth: GasTipCap
+    pub max_priority_fee_per_gas: U256, // DynamicFeeTx, BlobTx, SetCodeTx
+    pub gas_price: U256, // LegacyTx, AccessListTx
+    pub data: Vec<u8>,   // Called init for contract creation, data for message call transactions
+    /// geth: BlobHashes
+    pub blob_versioned_hashes: Vec<Hash>, // BlobTx
+    /// geth: BlobFeeCap
+    pub max_fee_per_blob_gas: U256, // BlobTx
+    /// geth: AuthList
+    pub authorization_list: Vec<SetCodeAuthorization>, // SetCodeTx
+}
+
+/// The Ethereum transaction types, as defined by EIP 2718, EIP 2930, EIP 1559, EIP 4844, and EIP 7702.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TransactionType {
-    #[default]
     Legacy = 0,
     AccessList = 1,
     DynamicFee = 2,
@@ -33,176 +62,119 @@ impl Display for TransactionType {
     }
 }
 
-// Source: go-ethereum/core/types/tx_legacy.go (LegacyTx)
+/// The Legacy Ethereum transaction, defined in the EIP 2718.
+/// Source: https://eips.ethereum.org/EIPS/eip-2718
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct LegacyTx {
+struct LegacyTx {
     pub nonce: u64,
     pub gas_price: U256,
-    pub gas: u64,
+    pub gas_limit: u64,
     pub to: Option<Address>,
     pub value: U256,
-    pub input: Vec<u8>,
+    pub data: Vec<u8>,
 
-    pub v: U256,
+    pub w: U256,
     pub r: U256,
     pub s: U256,
 }
 
-impl LegacyTx {
-    pub fn is_constructible_from(tx: &Transaction) -> bool {
-        tx.transaction_type == TransactionType::Legacy
-    }
-}
-
-// Source: go-ethereum/core/types/tx_access_list.go (AccessListTx)
+/// The Access List Ethereum transaction, defined in the EIP 2930.
+/// Source: https://eips.ethereum.org/EIPS/eip-2930
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct AccessListTx {
+struct AccessListTx {
     pub chain_id: U256,
     pub nonce: u64,
     pub gas_price: U256,
-    pub gas: u64,
+    pub gas_limit: u64,
     pub to: Option<Address>,
     pub value: U256,
-    pub input: Vec<u8>,
+    pub data: Vec<u8>,
     pub access_list: Vec<AccessTuple>,
 
-    pub v: U256,
+    pub y_parity: U256,
     pub r: U256,
     pub s: U256,
 }
-// Source: go-ethereum/core/types/tx_access_list.go (AccessTuple)
+
+/// The Access List internal values, used in AccessListTx.
+/// It contains the address and a list of storage keys that the transaction plans to access.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct AccessTuple {
     pub address: Address,
     pub storage_keys: Vec<Hash>,
 }
 
-impl AccessListTx {
-    pub fn is_constructible_from(tx: &Transaction) -> bool {
-        tx.transaction_type == TransactionType::AccessList
-    }
-}
-
-// Source: go-ethereum/core/types/tx_dynamic_fee.go (DynamicFeeTx)
+// The Dynamic Fee Ethereum transaction, defined in the EIP 1559.
+// Source: https://eips.ethereum.org/EIPS/eip-1559
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct DynamicFeeTx {
+struct DynamicFeeTx {
     pub chain_id: U256,
     pub nonce: u64,
     pub max_priority_fee_per_gas: U256,
     pub max_fee_per_gas: U256,
-    pub gas: u64,
+    pub gas_limit: u64,
     pub to: Option<Address>,
     pub value: U256,
-    pub input: Vec<u8>,
+    pub data: Vec<u8>,
     pub access_list: Vec<AccessTuple>,
 
-    pub v: U256,
+    pub y_parity: U256,
     pub r: U256,
     pub s: U256,
 }
 
-impl DynamicFeeTx {
-    pub fn is_constructible_from(tx: &Transaction) -> bool {
-        tx.transaction_type == TransactionType::DynamicFee
-    }
-}
-
-// Source: go-ethereum/core/types/tx_blob.go (BlobTx)
+/// The Blob Ethereum transaction, defined in the EIP 4844.
+/// Source: https://eips.ethereum.org/EIPS/eip-4844
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct BlobTx {
+struct BlobTx {
     pub chain_id: U256,
     pub nonce: u64,
     pub max_priority_fee_per_gas: U256,
     pub max_fee_per_gas: U256,
-    pub gas: u64,
+    pub gas_limit: u64,
     pub to: Address,
     pub value: U256,
-    pub input: Vec<u8>,
+    pub data: Vec<u8>,
     pub access_list: Vec<AccessTuple>,
     pub max_fee_per_blob_gas: U256,
     pub blob_versioned_hashes: Vec<Hash>,
     // sidecar is not included in the RLP encoding
-    pub v: U256,
+    pub y_parity: U256,
     pub r: U256,
     pub s: U256,
 }
 
-impl BlobTx {
-    pub fn is_constructible_from(tx: &Transaction) -> bool {
-        tx.transaction_type == TransactionType::Blob && tx.to.is_some()
-    }
-}
-
-// Source: go-ethereum/core/types/tx_set_code.go (SetCodeTx)
+/// The SetCode Ethereum transaction, defined in the EIP 7702.
+/// Source: https://eips.ethereum.org/EIPS/eip-7702
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct SetCodeTx {
+struct SetCodeTx {
     pub chain_id: U256,
     pub nonce: u64,
     pub max_priority_fee_per_gas: U256,
     pub max_fee_per_gas: U256,
-    pub gas: u64,
+    pub gas_limit: u64,
     pub to: Address,
     pub value: U256,
-    pub input: Vec<u8>,
+    pub data: Vec<u8>,
     pub access_list: Vec<AccessTuple>,
     pub authorization_list: Vec<SetCodeAuthorization>,
 
-    pub v: U256,
+    pub y_parity: U256,
     pub r: U256,
     pub s: U256,
 }
 
-// Source: go-ethereum/core/types/tx_set_code.go (SetCodeAuthorization)
+/// The Authorization list internal values, used in SetCodeTx.
+/// It indicates what code the signer desires to execute in the context of their EOA.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct SetCodeAuthorization {
     pub chain_id: U256,
     pub address: Address,
     pub nonce: u64,
-    pub y_parity: u8, /* TODO: this is just one or zero, can be represented with
+    pub y_parity: u8, /* NOTE: this is just one or zero, can be represented with
                        * one byte only */
     pub r: U256,
     pub s: U256,
-}
-
-impl SetCodeTx {
-    pub fn is_constructible_from(tx: &Transaction) -> bool {
-        tx.transaction_type == TransactionType::SetCode && tx.to.is_some()
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Transaction {
-    pub transaction_type: TransactionType,
-    pub transaction_index: u64,
-    pub nonce: u64,
-    pub gas_price: U256,
-    pub gas: u64,
-    // #[serde(default)]
-    pub to: Option<Address>,
-    pub value: U256,
-    pub input: Vec<u8>,
-    pub v: U256,
-    pub r: U256,
-    pub s: U256,
-    pub chain_id: U256,
-    pub max_priority_fee_per_gas: U256,
-    pub max_fee_per_gas: U256,
-    pub access_list: Vec<AccessTuple>,
-    pub max_fee_per_blob_gas: U256,
-    pub blob_versioned_hashes: Vec<Hash>,
-    pub authorization_list: Vec<SetCodeAuthorization>,
-}
-
-impl Transaction {
-    pub fn is_valid(&self) -> bool {
-        match self.transaction_type {
-            TransactionType::Legacy => LegacyTx::is_constructible_from(self),
-            TransactionType::DynamicFee => DynamicFeeTx::is_constructible_from(self),
-            TransactionType::AccessList => AccessListTx::is_constructible_from(self),
-            TransactionType::Blob => BlobTx::is_constructible_from(self),
-            TransactionType::SetCode => SetCodeTx::is_constructible_from(self),
-        }
-    }
 }
 
 impl TryFrom<Transaction> for LegacyTx {
@@ -210,19 +182,16 @@ impl TryFrom<Transaction> for LegacyTx {
 
     fn try_from(tx: Transaction) -> Result<Self, Self::Error> {
         if tx.transaction_type != TransactionType::Legacy {
-            return Err(TransactionError::TransactionTypeMismatch(
-                TransactionType::Legacy,
-                tx.transaction_type,
-            ));
+            return Err(TransactionError::ConversionError(TransactionType::Legacy));
         }
         Ok(LegacyTx {
             nonce: tx.nonce,
             gas_price: tx.gas_price,
-            gas: tx.gas,
+            gas_limit: tx.gas_limit,
             to: tx.to,
             value: tx.value,
-            input: tx.input,
-            v: tx.v,
+            data: tx.data,
+            w: tx.y_parity,
             r: tx.r,
             s: tx.s,
         })
@@ -235,16 +204,15 @@ impl From<LegacyTx> for Transaction {
             transaction_type: TransactionType::Legacy,
             nonce: tx.nonce,
             gas_price: tx.gas_price,
-            gas: tx.gas,
+            gas_limit: tx.gas_limit,
             to: tx.to,
             value: tx.value,
-            input: tx.input,
-            v: tx.v,
+            data: tx.data,
+            y_parity: tx.w,
             r: tx.r,
             s: tx.s,
             chain_id: U256::default(),
             max_priority_fee_per_gas: U256::default(),
-            transaction_index: u64::default(),
             max_fee_per_gas: U256::default(),
             access_list: Vec::new(),
             max_fee_per_blob_gas: U256::default(),
@@ -259,9 +227,8 @@ impl TryFrom<Transaction> for DynamicFeeTx {
 
     fn try_from(tx: Transaction) -> Result<Self, Self::Error> {
         if tx.transaction_type != TransactionType::DynamicFee {
-            return Err(TransactionError::TransactionTypeMismatch(
+            return Err(TransactionError::ConversionError(
                 TransactionType::DynamicFee,
-                tx.transaction_type,
             ));
         }
         Ok(DynamicFeeTx {
@@ -269,12 +236,12 @@ impl TryFrom<Transaction> for DynamicFeeTx {
             nonce: tx.nonce,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
             max_fee_per_gas: tx.max_fee_per_gas,
-            gas: tx.gas,
+            gas_limit: tx.gas_limit,
             to: tx.to,
             value: tx.value,
-            input: tx.input,
+            data: tx.data,
             access_list: tx.access_list,
-            v: tx.v,
+            y_parity: tx.y_parity,
             r: tx.r,
             s: tx.s,
         })
@@ -289,16 +256,15 @@ impl From<DynamicFeeTx> for Transaction {
             nonce: tx.nonce,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
             max_fee_per_gas: tx.max_fee_per_gas,
-            gas: tx.gas,
+            gas_limit: tx.gas_limit,
             to: tx.to,
             value: tx.value,
-            input: tx.input,
+            data: tx.data,
             access_list: tx.access_list,
-            v: tx.v,
+            y_parity: tx.y_parity,
             r: tx.r,
             s: tx.s,
             gas_price: U256::default(),
-            transaction_index: u64::default(),
             max_fee_per_blob_gas: U256::default(),
             blob_versioned_hashes: Vec::new(),
             authorization_list: Vec::new(),
@@ -311,21 +277,20 @@ impl TryFrom<Transaction> for AccessListTx {
 
     fn try_from(tx: Transaction) -> Result<Self, Self::Error> {
         if tx.transaction_type != TransactionType::AccessList {
-            return Err(TransactionError::TransactionTypeMismatch(
+            return Err(TransactionError::ConversionError(
                 TransactionType::AccessList,
-                tx.transaction_type,
             ));
         }
         Ok(AccessListTx {
             chain_id: tx.chain_id,
             nonce: tx.nonce,
             gas_price: tx.gas_price,
-            gas: tx.gas,
+            gas_limit: tx.gas_limit,
             to: tx.to,
             value: tx.value,
-            input: tx.input,
+            data: tx.data,
             access_list: tx.access_list,
-            v: tx.v,
+            y_parity: tx.y_parity,
             r: tx.r,
             s: tx.s,
         })
@@ -339,17 +304,16 @@ impl From<AccessListTx> for Transaction {
             chain_id: tx.chain_id,
             nonce: tx.nonce,
             gas_price: tx.gas_price,
-            gas: tx.gas,
+            gas_limit: tx.gas_limit,
             to: tx.to,
             value: tx.value,
-            input: tx.input,
+            data: tx.data,
             access_list: tx.access_list,
-            v: tx.v,
+            y_parity: tx.y_parity,
             r: tx.r,
             s: tx.s,
             max_priority_fee_per_gas: U256::default(),
             max_fee_per_gas: U256::default(),
-            transaction_index: u64::default(),
             max_fee_per_blob_gas: U256::default(),
             blob_versioned_hashes: Vec::new(),
             authorization_list: Vec::new(),
@@ -362,10 +326,7 @@ impl TryFrom<Transaction> for BlobTx {
 
     fn try_from(tx: Transaction) -> Result<Self, Self::Error> {
         if tx.transaction_type != TransactionType::Blob {
-            return Err(TransactionError::TransactionTypeMismatch(
-                TransactionType::Blob,
-                tx.transaction_type,
-            ));
+            return Err(TransactionError::ConversionError(TransactionType::Blob));
         }
 
         Ok(BlobTx {
@@ -373,16 +334,16 @@ impl TryFrom<Transaction> for BlobTx {
             nonce: tx.nonce,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
             max_fee_per_gas: tx.max_fee_per_gas,
-            gas: tx.gas,
-            to: tx.to.ok_or(TransactionError::InvalidTransactionError(
-                TransactionType::Blob,
-            ))?,
+            gas_limit: tx.gas_limit,
+            to: tx
+                .to
+                .ok_or(TransactionError::ConversionError(TransactionType::Blob))?,
             value: tx.value,
-            input: tx.input,
+            data: tx.data,
             access_list: tx.access_list,
             max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
             blob_versioned_hashes: tx.blob_versioned_hashes,
-            v: tx.v,
+            y_parity: tx.y_parity,
             r: tx.r,
             s: tx.s,
         })
@@ -397,18 +358,17 @@ impl From<BlobTx> for Transaction {
             nonce: tx.nonce,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
             max_fee_per_gas: tx.max_fee_per_gas,
-            gas: tx.gas,
+            gas_limit: tx.gas_limit,
             to: Some(tx.to),
             value: tx.value,
-            input: tx.input,
+            data: tx.data,
             access_list: tx.access_list,
             max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
             blob_versioned_hashes: tx.blob_versioned_hashes,
-            v: tx.v,
+            y_parity: tx.y_parity,
             r: tx.r,
             s: tx.s,
             gas_price: U256::default(),
-            transaction_index: u64::default(),
             authorization_list: Vec::new(),
         }
     }
@@ -419,10 +379,7 @@ impl TryFrom<Transaction> for SetCodeTx {
 
     fn try_from(tx: Transaction) -> Result<Self, Self::Error> {
         if tx.transaction_type != TransactionType::SetCode {
-            return Err(TransactionError::TransactionTypeMismatch(
-                TransactionType::SetCode,
-                tx.transaction_type,
-            ));
+            return Err(TransactionError::ConversionError(TransactionType::SetCode));
         }
 
         Ok(SetCodeTx {
@@ -430,15 +387,15 @@ impl TryFrom<Transaction> for SetCodeTx {
             nonce: tx.nonce,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
             max_fee_per_gas: tx.max_fee_per_gas,
-            gas: tx.gas,
-            to: tx.to.ok_or(TransactionError::InvalidTransactionError(
-                TransactionType::SetCode,
-            ))?,
+            gas_limit: tx.gas_limit,
+            to: tx
+                .to
+                .ok_or(TransactionError::ConversionError(TransactionType::SetCode))?,
             value: tx.value,
-            input: tx.input,
+            data: tx.data,
             access_list: tx.access_list,
             authorization_list: tx.authorization_list,
-            v: tx.v,
+            y_parity: tx.y_parity,
             r: tx.r,
             s: tx.s,
         })
@@ -453,18 +410,17 @@ impl From<SetCodeTx> for Transaction {
             nonce: tx.nonce,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
             max_fee_per_gas: tx.max_fee_per_gas,
-            gas: tx.gas,
+            gas_limit: tx.gas_limit,
             to: Some(tx.to),
             value: tx.value,
-            input: tx.input,
+            data: tx.data,
             access_list: tx.access_list,
             max_fee_per_blob_gas: U256::default(),
             blob_versioned_hashes: Vec::new(),
-            v: tx.v,
+            y_parity: tx.y_parity,
             r: tx.r,
             s: tx.s,
             gas_price: U256::default(),
-            transaction_index: u64::default(),
             authorization_list: tx.authorization_list,
         }
     }
@@ -472,9 +428,32 @@ impl From<SetCodeTx> for Transaction {
 
 #[cfg(test)]
 mod tests {
-    use crate::transaction;
 
     use super::*;
+
+    impl Default for Transaction {
+        fn default() -> Self {
+            Self {
+                transaction_type: TransactionType::Legacy,
+                nonce: Default::default(),
+                gas_limit: Default::default(),
+                to: Default::default(),
+                value: Default::default(),
+                r: Default::default(),
+                s: Default::default(),
+                access_list: Default::default(),
+                chain_id: Default::default(),
+                y_parity: Default::default(),
+                max_fee_per_gas: Default::default(),
+                max_priority_fee_per_gas: Default::default(),
+                gas_price: Default::default(),
+                data: Default::default(),
+                blob_versioned_hashes: Default::default(),
+                max_fee_per_blob_gas: Default::default(),
+                authorization_list: Default::default(),
+            }
+        }
+    }
 
     #[test]
     fn transaction_type_display_prints_correct_name() {
@@ -531,31 +510,25 @@ mod tests {
     #[test]
     fn conversion_to_inner_types_fail_if_error_occurs() {
         // Attempt to convert to LegacyTx with mismatched transaction type
-        let error = LegacyTx::try_from(transaction::Transaction {
+        let error = LegacyTx::try_from(Transaction {
             transaction_type: TransactionType::DynamicFee,
             ..Default::default()
         })
         .expect_err("Conversion to legacy transaction must fail");
         assert!(matches!(
             error,
-            TransactionError::TransactionTypeMismatch(
-                TransactionType::Legacy,
-                TransactionType::DynamicFee
-            )
+            TransactionError::ConversionError(TransactionType::Legacy)
         ));
 
         // Attempt to convert to DynamicFeeTx with mismatched transaction type
-        let error = DynamicFeeTx::try_from(transaction::Transaction {
+        let error = DynamicFeeTx::try_from(Transaction {
             transaction_type: TransactionType::Legacy,
             ..Default::default()
         })
         .expect_err("Conversion to dynamic fee transaction must fail");
         assert!(matches!(
             error,
-            TransactionError::TransactionTypeMismatch(
-                TransactionType::DynamicFee,
-                TransactionType::Legacy
-            )
+            TransactionError::ConversionError(TransactionType::DynamicFee)
         ));
 
         // Attempt to convert to AccessListTx with mismatched transaction type
@@ -566,10 +539,7 @@ mod tests {
         .expect_err("Conversion to access list transaction must fail");
         assert!(matches!(
             error,
-            TransactionError::TransactionTypeMismatch(
-                TransactionType::AccessList,
-                TransactionType::Legacy
-            )
+            TransactionError::ConversionError(TransactionType::AccessList)
         ));
 
         // Attempt to convert to BlobTx with mismatched transaction type
@@ -580,10 +550,7 @@ mod tests {
         .expect_err("Conversion to blob transaction must fail");
         assert!(matches!(
             error,
-            TransactionError::TransactionTypeMismatch(
-                TransactionType::Blob,
-                TransactionType::Legacy
-            )
+            TransactionError::ConversionError(TransactionType::Blob)
         ));
 
         // Attempt to convert to BlobTx with to field set to None
@@ -595,7 +562,7 @@ mod tests {
         .expect_err("Conversion to blob transaction must fail");
         assert!(matches!(
             error,
-            TransactionError::InvalidTransactionError(TransactionType::Blob)
+            TransactionError::ConversionError(TransactionType::Blob)
         ));
 
         // Attempt to convert to SetCodeTx with mismatched transaction type
@@ -606,10 +573,7 @@ mod tests {
         .expect_err("Conversion to set code transaction must fail");
         assert!(matches!(
             error,
-            TransactionError::TransactionTypeMismatch(
-                TransactionType::SetCode,
-                TransactionType::Blob
-            )
+            TransactionError::ConversionError(TransactionType::SetCode)
         ));
 
         // Attempt to convert to SetCodeTx with to field set to None
@@ -621,111 +585,7 @@ mod tests {
         .expect_err("Conversion to set code transaction must fail");
         assert!(matches!(
             error,
-            TransactionError::InvalidTransactionError(TransactionType::SetCode)
+            TransactionError::ConversionError(TransactionType::SetCode)
         ));
-    }
-
-    #[test]
-    fn is_valid_correctly_check_transaction() {
-        // Valid Legacy transactions
-        let legacy_tx = Transaction {
-            transaction_type: TransactionType::Legacy,
-            to: None,
-            ..Default::default()
-        };
-        assert!(
-            legacy_tx.is_valid(),
-            "Legacy transaction without to field should be valid"
-        );
-        let legacy_tx_with_to = Transaction {
-            to: Some(Address::default()),
-            ..legacy_tx.clone()
-        };
-        assert!(
-            legacy_tx_with_to.is_valid(),
-            "Legacy transaction with to field should be valid"
-        );
-
-        // Valid AccessList transactions
-        let access_list_tx = Transaction {
-            transaction_type: TransactionType::AccessList,
-            to: None,
-            ..Default::default()
-        };
-        assert!(
-            access_list_tx.is_valid(),
-            "AccessList transaction without to field should be valid"
-        );
-        let access_list_tx_with_to = Transaction {
-            to: Some(Address::default()),
-            ..access_list_tx.clone()
-        };
-        assert!(
-            access_list_tx_with_to.is_valid(),
-            "AccessList transaction with to field should be valid"
-        );
-
-        // Valid DynamicFee transactions
-        let dynamic_fee_tx = Transaction {
-            transaction_type: TransactionType::DynamicFee,
-            to: None,
-            ..Default::default()
-        };
-        assert!(
-            dynamic_fee_tx.is_valid(),
-            "DynamicFee transaction without to field should be valid"
-        );
-        let dynamic_fee_tx_with_to = Transaction {
-            to: Some(Address::default()),
-            ..dynamic_fee_tx.clone()
-        };
-        assert!(
-            dynamic_fee_tx_with_to.is_valid(),
-            "DynamicFee transaction with to field should be valid"
-        );
-
-        // Valid Blob transactions
-        let blob_tx = Transaction {
-            transaction_type: TransactionType::Blob,
-            to: Some(Address::default()),
-            ..Default::default()
-        };
-        assert!(blob_tx.is_valid(), "Blob transaction should be valid");
-
-        // Valid SetCode transactions
-        let set_code_tx = Transaction {
-            transaction_type: TransactionType::SetCode,
-            to: Some(Address::default()),
-            ..Default::default()
-        };
-        assert!(
-            set_code_tx.is_valid(),
-            "SetCode transaction should be valid"
-        );
-    }
-
-    #[test]
-    fn is_valid_returns_false_for_invalid_transactions() {
-        // Invalid Blob transaction without to field
-        let invalid_blob_tx = Transaction {
-            transaction_type: TransactionType::Blob,
-            to: None,
-            ..Default::default()
-        };
-        assert!(
-            !invalid_blob_tx.is_valid(),
-            "Blob transaction without to field should be invalid"
-        );
-
-        // Invalid SetCode transaction without to field
-        let invalid_set_code_tx = Transaction {
-            transaction_type: TransactionType::SetCode,
-            to: None,
-            ..Default::default()
-        };
-        assert!(
-            !invalid_set_code_tx.is_valid(),
-            "SetCode transaction without to field should be invalid"
-        );
     }
 }
