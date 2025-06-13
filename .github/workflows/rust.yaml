@@ -22,13 +22,13 @@ jobs:
     - name: checkout
       uses: actions/checkout@v4
     - name: install rust
-      uses: dtolnay/rust-toolchain@1.86
+      uses: dtolnay/rust-toolchain@nightly
       with:
         components: rustfmt
     - name: load cache
       uses: Swatinem/rust-cache@v2
     - name: cargo fmt
-      run: cargo fmt --check
+      run: cargo +nightly fmt --check
 
   clippy:
     name: clippy
