@@ -171,8 +171,7 @@ pub struct SetCodeAuthorization {
     pub chain_id: U256,
     pub address: Address,
     pub nonce: u64,
-    pub y_parity: u8, /* NOTE: this is just one or zero, can be represented with
-                       * one byte only */
+    pub y_parity: u8,
     pub r: U256,
     pub s: U256,
 }
