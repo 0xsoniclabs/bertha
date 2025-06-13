@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::{Address, Hash, U256};
 
-#[derive(Debug, Error)]
+#[derive(Debug, PartialEq, Eq, Error)]
 pub enum TransactionError {
     #[error("couldn't convert transaction to type {0}")]
     ConversionError(TransactionType),
@@ -13,7 +13,7 @@ pub enum TransactionError {
 /// It contains all the fields required for different transaction types.
 /// Fields are named according to the Ethereum Yellow Paper Shanghai version (except for EIP-7702 fields).
 /// Go-ethereum names, where they differ, are indicated through doc comments on each field.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Transaction {
     pub transaction_type: TransactionType,
     pub chain_id: U256,
@@ -515,10 +515,10 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to legacy transaction must fail");
-        assert!(matches!(
+        assert_eq!(
             error,
             TransactionError::ConversionError(TransactionType::Legacy)
-        ));
+        );
 
         // Attempt to convert to DynamicFeeTx with mismatched transaction type
         let error = DynamicFeeTx::try_from(Transaction {
@@ -526,10 +526,10 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to dynamic fee transaction must fail");
-        assert!(matches!(
+        assert_eq!(
             error,
             TransactionError::ConversionError(TransactionType::DynamicFee)
-        ));
+        );
 
         // Attempt to convert to AccessListTx with mismatched transaction type
         let error = AccessListTx::try_from(Transaction {
@@ -537,10 +537,10 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to access list transaction must fail");
-        assert!(matches!(
+        assert_eq!(
             error,
             TransactionError::ConversionError(TransactionType::AccessList)
-        ));
+        );
 
         // Attempt to convert to BlobTx with mismatched transaction type
         let error = BlobTx::try_from(Transaction {
@@ -548,10 +548,10 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to blob transaction must fail");
-        assert!(matches!(
+        assert_eq!(
             error,
             TransactionError::ConversionError(TransactionType::Blob)
-        ));
+        );
 
         // Attempt to convert to BlobTx with to field set to None
         let error = BlobTx::try_from(Transaction {
@@ -560,10 +560,10 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to blob transaction must fail");
-        assert!(matches!(
+        assert_eq!(
             error,
             TransactionError::ConversionError(TransactionType::Blob)
-        ));
+        );
 
         // Attempt to convert to SetCodeTx with mismatched transaction type
         let error = SetCodeTx::try_from(Transaction {
@@ -571,10 +571,10 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to set code transaction must fail");
-        assert!(matches!(
+        assert_eq!(
             error,
             TransactionError::ConversionError(TransactionType::SetCode)
-        ));
+        );
 
         // Attempt to convert to SetCodeTx with to field set to None
         let error = SetCodeTx::try_from(Transaction {
@@ -583,9 +583,9 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to set code transaction must fail");
-        assert!(matches!(
+        assert_eq!(
             error,
             TransactionError::ConversionError(TransactionType::SetCode)
-        ));
+        );
     }
 }
