@@ -79,7 +79,9 @@ func (db DB) GetBlock(chainID, blockNumber uint64) (*Block, error) {
 // GetBlocks retrieves multiple block by chain ID and block number.
 // This function returns an iterator that yields blocks in the specified range.
 // If there are no blocks in the range in the database, the iterator will not yield any blocks.
-func (db DB) GetBlocks(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq[*Block] {
+// If parsing the block fails, the block will be nil and an error is returned.
+// The iterator needs to be used in a range loop because otherwise the inner iterator will not be closed properly.
+func (db DB) GetBlocks(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error] {
 	startKey := computeKey(chainID, startBlockNumber)
 	endKey := computeKey(chainID, endBlockNumber)
 
@@ -87,27 +89,28 @@ func (db DB) GetBlocks(chainID, startBlockNumber, endBlockNumber uint64) iter.Se
 	it := db.db.NewIterator(readOptions)
 	it.Seek(startKey)
 
-	stop := false
-
-	return func(yield func(*Block) bool) {
-		for it.Valid() && !stop {
+	return func(yield func(*Block, error) bool) {
+		defer it.Close()
+		for it.Valid() {
 			key := it.Key().Data()
+			// Stop if we reach a key that has a different chain ID
 			if !slices.Equal(key[:8], startKey[:8]) {
 				break
 			}
-			if slices.Equal(key, endKey) {
-				stop = true
-			}
 			value := it.Value().Data()
-			var block Block
-			if err := proto.Unmarshal(value, &block); err != nil {
+			block := &Block{}
+			err := proto.Unmarshal(value, block)
+			if err != nil {
+				block = nil
+			}
+			if !yield(block, err) {
 				break
 			}
-			if !yield(&block) {
+			// Stop if we reach the end key
+			if slices.Equal(key, endKey) {
 				break
 			}
 			it.Next()
 		}
-		it.Close()
 	}
 }

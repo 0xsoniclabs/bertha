@@ -9,7 +9,25 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func TestGetBlocksReturnsBlockIfItExists(t *testing.T) {
+func TestOpenDBOpensExistingDb(t *testing.T) {
+	path, err := os.MkdirTemp("", "blockdb-*")
+	require.NoError(t, err, "failed to create temp dir")
+
+	writeDB, err := createDB(path)
+	require.NoError(t, err, "failed to create db")
+	writeDB.close()
+
+	db, err := OpenDB(path)
+	require.NoError(t, err, "failed to open db")
+	require.NoError(t, db.Close(), "failed to close db")
+}
+
+func TestOpenDBFailsIfDbDoesNotExist(t *testing.T) {
+	_, err := OpenDB("non-existing-db-path")
+	require.Error(t, err, "opening db did not return an error although path does not exist")
+}
+
+func TestGetBlockReturnsBlockIfItExists(t *testing.T) {
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3}
 
@@ -26,22 +44,66 @@ func TestGetBlocksReturnsBlockIfItExists(t *testing.T) {
 
 	tests := []struct {
 		chainID, blockNumber uint64
-		expectedBlock        *Block
 	}{
-		{0, 1, nil},                     // non-existing chainID
-		{chainID, 4, nil},               // non-existing block number
-		{chainID, 1, &Block{Number: 1}}, // existing chainID and block number
+		{chainID, 1}, // existing chainID and block number
+		{chainID, 2}, // existing chainID and block number
+		{chainID, 3}, // existing chainID and block number
 	}
 
 	for _, test := range tests {
 		block, err := db.GetBlock(test.chainID, test.blockNumber)
 		require.NoError(t, err, "failed to retrieve block")
-		if test.expectedBlock == nil {
-			require.Nil(t, block, "expected nil block for chainID %d and blockNumber %d", test.chainID, test.blockNumber)
-		} else {
-			require.NotNil(t, block, "expected block to exist for chainID %d and blockNumber %d", test.chainID, test.blockNumber)
-			require.Equal(t, test.expectedBlock.Number, block.Number, "expected block number %d but got %d", test.expectedBlock.Number, block.Number)
-		}
+		require.NotNil(t, block, "expected block to exist for chainID %d and blockNumber %d", test.chainID, test.blockNumber)
+		require.Equal(t, test.blockNumber, block.Number, "expected block number %d but got %d", test.blockNumber, block.Number)
+	}
+}
+
+func TestGetBlockReturnsErrorIfBlockDoesNotExist(t *testing.T) {
+	chainID := uint64(3)
+	blockNumber := uint64(1)
+
+	path, err := fillDBWithInvalidBlock(chainID, blockNumber)
+	require.NoError(t, err, "failed to create db")
+
+	// db now contains an invalid blocks at blocknumber 1 for chainId 3
+
+	db, err := OpenDB(path)
+	require.NoError(t, err, "failed to open db")
+	defer func() {
+		require.NoError(t, db.Close(), "failed to close db")
+	}()
+
+	block, err := db.GetBlock(chainID, blockNumber)
+	require.Error(t, err, "expected error when retrieving an invalid block")
+	require.Nil(t, block, "expected nil block when retrieving an invalid block")
+}
+
+func TestGetBlockReturnsErrorIfBlockIsInvalid(t *testing.T) {
+	chainID := uint64(3)
+	blockNumbers := []uint64{1, 2, 3}
+
+	path, err := fillDBWithBlocks(chainID, blockNumbers)
+	require.NoError(t, err, "failed to create db")
+
+	// db now contains blocks 1, 2, and 3 for chainId 3
+
+	db, err := OpenDB(path)
+	require.NoError(t, err, "failed to open db")
+	defer func() {
+		require.NoError(t, db.Close(), "failed to close db")
+	}()
+
+	tests := []struct {
+		chainID, blockNumber uint64
+	}{
+		{0, 1},       // non-existing chainID
+		{chainID, 0}, // non-existing block number
+	}
+
+	for _, test := range tests {
+		block, err := db.GetBlock(test.chainID, test.blockNumber)
+		require.Nil(t, block, "expected nil block for chainID %d and blockNumber %d", test.chainID, test.blockNumber)
+		require.NoError(t, err, "expected nil error when retrieving non-existing block")
 	}
 }
 
@@ -70,12 +132,36 @@ func TestGetBlocksReturnsExistingSubRange(t *testing.T) {
 
 	for _, test := range tests {
 		count := 0
-		for range db.GetBlocks(test.chainID, test.startBlockNumber, test.endBlockNumber) {
+		for _, err := range db.GetBlocks(test.chainID, test.startBlockNumber, test.endBlockNumber) {
+			require.NoError(t, err, "expected nil error when retrieving a block")
 			count++
 		}
 		require.Equal(t, test.expectedBlockCount, count, "expected %d blocks for chainID %d from %d to %d, got %d",
 			test.expectedBlockCount, test.chainID, test.startBlockNumber, test.endBlockNumber, count)
 	}
+}
+
+func TestGetBlocksReturnsErrorIfBlockIsInvalid(t *testing.T) {
+	chainID := uint64(3)
+	blockNumber := uint64(1)
+
+	path, err := fillDBWithInvalidBlock(chainID, blockNumber)
+	require.NoError(t, err, "failed to create db")
+
+	// db now contains an invalid blocks at blocknumber 1 for chainId 3
+
+	db, err := OpenDB(path)
+	require.NoError(t, err, "failed to open db")
+
+	count := 0
+	for block, err := range db.GetBlocks(chainID, blockNumber, blockNumber) {
+		require.Error(t, err, "expected error when retrieving an invalid block")
+		require.Nil(t, block, "expected nil block when retrieving an invalid block")
+		count++
+	}
+	require.Equal(t, 1, count, "expected %d blocks for chainID %d from %d to %d, got %d",
+		1, chainID, blockNumber, blockNumber, count)
+
 }
 
 // writeDB is a wrapper around grocksdb.DB that provides methods to write blocks to the database.
@@ -132,6 +218,27 @@ func fillDBWithBlocks(chainID uint64, blockNumbers []uint64) (string, error) {
 		if err := db.putBlock(chainID, &block); err != nil {
 			return "", err
 		}
+	}
+
+	return path, nil
+}
+
+func fillDBWithInvalidBlock(chainID uint64, blockNumber uint64) (string, error) {
+	path, err := os.MkdirTemp("", "blockdb-*")
+	if err != nil {
+		return "", err
+	}
+
+	db, err := createDB(path)
+	if err != nil {
+		return "", err
+	}
+	defer db.close()
+
+	key := computeKey(chainID, blockNumber)
+	value := []byte{0x00} // Invalid block data, just a single byte
+	if err := db.putRaw(key, value); err != nil {
+		return "", err
 	}
 
 	return path, nil
