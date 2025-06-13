@@ -16,22 +16,23 @@ pub enum TransactionError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transaction {
     pub transaction_type: TransactionType,
+    pub chain_id: U256,
     pub nonce: u64,
+    pub gas_price: U256, // LegacyTx, AccessListTx
     pub gas_limit: u64,
     pub to: Option<Address>,
     pub value: U256,
-    pub r: U256,
-    pub s: U256,
+    pub data: Vec<u8>, // Called init for contract creation, data for message call transactions
     pub access_list: Vec<AccessTuple>,
-    pub chain_id: U256,
     /// geth: v
     pub y_parity: U256,
+    pub r: U256,
+    pub s: U256,
+    // The following fields are in EIP order
     /// geth: GasFeeCap
     pub max_fee_per_gas: U256, // DynamicFeeTx, BlobTx, SetCodeTx
     /// geth: GasTipCap
     pub max_priority_fee_per_gas: U256, // DynamicFeeTx, BlobTx, SetCodeTx
-    pub gas_price: U256, // LegacyTx, AccessListTx
-    pub data: Vec<u8>,   // Called init for contract creation, data for message call transactions
     /// geth: BlobHashes
     pub blob_versioned_hashes: Vec<Hash>, // BlobTx
     /// geth: BlobFeeCap
@@ -253,8 +254,7 @@ impl From<DynamicFeeTx> for Transaction {
             transaction_type: TransactionType::DynamicFee,
             chain_id: tx.chain_id,
             nonce: tx.nonce,
-            max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
-            max_fee_per_gas: tx.max_fee_per_gas,
+            gas_price: U256::default(),
             gas_limit: tx.gas_limit,
             to: tx.to,
             value: tx.value,
@@ -263,7 +263,8 @@ impl From<DynamicFeeTx> for Transaction {
             y_parity: tx.y_parity,
             r: tx.r,
             s: tx.s,
-            gas_price: U256::default(),
+            max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
+            max_fee_per_gas: tx.max_fee_per_gas,
             max_fee_per_blob_gas: U256::default(),
             blob_versioned_hashes: Vec::new(),
             authorization_list: Vec::new(),
@@ -355,19 +356,19 @@ impl From<BlobTx> for Transaction {
             transaction_type: TransactionType::Blob,
             chain_id: tx.chain_id,
             nonce: tx.nonce,
-            max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
-            max_fee_per_gas: tx.max_fee_per_gas,
+            gas_price: U256::default(),
             gas_limit: tx.gas_limit,
             to: Some(tx.to),
             value: tx.value,
             data: tx.data,
             access_list: tx.access_list,
-            max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
-            blob_versioned_hashes: tx.blob_versioned_hashes,
             y_parity: tx.y_parity,
             r: tx.r,
             s: tx.s,
-            gas_price: U256::default(),
+            max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
+            max_fee_per_gas: tx.max_fee_per_gas,
+            max_fee_per_blob_gas: tx.max_fee_per_blob_gas,
+            blob_versioned_hashes: tx.blob_versioned_hashes,
             authorization_list: Vec::new(),
         }
     }
@@ -407,19 +408,19 @@ impl From<SetCodeTx> for Transaction {
             transaction_type: TransactionType::SetCode,
             chain_id: tx.chain_id,
             nonce: tx.nonce,
-            max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
-            max_fee_per_gas: tx.max_fee_per_gas,
             gas_limit: tx.gas_limit,
+            gas_price: U256::default(),
             to: Some(tx.to),
             value: tx.value,
             data: tx.data,
             access_list: tx.access_list,
-            max_fee_per_blob_gas: U256::default(),
-            blob_versioned_hashes: Vec::new(),
             y_parity: tx.y_parity,
             r: tx.r,
             s: tx.s,
-            gas_price: U256::default(),
+            max_priority_fee_per_gas: tx.max_priority_fee_per_gas,
+            max_fee_per_gas: tx.max_fee_per_gas,
+            max_fee_per_blob_gas: U256::default(),
+            blob_versioned_hashes: Vec::new(),
             authorization_list: tx.authorization_list,
         }
     }
@@ -434,22 +435,22 @@ mod tests {
         fn default() -> Self {
             Self {
                 transaction_type: TransactionType::Legacy,
-                nonce: Default::default(),
-                gas_limit: Default::default(),
-                to: Default::default(),
-                value: Default::default(),
-                r: Default::default(),
-                s: Default::default(),
-                access_list: Default::default(),
-                chain_id: Default::default(),
-                y_parity: Default::default(),
-                max_fee_per_gas: Default::default(),
-                max_priority_fee_per_gas: Default::default(),
-                gas_price: Default::default(),
-                data: Default::default(),
-                blob_versioned_hashes: Default::default(),
-                max_fee_per_blob_gas: Default::default(),
-                authorization_list: Default::default(),
+                chain_id: U256::default(),
+                nonce: 0,
+                gas_price: U256::default(),
+                gas_limit: 21000,
+                to: None,
+                value: U256::default(),
+                data: Vec::new(),
+                access_list: Vec::new(),
+                y_parity: U256::default(),
+                r: U256::default(),
+                s: U256::default(),
+                max_fee_per_gas: U256::default(),
+                max_priority_fee_per_gas: U256::default(),
+                blob_versioned_hashes: Vec::new(),
+                max_fee_per_blob_gas: U256::default(),
+                authorization_list: Vec::new(),
             }
         }
     }
@@ -464,7 +465,7 @@ mod tests {
     }
 
     #[test]
-    fn can_be_converted_to_and_from_inner_transaction_types() {
+    fn can_be_converted_to_and_from_specialized_transaction_types() {
         // Legacy transaction
         let legacy_tx = LegacyTx::default();
         let transaction: Transaction = legacy_tx.clone().into();
@@ -507,7 +508,7 @@ mod tests {
     }
 
     #[test]
-    fn conversion_to_inner_types_fail_if_error_occurs() {
+    fn conversion_to_specialized_types_fail_if_error_occurs() {
         // Attempt to convert to LegacyTx with mismatched transaction type
         let error = LegacyTx::try_from(Transaction {
             transaction_type: TransactionType::DynamicFee,
