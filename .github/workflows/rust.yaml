@@ -80,6 +80,10 @@ jobs:
       uses: dtolnay/rust-toolchain@1.86
     - name: install protoc
       uses: arduino/setup-protoc@v3
+    - name: install rocksdb
+      uses: awalsh128/cache-apt-pkgs-action@latest
+      with:
+        packages: librocksdb-dev
     - name: load cache
       uses: Swatinem/rust-cache@v2
     - name: cargo build
@@ -96,6 +100,10 @@ jobs:
       uses: dtolnay/rust-toolchain@1.86
     - name: install protoc
       uses: arduino/setup-protoc@v3
+    - name: install rocksdb
+      uses: awalsh128/cache-apt-pkgs-action@latest
+      with:
+        packages: librocksdb-dev
     - name: load cache
       uses: Swatinem/rust-cache@v2
     - name: cargo test
