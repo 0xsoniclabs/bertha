@@ -1,5 +1,5 @@
 [package]
-name = "blockserver"
+name = "blockservice"
 version = "0.1.0"
 edition = "2024"
 publish = false
@@ -9,6 +9,7 @@ bertha-types = { path = "../bertha-types" }
 prost = "0.13.5"
 thiserror = "2.0.12"
 tonic = "0.13.1"
+clap = { version = "4.5.40", features = ["derive"] }
 
 [dev-dependencies]
 rand = "0.9.1"
