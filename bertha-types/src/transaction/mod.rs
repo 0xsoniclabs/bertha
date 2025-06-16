@@ -7,19 +7,8 @@ mod set_code_tx;
 
 use std::fmt::Display;
 
-#[allow(unused_imports)]
-use access_list_tx::AccessListTx;
 pub use access_list_tx::AccessTuple;
-#[allow(unused_imports)]
-use blob_tx::BlobTx;
-#[allow(unused_imports)]
-use dynamic_fee_tx::DynamicFeeTx;
-pub use error::TransactionError;
-#[allow(unused_imports)]
-use legacy_tx::LegacyTx;
 pub use set_code_tx::SetCodeAuthorization;
-#[allow(unused_imports)]
-use set_code_tx::SetCodeTx;
 
 use crate::{Address, Hash, U256};
 
