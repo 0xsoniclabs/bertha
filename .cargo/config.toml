@@ -1,0 +1,5 @@
+[env]
+# Workaround for https://github.com/rust-rocksdb/rust-rocksdb/issues/310
+# This needs to be placed at the workspace root, as Cargo does not read configs from nested crates.
+ROCKSDB_LIB_DIR = "/usr/lib/"
+SNAPPY_LIB_DIR = "/usr/lib/"
