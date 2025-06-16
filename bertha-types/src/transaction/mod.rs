@@ -7,9 +7,9 @@ mod set_code_tx;
 
 use std::fmt::Display;
 
-pub use access_list_tx::AccessTuple;
-pub use set_code_tx::SetCodeAuthorization;
-
+pub use crate::transaction::{
+    access_list_tx::AccessTuple, error::TransactionError, set_code_tx::SetCodeAuthorization,
+};
 use crate::{Address, Hash, U256};
 
 /// An Ethereum-compatible transaction.
