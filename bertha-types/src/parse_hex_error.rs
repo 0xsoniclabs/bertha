@@ -19,7 +19,7 @@ pub enum ParseHexError {
     #[error("hex string is required to have a length of exactly {0} bytes, but has {1} bytes")]
     FixedSizeMismatch(usize, usize),
 
-    #[error("Custom: {0}")]
+    #[error("custom: {0}")]
     Custom(String),
 }
 

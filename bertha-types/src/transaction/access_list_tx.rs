@@ -5,8 +5,7 @@ use crate::{
     transaction::{TransactionError, TransactionType},
 };
 
-/// The Access List Ethereum transaction, defined in the EIP 2930.
-/// Source: https://eips.ethereum.org/EIPS/eip-2930
+/// An Ethereum transaction with an optional access list, as defined in [EIP-2930](https://eips.ethereum.org/EIPS/eip-2930).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AccessListTx {
@@ -37,7 +36,7 @@ pub struct AccessListEntry {
     pub storage_keys: Vec<Hash>,
 }
 
-/// A JSON-RPC representation of an Access List entry.
+/// The JSON-RPC representation of an [AccessListEntry].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JsonRpcAccessListEntry {
@@ -63,11 +62,12 @@ impl From<AccessListEntry> for JsonRpcAccessListEntry {
 }
 
 impl AccessListTx {
-    /// Checks if the transaction can be converted to an AccessList transaction.
+    /// Checks if the transaction can be converted to an [AccessListTx].
     pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
         if tx.transaction_type != TransactionType::AccessList {
             return Err(TransactionError::ConversionError(format!(
-                "Expected AccessList transaction type, found {:?}",
+                "expected {:?}, found {:?}",
+                TransactionType::AccessList,
                 tx.transaction_type
             )));
         }
@@ -152,7 +152,7 @@ mod tests {
                 ..Default::default()
             })
             .is_ok(),
-            "AccessListTx should be constructible from a correct Access List transaction"
+            "AccessListTx should be constructible from a correct access list transaction"
         );
         // Mismatched transaction type
         let err = AccessListTx::is_constructible_from(&Transaction {
