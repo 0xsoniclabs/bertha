@@ -34,7 +34,7 @@ impl BlobTx {
     pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
         if tx.transaction_type != TransactionType::Blob {
             return Err(TransactionError::ConversionError(format!(
-                "Expected {:?}, found {:?}",
+                "expected {:?}, found {:?}",
                 TransactionType::Blob,
                 tx.transaction_type
             )));
