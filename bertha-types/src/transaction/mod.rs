@@ -12,7 +12,7 @@ pub use crate::transaction::{
     access_list_tx::AccessListEntry, error::TransactionError, set_code_tx::SetCodeAuthorization,
 };
 use crate::{
-    Address, AsHex, Hash, HexConvert, U256,
+    Address, AsHex, Hash, HexConvert, RlpNil, RlpString, U256,
     parse_hex_error::ParseHexError,
     transaction::{
         access_list_tx::AccessListTx, blob_tx::BlobTx, dynamic_fee_tx::DynamicFeeTx,
@@ -163,7 +163,7 @@ pub struct JsonRpcTransaction {
     pub gas_price: AsHex<U256>,
     pub gas: AsHex<u64>,
     #[serde(default)]
-    pub to: AsHex<Nil<Address>>,
+    pub to: AsHex<RlpNil<Address>>,
     pub value: AsHex<U256>,
     pub input: AsHex<Vec<u8>>,
     #[serde(default)]
@@ -225,7 +225,7 @@ impl From<Transaction> for JsonRpcTransaction {
             nonce: AsHex(value.nonce),
             gas_price: AsHex(value.gas_price),
             gas: AsHex(value.gas_limit),
-            to: AsHex(Nil(value.to)),
+            to: AsHex(RlpNil(value.to)),
             value: AsHex(value.value),
             input: AsHex(value.data),
             v: AsHex(value.y_parity),
@@ -325,83 +325,6 @@ where
 {
     let value: Option<T> = Option::deserialize(deserializer)?;
     Ok(value.unwrap_or_default())
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct Nil<T>(pub Option<T>);
-
-impl<T: Decodable> Decodable for Nil<T> {
-    fn decode(from: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
-        if from.starts_with(&[0x80]) {
-            *from = &from[1..];
-            Ok(Nil(None))
-        } else {
-            Ok(Nil(Some(T::decode(from)?)))
-        }
-    }
-}
-
-impl<T: Encodable> Encodable for Nil<T> {
-    fn length(&self) -> usize {
-        match &self.0 {
-            Some(value) => value.length(),
-            None => 1, // Empty address is encoded as a single byte
-        }
-    }
-
-    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        match &self.0 {
-            Some(value) => value.encode(out),
-            None => out.put_bytes(alloy_rlp::EMPTY_STRING_CODE, 1),
-        }
-    }
-}
-
-impl<T: HexConvert> HexConvert for Nil<T> {
-    fn to_hex(&self) -> String {
-        match &self.0 {
-            Some(value) => value.to_hex(),
-            None => "0x".to_string(),
-        }
-    }
-
-    fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
-        Ok(Self(Some(T::try_from_hex(value)?)))
-    }
-}
-
-impl<T: HexConvert> AsHex<Nil<T>> {
-    pub fn is_none(&self) -> bool {
-        self.0.0.is_none()
-    }
-}
-
-/// A wrapper type to encode and decode [Vec<u8>] as a RLP string and not as a RLP list.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct RlpString(pub Vec<u8>);
-
-impl Encodable for RlpString {
-    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        self.0.as_slice().encode(out);
-    }
-}
-
-impl Decodable for RlpString {
-    fn decode(rlp: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
-        Ok(Self(alloy_rlp::Header::decode_bytes(rlp, false)?.to_vec()))
-    }
-}
-
-impl HexConvert for RlpString {
-    fn to_hex(&self) -> String {
-        self.0.to_hex()
-    }
-
-    fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
-        Vec::try_from_hex(value).map(Self)
-    }
 }
 
 #[cfg(test)]

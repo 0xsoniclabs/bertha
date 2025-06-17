@@ -5,6 +5,7 @@ mod hex_convert;
 mod log;
 mod parse_hex_error;
 mod receipts;
+mod rlp_utils;
 mod transaction;
 mod u256;
 
@@ -20,3 +21,5 @@ pub use u256::U256;
 pub type Bloom = [u8; 256];
 pub type Hash = [u8; 32];
 pub type Address = [u8; 20];
+
+pub(crate) use rlp_utils::*;

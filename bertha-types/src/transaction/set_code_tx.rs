@@ -2,8 +2,8 @@ use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Address, AsHex, Transaction, U256,
-    transaction::{AccessListEntry, RlpString, TransactionError, TransactionType},
+    Address, AsHex, RlpString, Transaction, U256,
+    transaction::{AccessListEntry, TransactionError, TransactionType},
 };
 
 /// An Ethereum transaction for setting code in EOAs, as defined in [EIP-7702](https://eips.ethereum.org/EIPS/eip-7702).

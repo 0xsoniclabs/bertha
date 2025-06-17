@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Address, AsHex, Hash, Transaction, U256,
-    transaction::{Nil, RlpString, TransactionError, TransactionType},
+    transaction::{RlpNil, RlpString, TransactionError, TransactionType},
 };
 
 /// An Ethereum transaction with an optional access list, as defined in [EIP-2930](https://eips.ethereum.org/EIPS/eip-2930).
@@ -16,7 +16,7 @@ pub(crate) struct AccessListTx {
     #[serde(rename = "gas")]
     pub gas_limit: AsHex<u64>,
     #[serde(skip_serializing_if = "AsHex::is_none")]
-    pub to: AsHex<Nil<Address>>,
+    pub to: AsHex<RlpNil<Address>>,
     pub value: AsHex<U256>,
     #[serde(rename = "input")]
     pub data: AsHex<RlpString>,
@@ -89,7 +89,7 @@ impl TryFrom<Transaction> for AccessListTx {
             nonce: AsHex(tx.nonce),
             gas_price: AsHex(tx.gas_price),
             gas_limit: AsHex(tx.gas_limit),
-            to: AsHex(Nil(tx.to)),
+            to: AsHex(RlpNil(tx.to)),
             value: AsHex(tx.value),
             data: AsHex(RlpString(tx.data)),
             access_list: tx.access_list,

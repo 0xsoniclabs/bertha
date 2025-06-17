@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use crate::{
     Address, AsHex, Transaction, U256,
-    transaction::{AccessListEntry, Nil, RlpString, TransactionError, TransactionType},
+    transaction::{AccessListEntry, RlpNil, RlpString, TransactionError, TransactionType},
 };
 
 // An Ethereum transaction with dynamic gas fees, as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559).
@@ -17,7 +17,7 @@ pub(crate) struct DynamicFeeTx {
     #[serde(rename = "gas")]
     pub gas_limit: AsHex<u64>,
     #[serde(skip_serializing_if = "AsHex::is_none")]
-    pub to: AsHex<Nil<Address>>,
+    pub to: AsHex<RlpNil<Address>>,
     pub value: AsHex<U256>,
     #[serde(rename = "input")]
     pub data: AsHex<RlpString>,
@@ -54,7 +54,7 @@ impl TryFrom<Transaction> for DynamicFeeTx {
             max_priority_fee_per_gas: AsHex(tx.max_priority_fee_per_gas),
             max_fee_per_gas: AsHex(tx.max_fee_per_gas),
             gas_limit: AsHex(tx.gas_limit),
-            to: AsHex(Nil(tx.to)),
+            to: AsHex(RlpNil(tx.to)),
             value: AsHex(tx.value),
             data: AsHex(RlpString(tx.data)),
             access_list: tx.access_list,

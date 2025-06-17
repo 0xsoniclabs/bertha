@@ -2,8 +2,8 @@ use alloy_rlp::{Decodable, RlpEncodable};
 use serde::Serialize;
 
 use crate::{
-    Address, AsHex, Transaction, U256,
-    transaction::{Nil, RlpString, TransactionError, TransactionType},
+    Address, AsHex, RlpString, Transaction, U256,
+    transaction::{RlpNil, TransactionError, TransactionType},
 };
 
 /// A legacy Ethereum transaction, as defined in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
@@ -15,7 +15,7 @@ pub(crate) struct LegacyTx {
     #[serde(rename = "gas")]
     pub gas_limit: AsHex<u64>,
     #[serde(skip_serializing_if = "AsHex::is_none")]
-    pub to: AsHex<Nil<Address>>,
+    pub to: AsHex<RlpNil<Address>>,
     pub value: AsHex<U256>,
     #[serde(rename = "input")]
     pub data: AsHex<RlpString>,
@@ -40,11 +40,8 @@ impl LegacyTx {
     }
 
     // This is essentially [Decodable::decode] but because the header was parsed already in
-
     // [Transaction::decode], it can not be read again. However, the payload length is needed
-
     // so we have to pass it explicitly.
-
     pub fn decode(b: &mut &[u8], payload_length: usize) -> alloy_rlp::Result<Self> {
         let started_len = b.len();
         if started_len < payload_length {
@@ -83,7 +80,7 @@ impl TryFrom<Transaction> for LegacyTx {
             nonce: AsHex(tx.nonce),
             gas_price: AsHex(tx.gas_price),
             gas_limit: AsHex(tx.gas_limit),
-            to: AsHex(Nil(tx.to)),
+            to: AsHex(RlpNil(tx.to)),
             value: AsHex(tx.value),
             data: AsHex(RlpString(tx.data)),
             w: AsHex(tx.y_parity),
