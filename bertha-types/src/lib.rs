@@ -14,7 +14,7 @@ pub use block_header::BlockHeader;
 pub use hex_convert::HexConvert;
 pub use log::Log;
 pub use receipts::{BlockReceipt, ReceiptVerificationError, TransactionReceipt};
-pub use transaction::Transaction;
+pub use transaction::{AccessListEntry, SetCodeAuthorization, Transaction, TransactionType};
 pub use u256::U256;
 
 pub type Bloom = [u8; 256];

@@ -29,7 +29,7 @@ pub(crate) struct SetCodeTx {
 }
 
 /// An authorization that specifies what code the signer wants to be executed in the context of
-/// their EOA, used in [SetCodeTx].
+/// their EOA, used in EIP-7702 set code transactions.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(
     from = "JsonRpcSetCodeAuthorization",
