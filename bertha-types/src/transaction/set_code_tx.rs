@@ -39,7 +39,7 @@ pub struct SetCodeAuthorization {
     pub chain_id: U256,
     pub address: Address,
     pub nonce: u64,
-    pub y_parity: u64,
+    pub y_parity: u8,
     pub r: U256,
     pub s: U256,
 }
@@ -70,7 +70,7 @@ struct JsonRpcSetCodeAuthorization {
     pub chain_id: AsHex<U256>,
     pub address: AsHex<Address>,
     pub nonce: AsHex<u64>,
-    pub y_parity: AsHex<u64>,
+    pub y_parity: AsHex<u8>,
     pub r: AsHex<U256>,
     pub s: AsHex<U256>,
 }

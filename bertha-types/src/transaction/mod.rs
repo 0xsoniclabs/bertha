@@ -586,7 +586,7 @@ mod tests {
                 chain_id: U256::default(),
                 address: Address::default(),
                 nonce: 0,
-                y_parity: u64::default(),
+                y_parity: u8::default(),
                 r: U256::default(),
                 s: U256::default(),
             }],
