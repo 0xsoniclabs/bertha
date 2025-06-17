@@ -77,7 +77,7 @@ impl From<bertha_types::TransactionReceipt> for TransactionReceipt {
     fn from(value: bertha_types::TransactionReceipt) -> Self {
         let logs = value.logs.into_iter().map(From::from).collect();
         Self {
-            transaction_type: value.type_,
+            transaction_type: (value.transaction_type as u8).into(),
             cumulative_gas_used: value.cumulative_gas_used,
             logs,
             status: value.status,
@@ -237,7 +237,10 @@ impl TryFrom<TransactionReceipt> for bertha_types::TransactionReceipt {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
-            type_: value.transaction_type,
+            transaction_type: u8::try_from(value.transaction_type)
+                .ok()
+                .and_then(|v| bertha_types::TransactionType::try_from(v).ok())
+                .ok_or(Error::TypeConversion)?,
             status: value.status,
             cumulative_gas_used: value.cumulative_gas_used,
             logs,
@@ -393,7 +396,7 @@ mod tests {
         transaction_type: TransactionType,
     ) -> bertha_types::TransactionReceipt {
         bertha_types::TransactionReceipt {
-            type_: (transaction_type as u8).into(),
+            transaction_type: transaction_type.try_into().unwrap(),
             status: rng.u64(),
             cumulative_gas_used: rng.u64(),
             logs: vec![make_log(rng), make_log(rng)],
@@ -721,6 +724,19 @@ mod tests {
         let proto_receipt: TransactionReceipt = receipt.clone().into();
         let converted_receipt: bertha_types::TransactionReceipt = proto_receipt.try_into().unwrap();
         assert_eq!(converted_receipt, receipt);
+    }
+
+    #[test]
+    fn receipt_conversion_fails_for_invalid_transaction_types() {
+        let receipt: TransactionReceipt =
+            make_receipt(&mut TestRng::new(123), TransactionType::Legacy).into();
+
+        let invalid_receipt = TransactionReceipt {
+            transaction_type: 256,
+            ..receipt.clone()
+        };
+        let err = bertha_types::TransactionReceipt::try_from(invalid_receipt).unwrap_err();
+        assert_eq!(err, Error::TypeConversion);
     }
 
     #[test]
