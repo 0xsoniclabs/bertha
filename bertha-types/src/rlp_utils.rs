@@ -128,19 +128,19 @@ mod tests {
     }
 
     #[test]
-    fn rlpnil_to_hex_some_normal_hex_encoding_for_value() {
+    fn rlpnil_to_hex_returns_normal_hex_encoding_for_value() {
         let nil = RlpNil(Some(20u8));
         assert_eq!(nil.to_hex(), "0x14");
     }
 
     #[test]
-    fn rlpnil_try_from_hex_parses_inner_value_value() {
+    fn rlpnil_try_from_hex_parses_inner_value() {
         let parsed = RlpNil::<u8>::try_from_hex("0x14").unwrap();
         assert_eq!(parsed.0, Some(20));
     }
 
     #[test]
-    fn rlpstring_encodes_vec_u8_like_slice_u8() {
+    fn rlpstring_encodes_vec_u8_as_slice_u8() {
         let s = RlpString(vec![0x01, 0x02, 0x03]);
         let mut out = Vec::new();
         s.encode(&mut out);
@@ -150,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn rlpstring_decodes_vec_u8_like_slice_u8() {
+    fn rlpstring_decodes_vec_u8_as_slice_u8() {
         let slice = [0x01, 0x02, 0x03].as_slice();
         let mut encoded = Vec::new();
         slice.encode(&mut encoded);

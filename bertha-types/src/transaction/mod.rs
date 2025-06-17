@@ -89,6 +89,10 @@ impl Encodable for Transaction {
             RlpString(buf).encode(out);
         }
 
+        // in case the conversion to one of the inner types fails (the transaction is invalid), we
+        // encode an empty string to make sure decoding fails when this data is ingested
+        // again
+        // this is essentially a trash in -> trash out policy
         match self.transaction_type {
             TransactionType::Legacy => LegacyTx::try_from(self.clone())
                 .map(|tx| tx.encode(out))
