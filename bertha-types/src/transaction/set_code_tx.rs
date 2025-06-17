@@ -52,7 +52,7 @@ impl SetCodeTx {
     }
 }
 
-/// A JSON-RPC representation of a SetCode transaction authorization.\
+/// A JSON-RPC representation of a SetCode transaction authorization.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JsonRpcSetCodeAuthorization {
