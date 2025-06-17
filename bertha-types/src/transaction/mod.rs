@@ -5,8 +5,6 @@ mod error;
 mod legacy_tx;
 mod set_code_tx;
 
-use std::fmt::Display;
-
 use serde::{Deserialize, Serialize};
 
 pub use crate::transaction::{
@@ -64,18 +62,6 @@ pub enum TransactionType {
     DynamicFee = 2,
     Blob = 3,
     SetCode = 4,
-}
-
-impl Display for TransactionType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TransactionType::Legacy => write!(f, "LegacyTx"),
-            TransactionType::DynamicFee => write!(f, "DynamicFeeTx"),
-            TransactionType::AccessList => write!(f, "AccessListTx"),
-            TransactionType::Blob => write!(f, "BlobTx"),
-            TransactionType::SetCode => write!(f, "SetCodeTx"),
-        }
-    }
 }
 
 impl TryFrom<u8> for TransactionType {
@@ -290,15 +276,6 @@ mod tests {
 
     use super::*;
     use crate::HexConvert;
-
-    #[test]
-    fn transaction_type_display_prints_correct_name() {
-        assert_eq!(TransactionType::Legacy.to_string(), "LegacyTx");
-        assert_eq!(TransactionType::AccessList.to_string(), "AccessListTx");
-        assert_eq!(TransactionType::DynamicFee.to_string(), "DynamicFeeTx");
-        assert_eq!(TransactionType::Blob.to_string(), "BlobTx");
-        assert_eq!(TransactionType::SetCode.to_string(), "SetCodeTx");
-    }
 
     #[test]
     fn is_valid_correctly_checks_transaction() {
