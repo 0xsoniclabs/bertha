@@ -5,8 +5,7 @@ use crate::{
     transaction::{AccessListEntry, TransactionError, TransactionType},
 };
 
-// The Dynamic Fee Ethereum transaction, defined in the EIP 1559.
-// Source: https://eips.ethereum.org/EIPS/eip-1559
+// An Ethereum transaction with dynamic gas fees, as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DynamicFeeTx {
@@ -30,7 +29,7 @@ pub(crate) struct DynamicFeeTx {
 }
 
 impl DynamicFeeTx {
-    /// Checks if the transaction can be converted to a DynamicFee transaction.
+    /// Checks if the transaction can be converted to a [DynamicFeeTx] transaction.
     pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
         if tx.transaction_type != TransactionType::DynamicFee {
             return Err(TransactionError::ConversionError(format!(

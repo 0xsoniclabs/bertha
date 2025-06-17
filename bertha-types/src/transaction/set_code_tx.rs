@@ -5,8 +5,7 @@ use crate::{
     transaction::{AccessListEntry, TransactionError, TransactionType},
 };
 
-/// The SetCode Ethereum transaction, defined in the EIP 7702.
-/// Source: https://eips.ethereum.org/EIPS/eip-7702
+/// An Ethereum transaction for setting code in EOAs, as defined in [EIP-7702](https://eips.ethereum.org/EIPS/eip-7702).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SetCodeTx {
@@ -46,7 +45,7 @@ pub struct SetCodeAuthorization {
 }
 
 impl SetCodeTx {
-    /// Checks if the transaction can be converted to a SetCode transaction.
+    /// Checks if the transaction can be converted to a [SetCodeTx].
     pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
         if tx.transaction_type != TransactionType::SetCode {
             return Err(TransactionError::ConversionError(format!(
@@ -63,7 +62,7 @@ impl SetCodeTx {
     }
 }
 
-/// A JSON-RPC representation of a SetCode transaction authorization.
+/// The JSON-RPC representation of a [SetCodeAuthorization].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JsonRpcSetCodeAuthorization {
@@ -192,7 +191,7 @@ mod tests {
                 ..Default::default()
             })
             .is_ok(),
-            "SetCodeTx should be constructible from a correct SetCode transaction"
+            "SetCodeTx should be constructible from a correct SetCodeTx"
         );
         // Mismatched transaction type
         let err = SetCodeTx::is_constructible_from(&Transaction {

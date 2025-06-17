@@ -5,8 +5,7 @@ use crate::{
     transaction::{TransactionError, TransactionType},
 };
 
-/// The Legacy Ethereum transaction, defined in the EIP 2718.
-/// Source: https://eips.ethereum.org/EIPS/eip-2718
+/// A legacy Ethereum transaction, as defined in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LegacyTx {
@@ -27,7 +26,7 @@ pub(crate) struct LegacyTx {
 }
 
 impl LegacyTx {
-    /// Checks if the transaction can be converted to a Legacy transaction.
+    /// Checks if the transaction can be converted to a [LegacyTx].
     pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
         if tx.transaction_type != TransactionType::Legacy {
             return Err(TransactionError::ConversionError(format!(
@@ -115,7 +114,7 @@ mod tests {
                 ..Default::default()
             })
             .is_ok(),
-            "LegacyTx should be constructible from a correct Legacy transaction"
+            "LegacyTx should be constructible from a correct legacy transaction"
         );
         // Mismatched transaction type
         let err = LegacyTx::is_constructible_from(&Transaction {

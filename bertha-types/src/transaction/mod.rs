@@ -186,9 +186,8 @@ impl From<Transaction> for JsonRpcTransaction {
 }
 
 impl Transaction {
-    /// Checks if the transaction is valid by checking if it can be converted to a
+    /// Checks if the transaction can be converted to a
     /// specialized transaction type.
-    /// This is a lightweight check that does not move the self value.
     pub fn is_valid(&self) -> Result<(), TransactionError> {
         match self.transaction_type {
             TransactionType::Legacy => LegacyTx::is_constructible_from(self),
@@ -220,7 +219,7 @@ impl Serialize for JsonRpcTransaction {
         let tx = Transaction::try_from(self.clone())
             .map_err(|err: TransactionError| serde::ser::Error::custom(err.to_string()))?;
         // NOTE: A conversion error can never happen here as `Transaction::try_from` checks for the
-        // validity
+        // validity and it is therefore safe to unwrap.
         match self.transaction_type.0 {
             TransactionType::Legacy => LegacyTx::try_from(tx)
                 .map(|tx| TransactionWithType {
@@ -711,24 +710,8 @@ mod tests {
     }
 
     fn make_json_transaction_with_invalid_type() -> serde_json::Value {
-        let invalid_tx = r#"{
-            "type": "0x5",
-            "chainId": "0x0",
-            "nonce": "0x0",
-            "gasPrice": "0x0",
-            "gas": "0x0",
-            "value": "0x0",
-            "input": "0x",
-            "accessList": [],
-            "maxFeePerGas": "0x0",
-            "maxPriorityFeePerGas": "0x0",
-            "blobVersionedHashes": [],
-            "maxFeePerBlobGas": "0x0",
-            "authorizationList": [],
-            "v": "0x0",
-            "r": "0x0",
-            "s": "0x0"
-        }"#;
+        let mut invalid_tx = make_json_transaction(TransactionType::Legacy, true);
+        invalid_tx["type"] = "0x5";
         serde_json::from_str(invalid_tx).unwrap()
     }
 

@@ -5,8 +5,7 @@ use crate::{
     transaction::{AccessListEntry, TransactionError, TransactionType},
 };
 
-/// The Blob Ethereum transaction, defined in the EIP 4844.
-/// Source: https://eips.ethereum.org/EIPS/eip-4844
+/// A "blob-carrying" Ethereum transaction, as defined in [EIP-4844](https://eips.ethereum.org/EIPS/eip-4844).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BlobTx {
@@ -31,7 +30,7 @@ pub(crate) struct BlobTx {
 }
 
 impl BlobTx {
-    /// Checks if the transaction can be converted to a Blob transaction.
+    /// Checks if the transaction can be converted to a [BlobTx].
     pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
         if tx.transaction_type != TransactionType::Blob {
             return Err(TransactionError::ConversionError(format!(
@@ -140,7 +139,7 @@ mod tests {
                 ..Default::default()
             })
             .is_ok(),
-            "BlobTx should be constructible from a correct Blob transaction"
+            "BlobTx should be constructible from a correct blob transaction"
         );
         // Mismatched transaction type
         let err = BlobTx::is_constructible_from(&Transaction {
