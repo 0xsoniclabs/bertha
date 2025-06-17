@@ -27,7 +27,7 @@ pub(crate) struct LegacyTx {
 }
 
 impl LegacyTx {
-    /// A function to check if the transaction can be converted to a Legacy transaction.
+    /// Checks if the transaction can be converted to a Legacy transaction.
     pub fn is_constructible_from(tx: &Transaction) -> bool {
         tx.transaction_type == TransactionType::Legacy
     }

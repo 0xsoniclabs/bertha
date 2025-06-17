@@ -20,7 +20,7 @@ pub(crate) struct AccessListTx {
     pub value: AsHex<U256>,
     #[serde(rename = "input")]
     pub data: AsHex<Vec<u8>>,
-    pub access_list: Vec<AccessTuple>,
+    pub access_list: Vec<AccessListEntry>,
 
     #[serde(rename = "v")]
     pub y_parity: AsHex<U256>,
@@ -31,31 +31,31 @@ pub(crate) struct AccessListTx {
 /// The Access List internal values, used in AccessListTx.
 /// It contains the address and a list of storage keys that the transaction plans to access.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(from = "JsonRpcAccessTuple", into = "JsonRpcAccessTuple")]
-pub struct AccessTuple {
+#[serde(from = "JsonRpcAccessListEntry", into = "JsonRpcAccessListEntry")]
+pub struct AccessListEntry {
     pub address: Address,
     pub storage_keys: Vec<Hash>,
 }
 
-/// A JSON-RPC representation of an Access List transaction.
+/// A JSON-RPC representation of an Access List entry.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct JsonRpcAccessTuple {
+struct JsonRpcAccessListEntry {
     pub address: AsHex<Address>,
     pub storage_keys: Vec<AsHex<Hash>>,
 }
 
-impl From<JsonRpcAccessTuple> for AccessTuple {
-    fn from(value: JsonRpcAccessTuple) -> Self {
-        AccessTuple {
+impl From<JsonRpcAccessListEntry> for AccessListEntry {
+    fn from(value: JsonRpcAccessListEntry) -> Self {
+        AccessListEntry {
             address: value.address.0,
             storage_keys: value.storage_keys.into_iter().map(|h| h.0).collect(),
         }
     }
 }
-impl From<AccessTuple> for JsonRpcAccessTuple {
-    fn from(value: AccessTuple) -> Self {
-        JsonRpcAccessTuple {
+impl From<AccessListEntry> for JsonRpcAccessListEntry {
+    fn from(value: AccessListEntry) -> Self {
+        JsonRpcAccessListEntry {
             address: AsHex(value.address),
             storage_keys: value.storage_keys.into_iter().map(AsHex).collect(),
         }
@@ -63,7 +63,7 @@ impl From<AccessTuple> for JsonRpcAccessTuple {
 }
 
 impl AccessListTx {
-    /// A function to check if the transaction can be converted to an AccessList transaction.
+    /// Checks if the transaction can be converted to an AccessList transaction.
     pub fn is_constructible_from(tx: &Transaction) -> bool {
         tx.transaction_type == TransactionType::AccessList
     }

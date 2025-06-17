@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use crate::{
     Address, AsHex, Transaction, U256,
-    transaction::{AccessTuple, TransactionError, TransactionType},
+    transaction::{AccessListEntry, TransactionError, TransactionType},
 };
 
 // The Dynamic Fee Ethereum transaction, defined in the EIP 1559.
@@ -21,7 +21,7 @@ pub(crate) struct DynamicFeeTx {
     pub value: AsHex<U256>,
     #[serde(rename = "input")]
     pub data: AsHex<Vec<u8>>,
-    pub access_list: Vec<AccessTuple>,
+    pub access_list: Vec<AccessListEntry>,
 
     #[serde(rename = "v")]
     pub y_parity: AsHex<U256>,
@@ -30,7 +30,7 @@ pub(crate) struct DynamicFeeTx {
 }
 
 impl DynamicFeeTx {
-    /// A function to check if the transaction can be converted to a DynamicFee transaction.
+    /// Checks if the transaction can be converted to a DynamicFee transaction.
     pub fn is_constructible_from(tx: &Transaction) -> bool {
         tx.transaction_type == TransactionType::DynamicFee
     }

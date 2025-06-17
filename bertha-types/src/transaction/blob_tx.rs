@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use crate::{
     Address, AsHex, Hash, Transaction, U256,
-    transaction::{AccessTuple, TransactionError, TransactionType},
+    transaction::{AccessListEntry, TransactionError, TransactionType},
 };
 
 /// The Blob Ethereum transaction, defined in the EIP 4844.
@@ -20,7 +20,7 @@ pub(crate) struct BlobTx {
     pub value: AsHex<U256>,
     #[serde(rename = "input")]
     pub data: AsHex<Vec<u8>>,
-    pub access_list: Vec<AccessTuple>,
+    pub access_list: Vec<AccessListEntry>,
     pub max_fee_per_blob_gas: AsHex<U256>,
     pub blob_versioned_hashes: Vec<AsHex<Hash>>,
     // sidecar is not included in the RLP encoding
@@ -31,7 +31,7 @@ pub(crate) struct BlobTx {
 }
 
 impl BlobTx {
-    /// A function to check if the transaction can be converted to a Blob transaction.
+    /// Checks if the transaction can be converted to a Blob transaction.
     pub fn is_constructible_from(tx: &Transaction) -> bool {
         tx.transaction_type == TransactionType::Blob && tx.to.is_some()
     }

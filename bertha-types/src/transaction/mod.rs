@@ -10,7 +10,7 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 
 pub use crate::transaction::{
-    access_list_tx::AccessTuple, error::TransactionError, set_code_tx::SetCodeAuthorization,
+    access_list_tx::AccessListEntry, error::TransactionError, set_code_tx::SetCodeAuthorization,
 };
 use crate::{
     Address, AsHex, Hash, HexConvert, U256,
@@ -36,7 +36,7 @@ pub struct Transaction {
     pub to: Option<Address>,
     pub value: U256,
     pub data: Vec<u8>, // Called init for contract creation, data for message call transactions
-    pub access_list: Vec<AccessTuple>,
+    pub access_list: Vec<AccessListEntry>,
     // The following fields are in EIP order
     /// geth: GasFeeCap
     pub max_fee_per_gas: U256, // DynamicFeeTx, BlobTx, SetCodeTx
@@ -124,7 +124,7 @@ pub struct JsonRpcTransaction {
     pub value: AsHex<U256>,
     pub input: AsHex<Vec<u8>>,
     #[serde(default)]
-    pub access_list: Vec<AccessTuple>,
+    pub access_list: Vec<AccessListEntry>,
     #[serde(default)]
     pub max_priority_fee_per_gas: AsHex<U256>,
     #[serde(default)]
@@ -195,7 +195,7 @@ impl From<Transaction> for JsonRpcTransaction {
 }
 
 impl Transaction {
-    /// A function to check if the transaction is valid by checking if it can be converted to a
+    /// Checks if the transaction is valid by checking if it can be converted to a
     /// specialized transaction type.
     /// This is a lightweight check that does not move the self value.
     pub fn is_valid(&self) -> bool {
@@ -226,53 +226,48 @@ impl Serialize for JsonRpcTransaction {
             transaction: T,
         }
 
-        //NOTE: A conversion error can never happen with LegacyTx, AccessListTx, and DynamicFeeTx
-        //as the transaction type is guaranteed to be correct from the match statement
+        // NOTE: A conversion error can never happen with LegacyTx, AccessListTx, and DynamicFeeTx
+        // as the transaction type is guaranteed to be correct from the match statement
         match self.transaction_type.0 {
-            TransactionType::Legacy => LegacyTx::try_from(Into::<Transaction>::into(self.clone()))
+            TransactionType::Legacy => LegacyTx::try_from(Transaction::from(self.clone()))
                 .map(|tx| TransactionWithType {
                     transaction_type: AsHex(TransactionType::Legacy),
                     transaction: tx,
                 })
                 .map_err(|err| serde::ser::Error::custom(err.to_string()))?
                 .serialize(serializer),
-            TransactionType::AccessList => {
-                AccessListTx::try_from(Into::<Transaction>::into(self.clone()))
-                    .map(|tx| TransactionWithType {
-                        transaction_type: AsHex(TransactionType::AccessList),
-                        transaction: tx,
-                    })
-                    .map_err(|err| serde::ser::Error::custom(err.to_string()))?
-                    .serialize(serializer)
-            }
-            TransactionType::DynamicFee => {
-                DynamicFeeTx::try_from(Into::<Transaction>::into(self.clone()))
-                    .map(|tx| TransactionWithType {
-                        transaction_type: AsHex(TransactionType::DynamicFee),
-                        transaction: tx,
-                    })
-                    .map_err(|err| serde::ser::Error::custom(err.to_string()))?
-                    .serialize(serializer)
-            }
-            TransactionType::Blob => BlobTx::try_from(Into::<Transaction>::into(self.clone()))
+            TransactionType::AccessList => AccessListTx::try_from(Transaction::from(self.clone()))
+                .map(|tx| TransactionWithType {
+                    transaction_type: AsHex(TransactionType::AccessList),
+                    transaction: tx,
+                })
+                .map_err(|err| serde::ser::Error::custom(err.to_string()))?
+                .serialize(serializer),
+            TransactionType::DynamicFee => DynamicFeeTx::try_from(Transaction::from(self.clone()))
+                .map(|tx| TransactionWithType {
+                    transaction_type: AsHex(TransactionType::DynamicFee),
+                    transaction: tx,
+                })
+                .map_err(|err| serde::ser::Error::custom(err.to_string()))?
+                .serialize(serializer),
+            TransactionType::Blob => BlobTx::try_from(Transaction::from(self.clone()))
                 .map(|tx| TransactionWithType {
                     transaction_type: AsHex(TransactionType::Blob),
                     transaction: tx,
                 })
                 .map_err(|err| serde::ser::Error::custom(err.to_string()))?
                 .serialize(serializer),
-            TransactionType::SetCode => {
-                SetCodeTx::try_from(Into::<Transaction>::into(self.clone()))
-                    .map(|tx| TransactionWithType {
-                        transaction_type: AsHex(TransactionType::SetCode),
-                        transaction: tx,
-                    })
-                    .map_err(|err| serde::ser::Error::custom(err.to_string()))?
-                    .serialize(serializer)
-            }
+            TransactionType::SetCode => SetCodeTx::try_from(Transaction::from(self.clone()))
+                .map(|tx| TransactionWithType {
+                    transaction_type: AsHex(TransactionType::SetCode),
+                    transaction: tx,
+                })
+                .map_err(|err| serde::ser::Error::custom(err.to_string()))?
+                .serialize(serializer),
         }
     }
 }
+
 /// A wrapper type for deserializing a transaction and ensuring it is valid.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct TransactionDeserializer(Transaction);
@@ -316,40 +311,6 @@ mod tests {
 
     use super::*;
 
-    impl Default for Transaction {
-        fn default() -> Self {
-            Self {
-                transaction_type: TransactionType::Legacy,
-                chain_id: U256::default(),
-                nonce: 0,
-                gas_price: U256::default(),
-                gas_limit: u64::default(),
-                to: Some(Address::default()),
-                value: U256::default(),
-                data: Vec::default(),
-                access_list: vec![AccessTuple {
-                    address: Address::default(),
-                    storage_keys: vec![Hash::default()],
-                }],
-                max_fee_per_gas: U256::default(),
-                max_priority_fee_per_gas: U256::default(),
-                blob_versioned_hashes: vec![Hash::default()],
-                max_fee_per_blob_gas: U256::default(),
-                authorization_list: vec![SetCodeAuthorization {
-                    chain_id: U256::default(),
-                    address: Address::default(),
-                    nonce: 0,
-                    y_parity: u64::default(),
-                    r: U256::default(),
-                    s: U256::default(),
-                }],
-                y_parity: U256::default(),
-                r: U256::default(),
-                s: U256::default(),
-            }
-        }
-    }
-
     #[test]
     fn transaction_type_display_prints_correct_name() {
         assert_eq!(TransactionType::Legacy.to_string(), "LegacyTx");
@@ -361,10 +322,8 @@ mod tests {
 
     #[test]
     fn is_valid_correctly_checks_transaction() {
-        let mut transaction = Transaction::default();
+        let mut transaction = make_transaction(TransactionType::Legacy, true);
 
-        // Valid Legacy transactions
-        // By default, the transaction is a Legacy transaction with a to field
         assert!(
             transaction.is_valid(),
             "Legacy transaction with to field should be valid"
@@ -375,7 +334,6 @@ mod tests {
             "Legacy transaction without to field should be valid"
         );
 
-        // Valid AccessList transactions
         transaction.transaction_type = TransactionType::AccessList;
         transaction.to = Some(Address::default());
         assert!(
@@ -388,7 +346,6 @@ mod tests {
             "AccessList transaction without to field should be valid"
         );
 
-        // Valid DynamicFee transactions
         transaction.transaction_type = TransactionType::DynamicFee;
         transaction.to = Some(Address::default());
         assert!(
@@ -401,12 +358,10 @@ mod tests {
             "DynamicFee transaction without to field should be valid"
         );
 
-        // Valid Blob transactions
         transaction.transaction_type = TransactionType::Blob;
         transaction.to = Some(Address::default());
         assert!(transaction.is_valid(), "Blob transaction should be valid");
 
-        // Valid SetCode transactions
         transaction.transaction_type = TransactionType::SetCode;
         assert!(
             transaction.is_valid(),
@@ -416,23 +371,13 @@ mod tests {
 
     #[test]
     fn is_valid_returns_false_for_invalid_transactions() {
-        // Invalid Blob transaction without to field
-        let invalid_blob_tx = Transaction {
-            transaction_type: TransactionType::Blob,
-            to: None,
-            ..Default::default()
-        };
+        let invalid_blob_tx = make_transaction(TransactionType::Blob, false);
         assert!(
             !invalid_blob_tx.is_valid(),
             "Blob transaction without to field should be invalid"
         );
 
-        // Invalid SetCode transaction without to field
-        let invalid_set_code_tx = Transaction {
-            transaction_type: TransactionType::SetCode,
-            to: None,
-            ..Default::default()
-        };
+        let invalid_set_code_tx = make_transaction(TransactionType::SetCode, false);
         assert!(
             !invalid_set_code_tx.is_valid(),
             "SetCode transaction without to field should be invalid"
@@ -441,76 +386,66 @@ mod tests {
 
     #[test]
     fn can_be_serialized_to_json_rpc_format() {
-        let mut transaction = Transaction::default();
+        let mut transaction = make_transaction(TransactionType::Legacy, true);
 
-        // Legacy transaction with to field
-        let json_str = serde_json::to_string(&transaction.clone())
-            .expect("Serialization to JSON-RPC format should not fail");
-        assert_eq!(json_str, make_legacy_tx(true));
+        let json_str = serde_json::to_string(&transaction)
+            .expect("Serialization of Legacy transaction with to field should not fail");
+        assert_eq!(json_str, make_json_legacy_tx(true));
 
-        // Legacy transaction without to field
         transaction.to = None;
         let json_str_without_to = serde_json::to_string(&transaction)
-            .expect("Serialization to JSON-RPC format should not fail");
-        assert_eq!(json_str_without_to, make_legacy_tx(false));
+            .expect("Serialization of Legacy transaction without to field should not fail");
+        assert_eq!(json_str_without_to, make_json_legacy_tx(false));
 
-        // AccessList transaction with to field
         transaction.transaction_type = TransactionType::AccessList;
         transaction.to = Some(Address::default());
         let json_str_access_list = serde_json::to_string(&transaction)
-            .expect("Serialization to JSON-RPC format should not fail");
-        assert_eq!(json_str_access_list, make_access_list_tx(true));
+            .expect("Serialization of AccessList transaction with to field should not fail");
+        assert_eq!(json_str_access_list, make_json_access_list_tx(true));
 
-        // AccessList transaction without to field
         transaction.to = None;
         let json_str_access_list_without_to = serde_json::to_string(&transaction)
-            .expect("Serialization to JSON-RPC format should not fail");
-        assert_eq!(json_str_access_list_without_to, make_access_list_tx(false));
+            .expect("Serialization of AccessList transaction without to field should not fail");
+        assert_eq!(
+            json_str_access_list_without_to,
+            make_json_access_list_tx(false)
+        );
 
-        // DynamicFee transaction with to field
         transaction.transaction_type = TransactionType::DynamicFee;
         transaction.to = Some(Address::default());
         let json_str_dynamic_fee = serde_json::to_string(&transaction)
-            .expect("Serialization to JSON-RPC format should not fail");
-        assert_eq!(json_str_dynamic_fee, make_dynamic_fee_tx(true));
+            .expect("Serialization of DynamicFee transaction with to field should not fail");
+        assert_eq!(json_str_dynamic_fee, make_json_dynamic_fee_tx(true));
 
-        // DynamicFee transaction without to field
         transaction.to = None;
         let json_str_dynamic_fee_without_to = serde_json::to_string(&transaction)
-            .expect("Serialization to JSON-RPC format should not fail");
-        assert_eq!(json_str_dynamic_fee_without_to, make_dynamic_fee_tx(false));
+            .expect("Serialization of DynamicFee transaction without to field should not fail");
+        assert_eq!(
+            json_str_dynamic_fee_without_to,
+            make_json_dynamic_fee_tx(false)
+        );
 
-        // Blob transaction
         transaction.transaction_type = TransactionType::Blob;
         transaction.to = Some(Address::default());
         let json_str_blob = serde_json::to_string(&transaction)
-            .expect("Serialization to JSON-RPC format should not fail");
-        assert_eq!(json_str_blob, make_blob_tx());
+            .expect("Serialization of valid Blob transaction should not fail");
+        assert_eq!(json_str_blob, make_json_blob_tx());
 
-        // SetCode transaction
         transaction.transaction_type = TransactionType::SetCode;
         let json_str_set_code = serde_json::to_string(&transaction)
-            .expect("Serialization to JSON-RPC format should not fail");
-        assert_eq!(json_str_set_code, make_set_code_tx());
+            .expect("Serialization of valid SetCode transaction should not fail");
+        assert_eq!(json_str_set_code, make_json_set_code_tx());
     }
 
     #[test]
     fn serialization_fails_for_invalid_transactions() {
-        // Serializing Blob transaction without to field
-        serde_json::to_string(&Transaction {
-            transaction_type: TransactionType::Blob,
-            to: None,
-            ..Default::default()
-        })
-        .expect_err("Serialization of invalid Blob transaction should fail");
+        let transaction = make_transaction(TransactionType::Blob, false);
+        serde_json::to_string(&transaction)
+            .expect_err("Serialization of Blob transaction without to field should fail");
 
-        // Serializing SetCode transaction without to field
-        serde_json::to_string(&Transaction {
-            transaction_type: TransactionType::SetCode,
-            to: None,
-            ..Default::default()
-        })
-        .expect_err("Serialization of invalid SetCode transaction should fail");
+        let transaction = make_transaction(TransactionType::SetCode, false);
+        serde_json::to_string(&transaction)
+            .expect_err("Serialization of SetCode transaction without to field should fail");
     }
 
     #[test]
@@ -523,7 +458,7 @@ mod tests {
 
         let json_str = r#"{"value": null}"#;
         let deserialized: TestDeserializeNull = serde_json::from_str(json_str)
-            .expect("Deserialization should have handled null values correctly");
+            .expect("Deserialization should handle null values correctly");
         assert_eq!(
             deserialized.value,
             u32::default(),
@@ -539,190 +474,227 @@ mod tests {
 
     #[test]
     fn can_be_deserialized_from_json() {
-        // Legacy Transaction with to field
-        let mut expected = LegacyTx {
-            to: Some(AsHex(Address::default())),
-            ..Default::default()
-        };
-        let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
-            &make_transaction(TransactionType::Legacy, true),
-        )
-        .expect("Deserialization should not fail")
-        .get();
-        let legacy_tx = LegacyTx::try_from(transaction.clone())
-            .expect("Conversion to LegacyTx should not fail");
-        assert_eq!(legacy_tx, expected);
+        // Legacy Tx
+        {
+            let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
+                &make_json_transaction(TransactionType::Legacy, true),
+            )
+            .expect("Deserialization should not fail")
+            .get();
+            let legacy_tx = LegacyTx::try_from(transaction)
+                .expect("Conversion to LegacyTx with to field should not fail");
+            assert_eq!(legacy_tx, make_legacy_tx(true));
 
-        // Legacy Transaction without to field
-        expected.to = None; // Update expected to match the deserialized without to field
-        let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
-            &make_transaction(TransactionType::Legacy, false),
-        )
-        .expect("Deserialization should not fail")
-        .get();
-        let legacy_tx = LegacyTx::try_from(transaction.clone())
-            .expect("Conversion to LegacyTx should not fail");
-        assert_eq!(legacy_tx, expected);
+            let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
+                &make_json_transaction(TransactionType::Legacy, false),
+            )
+            .expect("Deserialization should not fail")
+            .get();
+            let legacy_tx = LegacyTx::try_from(transaction.clone())
+                .expect("Conversion to LegacyTx without to field should not fail");
+            assert_eq!(legacy_tx, make_legacy_tx(false));
+        }
 
-        // AccessList Transaction with to field
-        let mut expected = AccessListTx {
-            to: Some(AsHex(Address::default())),
-            access_list: vec![AccessTuple {
-                address: Address::default(),
-                storage_keys: vec![Hash::default()],
-            }],
-            ..Default::default()
-        };
-        let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
-            &make_transaction(TransactionType::AccessList, true),
-        )
-        .expect("Deserialization should not fail")
-        .get();
-        let access_list_tx = AccessListTx::try_from(transaction.clone())
-            .expect("Conversion to AccessListTx should not fail");
-        assert_eq!(access_list_tx, expected);
+        // Access List Tx
+        {
+            let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
+                &make_json_transaction(TransactionType::AccessList, true),
+            )
+            .expect("Deserialization should not fail")
+            .get();
+            let access_list_tx = AccessListTx::try_from(transaction.clone())
+                .expect("Conversion to AccessListTx with to field should not fail");
+            assert_eq!(access_list_tx, make_access_list_tx(true));
 
-        // AccessList Transaction without to field
-        expected.to = None; // Update expected to match the deserialized without to field
-        let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
-            &make_transaction(TransactionType::AccessList, false),
-        )
-        .expect("Deserialization should not fail")
-        .get();
-        let access_list_tx = AccessListTx::try_from(transaction.clone())
-            .expect("Conversion to AccessListTx should not fail");
-        assert_eq!(access_list_tx, expected);
+            let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
+                &make_json_transaction(TransactionType::AccessList, false),
+            )
+            .expect("Deserialization should not fail")
+            .get();
+            let access_list_tx = AccessListTx::try_from(transaction.clone())
+                .expect("Conversion to AccessListTx without to field should not fail");
+            assert_eq!(access_list_tx, make_access_list_tx(false));
+        }
 
-        // DynamicFee Transaction with to field
-        let mut expected = DynamicFeeTx {
-            to: Some(AsHex(Address::default())),
-            access_list: vec![AccessTuple {
-                address: Address::default(),
-                storage_keys: vec![Hash::default()],
-            }],
-            ..Default::default()
-        };
-        let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
-            &make_transaction(TransactionType::DynamicFee, true),
-        )
-        .expect("Deserialization should not fail")
-        .get();
-        let dynamic_fee_tx = DynamicFeeTx::try_from(transaction.clone())
-            .expect("Conversion to DynamicFeeTx should not fail");
-        assert_eq!(dynamic_fee_tx, expected);
+        // Dynamic Fee Tx
+        {
+            let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
+                &make_json_transaction(TransactionType::DynamicFee, true),
+            )
+            .expect("Deserialization should not fail")
+            .get();
+            let dynamic_fee_tx = DynamicFeeTx::try_from(transaction.clone())
+                .expect("Conversion to DynamicFeeTx with to field should not fail");
+            assert_eq!(dynamic_fee_tx, make_dynamic_fee_tx(true));
 
-        // DynamicFee Transaction without to field
-        expected.to = None; // Update expected to match the deserialized without to field
-        let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
-            &make_transaction(TransactionType::DynamicFee, false),
-        )
-        .expect("Deserialization should not fail")
-        .get();
-        let dynamic_fee_tx = DynamicFeeTx::try_from(transaction.clone())
-            .expect("Conversion to DynamicFeeTx should not fail");
-        assert_eq!(dynamic_fee_tx, expected);
+            let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
+                &make_json_transaction(TransactionType::DynamicFee, false),
+            )
+            .expect("Deserialization should not fail")
+            .get();
+            let dynamic_fee_tx = DynamicFeeTx::try_from(transaction.clone())
+                .expect("Conversion to DynamicFeeTx without to should not fail");
+            assert_eq!(dynamic_fee_tx, make_dynamic_fee_tx(false));
+        }
 
-        // Blob Transaction
         let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
-            &make_transaction(TransactionType::Blob, true),
+            &make_json_transaction(TransactionType::Blob, true),
         )
         .expect("Deserialization should not fail")
         .get();
         let blob_tx =
             BlobTx::try_from(transaction.clone()).expect("Conversion to BlobTx should not fail");
-        assert_eq!(
-            blob_tx,
-            BlobTx {
-                access_list: vec![AccessTuple {
-                    address: Address::default(),
-                    storage_keys: vec![Hash::default()]
-                }],
-                blob_versioned_hashes: vec![AsHex(Hash::default())],
-                ..Default::default()
-            }
-        );
+        assert_eq!(blob_tx, make_blob_tx());
 
-        // SetCode Transaction
         let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
-            &make_transaction(TransactionType::SetCode, true),
+            &make_json_transaction(TransactionType::SetCode, true),
         )
         .expect("Deserialization should not fail")
         .get();
         let set_code_tx = SetCodeTx::try_from(transaction.clone())
             .expect("Conversion to SetCodeTx should not fail");
-        assert_eq!(
-            set_code_tx,
-            SetCodeTx {
-                access_list: vec![AccessTuple {
-                    address: Address::default(),
-                    storage_keys: vec![Hash::default()]
-                }],
-                authorization_list: vec![SetCodeAuthorization::default()],
-                ..Default::default()
-            }
-        );
+        assert_eq!(set_code_tx, make_set_code_tx());
     }
 
     #[test]
     fn deserialize_fails_for_invalid_transactions() {
-        // Transaction with unknown transaction type
-        serde_json::from_str::<TransactionDeserializer>(&make_transaction_with_invalid_type())
-            .expect_err("Deserialization of invalid transaction type should fail");
-        // Blob Transaction without to field
-        let json_str = make_transaction(TransactionType::Blob, false);
-        serde_json::from_str::<TransactionDeserializer>(&json_str)
-            .expect_err("Deserialization of invalid Blob transaction should fail");
+        serde_json::from_str::<TransactionDeserializer>(&make_json_transaction_with_invalid_type())
+            .expect_err("Deserialization of Transaction with invalid transaction type should fail");
 
-        // SetCode Transaction without to field
-        let json_str = make_transaction(TransactionType::SetCode, false);
+        let json_str = make_json_transaction(TransactionType::Blob, false);
         serde_json::from_str::<TransactionDeserializer>(&json_str)
-            .expect_err("Deserialization of invalid SetCode transaction should fail");
+            .expect_err("Deserialization of Blob transaction without to field should fail");
+
+        let json_str = make_json_transaction(TransactionType::SetCode, false);
+        serde_json::from_str::<TransactionDeserializer>(&json_str)
+            .expect_err("Deserialization of SetCode transaction without to field should fail");
     }
 
-    fn make_legacy_tx(include_to: bool) -> String {
-        if include_to {
-            format!(
-                r#"{{
-                    "type": "0x0",
-                    "nonce": "0x0",
-                    "gasPrice": "0x0",
-                    "gas": "0x0",
-                    "to": "{}",
-                    "value": "0x0",
-                    "input": "0x",
-                    "v": "0x0",
-                    "r": "0x0",
-                    "s": "0x0"
-                }}"#,
-                Address::default().to_hex()
-            )
-            .replace(['\n', ' '], "")
-        } else {
-            r#"{
-                    "type": "0x0",
-                    "nonce": "0x0",
-                    "gasPrice": "0x0",
-                    "gas": "0x0",
-                    "value": "0x0",
-                    "input": "0x",
-                    "v": "0x0",
-                    "r": "0x0",
-                    "s": "0x0"
-                }"#
-            .replace(['\n', ' '], "")
+    impl Default for Transaction {
+        fn default() -> Self {
+            Transaction {
+                transaction_type: TransactionType::Legacy,
+                chain_id: U256::default(),
+                nonce: u64::default(),
+                gas_price: U256::default(),
+                gas_limit: u64::default(),
+                to: Some(Address::default()),
+                value: U256::default(),
+                data: Vec::default(),
+                access_list: Vec::default(),
+                max_fee_per_gas: U256::default(),
+                max_priority_fee_per_gas: U256::default(),
+                blob_versioned_hashes: vec![Hash::default()],
+                max_fee_per_blob_gas: U256::default(),
+                authorization_list: Vec::default(),
+                y_parity: U256::default(),
+                r: U256::default(),
+                s: U256::default(),
+            }
         }
     }
 
-    fn make_access_list_tx(include_to: bool) -> String {
-        if include_to {
-            format!(
-                r#"{{
+    fn make_transaction(type_: TransactionType, include_to: bool) -> Transaction {
+        Transaction {
+            transaction_type: type_,
+            to: if include_to {
+                Some(Address::default())
+            } else {
+                None
+            },
+            access_list: vec![AccessListEntry {
+                address: Address::default(),
+                storage_keys: vec![Hash::default()],
+            }],
+            blob_versioned_hashes: vec![Hash::default()],
+            authorization_list: vec![SetCodeAuthorization {
+                chain_id: U256::default(),
+                address: Address::default(),
+                nonce: 0,
+                y_parity: u64::default(),
+                r: U256::default(),
+                s: U256::default(),
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn make_legacy_tx(include_to: bool) -> LegacyTx {
+        let tx = make_transaction(TransactionType::Legacy, include_to);
+        LegacyTx {
+            to: tx.to.map(AsHex),
+            ..Default::default()
+        }
+    }
+
+    fn make_access_list_tx(include_to: bool) -> AccessListTx {
+        let tx = make_transaction(TransactionType::AccessList, include_to);
+        AccessListTx {
+            to: tx.to.map(AsHex),
+            access_list: tx.access_list,
+            ..Default::default()
+        }
+    }
+
+    fn make_dynamic_fee_tx(include_to: bool) -> DynamicFeeTx {
+        let tx = make_transaction(TransactionType::DynamicFee, include_to);
+        DynamicFeeTx {
+            to: tx.to.map(AsHex),
+            access_list: tx.access_list,
+            ..Default::default()
+        }
+    }
+
+    fn make_blob_tx() -> BlobTx {
+        let tx = make_transaction(TransactionType::Blob, true);
+        BlobTx {
+            access_list: tx.access_list,
+            blob_versioned_hashes: tx.blob_versioned_hashes.into_iter().map(AsHex).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn make_set_code_tx() -> SetCodeTx {
+        let tx = make_transaction(TransactionType::SetCode, true);
+        SetCodeTx {
+            access_list: tx.access_list,
+            authorization_list: tx.authorization_list,
+            ..Default::default()
+        }
+    }
+
+    fn make_json_legacy_tx(include_to: bool) -> String {
+        format!(
+            r#"{{
+                "type": "0x0",
+                "nonce": "0x0",
+                "gasPrice": "0x0",
+                "gas": "0x0",
+                {}
+                "value": "0x0",
+                "input": "0x",
+                "v": "0x0",
+                "r": "0x0",
+                "s": "0x0"
+            }}"#,
+            if include_to {
+                format!(r#""to": "{}","#, Address::default().to_hex())
+            } else {
+                String::new()
+            }
+        )
+        .replace(['\n', ' '], "")
+    }
+
+    fn make_json_access_list_tx(include_to: bool) -> String {
+        format!(
+            r#"{{
                     "type": "0x1",
                     "chainId": "0x0",
                     "nonce": "0x0",
                     "gasPrice": "0x0",
                     "gas": "0x0",
-                    "to": "{}",
+                    {}
                     "value": "0x0",
                     "input": "0x",
                     "accessList": [
@@ -735,49 +707,27 @@ mod tests {
                     "r": "0x0",
                     "s": "0x0"
                 }}"#,
-                Address::default().to_hex(),
-                Address::default().to_hex(),
-                Hash::default().to_hex()
-            )
-            .replace(['\n', ' '], "")
-        } else {
-            format!(
-                r#"{{
-                    "type": "0x1",
-                    "chainId": "0x0",
-                    "nonce": "0x0",
-                    "gasPrice": "0x0",
-                    "gas": "0x0",
-                    "value": "0x0",
-                    "input": "0x",
-                    "accessList": [
-                        {{
-                            "address": "{}",
-                            "storageKeys": ["{}"]
-                        }}
-                    ],
-                    "v": "0x0",
-                    "r": "0x0",
-                    "s": "0x0"
-                }}"#,
-                Address::default().to_hex(),
-                Hash::default().to_hex()
-            )
-            .replace(['\n', ' '], "")
-        }
+            if include_to {
+                format!(r#""to": "{}","#, Address::default().to_hex())
+            } else {
+                String::new()
+            },
+            Address::default().to_hex(),
+            Hash::default().to_hex()
+        )
+        .replace(['\n', ' '], "")
     }
 
-    fn make_dynamic_fee_tx(include_to: bool) -> String {
-        if include_to {
-            format!(
-                r#"{{
+    fn make_json_dynamic_fee_tx(include_to: bool) -> String {
+        format!(
+            r#"{{
                     "type": "0x2",
                     "chainId": "0x0",
                     "nonce": "0x0",
                     "maxPriorityFeePerGas": "0x0",
                     "maxFeePerGas": "0x0",
                     "gas": "0x0",
-                    "to": "{}",
+                    {}
                     "value": "0x0",
                     "input": "0x",
                     "accessList": [
@@ -790,40 +740,18 @@ mod tests {
                     "r": "0x0",
                     "s": "0x0"
                 }}"#,
-                Address::default().to_hex(),
-                Address::default().to_hex(),
-                Hash::default().to_hex()
-            )
-            .replace(['\n', ' '], "")
-        } else {
-            format!(
-                r#"{{
-                    "type": "0x2",
-                    "chainId": "0x0",
-                    "nonce": "0x0",
-                    "maxPriorityFeePerGas": "0x0",
-                    "maxFeePerGas": "0x0",
-                    "gas": "0x0",
-                    "value": "0x0",
-                    "input": "0x",
-                    "accessList": [
-                        {{
-                            "address": "{}",
-                            "storageKeys": ["{}"]
-                        }}
-                    ],
-                    "v": "0x0",
-                    "r": "0x0",
-                    "s": "0x0"
-                }}"#,
-                Address::default().to_hex(),
-                Hash::default().to_hex()
-            )
-            .replace(['\n', ' '], "")
-        }
+            if include_to {
+                format!(r#""to": "{}","#, Address::default().to_hex())
+            } else {
+                String::new()
+            },
+            Address::default().to_hex(),
+            Hash::default().to_hex()
+        )
+        .replace(['\n', ' '], "")
     }
 
-    fn make_blob_tx() -> String {
+    fn make_json_blob_tx() -> String {
         format!(
             r#"{{
                 "type": "0x3",
@@ -855,7 +783,7 @@ mod tests {
         .replace(['\n', ' '], "")
     }
 
-    fn make_set_code_tx() -> String {
+    fn make_json_set_code_tx() -> String {
         format!(
             r#"{{
                 "type": "0x4",
@@ -895,16 +823,15 @@ mod tests {
         .replace(['\n', ' '], "")
     }
 
-    fn make_transaction(tx_type: TransactionType, include_to: bool) -> String {
-        if include_to {
-            format!(
-                r#"{{
+    fn make_json_transaction(tx_type: TransactionType, include_to: bool) -> String {
+        format!(
+            r#"{{
                     "type": "{}",
                     "chainId": "0x0",
                     "nonce": "0x0",
                     "gasPrice": "0x0",
                     "gas": "0x0",
-                    "to": "{}",
+                    {}
                     "value": "0x0",
                     "input": "0x",
                     "accessList": [
@@ -931,61 +858,21 @@ mod tests {
                     "r": "0x0",
                     "s": "0x0"
                 }}"#,
-                tx_type.to_hex(),
-                Address::default().to_hex(),
-                Address::default().to_hex(),
-                Hash::default().to_hex(),
-                Hash::default().to_hex(),
-                Address::default().to_hex()
-            )
-            .replace('\n', "")
-            .replace(' ', "")
-        } else {
-            format!(
-                r#"{{
-                    "type": "{}",
-                    "chainId": "0x0",
-                    "nonce": "0x0",
-                    "gasPrice": "0x0",
-                    "gas": "0x0",
-                    "value": "0x0",
-                    "input": "0x",
-                    "accessList": [
-                        {{
-                            "address": "{}",
-                            "storageKeys": ["{}"]
-                        }}
-                    ],
-                    "maxFeePerGas": "0x0",
-                    "maxPriorityFeePerGas": "0x0",
-                    "blobVersionedHashes": ["{}"],
-                    "maxFeePerBlobGas": "0x0",
-                    "authorizationList": [
-                    {{
-                        "chainId": "0x0",
-                        "address": "{}",
-                        "nonce": "0x0",
-                        "yParity": "0x0",
-                        "r": "0x0",
-                        "s": "0x0"
-                    }}
-                ],
-                    "v": "0x0",
-                    "r": "0x0",
-                    "s": "0x0"
-                }}"#,
-                tx_type.to_hex(),
-                Address::default().to_hex(),
-                Hash::default().to_hex(),
-                Hash::default().to_hex(),
-                Address::default().to_hex()
-            )
-            .replace('\n', "")
-            .replace(' ', "")
-        }
+            tx_type.to_hex(),
+            if include_to {
+                format!(r#""to": "{}","#, Address::default().to_hex())
+            } else {
+                String::new()
+            },
+            Address::default().to_hex(),
+            Hash::default().to_hex(),
+            Hash::default().to_hex(),
+            Address::default().to_hex()
+        )
+        .replace(['\n', ' '], "")
     }
 
-    fn make_transaction_with_invalid_type() -> String {
+    fn make_json_transaction_with_invalid_type() -> String {
         r#"{
             "type": "0x5",
             "chainId": "0x0",
