@@ -596,46 +596,27 @@ mod tests {
 
     fn make_legacy_tx(include_to: bool) -> LegacyTx {
         let tx = make_transaction(TransactionType::Legacy, include_to);
-        LegacyTx {
-            to: tx.to.map(AsHex),
-            ..Default::default()
-        }
+        LegacyTx::try_from(tx).unwrap()
     }
 
     fn make_access_list_tx(include_to: bool) -> AccessListTx {
         let tx = make_transaction(TransactionType::AccessList, include_to);
-        AccessListTx {
-            to: tx.to.map(AsHex),
-            access_list: tx.access_list,
-            ..Default::default()
-        }
+        AccessListTx::try_from(tx).unwrap()
     }
 
     fn make_dynamic_fee_tx(include_to: bool) -> DynamicFeeTx {
         let tx = make_transaction(TransactionType::DynamicFee, include_to);
-        DynamicFeeTx {
-            to: tx.to.map(AsHex),
-            access_list: tx.access_list,
-            ..Default::default()
-        }
+        DynamicFeeTx::try_from(tx).unwrap()
     }
 
     fn make_blob_tx() -> BlobTx {
         let tx = make_transaction(TransactionType::Blob, true);
-        BlobTx {
-            access_list: tx.access_list,
-            blob_versioned_hashes: tx.blob_versioned_hashes.into_iter().map(AsHex).collect(),
-            ..Default::default()
-        }
+        BlobTx::try_from(tx).unwrap()
     }
 
     fn make_set_code_tx() -> SetCodeTx {
         let tx = make_transaction(TransactionType::SetCode, true);
-        SetCodeTx {
-            access_list: tx.access_list,
-            authorization_list: tx.authorization_list,
-            ..Default::default()
-        }
+        SetCodeTx::try_from(tx).unwrap()
     }
 
     fn make_json_transaction(tx_type: TransactionType, include_to: bool) -> serde_json::Value {
