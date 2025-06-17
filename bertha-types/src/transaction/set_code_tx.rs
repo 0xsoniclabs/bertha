@@ -49,7 +49,8 @@ impl SetCodeTx {
     pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
         if tx.transaction_type != TransactionType::SetCode {
             return Err(TransactionError::ConversionError(format!(
-                "Expected SetCode transaction type, found {:?}",
+                "Expected {:?}, found {:?}",
+                TransactionType::SetCode,
                 tx.transaction_type
             )));
         }

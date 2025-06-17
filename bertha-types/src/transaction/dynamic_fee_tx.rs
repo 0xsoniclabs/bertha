@@ -33,7 +33,8 @@ impl DynamicFeeTx {
     pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
         if tx.transaction_type != TransactionType::DynamicFee {
             return Err(TransactionError::ConversionError(format!(
-                "Expected DynamicFee transaction type, found {:?}",
+                "Expected {:?}, found {:?}",
+                TransactionType::DynamicFee,
                 tx.transaction_type
             )));
         }

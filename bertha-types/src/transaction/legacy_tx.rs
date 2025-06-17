@@ -30,7 +30,8 @@ impl LegacyTx {
     pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
         if tx.transaction_type != TransactionType::Legacy {
             return Err(TransactionError::ConversionError(format!(
-                "Expected Legacy transaction type, found {:?}",
+                "Expected {:?}, found {:?}",
+                TransactionType::Legacy,
                 tx.transaction_type
             )));
         }

@@ -496,19 +496,25 @@ mod tests {
             assert_eq!(dynamic_fee_tx, make_dynamic_fee_tx(false));
         }
 
-        let transaction: Transaction =
-            serde_json::from_value(make_json_transaction(TransactionType::Blob, true))
-                .expect("Deserialization should not fail");
-        let blob_tx =
-            BlobTx::try_from(transaction.clone()).expect("Conversion to BlobTx should not fail");
-        assert_eq!(blob_tx, make_blob_tx());
+        // Blob Tx
+        {
+            let transaction: Transaction =
+                serde_json::from_value(make_json_transaction(TransactionType::Blob, true))
+                    .expect("Deserialization should not fail");
+            let blob_tx = BlobTx::try_from(transaction.clone())
+                .expect("Conversion to BlobTx should not fail");
+            assert_eq!(blob_tx, make_blob_tx());
+        }
 
-        let transaction: Transaction =
-            serde_json::from_value(make_json_transaction(TransactionType::SetCode, true))
-                .expect("Deserialization should not fail");
-        let set_code_tx = SetCodeTx::try_from(transaction.clone())
-            .expect("Conversion to SetCodeTx should not fail");
-        assert_eq!(set_code_tx, make_set_code_tx());
+        // Set Code Tx
+        {
+            let transaction: Transaction =
+                serde_json::from_value(make_json_transaction(TransactionType::SetCode, true))
+                    .expect("Deserialization should not fail");
+            let set_code_tx = SetCodeTx::try_from(transaction.clone())
+                .expect("Conversion to SetCodeTx should not fail");
+            assert_eq!(set_code_tx, make_set_code_tx());
+        }
     }
 
     #[test]
@@ -711,8 +717,8 @@ mod tests {
 
     fn make_json_transaction_with_invalid_type() -> serde_json::Value {
         let mut invalid_tx = make_json_transaction(TransactionType::Legacy, true);
-        invalid_tx["type"] = "0x5";
-        serde_json::from_str(invalid_tx).unwrap()
+        invalid_tx["type"] = "0x5".into();
+        invalid_tx
     }
 
     /// Utility function to copy fields from a value into a map
