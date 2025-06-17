@@ -41,6 +41,8 @@ jobs:
       uses: dtolnay/rust-toolchain@1.86
       with:
         components: clippy
+    - name: install protoc
+      uses: arduino/setup-protoc@v3
     - name: load cache
       uses: Swatinem/rust-cache@v2
     - name: cargo clippy
@@ -55,6 +57,8 @@ jobs:
       uses: actions/checkout@v4
     - name: install rust
       uses: dtolnay/rust-toolchain@1.86
+    - name: install protoc
+      uses: arduino/setup-protoc@v3
     - name: load cache
       uses: Swatinem/rust-cache@v2
     - name: cargo doc
@@ -74,6 +78,8 @@ jobs:
       uses: actions/checkout@v4
     - name: install rust
       uses: dtolnay/rust-toolchain@1.86
+    - name: install protoc
+      uses: arduino/setup-protoc@v3
     - name: load cache
       uses: Swatinem/rust-cache@v2
     - name: cargo build
@@ -88,6 +94,8 @@ jobs:
       uses: actions/checkout@v4
     - name: install rust
       uses: dtolnay/rust-toolchain@1.86
+    - name: install protoc
+      uses: arduino/setup-protoc@v3
     - name: load cache
       uses: Swatinem/rust-cache@v2
     - name: cargo test
