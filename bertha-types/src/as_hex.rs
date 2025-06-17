@@ -1,7 +1,7 @@
 use crate::HexConvert;
 
 /// A utility wrapper type for serializing and deserializing types as hex strings using serde.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AsHex<T: HexConvert>(pub T);
 
 impl<T: HexConvert> serde::Serialize for AsHex<T> {
@@ -18,8 +18,8 @@ impl<'de, T: HexConvert> serde::Deserialize<'de> for AsHex<T> {
     where
         D: serde::Deserializer<'de>,
     {
-        let hex_str: &str = serde::Deserialize::deserialize(deserializer)?;
-        T::try_from_hex(hex_str)
+        let hex_str: String = serde::Deserialize::deserialize(deserializer)?;
+        T::try_from_hex(&hex_str)
             .map(AsHex)
             .map_err(serde::de::Error::custom)
     }

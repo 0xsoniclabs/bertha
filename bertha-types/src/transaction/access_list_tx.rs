@@ -1,55 +1,97 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{
-    Address, Hash, Transaction, U256,
+    Address, AsHex, Hash, Transaction, U256,
     transaction::{TransactionError, TransactionType},
 };
 
-/// The Access List Ethereum transaction, defined in the EIP 2930.
-/// Source: https://eips.ethereum.org/EIPS/eip-2930
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+/// An Ethereum transaction with an optional access list, as defined in [EIP-2930](https://eips.ethereum.org/EIPS/eip-2930).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct AccessListTx {
-    pub chain_id: U256,
-    pub nonce: u64,
-    pub gas_price: U256,
-    pub gas_limit: u64,
-    pub to: Option<Address>,
-    pub value: U256,
-    pub data: Vec<u8>,
-    pub access_list: Vec<AccessTuple>,
+    pub chain_id: AsHex<U256>,
+    pub nonce: AsHex<u64>,
+    pub gas_price: AsHex<U256>,
+    #[serde(rename = "gas")]
+    pub gas_limit: AsHex<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<AsHex<Address>>,
+    pub value: AsHex<U256>,
+    #[serde(rename = "input")]
+    pub data: AsHex<Vec<u8>>,
+    pub access_list: Vec<AccessListEntry>,
 
-    pub y_parity: U256,
-    pub r: U256,
-    pub s: U256,
+    #[serde(rename = "v")]
+    pub y_parity: AsHex<U256>,
+    pub r: AsHex<U256>,
+    pub s: AsHex<U256>,
 }
 
-/// The Access List internal values, used in AccessListTx.
+/// An entry in the access list.
 /// It contains the address and a list of storage keys that the transaction plans to access.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
-pub struct AccessTuple {
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "JsonRpcAccessListEntry", into = "JsonRpcAccessListEntry")]
+pub struct AccessListEntry {
     pub address: Address,
     pub storage_keys: Vec<Hash>,
+}
+
+/// The JSON-RPC representation of an [AccessListEntry].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonRpcAccessListEntry {
+    pub address: AsHex<Address>,
+    pub storage_keys: Vec<AsHex<Hash>>,
+}
+
+impl From<JsonRpcAccessListEntry> for AccessListEntry {
+    fn from(value: JsonRpcAccessListEntry) -> Self {
+        AccessListEntry {
+            address: value.address.0,
+            storage_keys: value.storage_keys.into_iter().map(|h| h.0).collect(),
+        }
+    }
+}
+impl From<AccessListEntry> for JsonRpcAccessListEntry {
+    fn from(value: AccessListEntry) -> Self {
+        JsonRpcAccessListEntry {
+            address: AsHex(value.address),
+            storage_keys: value.storage_keys.into_iter().map(AsHex).collect(),
+        }
+    }
+}
+
+impl AccessListTx {
+    /// Checks if the transaction can be converted to an [AccessListTx].
+    pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
+        if tx.transaction_type != TransactionType::AccessList {
+            return Err(TransactionError::ConversionError(format!(
+                "expected {:?}, found {:?}",
+                TransactionType::AccessList,
+                tx.transaction_type
+            )));
+        }
+        Ok(())
+    }
 }
 
 impl TryFrom<Transaction> for AccessListTx {
     type Error = TransactionError;
 
     fn try_from(tx: Transaction) -> Result<Self, Self::Error> {
-        if tx.transaction_type != TransactionType::AccessList {
-            return Err(TransactionError::ConversionError(
-                TransactionType::AccessList,
-            ));
-        }
+        AccessListTx::is_constructible_from(&tx)?;
         Ok(AccessListTx {
-            chain_id: tx.chain_id,
-            nonce: tx.nonce,
-            gas_price: tx.gas_price,
-            gas_limit: tx.gas_limit,
-            to: tx.to,
-            value: tx.value,
-            data: tx.data,
+            chain_id: AsHex(tx.chain_id),
+            nonce: AsHex(tx.nonce),
+            gas_price: AsHex(tx.gas_price),
+            gas_limit: AsHex(tx.gas_limit),
+            to: tx.to.map(AsHex),
+            value: AsHex(tx.value),
+            data: AsHex(tx.data),
             access_list: tx.access_list,
-            y_parity: tx.y_parity,
-            r: tx.r,
-            s: tx.s,
+            y_parity: AsHex(tx.y_parity),
+            r: AsHex(tx.r),
+            s: AsHex(tx.s),
         })
     }
 }
@@ -58,26 +100,25 @@ impl From<AccessListTx> for Transaction {
     fn from(tx: AccessListTx) -> Self {
         Transaction {
             transaction_type: TransactionType::AccessList,
-            chain_id: tx.chain_id,
-            nonce: tx.nonce,
-            gas_price: tx.gas_price,
-            gas_limit: tx.gas_limit,
-            to: tx.to,
-            value: tx.value,
-            data: tx.data,
+            chain_id: tx.chain_id.0,
+            nonce: tx.nonce.0,
+            gas_price: tx.gas_price.0,
+            gas_limit: tx.gas_limit.0,
+            to: tx.to.map(|addr| addr.0),
+            value: tx.value.0,
+            data: tx.data.0,
             access_list: tx.access_list,
             max_priority_fee_per_gas: U256::default(),
             max_fee_per_gas: U256::default(),
             max_fee_per_blob_gas: U256::default(),
             blob_versioned_hashes: Vec::new(),
             authorization_list: Vec::new(),
-            y_parity: tx.y_parity,
-            r: tx.r,
-            s: tx.s,
+            y_parity: tx.y_parity.0,
+            r: tx.r.0,
+            s: tx.s.0,
         }
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,9 +141,27 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to access list transaction must fail");
-        assert_eq!(
-            error,
-            TransactionError::ConversionError(TransactionType::AccessList)
+        assert!(matches!(error, TransactionError::ConversionError(_)));
+    }
+
+    #[test]
+    fn is_constructible_from_returns_correct_value() {
+        assert!(
+            AccessListTx::is_constructible_from(&Transaction {
+                transaction_type: TransactionType::AccessList,
+                ..Default::default()
+            })
+            .is_ok(),
+            "AccessListTx should be constructible from a correct access list transaction"
         );
+        // Mismatched transaction type
+        let err = AccessListTx::is_constructible_from(&Transaction {
+            transaction_type: TransactionType::Legacy,
+            ..Default::default()
+        })
+        .expect_err(
+            "AccessListTx should not be constructible from a transaction with a mismatched type",
+        );
+        assert!(matches!(err, TransactionError::ConversionError(_)));
     }
 }

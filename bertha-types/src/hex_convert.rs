@@ -60,6 +60,16 @@ impl HexConvert for u64 {
     }
 }
 
+impl HexConvert for u8 {
+    fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
+        u8::from_str_radix(value.trim_start_matches("0x"), 16).map_err(Into::<ParseHexError>::into)
+    }
+
+    fn to_hex(&self) -> String {
+        format!("0x{:x}", self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::num::IntErrorKind;
@@ -203,11 +213,64 @@ mod tests {
 
     #[test]
     fn u64_can_be_converted_to_hex_string() {
-        assert_eq!(0.to_hex(), "0x0");
-        assert_eq!(10.to_hex(), "0xa");
-        assert_eq!(16.to_hex(), "0x10");
-        assert_eq!(255.to_hex(), "0xff");
-        assert_eq!(256.to_hex(), "0x100");
+        assert_eq!(u64::MIN.to_hex(), "0x0");
+        assert_eq!(10u64.to_hex(), "0xa");
+        assert_eq!(16u64.to_hex(), "0x10");
+        assert_eq!(255u64.to_hex(), "0xff");
+        assert_eq!(256u64.to_hex(), "0x100");
         assert_eq!(u64::MAX.to_hex(), "0xffffffffffffffff");
+    }
+
+    #[test]
+    fn u8_can_be_constructed_from_hex_string() {
+        // Even-length hex string
+        let n = u8::try_from_hex("0x00").unwrap();
+        assert_eq!(n, 0u8);
+
+        // Odd-length hex string
+        let n = u8::try_from_hex("0x0").unwrap();
+        assert_eq!(n, 0u8);
+
+        // Without 0x prefix
+        let n = u8::try_from_hex("10").unwrap();
+        assert_eq!(n, 16u8);
+
+        // u8::MAX
+        let n = u8::try_from_hex("0xff").unwrap();
+        assert_eq!(n, u8::MAX);
+    }
+
+    #[test]
+    fn u8_from_malformed_hex_string_produces_error() {
+        let n = u8::try_from_hex("0x").unwrap_err();
+        assert_eq!(n, ParseHexError::IntError(IntErrorKind::Empty));
+        assert_eq!(
+            n.to_string(),
+            "hex string cannot be represented as a number of the target type: IntErrorKind::Empty"
+        );
+
+        let n = u8::try_from_hex("xyz").unwrap_err();
+        assert_eq!(n, ParseHexError::InvalidCharacter);
+        assert_eq!(n.to_string(), "hex string contains invalid character(s)");
+
+        let n = u8::try_from_hex("0xxyz").unwrap_err();
+        assert_eq!(n, ParseHexError::InvalidCharacter);
+        assert_eq!(n.to_string(), "hex string contains invalid character(s)");
+
+        let n =
+            u8::try_from_hex(const_hex::encode((u16::from(u8::MAX) + 1u16).to_be_bytes()).as_str())
+                .unwrap_err();
+        assert_eq!(
+            n,
+            crate::parse_hex_error::ParseHexError::IntError(IntErrorKind::PosOverflow)
+        );
+    }
+
+    #[test]
+    fn u8_can_be_converted_to_hex_string() {
+        assert_eq!(u8::MIN.to_hex(), "0x0");
+        assert_eq!(10u8.to_hex(), "0xa");
+        assert_eq!(16u8.to_hex(), "0x10");
+        assert_eq!(u8::MAX.to_hex(), "0xff");
     }
 }
