@@ -248,28 +248,28 @@ impl Serialize for JsonRpcTransaction {
                     transaction_type: AsHex(TransactionType::AccessList),
                     transaction: tx,
                 })
-                .map_err(|err| serde::ser::Error::custom(err.to_string()))?
+                .unwrap()
                 .serialize(serializer),
             TransactionType::DynamicFee => DynamicFeeTx::try_from(tx)
                 .map(|tx| TransactionWithType {
                     transaction_type: AsHex(TransactionType::DynamicFee),
                     transaction: tx,
                 })
-                .map_err(|err| serde::ser::Error::custom(err.to_string()))?
+                .unwrap()
                 .serialize(serializer),
             TransactionType::Blob => BlobTx::try_from(tx)
                 .map(|tx| TransactionWithType {
                     transaction_type: AsHex(TransactionType::Blob),
                     transaction: tx,
                 })
-                .map_err(|err| serde::ser::Error::custom(err.to_string()))?
+                .unwrap()
                 .serialize(serializer),
             TransactionType::SetCode => SetCodeTx::try_from(tx)
                 .map(|tx| TransactionWithType {
                     transaction_type: AsHex(TransactionType::SetCode),
                     transaction: tx,
                 })
-                .map_err(|err| serde::ser::Error::custom(err.to_string()))?
+                .unwrap()
                 .serialize(serializer),
         }
     }
