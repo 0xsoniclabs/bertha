@@ -448,18 +448,16 @@ mod tests {
     fn can_be_deserialized_from_json() {
         // Legacy Tx
         {
-            let transaction: Transaction = serde_json::from_str(
-                &make_json_transaction(TransactionType::Legacy, true).to_string(),
-            )
-            .expect("Deserialization should not fail");
+            let transaction: Transaction =
+                serde_json::from_value(make_json_transaction(TransactionType::Legacy, true))
+                    .expect("Deserialization should not fail");
             let legacy_tx = LegacyTx::try_from(transaction)
                 .expect("Conversion to LegacyTx with to field should not fail");
             assert_eq!(legacy_tx, make_legacy_tx(true));
 
-            let transaction: Transaction = serde_json::from_str(
-                &make_json_transaction(TransactionType::Legacy, false).to_string(),
-            )
-            .expect("Deserialization should not fail");
+            let transaction: Transaction =
+                serde_json::from_value(make_json_transaction(TransactionType::Legacy, false))
+                    .expect("Deserialization should not fail");
             let legacy_tx = LegacyTx::try_from(transaction.clone())
                 .expect("Conversion to LegacyTx without to field should not fail");
             assert_eq!(legacy_tx, make_legacy_tx(false));
@@ -467,18 +465,16 @@ mod tests {
 
         // Access List Tx
         {
-            let transaction: Transaction = serde_json::from_str(
-                &make_json_transaction(TransactionType::AccessList, true).to_string(),
-            )
-            .expect("Deserialization should not fail");
+            let transaction: Transaction =
+                serde_json::from_value(make_json_transaction(TransactionType::AccessList, true))
+                    .expect("Deserialization should not fail");
             let access_list_tx = AccessListTx::try_from(transaction.clone())
                 .expect("Conversion to AccessListTx with to field should not fail");
             assert_eq!(access_list_tx, make_access_list_tx(true));
 
-            let transaction: Transaction = serde_json::from_str(
-                &make_json_transaction(TransactionType::AccessList, false).to_string(),
-            )
-            .expect("Deserialization should not fail");
+            let transaction: Transaction =
+                serde_json::from_value(make_json_transaction(TransactionType::AccessList, false))
+                    .expect("Deserialization should not fail");
             let access_list_tx = AccessListTx::try_from(transaction.clone())
                 .expect("Conversion to AccessListTx without to field should not fail");
             assert_eq!(access_list_tx, make_access_list_tx(false));
@@ -486,34 +482,31 @@ mod tests {
 
         // Dynamic Fee Tx
         {
-            let transaction: Transaction = serde_json::from_str(
-                &make_json_transaction(TransactionType::DynamicFee, true).to_string(),
-            )
-            .expect("Deserialization should not fail");
+            let transaction: Transaction =
+                serde_json::from_value(make_json_transaction(TransactionType::DynamicFee, true))
+                    .expect("Deserialization should not fail");
             let dynamic_fee_tx = DynamicFeeTx::try_from(transaction.clone())
                 .expect("Conversion to DynamicFeeTx with to field should not fail");
             assert_eq!(dynamic_fee_tx, make_dynamic_fee_tx(true));
 
-            let transaction: Transaction = serde_json::from_str(
-                &make_json_transaction(TransactionType::DynamicFee, false).to_string(),
-            )
-            .expect("Deserialization should not fail");
+            let transaction: Transaction =
+                serde_json::from_value(make_json_transaction(TransactionType::DynamicFee, false))
+                    .expect("Deserialization should not fail");
             let dynamic_fee_tx = DynamicFeeTx::try_from(transaction.clone())
                 .expect("Conversion to DynamicFeeTx without to should not fail");
             assert_eq!(dynamic_fee_tx, make_dynamic_fee_tx(false));
         }
 
         let transaction: Transaction =
-            serde_json::from_str(&make_json_transaction(TransactionType::Blob, true).to_string())
+            serde_json::from_value(make_json_transaction(TransactionType::Blob, true))
                 .expect("Deserialization should not fail");
         let blob_tx =
             BlobTx::try_from(transaction.clone()).expect("Conversion to BlobTx should not fail");
         assert_eq!(blob_tx, make_blob_tx());
 
-        let transaction: Transaction = serde_json::from_str(
-            &make_json_transaction(TransactionType::SetCode, true).to_string(),
-        )
-        .expect("Deserialization should not fail");
+        let transaction: Transaction =
+            serde_json::from_value(make_json_transaction(TransactionType::SetCode, true))
+                .expect("Deserialization should not fail");
         let set_code_tx = SetCodeTx::try_from(transaction.clone())
             .expect("Conversion to SetCodeTx should not fail");
         assert_eq!(set_code_tx, make_set_code_tx());
@@ -522,21 +515,21 @@ mod tests {
     #[test]
     fn deserialize_fails_for_invalid_transactions() {
         let res: Result<Transaction, _> =
-            serde_json::from_str(&make_json_transaction_with_invalid_type().to_string());
+            serde_json::from_value(make_json_transaction_with_invalid_type());
         assert!(
             res.is_err(),
             "Deserialization of Transaction with invalid transaction type should fail"
         );
 
-        let json_str = make_json_transaction(TransactionType::Blob, false).to_string();
-        let res: Result<Transaction, _> = serde_json::from_str(&json_str);
+        let res: Result<Transaction, _> =
+            serde_json::from_value(make_json_transaction(TransactionType::Blob, false));
         assert!(
             res.is_err(),
             "Deserialization of Blob transaction without to field should fail"
         );
 
-        let json_str = make_json_transaction(TransactionType::SetCode, false).to_string();
-        let res: Result<Transaction, _> = serde_json::from_str(&json_str);
+        let res: Result<Transaction, _> =
+            serde_json::from_value(make_json_transaction(TransactionType::SetCode, false));
         assert!(
             res.is_err(),
             "Deserialization of SetCode transaction without to field should fail"

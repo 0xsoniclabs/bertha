@@ -18,8 +18,8 @@ impl<'de, T: HexConvert> serde::Deserialize<'de> for AsHex<T> {
     where
         D: serde::Deserializer<'de>,
     {
-        let hex_str: &str = serde::Deserialize::deserialize(deserializer)?;
-        T::try_from_hex(hex_str)
+        let hex_str: String = serde::Deserialize::deserialize(deserializer)?;
+        T::try_from_hex(&hex_str)
             .map(AsHex)
             .map_err(serde::de::Error::custom)
     }
