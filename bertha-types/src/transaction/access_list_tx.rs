@@ -28,7 +28,7 @@ pub(crate) struct AccessListTx {
     pub s: AsHex<U256>,
 }
 
-/// The Access List internal values, used in AccessListTx.
+/// An entry in the access list.
 /// It contains the address and a list of storage keys that the transaction plans to access.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "JsonRpcAccessListEntry", into = "JsonRpcAccessListEntry")]
