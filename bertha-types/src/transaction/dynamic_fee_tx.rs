@@ -31,8 +31,14 @@ pub(crate) struct DynamicFeeTx {
 
 impl DynamicFeeTx {
     /// Checks if the transaction can be converted to a DynamicFee transaction.
-    pub fn is_constructible_from(tx: &Transaction) -> bool {
-        tx.transaction_type == TransactionType::DynamicFee
+    pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
+        if tx.transaction_type != TransactionType::DynamicFee {
+            return Err(TransactionError::ConversionError(format!(
+                "Expected DynamicFee transaction type, found {:?}",
+                tx.transaction_type
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -40,11 +46,7 @@ impl TryFrom<Transaction> for DynamicFeeTx {
     type Error = TransactionError;
 
     fn try_from(tx: Transaction) -> Result<Self, Self::Error> {
-        if tx.transaction_type != TransactionType::DynamicFee {
-            return Err(TransactionError::ConversionError(
-                TransactionType::DynamicFee,
-            ));
-        }
+        DynamicFeeTx::is_constructible_from(&tx)?;
         Ok(DynamicFeeTx {
             chain_id: AsHex(tx.chain_id),
             nonce: AsHex(tx.nonce),
@@ -108,10 +110,7 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to dynamic fee transaction must fail");
-        assert_eq!(
-            error,
-            TransactionError::ConversionError(TransactionType::DynamicFee)
-        );
+        assert!(matches!(error, TransactionError::ConversionError(_)));
     }
 
     #[test]
@@ -120,16 +119,18 @@ mod tests {
             DynamicFeeTx::is_constructible_from(&Transaction {
                 transaction_type: TransactionType::DynamicFee,
                 ..Default::default()
-            }),
+            })
+            .is_ok(),
             "DynamicFeeTx should be constructible from a correct DynamicFee transaction"
         );
         // Mismatched transaction type
-        assert!(
-            !DynamicFeeTx::is_constructible_from(&Transaction {
-                transaction_type: TransactionType::Legacy,
-                ..Default::default()
-            }),
-            "DynamicFeeTx should not be constructible from a transaction with a mismatched type"
+        let err = DynamicFeeTx::is_constructible_from(&Transaction {
+            transaction_type: TransactionType::Legacy,
+            ..Default::default()
+        })
+        .expect_err(
+            "DynamicFeeTx should not be constructible from a transaction with a mismatched type",
         );
+        assert!(matches!(err, TransactionError::ConversionError(_)));
     }
 }

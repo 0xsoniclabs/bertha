@@ -32,8 +32,19 @@ pub(crate) struct BlobTx {
 
 impl BlobTx {
     /// Checks if the transaction can be converted to a Blob transaction.
-    pub fn is_constructible_from(tx: &Transaction) -> bool {
-        tx.transaction_type == TransactionType::Blob && tx.to.is_some()
+    pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
+        if tx.transaction_type != TransactionType::Blob {
+            return Err(TransactionError::ConversionError(format!(
+                "Expected Blob transaction type, found {:?}",
+                tx.transaction_type,
+            )));
+        }
+        if tx.to.is_none() {
+            return Err(TransactionError::ConversionError(
+                "Blob transaction requires 'to' field to be set".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -41,20 +52,15 @@ impl TryFrom<Transaction> for BlobTx {
     type Error = TransactionError;
 
     fn try_from(tx: Transaction) -> Result<Self, Self::Error> {
-        if tx.transaction_type != TransactionType::Blob {
-            return Err(TransactionError::ConversionError(TransactionType::Blob));
-        }
-
+        BlobTx::is_constructible_from(&tx)?;
         Ok(BlobTx {
             chain_id: AsHex(tx.chain_id),
             nonce: AsHex(tx.nonce),
             max_priority_fee_per_gas: AsHex(tx.max_priority_fee_per_gas),
             max_fee_per_gas: AsHex(tx.max_fee_per_gas),
             gas_limit: AsHex(tx.gas_limit),
-            to: tx
-                .to
-                .map(AsHex)
-                .ok_or(TransactionError::ConversionError(TransactionType::Blob))?,
+            // Safe to unwrap as is_constructible_from checks for None
+            to: tx.to.map(AsHex).unwrap(),
             value: AsHex(tx.value),
             data: AsHex(tx.data),
             access_list: tx.access_list,
@@ -113,10 +119,7 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to blob transaction must fail");
-        assert_eq!(
-            error,
-            TransactionError::ConversionError(TransactionType::Blob)
-        );
+        assert!(matches!(error, TransactionError::ConversionError(_)));
 
         // Attempt to convert to BlobTx with to field set to None
         let error = BlobTx::try_from(Transaction {
@@ -125,10 +128,7 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to blob transaction must fail");
-        assert_eq!(
-            error,
-            TransactionError::ConversionError(TransactionType::Blob)
-        );
+        assert!(matches!(error, TransactionError::ConversionError(_)));
     }
 
     #[test]
@@ -138,25 +138,27 @@ mod tests {
                 transaction_type: TransactionType::Blob,
                 to: Some(Address::default()),
                 ..Default::default()
-            }),
+            })
+            .is_ok(),
             "BlobTx should be constructible from a correct Blob transaction"
         );
         // Mismatched transaction type
-        assert!(
-            !BlobTx::is_constructible_from(&Transaction {
-                transaction_type: TransactionType::Legacy,
-                ..Default::default()
-            }),
-            "BlobTx should not be constructible from a transaction with a mismatched type"
-        );
+        let err = BlobTx::is_constructible_from(&Transaction {
+            transaction_type: TransactionType::Legacy,
+            to: Some(Address::default()),
+            ..Default::default()
+        })
+        .expect_err("BlobTx should not be constructible from a transaction with a mismatched type");
+        assert!(matches!(err, TransactionError::ConversionError(_)));
         // Missing 'to' field
-        assert!(
-            !BlobTx::is_constructible_from(&Transaction {
-                transaction_type: TransactionType::Blob,
-                to: None,
-                ..Default::default()
-            }),
-            "BlobTx should not be constructible from a transaction with missing 'to' field"
+        let err = BlobTx::is_constructible_from(&Transaction {
+            transaction_type: TransactionType::Blob,
+            to: None,
+            ..Default::default()
+        })
+        .expect_err(
+            "BlobTx should not be constructible from a transaction with a missing 'to' field",
         );
+        assert!(matches!(err, TransactionError::ConversionError(_)));
     }
 }

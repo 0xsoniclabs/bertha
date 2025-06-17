@@ -64,8 +64,14 @@ impl From<AccessListEntry> for JsonRpcAccessListEntry {
 
 impl AccessListTx {
     /// Checks if the transaction can be converted to an AccessList transaction.
-    pub fn is_constructible_from(tx: &Transaction) -> bool {
-        tx.transaction_type == TransactionType::AccessList
+    pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
+        if tx.transaction_type != TransactionType::AccessList {
+            return Err(TransactionError::ConversionError(format!(
+                "Expected AccessList transaction type, found {:?}",
+                tx.transaction_type
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -73,11 +79,7 @@ impl TryFrom<Transaction> for AccessListTx {
     type Error = TransactionError;
 
     fn try_from(tx: Transaction) -> Result<Self, Self::Error> {
-        if tx.transaction_type != TransactionType::AccessList {
-            return Err(TransactionError::ConversionError(
-                TransactionType::AccessList,
-            ));
-        }
+        AccessListTx::is_constructible_from(&tx)?;
         Ok(AccessListTx {
             chain_id: AsHex(tx.chain_id),
             nonce: AsHex(tx.nonce),
@@ -139,10 +141,7 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to access list transaction must fail");
-        assert_eq!(
-            error,
-            TransactionError::ConversionError(TransactionType::AccessList)
-        );
+        assert!(matches!(error, TransactionError::ConversionError(_)));
     }
 
     #[test]
@@ -151,15 +150,18 @@ mod tests {
             AccessListTx::is_constructible_from(&Transaction {
                 transaction_type: TransactionType::AccessList,
                 ..Default::default()
-            }),
+            })
+            .is_ok(),
             "AccessListTx should be constructible from a correct Access List transaction"
         );
-        assert!(
-            !AccessListTx::is_constructible_from(&Transaction {
-                transaction_type: TransactionType::Legacy,
-                ..Default::default()
-            }),
-            "AccessListTx should not be constructible from a transaction with mismatched type"
+        // Mismatched transaction type
+        let err = AccessListTx::is_constructible_from(&Transaction {
+            transaction_type: TransactionType::Legacy,
+            ..Default::default()
+        })
+        .expect_err(
+            "AccessListTx should not be constructible from a transaction with a mismatched type",
         );
+        assert!(matches!(err, TransactionError::ConversionError(_)));
     }
 }

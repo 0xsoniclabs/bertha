@@ -28,8 +28,14 @@ pub(crate) struct LegacyTx {
 
 impl LegacyTx {
     /// Checks if the transaction can be converted to a Legacy transaction.
-    pub fn is_constructible_from(tx: &Transaction) -> bool {
-        tx.transaction_type == TransactionType::Legacy
+    pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
+        if tx.transaction_type != TransactionType::Legacy {
+            return Err(TransactionError::ConversionError(format!(
+                "Expected Legacy transaction type, found {:?}",
+                tx.transaction_type
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -37,9 +43,7 @@ impl TryFrom<Transaction> for LegacyTx {
     type Error = TransactionError;
 
     fn try_from(tx: Transaction) -> Result<Self, Self::Error> {
-        if tx.transaction_type != TransactionType::Legacy {
-            return Err(TransactionError::ConversionError(TransactionType::Legacy));
-        }
+        LegacyTx::is_constructible_from(&tx)?;
         Ok(LegacyTx {
             nonce: AsHex(tx.nonce),
             gas_price: AsHex(tx.gas_price),
@@ -100,10 +104,7 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to legacy transaction must fail");
-        assert_eq!(
-            error,
-            TransactionError::ConversionError(TransactionType::Legacy)
-        );
+        assert!(matches!(error, TransactionError::ConversionError(_)));
     }
 
     #[test]
@@ -112,16 +113,18 @@ mod tests {
             LegacyTx::is_constructible_from(&Transaction {
                 transaction_type: TransactionType::Legacy,
                 ..Default::default()
-            }),
+            })
+            .is_ok(),
             "LegacyTx should be constructible from a correct Legacy transaction"
         );
         // Mismatched transaction type
-        assert!(
-            !LegacyTx::is_constructible_from(&Transaction {
-                transaction_type: TransactionType::DynamicFee,
-                ..Default::default()
-            }),
-            "LegacyTx should not be constructible from a transaction with a mismatched type"
+        let err = LegacyTx::is_constructible_from(&Transaction {
+            transaction_type: TransactionType::DynamicFee,
+            ..Default::default()
+        })
+        .expect_err(
+            "LegacyTx should not be constructible from a transaction with a mismatched type",
         );
+        assert!(matches!(err, TransactionError::ConversionError(_)));
     }
 }

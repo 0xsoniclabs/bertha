@@ -29,8 +29,8 @@ pub(crate) struct SetCodeTx {
     pub s: AsHex<U256>,
 }
 
-/// The Authorization list internal values, used in SetCodeTx.
-/// It indicates what code the signer desires to execute in the context of their EOA.
+/// An authorization that specifies what code the signer wants to be executed in the context of
+/// their EOA, used in [SetCodeTx].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(
     from = "JsonRpcSetCodeAuthorization",
@@ -47,8 +47,19 @@ pub struct SetCodeAuthorization {
 
 impl SetCodeTx {
     /// Checks if the transaction can be converted to a SetCode transaction.
-    pub fn is_constructible_from(tx: &Transaction) -> bool {
-        tx.transaction_type == TransactionType::SetCode && tx.to.is_some()
+    pub fn is_constructible_from(tx: &Transaction) -> Result<(), TransactionError> {
+        if tx.transaction_type != TransactionType::SetCode {
+            return Err(TransactionError::ConversionError(format!(
+                "Expected SetCode transaction type, found {:?}",
+                tx.transaction_type
+            )));
+        }
+        if tx.to.is_none() {
+            return Err(TransactionError::ConversionError(
+                "SetCode transaction requires 'to' field to be set".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -94,20 +105,15 @@ impl TryFrom<Transaction> for SetCodeTx {
     type Error = TransactionError;
 
     fn try_from(tx: Transaction) -> Result<Self, Self::Error> {
-        if tx.transaction_type != TransactionType::SetCode {
-            return Err(TransactionError::ConversionError(TransactionType::SetCode));
-        }
-
+        SetCodeTx::is_constructible_from(&tx)?;
         Ok(SetCodeTx {
             chain_id: AsHex(tx.chain_id),
             nonce: AsHex(tx.nonce),
             max_priority_fee_per_gas: AsHex(tx.max_priority_fee_per_gas),
             max_fee_per_gas: AsHex(tx.max_fee_per_gas),
             gas_limit: AsHex(tx.gas_limit),
-            to: tx
-                .to
-                .map(AsHex)
-                .ok_or(TransactionError::ConversionError(TransactionType::SetCode))?,
+            // Safe to unwrap as is_constructible_from checks for None
+            to: tx.to.map(AsHex).unwrap(),
             value: AsHex(tx.value),
             data: AsHex(tx.data),
             access_list: tx.access_list,
@@ -165,10 +171,7 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to set code transaction must fail");
-        assert_eq!(
-            error,
-            TransactionError::ConversionError(TransactionType::SetCode)
-        );
+        assert!(matches!(error, TransactionError::ConversionError(_)));
 
         // Attempt to convert to SetCodeTx with to field set to None
         let error = SetCodeTx::try_from(Transaction {
@@ -177,10 +180,7 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to set code transaction must fail");
-        assert_eq!(
-            error,
-            TransactionError::ConversionError(TransactionType::SetCode)
-        );
+        assert!(matches!(error, TransactionError::ConversionError(_)));
     }
 
     #[test]
@@ -190,26 +190,29 @@ mod tests {
                 transaction_type: TransactionType::SetCode,
                 to: Some(Address::default()),
                 ..Default::default()
-            }),
+            })
+            .is_ok(),
             "SetCodeTx should be constructible from a correct SetCode transaction"
         );
         // Mismatched transaction type
-        assert!(
-            !SetCodeTx::is_constructible_from(&Transaction {
-                transaction_type: TransactionType::Legacy,
-                to: Some(Address::default()),
-                ..Default::default()
-            }),
-            "SetCodeTx should not be constructible from a transaction with mismatched type"
+        let err = SetCodeTx::is_constructible_from(&Transaction {
+            transaction_type: TransactionType::Legacy,
+            to: Some(Address::default()),
+            ..Default::default()
+        })
+        .expect_err(
+            "SetCodeTx should not be constructible from a transaction with a mismatched type",
         );
+        assert!(matches!(err, TransactionError::ConversionError(_)));
         // Missing 'to' field
-        assert!(
-            !SetCodeTx::is_constructible_from(&Transaction {
-                transaction_type: TransactionType::SetCode,
-                to: None,
-                ..Default::default()
-            }),
-            "SetCodeTx should not be constructible from a transaction with missing 'to' field"
+        let err = SetCodeTx::is_constructible_from(&Transaction {
+            transaction_type: TransactionType::SetCode,
+            to: None,
+            ..Default::default()
+        })
+        .expect_err(
+            "SetCodeTx should not be constructible from a transaction with a missing 'to' field",
         );
+        assert!(matches!(err, TransactionError::ConversionError(_)));
     }
 }

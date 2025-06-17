@@ -111,9 +111,9 @@ impl HexConvert for TransactionType {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JsonRpcTransaction {
+    // NOTE: this is not called `type` because it is a reserved keyword in Rust
     #[serde(rename = "type")]
-    pub transaction_type: AsHex<TransactionType>, /* NOTE: this is not called `type` because it
-                                                   * is a reserved keyword in Rust */
+    pub transaction_type: AsHex<TransactionType>,
     #[serde(default)]
     pub chain_id: AsHex<U256>,
     pub nonce: AsHex<u64>,
@@ -142,9 +142,11 @@ pub struct JsonRpcTransaction {
     pub s: AsHex<U256>,
 }
 
-impl From<JsonRpcTransaction> for Transaction {
-    fn from(value: JsonRpcTransaction) -> Self {
-        Transaction {
+impl TryFrom<JsonRpcTransaction> for Transaction {
+    type Error = TransactionError;
+
+    fn try_from(value: JsonRpcTransaction) -> Result<Self, Self::Error> {
+        let tx = Transaction {
             transaction_type: value.transaction_type.0,
             nonce: value.nonce.0,
             gas_price: value.gas_price.0,
@@ -166,7 +168,10 @@ impl From<JsonRpcTransaction> for Transaction {
                 .map(|h| h.0)
                 .collect(),
             authorization_list: value.authorization_list,
-        }
+        };
+
+        tx.is_valid()?;
+        Ok(tx)
     }
 }
 
@@ -198,7 +203,7 @@ impl Transaction {
     /// Checks if the transaction is valid by checking if it can be converted to a
     /// specialized transaction type.
     /// This is a lightweight check that does not move the self value.
-    pub fn is_valid(&self) -> bool {
+    pub fn is_valid(&self) -> Result<(), TransactionError> {
         match self.transaction_type {
             TransactionType::Legacy => LegacyTx::is_constructible_from(self),
             TransactionType::DynamicFee => DynamicFeeTx::is_constructible_from(self),
@@ -226,38 +231,40 @@ impl Serialize for JsonRpcTransaction {
             transaction: T,
         }
 
-        // NOTE: A conversion error can never happen with LegacyTx, AccessListTx, and DynamicFeeTx
-        // as the transaction type is guaranteed to be correct from the match statement
+        let tx = Transaction::try_from(self.clone())
+            .map_err(|err: TransactionError| serde::ser::Error::custom(err.to_string()))?;
+        // NOTE: A conversion error can never happen here as `Transaction::try_from` checks for the
+        // validity
         match self.transaction_type.0 {
-            TransactionType::Legacy => LegacyTx::try_from(Transaction::from(self.clone()))
+            TransactionType::Legacy => LegacyTx::try_from(tx)
                 .map(|tx| TransactionWithType {
                     transaction_type: AsHex(TransactionType::Legacy),
                     transaction: tx,
                 })
-                .map_err(|err| serde::ser::Error::custom(err.to_string()))?
+                .unwrap()
                 .serialize(serializer),
-            TransactionType::AccessList => AccessListTx::try_from(Transaction::from(self.clone()))
+            TransactionType::AccessList => AccessListTx::try_from(tx)
                 .map(|tx| TransactionWithType {
                     transaction_type: AsHex(TransactionType::AccessList),
                     transaction: tx,
                 })
                 .map_err(|err| serde::ser::Error::custom(err.to_string()))?
                 .serialize(serializer),
-            TransactionType::DynamicFee => DynamicFeeTx::try_from(Transaction::from(self.clone()))
+            TransactionType::DynamicFee => DynamicFeeTx::try_from(tx)
                 .map(|tx| TransactionWithType {
                     transaction_type: AsHex(TransactionType::DynamicFee),
                     transaction: tx,
                 })
                 .map_err(|err| serde::ser::Error::custom(err.to_string()))?
                 .serialize(serializer),
-            TransactionType::Blob => BlobTx::try_from(Transaction::from(self.clone()))
+            TransactionType::Blob => BlobTx::try_from(tx)
                 .map(|tx| TransactionWithType {
                     transaction_type: AsHex(TransactionType::Blob),
                     transaction: tx,
                 })
                 .map_err(|err| serde::ser::Error::custom(err.to_string()))?
                 .serialize(serializer),
-            TransactionType::SetCode => SetCodeTx::try_from(Transaction::from(self.clone()))
+            TransactionType::SetCode => SetCodeTx::try_from(tx)
                 .map(|tx| TransactionWithType {
                     transaction_type: AsHex(TransactionType::SetCode),
                     transaction: tx,
@@ -265,34 +272,6 @@ impl Serialize for JsonRpcTransaction {
                 .map_err(|err| serde::ser::Error::custom(err.to_string()))?
                 .serialize(serializer),
         }
-    }
-}
-
-/// A wrapper type for deserializing a transaction and ensuring it is valid.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct TransactionDeserializer(Transaction);
-
-impl TransactionDeserializer {
-    /// Gets the Transaction from the deserializer.
-    #[allow(dead_code)]
-    pub fn get(self) -> Transaction {
-        self.0
-    }
-}
-
-impl<'de> Deserialize<'de> for TransactionDeserializer {
-    /// Deserializes a Transaction only if it is valid.
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let transaction: Transaction = Transaction::deserialize(deserializer)?;
-        if !transaction.is_valid() {
-            return Err(serde::de::Error::custom(
-                TransactionError::ConversionError(transaction.transaction_type).to_string(),
-            ));
-        }
-        Ok(Self(transaction))
     }
 }
 
@@ -326,46 +305,49 @@ mod tests {
         let mut transaction = make_transaction(TransactionType::Legacy, true);
 
         assert!(
-            transaction.is_valid(),
+            transaction.is_valid().is_ok(),
             "Legacy transaction with to field should be valid"
         );
         transaction.to = None;
         assert!(
-            transaction.is_valid(),
+            transaction.is_valid().is_ok(),
             "Legacy transaction without to field should be valid"
         );
 
         transaction.transaction_type = TransactionType::AccessList;
         transaction.to = Some(Address::default());
         assert!(
-            transaction.is_valid(),
+            transaction.is_valid().is_ok(),
             "AccessList transaction with to field should be valid"
         );
         transaction.to = None;
         assert!(
-            transaction.is_valid(),
+            transaction.is_valid().is_ok(),
             "AccessList transaction without to field should be valid"
         );
 
         transaction.transaction_type = TransactionType::DynamicFee;
         transaction.to = Some(Address::default());
         assert!(
-            transaction.is_valid(),
+            transaction.is_valid().is_ok(),
             "DynamicFee transaction with to field should be valid"
         );
         transaction.to = None;
         assert!(
-            transaction.is_valid(),
+            transaction.is_valid().is_ok(),
             "DynamicFee transaction without to field should be valid"
         );
 
         transaction.transaction_type = TransactionType::Blob;
         transaction.to = Some(Address::default());
-        assert!(transaction.is_valid(), "Blob transaction should be valid");
+        assert!(
+            transaction.is_valid().is_ok(),
+            "Blob transaction should be valid"
+        );
 
         transaction.transaction_type = TransactionType::SetCode;
         assert!(
-            transaction.is_valid(),
+            transaction.is_valid().is_ok(),
             "SetCode transaction should be valid"
         );
     }
@@ -374,19 +356,15 @@ mod tests {
     fn is_valid_returns_false_for_invalid_transactions() {
         let invalid_blob_tx = make_transaction(TransactionType::Blob, false);
         assert!(
-            !invalid_blob_tx.is_valid(),
+            invalid_blob_tx.is_valid().is_err(),
             "Blob transaction without to field should be invalid"
         );
 
         let invalid_set_code_tx = make_transaction(TransactionType::SetCode, false);
         assert!(
-            !invalid_set_code_tx.is_valid(),
+            invalid_set_code_tx.is_valid().is_err(),
             "SetCode transaction without to field should be invalid"
         );
-    }
-
-    fn to_value(json_str: &str) -> serde_json::Value {
-        serde_json::from_str(json_str).unwrap()
     }
 
     #[test]
@@ -493,20 +471,18 @@ mod tests {
     fn can_be_deserialized_from_json() {
         // Legacy Tx
         {
-            let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
+            let transaction: Transaction = serde_json::from_str(
                 &make_json_transaction(TransactionType::Legacy, true).to_string(),
             )
-            .expect("Deserialization should not fail")
-            .get();
+            .expect("Deserialization should not fail");
             let legacy_tx = LegacyTx::try_from(transaction)
                 .expect("Conversion to LegacyTx with to field should not fail");
             assert_eq!(legacy_tx, make_legacy_tx(true));
 
-            let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
+            let transaction: Transaction = serde_json::from_str(
                 &make_json_transaction(TransactionType::Legacy, false).to_string(),
             )
-            .expect("Deserialization should not fail")
-            .get();
+            .expect("Deserialization should not fail");
             let legacy_tx = LegacyTx::try_from(transaction.clone())
                 .expect("Conversion to LegacyTx without to field should not fail");
             assert_eq!(legacy_tx, make_legacy_tx(false));
@@ -514,20 +490,18 @@ mod tests {
 
         // Access List Tx
         {
-            let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
+            let transaction: Transaction = serde_json::from_str(
                 &make_json_transaction(TransactionType::AccessList, true).to_string(),
             )
-            .expect("Deserialization should not fail")
-            .get();
+            .expect("Deserialization should not fail");
             let access_list_tx = AccessListTx::try_from(transaction.clone())
                 .expect("Conversion to AccessListTx with to field should not fail");
             assert_eq!(access_list_tx, make_access_list_tx(true));
 
-            let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
+            let transaction: Transaction = serde_json::from_str(
                 &make_json_transaction(TransactionType::AccessList, false).to_string(),
             )
-            .expect("Deserialization should not fail")
-            .get();
+            .expect("Deserialization should not fail");
             let access_list_tx = AccessListTx::try_from(transaction.clone())
                 .expect("Conversion to AccessListTx without to field should not fail");
             assert_eq!(access_list_tx, make_access_list_tx(false));
@@ -535,39 +509,34 @@ mod tests {
 
         // Dynamic Fee Tx
         {
-            let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
+            let transaction: Transaction = serde_json::from_str(
                 &make_json_transaction(TransactionType::DynamicFee, true).to_string(),
             )
-            .expect("Deserialization should not fail")
-            .get();
+            .expect("Deserialization should not fail");
             let dynamic_fee_tx = DynamicFeeTx::try_from(transaction.clone())
                 .expect("Conversion to DynamicFeeTx with to field should not fail");
             assert_eq!(dynamic_fee_tx, make_dynamic_fee_tx(true));
 
-            let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
+            let transaction: Transaction = serde_json::from_str(
                 &make_json_transaction(TransactionType::DynamicFee, false).to_string(),
             )
-            .expect("Deserialization should not fail")
-            .get();
+            .expect("Deserialization should not fail");
             let dynamic_fee_tx = DynamicFeeTx::try_from(transaction.clone())
                 .expect("Conversion to DynamicFeeTx without to should not fail");
             assert_eq!(dynamic_fee_tx, make_dynamic_fee_tx(false));
         }
 
-        let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
-            &make_json_transaction(TransactionType::Blob, true).to_string(),
-        )
-        .expect("Deserialization should not fail")
-        .get();
+        let transaction: Transaction =
+            serde_json::from_str(&make_json_transaction(TransactionType::Blob, true).to_string())
+                .expect("Deserialization should not fail");
         let blob_tx =
             BlobTx::try_from(transaction.clone()).expect("Conversion to BlobTx should not fail");
         assert_eq!(blob_tx, make_blob_tx());
 
-        let transaction: Transaction = serde_json::from_str::<TransactionDeserializer>(
+        let transaction: Transaction = serde_json::from_str(
             &make_json_transaction(TransactionType::SetCode, true).to_string(),
         )
-        .expect("Deserialization should not fail")
-        .get();
+        .expect("Deserialization should not fail");
         let set_code_tx = SetCodeTx::try_from(transaction.clone())
             .expect("Conversion to SetCodeTx should not fail");
         assert_eq!(set_code_tx, make_set_code_tx());
@@ -575,27 +544,30 @@ mod tests {
 
     #[test]
     fn deserialize_fails_for_invalid_transactions() {
-        let res = serde_json::from_str::<TransactionDeserializer>(
-            &make_json_transaction_with_invalid_type().to_string(),
-        );
+        let res: Result<Transaction, _> =
+            serde_json::from_str(&make_json_transaction_with_invalid_type().to_string());
         assert!(
             res.is_err(),
             "Deserialization of Transaction with invalid transaction type should fail"
         );
 
         let json_str = make_json_transaction(TransactionType::Blob, false).to_string();
-        let res = serde_json::from_str::<TransactionDeserializer>(&json_str);
+        let res: Result<Transaction, _> = serde_json::from_str(&json_str);
         assert!(
             res.is_err(),
             "Deserialization of Blob transaction without to field should fail"
         );
 
         let json_str = make_json_transaction(TransactionType::SetCode, false).to_string();
-        let res = serde_json::from_str::<TransactionDeserializer>(&json_str);
+        let res: Result<Transaction, _> = serde_json::from_str(&json_str);
         assert!(
             res.is_err(),
             "Deserialization of SetCode transaction without to field should fail"
         );
+    }
+
+    fn to_value(json_str: &str) -> serde_json::Value {
+        serde_json::from_str(json_str).unwrap()
     }
 
     impl Default for Transaction {
