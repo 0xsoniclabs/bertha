@@ -1,7 +1,7 @@
 use alloy_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 
-use crate::{AsHex, HexConvert, parse_hex_error::ParseHexError};
+use crate::{HexConvert, parse_hex_error::ParseHexError};
 
 /// A wrapper type to encode and decode an optional value as a RLP nil (empty string).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -35,22 +35,9 @@ impl<T: Encodable> Encodable for RlpNil<T> {
     }
 }
 
-impl<T: HexConvert> HexConvert for RlpNil<T> {
-    fn to_hex(&self) -> String {
-        match &self.0 {
-            Some(value) => value.to_hex(),
-            None => "0x".to_string(),
-        }
-    }
-
-    fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
-        Ok(Self(Some(T::try_from_hex(value)?)))
-    }
-}
-
-impl<T: HexConvert> AsHex<RlpNil<T>> {
+impl<T> RlpNil<T> {
     pub fn is_none(&self) -> bool {
-        self.0.0.is_none()
+        self.0.is_none()
     }
 }
 
@@ -119,24 +106,6 @@ mod tests {
         let mut encoded_slice = encoded.as_slice();
         let decoded: RlpNil<u64> = RlpNil::decode(&mut encoded_slice).unwrap();
         assert_eq!(decoded, RlpNil(Some(u64::MAX)));
-    }
-
-    #[test]
-    fn rlpnil_to_hex_returns_0x_for_nil() {
-        let nil: RlpNil<u64> = RlpNil(None);
-        assert_eq!(nil.to_hex(), "0x");
-    }
-
-    #[test]
-    fn rlpnil_to_hex_returns_normal_hex_encoding_for_value() {
-        let nil = RlpNil(Some(20u8));
-        assert_eq!(nil.to_hex(), "0x14");
-    }
-
-    #[test]
-    fn rlpnil_try_from_hex_parses_inner_value() {
-        let parsed = RlpNil::<u8>::try_from_hex("0x14").unwrap();
-        assert_eq!(parsed.0, Some(20));
     }
 
     #[test]

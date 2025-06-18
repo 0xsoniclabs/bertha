@@ -167,7 +167,7 @@ pub struct JsonRpcTransaction {
     pub gas_price: AsHex<U256>,
     pub gas: AsHex<u64>,
     #[serde(default)]
-    pub to: AsHex<RlpNil<Address>>,
+    pub to: Option<AsHex<Address>>,
     pub value: AsHex<U256>,
     pub input: AsHex<Vec<u8>>,
     #[serde(default)]
@@ -198,7 +198,7 @@ impl TryFrom<JsonRpcTransaction> for Transaction {
             nonce: value.nonce.0,
             gas_price: value.gas_price.0,
             gas_limit: value.gas.0,
-            to: value.to.0.0,
+            to: value.to.map(|to| to.0),
             value: value.value.0,
             data: value.input.0,
             y_parity: value.v.0,
@@ -229,7 +229,7 @@ impl From<Transaction> for JsonRpcTransaction {
             nonce: AsHex(value.nonce),
             gas_price: AsHex(value.gas_price),
             gas: AsHex(value.gas_limit),
-            to: AsHex(RlpNil(value.to)),
+            to: value.to.map(AsHex),
             value: AsHex(value.value),
             input: AsHex(value.data),
             v: AsHex(value.y_parity),

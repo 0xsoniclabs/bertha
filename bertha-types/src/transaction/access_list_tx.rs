@@ -15,8 +15,8 @@ pub(crate) struct AccessListTx {
     pub gas_price: AsHex<U256>,
     #[serde(rename = "gas")]
     pub gas_limit: AsHex<u64>,
-    #[serde(skip_serializing_if = "AsHex::is_none")]
-    pub to: AsHex<RlpNil<Address>>,
+    #[serde(skip_serializing_if = "RlpNil::is_none")]
+    pub to: RlpNil<AsHex<Address>>,
     pub value: AsHex<U256>,
     #[serde(rename = "input")]
     pub data: AsHex<RlpString>,
@@ -89,7 +89,7 @@ impl TryFrom<Transaction> for AccessListTx {
             nonce: AsHex(tx.nonce),
             gas_price: AsHex(tx.gas_price),
             gas_limit: AsHex(tx.gas_limit),
-            to: AsHex(RlpNil(tx.to)),
+            to: RlpNil(tx.to.map(AsHex)),
             value: AsHex(tx.value),
             data: AsHex(RlpString(tx.data)),
             access_list: tx.access_list,
@@ -108,7 +108,7 @@ impl From<AccessListTx> for Transaction {
             nonce: tx.nonce.0,
             gas_price: tx.gas_price.0,
             gas_limit: tx.gas_limit.0,
-            to: tx.to.0.0,
+            to: tx.to.0.map(|to| to.0),
             value: tx.value.0,
             data: tx.data.0.0,
             access_list: tx.access_list,
