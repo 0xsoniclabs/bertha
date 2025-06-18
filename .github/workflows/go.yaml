@@ -59,6 +59,7 @@ jobs:
       working-directory: block-db-go-bindings
       run: go test
 
+  # This is currently disabled because we can not guarantee that the protobuf compiler versions between CI and dev machines do not get out of sync.
   #codegen:
     #name: codegen
     #runs-on: ubuntu-latest
