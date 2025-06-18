@@ -27,7 +27,7 @@ pub(crate) struct AccessListTx {
     pub s: AsHex<U256>,
 }
 
-/// An entry in the access list.
+/// An entry in the EIP-2930 access list.
 /// It contains the address and a list of storage keys that the transaction plans to access.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "JsonRpcAccessListEntry", into = "JsonRpcAccessListEntry")]
