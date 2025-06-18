@@ -1,0 +1,79 @@
+syntax = "proto3";
+package block;
+
+// Corresponds to bertha_types::Block
+message Block {
+  bytes parent_hash = 1;
+  bytes ommers_hash = 2;
+  bytes beneficiary = 3;
+  bytes state_root = 4;
+  uint64 difficulty = 5;
+  uint64 number = 6;
+  uint64 gas_limit = 7;
+  uint64 timestamp = 8;
+  bytes extra_data = 9;
+  bytes prev_randao = 10;
+  bytes nonce = 11;
+
+  repeated Transaction transactions = 12;
+  repeated TransactionReceipt receipts = 13;
+
+  optional bytes base_fee_per_gas = 14;
+  optional bytes withdrawals_root = 15;
+  optional uint64 blob_gas_used = 16;
+  optional uint64 excess_blob_gas = 17;
+  optional bytes parent_beacon_block_root = 18;
+  optional bytes requests_hash = 19;
+}
+
+// Corresponds to bertha_types::Transaction
+message Transaction {
+  uint64 transaction_type = 1;
+  bytes chain_id = 2;
+  uint64 nonce = 3;
+  bytes gas_price = 4;
+  uint64 gas_limit = 5;
+  optional bytes to = 6;
+  bytes value = 7;
+  bytes data = 8;
+  repeated AccessListEntry access_list = 9;
+  bytes max_fee_per_gas = 10;
+  bytes max_priority_fee_per_gas = 11;
+  repeated bytes blob_versioned_hashes = 12;
+  bytes max_fee_per_blob_gas = 13;
+  repeated SetCodeAuthorization authorization_list = 14;
+  bytes y_parity = 15;
+  bytes r = 16;
+  bytes s = 17;
+}
+
+// Corresponds to bertha_types::AccessListEntry
+message AccessListEntry {
+  bytes address = 1;
+  repeated bytes storage_keys = 2;
+}
+
+// Corresponds to bertha_types::SetCodeAuthorization
+message SetCodeAuthorization {
+  bytes chain_id = 1;
+  bytes address = 2;
+  uint64 nonce = 3;
+  uint64 y_parity = 4;
+  bytes r = 5;
+  bytes s = 6;
+}
+
+// Corresponds to bertha_types::TransactionReceipt
+message TransactionReceipt {
+  uint64 transaction_type = 1;
+  uint64 status = 2;
+  uint64 cumulative_gas_used = 3;
+  repeated Log logs = 4;
+}
+
+// Corresponds to bertha_types::Log
+message Log {
+  bytes address = 1;
+  bytes data = 2;
+  repeated bytes topics = 3;
+}

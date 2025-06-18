@@ -1,4 +1,4 @@
-use crate::{Address, Hash, TransactionReceipt, U256};
+use crate::{Address, Hash, Transaction, TransactionReceipt, U256};
 
 /// An Ethereum-compatible block in "normal form", that is, without any redundant or derived fields.
 ///
@@ -28,7 +28,7 @@ pub struct Block {
     pub prev_randao: Hash,
     pub nonce: [u8; 8],
 
-    // pub transactions: Vec<Transaction>, // TODO
+    pub transactions: Vec<Transaction>,
     pub receipts: Vec<TransactionReceipt>,
 
     /// Added by EIP-1559

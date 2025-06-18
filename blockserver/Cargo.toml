@@ -5,6 +5,20 @@ edition = "2024"
 publish = false
 
 [dependencies]
+bertha-types = { path = "../bertha-types" }
+prost = "0.13.5"
+thiserror = "2.0.12"
+tonic = "0.13.1"
+
+[dev-dependencies]
+rand = "0.9.1"
+
+[build-dependencies]
+tonic-build = "*"
 
 [lints]
 workspace = true
+
+[package.metadata.cargo-machete]
+# Machete does not understand that prost is used in generated code.
+ignored = ["prost"]

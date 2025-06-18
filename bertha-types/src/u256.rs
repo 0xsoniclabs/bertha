@@ -18,6 +18,20 @@ pub struct U256(BnumU256);
 impl U256 {
     pub const ZERO: Self = U256(BnumU256::ZERO);
     pub const MAX: Self = U256(BnumU256::MAX);
+
+    /// Constructs a [U256] from a byte array in big-endian order.
+    pub fn from_be_bytes(bytes: &[u8; 32]) -> Self {
+        // The slice is 32 bytes long, so it is safe to unwrap.
+        BnumU256::from_be_slice(bytes).unwrap().into()
+    }
+
+    /// Returns the big-endian representation of the number as a byte array.
+    pub fn to_be_bytes(&self) -> [u8; 32] {
+        let mut bytes = [0u8; 32];
+        let src_bytes = &self.0.to_radix_be(256);
+        bytes[32 - src_bytes.len()..].copy_from_slice(src_bytes);
+        bytes
+    }
 }
 
 impl HexConvert for U256 {
@@ -184,6 +198,47 @@ mod test {
         let x = U256::from(256u16);
         let hex = x.to_hex();
         assert_eq!(hex, "0x100");
+    }
+
+    #[test]
+    fn can_be_converted_to_and_from_be_bytes() {
+        let x = U256::ZERO;
+        let bytes = x.to_be_bytes();
+        assert_eq!(bytes, [0; 32]);
+        assert_eq!(U256::from_be_bytes(&bytes), x);
+
+        let x = U256::from(256u64);
+        let bytes = x.to_be_bytes();
+        assert_eq!(
+            bytes,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 1, 0
+            ]
+        );
+        assert_eq!(U256::from_be_bytes(&bytes), x);
+
+        let x = U256::from(u64::MAX);
+        let bytes = x.to_be_bytes();
+        assert_eq!(
+            bytes,
+            [
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255,
+                255, 255, 255, 255, 255, 255
+            ]
+        );
+        assert_eq!(U256::from_be_bytes(&bytes), x);
+
+        let x = U256::MAX;
+        let bytes = x.to_be_bytes();
+        assert_eq!(
+            bytes,
+            [
+                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
+            ]
+        );
+        assert_eq!(U256::from_be_bytes(&bytes), x);
     }
 
     #[test]

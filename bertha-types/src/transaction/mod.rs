@@ -33,9 +33,9 @@ pub struct Transaction {
     pub gas_limit: u64,
     pub to: Option<Address>,
     pub value: U256,
-    pub data: Vec<u8>, // Called init for contract creation, data for message call transactions
-    pub access_list: Vec<AccessListEntry>,
+    pub data: Vec<u8>, // Called `init` for contract creation, `data` for message call transactions
     // The following fields are in EIP order
+    pub access_list: Vec<AccessListEntry>, // AccessListTx, DynamicFeeTx, BlobTx, SetCodeTx
     /// geth: GasFeeCap
     pub max_fee_per_gas: U256, // DynamicFeeTx, BlobTx, SetCodeTx
     /// geth: GasTipCap
