@@ -396,7 +396,7 @@ mod tests {
         transaction_type: TransactionType,
     ) -> bertha_types::TransactionReceipt {
         bertha_types::TransactionReceipt {
-            transaction_type: transaction_type.try_into().unwrap(),
+            transaction_type,
             status: rng.u64(),
             cumulative_gas_used: rng.u64(),
             logs: vec![make_log(rng), make_log(rng)],
