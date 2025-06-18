@@ -1,4 +1,5 @@
 pub mod blockdb;
+mod cli;
 mod error;
 mod proto;
 
