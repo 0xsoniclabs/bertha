@@ -1,7 +1,20 @@
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+
 use crate::HexConvert;
 
 /// A utility wrapper type for serializing and deserializing types as hex strings using serde.
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    RlpEncodableWrapper,
+    RlpDecodableWrapper,
+)]
 pub struct AsHex<T: HexConvert>(pub T);
 
 impl<T: HexConvert> serde::Serialize for AsHex<T> {

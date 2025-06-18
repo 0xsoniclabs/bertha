@@ -1,12 +1,13 @@
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde::Serialize;
 
 use crate::{
     Address, AsHex, Transaction, U256,
-    transaction::{AccessListEntry, TransactionError, TransactionType},
+    transaction::{AccessListEntry, RlpNil, RlpString, TransactionError, TransactionType},
 };
 
 // An Ethereum transaction with dynamic gas fees, as defined in [EIP-1559](https://eips.ethereum.org/EIPS/eip-1559).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, RlpEncodable, RlpDecodable)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DynamicFeeTx {
     pub chain_id: AsHex<U256>,
@@ -15,11 +16,11 @@ pub(crate) struct DynamicFeeTx {
     pub max_fee_per_gas: AsHex<U256>,
     #[serde(rename = "gas")]
     pub gas_limit: AsHex<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub to: Option<AsHex<Address>>,
+    #[serde(skip_serializing_if = "RlpNil::is_none")]
+    pub to: RlpNil<AsHex<Address>>,
     pub value: AsHex<U256>,
     #[serde(rename = "input")]
-    pub data: AsHex<Vec<u8>>,
+    pub data: AsHex<RlpString>,
     pub access_list: Vec<AccessListEntry>,
 
     #[serde(rename = "v")]
@@ -53,9 +54,9 @@ impl TryFrom<Transaction> for DynamicFeeTx {
             max_priority_fee_per_gas: AsHex(tx.max_priority_fee_per_gas),
             max_fee_per_gas: AsHex(tx.max_fee_per_gas),
             gas_limit: AsHex(tx.gas_limit),
-            to: tx.to.map(AsHex),
+            to: RlpNil(tx.to.map(AsHex)),
             value: AsHex(tx.value),
-            data: AsHex(tx.data),
+            data: AsHex(RlpString(tx.data)),
             access_list: tx.access_list,
             y_parity: AsHex(tx.y_parity),
             r: AsHex(tx.r),
@@ -72,9 +73,9 @@ impl From<DynamicFeeTx> for Transaction {
             nonce: tx.nonce.0,
             gas_price: U256::default(),
             gas_limit: tx.gas_limit.0,
-            to: tx.to.map(|addr| addr.0),
+            to: tx.to.0.map(|to| to.0),
             value: tx.value.0,
-            data: tx.data.0,
+            data: tx.data.0.0,
             access_list: tx.access_list,
             max_priority_fee_per_gas: tx.max_priority_fee_per_gas.0,
             max_fee_per_gas: tx.max_fee_per_gas.0,
