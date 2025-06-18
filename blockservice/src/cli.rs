@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use bertha_types::{Hash, HexConvert};
 use clap::{Parser, Subcommand};
 
-/// Block Server
+/// Block Service
 #[derive(Debug, Clone, PartialEq, Eq, Parser)]
 pub struct Args {
     #[command(subcommand)]
@@ -19,7 +19,7 @@ pub enum Command {
     },
     /// Import all blocks from the specified snapshot (`.g`) file into the block database.
     Import { snapshot_file: PathBuf },
-    /// Lists all locally stored block ranges for all chains or only for the specific chain if
+    /// List all locally stored block ranges for all chains or only for the specific chain if
     /// specified.
     List { chain_id: Option<u64> },
     /// Check that all parent hashes match the hash of the parent block starting from the specified
@@ -54,16 +54,16 @@ mod tests {
 
     #[test]
     fn call_without_arguments_prints_usage() {
-        let args = ["blockserver"];
+        let args = ["blockservice"];
         let expected = "\
-Block Server
+Block Service
 
-Usage: blockserver <COMMAND>
+Usage: blockservice <COMMAND>
 
 Commands:
   init    Initialize a new block database in the current directory or at the specified path
   import  Import all blocks from the specified snapshot (`.g`) file into the block database
-  list    Lists all locally stored block ranges for all chains or only for the specific chain if specified
+  list    List all locally stored block ranges for all chains or only for the specific chain if specified
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
   clean   Delete all blocks for chains not referenced in the config file
@@ -78,11 +78,11 @@ Options:
 
     #[test]
     fn call_with_invalid_subcommand_prints_parse_error() {
-        let args = ["blockserver", "invalid"];
+        let args = ["blockservice", "invalid"];
         let expected = "\
 error: unrecognized subcommand 'invalid'
 
-Usage: blockserver <COMMAND>
+Usage: blockservice <COMMAND>
 
 For more information, try '--help'.
 ";
@@ -91,16 +91,16 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_help_argument_prints_help() {
-        let args = ["blockserver", "--help"];
+        let args = ["blockservice", "--help"];
         let expected = "\
-Block Server
+Block Service
 
-Usage: blockserver <COMMAND>
+Usage: blockservice <COMMAND>
 
 Commands:
   init    Initialize a new block database in the current directory or at the specified path
   import  Import all blocks from the specified snapshot (`.g`) file into the block database
-  list    Lists all locally stored block ranges for all chains or only for the specific chain if specified
+  list    List all locally stored block ranges for all chains or only for the specific chain if specified
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
   clean   Delete all blocks for chains not referenced in the config file
@@ -115,7 +115,7 @@ Options:
 
     #[test]
     fn call_with_init_subcommand_without_argument_parses_successfully() {
-        let args = ["blockserver", "init"];
+        let args = ["blockservice", "init"];
         let expected = Args {
             command: Command::Init { path: None },
         };
@@ -125,7 +125,7 @@ Options:
     #[test]
     fn call_with_init_subcommand_with_path_parses_successfully() {
         let path = "/path/to/database";
-        let args = ["blockserver", "init", path];
+        let args = ["blockservice", "init", path];
         let expected = Args {
             command: Command::Init {
                 path: Some(PathBuf::from(path)),
@@ -136,11 +136,11 @@ Options:
 
     #[test]
     fn call_with_init_subcommand_with_help_argument_prints_subcommand_help() {
-        let args = ["blockserver", "init", "--help"];
+        let args = ["blockservice", "init", "--help"];
         let expected = "\
 Initialize a new block database in the current directory or at the specified path
 
-Usage: blockserver init [PATH]
+Usage: blockservice init [PATH]
 
 Arguments:
   [PATH]  The path to the block database. Defaults to the current working directory
@@ -153,11 +153,11 @@ Options:
 
     #[test]
     fn call_with_init_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockserver", "init", "/path/to/database", "invalid"];
+        let args = ["blockservice", "init", "/path/to/database", "invalid"];
         let expected = "\
 error: unexpected argument 'invalid' found
 
-Usage: blockserver init [PATH]
+Usage: blockservice init [PATH]
 
 For more information, try '--help'.
 ";
@@ -166,12 +166,12 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_import_subcommand_without_argument_prints_parse_error() {
-        let args = ["blockserver", "import"];
+        let args = ["blockservice", "import"];
         let expected = "\
 error: the following required arguments were not provided:
   <SNAPSHOT_FILE>
 
-Usage: blockserver import <SNAPSHOT_FILE>
+Usage: blockservice import <SNAPSHOT_FILE>
 
 For more information, try '--help'.
 ";
@@ -181,7 +181,7 @@ For more information, try '--help'.
     #[test]
     fn call_with_import_subcommand_with_path_parses_successfully() {
         let path = "/path/to/snapshot.g";
-        let args = ["blockserver", "import", path];
+        let args = ["blockservice", "import", path];
         let expected = Args {
             command: Command::Import {
                 snapshot_file: PathBuf::from(path),
@@ -192,11 +192,11 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_import_subcommand_with_help_argument_prints_subcommand_help() {
-        let args = ["blockserver", "import", "--help"];
+        let args = ["blockservice", "import", "--help"];
         let expected = "\
 Import all blocks from the specified snapshot (`.g`) file into the block database
 
-Usage: blockserver import <SNAPSHOT_FILE>
+Usage: blockservice import <SNAPSHOT_FILE>
 
 Arguments:
   <SNAPSHOT_FILE>
@@ -209,11 +209,11 @@ Options:
 
     #[test]
     fn call_with_import_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockserver", "import", "/path/to/snapshot.g", "invalid"];
+        let args = ["blockservice", "import", "/path/to/snapshot.g", "invalid"];
         let expected = "\
 error: unexpected argument 'invalid' found
 
-Usage: blockserver import <SNAPSHOT_FILE>
+Usage: blockservice import <SNAPSHOT_FILE>
 
 For more information, try '--help'.
 ";
@@ -222,7 +222,7 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_list_subcommand_without_argument_parses_successfully() {
-        let args = ["blockserver", "list"];
+        let args = ["blockservice", "list"];
         let expected = Args {
             command: Command::List { chain_id: None },
         };
@@ -232,7 +232,7 @@ For more information, try '--help'.
     #[test]
     fn call_with_list_subcommand_with_chain_id_parses_successfully() {
         let chain_id = 146;
-        let args = ["blockserver", "list", &chain_id.to_string()];
+        let args = ["blockservice", "list", &chain_id.to_string()];
         let expected = Args {
             command: Command::List {
                 chain_id: Some(chain_id),
@@ -243,11 +243,11 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_list_subcommand_with_help_argument_prints_subcommand_help() {
-        let args = ["blockserver", "list", "--help"];
+        let args = ["blockservice", "list", "--help"];
         let expected = "\
-Lists all locally stored block ranges for all chains or only for the specific chain if specified
+List all locally stored block ranges for all chains or only for the specific chain if specified
 
-Usage: blockserver list [CHAIN_ID]
+Usage: blockservice list [CHAIN_ID]
 
 Arguments:
   [CHAIN_ID]
@@ -260,7 +260,7 @@ Options:
 
     #[test]
     fn call_with_list_subcommand_with_invalid_argument_prints_parse_error() {
-        let args = ["blockserver", "list", "invalid"];
+        let args = ["blockservice", "list", "invalid"];
         let expected = "\
 error: invalid value 'invalid' for '[CHAIN_ID]': invalid digit found in string
 
@@ -271,11 +271,11 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_list_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockserver", "list", "146", "invalid"];
+        let args = ["blockservice", "list", "146", "invalid"];
         let expected = "\
 error: unexpected argument 'invalid' found
 
-Usage: blockserver list [CHAIN_ID]
+Usage: blockservice list [CHAIN_ID]
 
 For more information, try '--help'.
 ";
@@ -284,12 +284,12 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_verify_subcommand_without_argument_prints_parse_error() {
-        let args = ["blockserver", "verify"];
+        let args = ["blockservice", "verify"];
         let expected = "\
 error: the following required arguments were not provided:
   <CHAIN_ID>
 
-Usage: blockserver verify <CHAIN_ID> [BLOCK_NUMBER] [BLOCK_HASH]
+Usage: blockservice verify <CHAIN_ID> [BLOCK_NUMBER] [BLOCK_HASH]
 
 For more information, try '--help'.
 ";
@@ -302,7 +302,7 @@ For more information, try '--help'.
         let block_number = 123456;
         let block_hash = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
         let args = [
-            "blockserver",
+            "blockservice",
             "verify",
             &chain_id.to_string(),
             &block_number.to_string(),
@@ -320,11 +320,11 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_verify_subcommand_with_help_argument_prints_subcommand_help() {
-        let args = ["blockserver", "verify", "--help"];
+        let args = ["blockservice", "verify", "--help"];
         let expected = "\
 Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
 
-Usage: blockserver verify <CHAIN_ID> [BLOCK_NUMBER] [BLOCK_HASH]
+Usage: blockservice verify <CHAIN_ID> [BLOCK_NUMBER] [BLOCK_HASH]
 
 Arguments:
   <CHAIN_ID>
@@ -339,7 +339,7 @@ Options:
 
     #[test]
     fn call_with_verify_subcommand_with_invalid_argument_prints_parse_error() {
-        let args = ["blockserver", "verify", "invalid"];
+        let args = ["blockservice", "verify", "invalid"];
         let expected = "\
 error: invalid value 'invalid' for '<CHAIN_ID>': invalid digit found in string
 
@@ -351,7 +351,7 @@ For more information, try '--help'.
     #[test]
     fn call_with_verify_subcommand_with_additional_argument_prints_parse_error() {
         let args = [
-            "blockserver",
+            "blockservice",
             "verify",
             "146",
             "123456",
@@ -361,7 +361,7 @@ For more information, try '--help'.
         let expected = "\
 error: unexpected argument 'invalid' found
 
-Usage: blockserver verify <CHAIN_ID> [BLOCK_NUMBER] [BLOCK_HASH]
+Usage: blockservice verify <CHAIN_ID> [BLOCK_NUMBER] [BLOCK_HASH]
 
 For more information, try '--help'.
 ";
@@ -370,12 +370,12 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_purge_subcommand_without_argument_prints_parse_error() {
-        let args = ["blockserver", "purge"];
+        let args = ["blockservice", "purge"];
         let expected = "\
 error: the following required arguments were not provided:
   <CHAIN_ID>
 
-Usage: blockserver purge <CHAIN_ID> [FROM] [TO]
+Usage: blockservice purge <CHAIN_ID> [FROM] [TO]
 
 For more information, try '--help'.
 ";
@@ -385,7 +385,7 @@ For more information, try '--help'.
     #[test]
     fn call_with_purge_subcommand_with_chain_id_parses_successfully() {
         let chain_id = 146;
-        let args = ["blockserver", "purge", &chain_id.to_string()];
+        let args = ["blockservice", "purge", &chain_id.to_string()];
         let expected = Args {
             command: Command::Purge {
                 chain_id,
@@ -402,7 +402,7 @@ For more information, try '--help'.
         let from = 1000;
         let to = 2000;
         let args = [
-            "blockserver",
+            "blockservice",
             "purge",
             &chain_id.to_string(),
             &from.to_string(),
@@ -420,11 +420,11 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_purge_subcommand_with_help_argument_prints_subcommand_help() {
-        let args = ["blockserver", "purge", "--help"];
+        let args = ["blockservice", "purge", "--help"];
         let expected = "\
 Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
 
-Usage: blockserver purge <CHAIN_ID> [FROM] [TO]
+Usage: blockservice purge <CHAIN_ID> [FROM] [TO]
 
 Arguments:
   <CHAIN_ID>
@@ -439,7 +439,7 @@ Options:
 
     #[test]
     fn call_with_purge_subcommand_with_invalid_argument_prints_parse_error() {
-        let args = ["blockserver", "purge", "invalid"];
+        let args = ["blockservice", "purge", "invalid"];
         let expected = "\
 error: invalid value 'invalid' for '<CHAIN_ID>': invalid digit found in string
 
@@ -450,11 +450,11 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_purge_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockserver", "purge", "146", "1000", "2000", "invalid"];
+        let args = ["blockservice", "purge", "146", "1000", "2000", "invalid"];
         let expected = "\
 error: unexpected argument 'invalid' found
 
-Usage: blockserver purge <CHAIN_ID> [FROM] [TO]
+Usage: blockservice purge <CHAIN_ID> [FROM] [TO]
 
 For more information, try '--help'.
 ";
@@ -463,7 +463,7 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_clean_subcommand_without_argument_parses_successfully() {
-        let args = ["blockserver", "clean"];
+        let args = ["blockservice", "clean"];
         let expected = Args {
             command: Command::Clean,
         };
@@ -472,11 +472,11 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_clean_subcommand_with_help_argument_prints_subcommand_help() {
-        let args = ["blockserver", "clean", "--help"];
+        let args = ["blockservice", "clean", "--help"];
         let expected = "\
 Delete all blocks for chains not referenced in the config file
 
-Usage: blockserver clean
+Usage: blockservice clean
 
 Options:
   -h, --help  Print help
@@ -486,11 +486,11 @@ Options:
 
     #[test]
     fn call_with_clean_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockserver", "clean", "invalid"];
+        let args = ["blockservice", "clean", "invalid"];
         let expected = "\
 error: unexpected argument 'invalid' found
 
-Usage: blockserver clean
+Usage: blockservice clean
 
 For more information, try '--help'.
 ";
@@ -499,7 +499,7 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_start_subcommand_without_argument_parses_successfully() {
-        let args = ["blockserver", "start"];
+        let args = ["blockservice", "start"];
         let expected = Args {
             command: Command::Start,
         };
@@ -508,11 +508,11 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_start_subcommand_with_help_argument_prints_subcommand_help() {
-        let args = ["blockserver", "start", "--help"];
+        let args = ["blockservice", "start", "--help"];
         let expected = "\
 Start the block server
 
-Usage: blockserver start
+Usage: blockservice start
 
 Options:
   -h, --help  Print help
@@ -522,11 +522,11 @@ Options:
 
     #[test]
     fn call_with_start_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockserver", "start", "invalid"];
+        let args = ["blockservice", "start", "invalid"];
         let expected = "\
 error: unexpected argument 'invalid' found
 
-Usage: blockserver start
+Usage: blockservice start
 
 For more information, try '--help'.
 ";
