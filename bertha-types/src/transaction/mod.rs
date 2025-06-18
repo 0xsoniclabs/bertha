@@ -89,10 +89,9 @@ impl Encodable for Transaction {
             RlpString(buf).encode(out);
         }
 
-        // in case the conversion to one of the inner types fails (the transaction is invalid), we
-        // encode an empty string to make sure decoding fails when this data is ingested
-        // again
-        // this is essentially a trash in -> trash out policy
+        // In case the conversion to one of the inner types fails (the transaction is invalid),
+        // we encode an empty string to make sure decoding fails when this data is ingested
+        // again. This is essentially a trash in -> trash out policy.
         match self.transaction_type {
             TransactionType::Legacy => LegacyTx::try_from(self.clone())
                 .map(|tx| tx.encode(out))
@@ -1212,10 +1211,35 @@ mod tests {
     }
 
     #[test]
+    fn encodes_invalid_transaction_to_empty_string() {
+        let invalid_blob_tx = make_transaction(TransactionType::Blob, false);
+        let mut buf = Vec::new();
+        invalid_blob_tx.encode(&mut buf);
+        assert_eq!(buf, [alloy_rlp::EMPTY_STRING_CODE]);
+    }
+
+    #[test]
     fn can_be_decoded_from_rlp() {
         for (tx, rlp) in generate_transactions_with_rlp() {
             let decoded = Transaction::decode(&mut &rlp[..]).unwrap();
             assert_eq!(decoded, tx, "Decoded Transaction should match expected one");
         }
+    }
+
+    #[test]
+    fn fails_to_decode_when_transaction_type_is_invalid() {
+        let tx = make_transaction(TransactionType::AccessList, false);
+        let mut buf = Vec::new();
+        tx.encode(&mut buf);
+        let mut rlp = buf.as_slice();
+        Header::decode(&mut rlp).unwrap();
+        let header_len = buf.len() - rlp.len();
+        // next next byte is used for the transaction type
+        buf[header_len] = 0x05; // Set an invalid transaction type
+        let decoded = Transaction::decode(&mut &buf[..]);
+        assert_eq!(
+            decoded,
+            Err(alloy_rlp::Error::Custom("invalid transaction type"))
+        );
     }
 }
