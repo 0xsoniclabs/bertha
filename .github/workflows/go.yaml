@@ -1,0 +1,83 @@
+name: Go
+
+permissions:
+  contents: read
+  checks: write
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/go.yaml'
+      - 'block-db-go-bindings/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/go.yaml'
+      - 'block-db-go-bindings/**'
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+    - name: setup go
+      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      with:
+        go-version: "1.24.2"
+    - name: install rocksdb
+      uses: awalsh128/cache-apt-pkgs-action@latest
+      with:
+        packages: librocksdb-dev
+    - name: install golangci-lint
+      run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
+    - name: golangci
+      working-directory: block-db-go-bindings
+      run: |
+        export PATH="${PATH}:$(go env GOPATH)/bin"
+        golangci-lint run .
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+    - name: setup go
+      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      with:
+        go-version: "1.24.2"
+    - name: install rocksdb
+      uses: awalsh128/cache-apt-pkgs-action@latest
+      with:
+        packages: librocksdb-dev
+    - name: go test
+      working-directory: block-db-go-bindings
+      run: go test
+
+  # This is currently disabled because we can not guarantee that the protobuf compiler versions between CI and dev machines do not get out of sync.
+  #codegen:
+    #name: codegen
+    #runs-on: ubuntu-latest
+
+    #steps:
+    #- name: checkout
+      #uses: actions/checkout@v4
+    #- name: setup go
+      #uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      #with:
+        #go-version: "1.24.2"
+    #- name: install deps
+      #run: |
+        #sudo apt-get install protobuf-compiler
+        #go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+    #- name: go generate
+      #working-directory: block-db-go-bindings
+      #run: |
+        #export PATH="${PATH}:$(go env GOPATH)/bin"
+        #go generate .
+        #git diff --exit-code # make sure there are no changes after code generation
