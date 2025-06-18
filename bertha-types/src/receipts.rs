@@ -3,7 +3,7 @@ use alloy_trie::{HashBuilder, Nibbles};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{Address, AsHex, Bloom, Hash, Log};
+use crate::{Address, AsHex, Bloom, Hash, Log, transaction::TransactionType};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Error)]
 #[error("the computed receipt root did not match the receipt root of the block header")]
@@ -15,7 +15,7 @@ pub struct ReceiptVerificationError;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(from = "JsonRpcTransactionReceipt", into = "JsonRpcTransactionReceipt")]
 pub struct TransactionReceipt {
-    pub type_: u64,
+    pub transaction_type: TransactionType,
     pub status: u64,
     pub cumulative_gas_used: u64,
     pub logs: Vec<Log>,
@@ -42,9 +42,8 @@ impl Encodable for TransactionReceipt {
 
     fn encode(&self, out: &mut dyn BufMut) {
         // see: https://github.com/ethereum/go-ethereum/blob/a511553e448c947a0fe8f34acf7bb6f9818c2b49/core/types/receipt.go#L122-L140
-        const LEGACY_TRANSACTION_TYPE: u8 = 0;
-        if self.type_ != LEGACY_TRANSACTION_TYPE as u64 {
-            out.put_u8(self.type_ as u8);
+        if self.transaction_type != TransactionType::Legacy {
+            out.put_u8(self.transaction_type as u8);
         }
         Header {
             list: true,
@@ -76,7 +75,8 @@ impl TransactionReceipt {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct JsonRpcTransactionReceipt {
-    pub type_: AsHex<u64>,
+    #[serde(rename = "type")]
+    pub transaction_type: AsHex<TransactionType>,
     pub status: AsHex<u64>,
     pub cumulative_gas_used: AsHex<u64>,
     pub logs_bloom: AsHex<Bloom>,
@@ -96,7 +96,7 @@ struct JsonRpcTransactionReceipt {
 impl From<JsonRpcTransactionReceipt> for TransactionReceipt {
     fn from(value: JsonRpcTransactionReceipt) -> Self {
         Self {
-            type_: value.type_.0,
+            transaction_type: value.transaction_type.0,
             status: value.status.0,
             cumulative_gas_used: value.cumulative_gas_used.0,
             logs: value.logs,
@@ -107,7 +107,7 @@ impl From<JsonRpcTransactionReceipt> for TransactionReceipt {
 impl From<TransactionReceipt> for JsonRpcTransactionReceipt {
     fn from(value: TransactionReceipt) -> Self {
         Self {
-            type_: AsHex(value.type_),
+            transaction_type: AsHex(value.transaction_type),
             status: AsHex(value.status),
             cumulative_gas_used: AsHex(value.cumulative_gas_used),
             logs_bloom: AsHex(value.logs_bloom()),
@@ -195,18 +195,18 @@ mod tests {
             status: 1,
             cumulative_gas_used: 21000,
             logs: vec![],
-            type_: 0,
+            transaction_type: TransactionType::Legacy,
         };
 
         // if the type == legacy transaction type (0) -> type field not encoded
         assert_eq!(receipt.encode_value(), Vec::try_from_hex("0xf9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
 
         // if the type != legacy transaction type (0) -> type field encoded
-        receipt.type_ = 1;
+        receipt.transaction_type = TransactionType::AccessList;
         assert_eq!(receipt.encode_value(), Vec::try_from_hex("0x01f9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
 
         // if the type != legacy transaction type (0) -> type field encoded
-        receipt.type_ = 2;
+        receipt.transaction_type = TransactionType::DynamicFee;
         assert_eq!(receipt.encode_value(), Vec::try_from_hex("0x02f9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
     }
 
@@ -236,7 +236,7 @@ mod tests {
             status: 0,
             cumulative_gas_used: 0,
             logs: vec![log.clone()],
-            type_: 0,
+            transaction_type: TransactionType::Legacy,
         };
         let block_receipt = VerifiedBlockReceipt(vec![receipt]);
 
@@ -330,13 +330,13 @@ mod tests {
                     },
                 ],
                 status: 1,
-                type_: 2,
+                transaction_type: TransactionType::DynamicFee,
             },
             TransactionReceipt {
                 cumulative_gas_used: 98081,
                 logs: vec![],
                 status: 1,
-                type_: 2,
+                transaction_type: TransactionType::DynamicFee,
             },
         ])
     }
@@ -389,7 +389,7 @@ mod tests {
             cumulative_gas_used: 12345,
             logs: vec![log.clone()],
             status: 1,
-            type_: 2,
+            transaction_type: TransactionType::DynamicFee,
         };
 
         let expected_json = format!(
@@ -446,7 +446,7 @@ mod tests {
             cumulative_gas_used: 12345,
             logs: vec![expected_log.clone()],
             status: 1,
-            type_: 2,
+            transaction_type: TransactionType::DynamicFee,
         };
 
         assert_eq!(
