@@ -8,4 +8,6 @@ pub enum Error {
     Protobuf(#[from] DecodeError),
     #[error("conversion from generic representation to Rust type failed")]
     TypeConversion,
+    #[error("I/O error")]
+    Io,
 }

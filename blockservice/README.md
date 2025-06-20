@@ -14,3 +14,17 @@ On Ubuntu 24.04, run
 ```
 sudo apt-get install librocksdb-dev protobuf-compiler
 ```
+
+## Running
+
+Create a new block database
+
+```
+cargo run --release -- init ./
+```
+
+Import a Sonic genesis snapshot
+
+```
+cargo run --release -- import /path/to/snapshot.g
+```
