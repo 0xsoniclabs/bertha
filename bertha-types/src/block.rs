@@ -1,5 +1,6 @@
 use crate::{
-    Address, EMPTY_SHA3_OMMERS_HASH, Hash, HexConvert, Transaction, TransactionReceipt, U256,
+    Address, EMPTY_SHA3_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, HexConvert, Transaction,
+    TransactionReceipt, U256,
 };
 
 /// An Ethereum-compatible block in "normal form", that is, without any redundant or derived fields.
@@ -63,8 +64,11 @@ impl Block {
             // in Sonic the extra_data must be 12 bytes long because it holds the duration and
             // nanoseconds part of the timestamp
             extra_data: vec![0; 12],
+            withdrawals_root: Some(Hash::try_from_hex(EMPTY_TREE_ROOT_HASH).unwrap()),
             // in Sonic the base_fee_per_gas is always set, so default to 0 instead of None
             base_fee_per_gas: Some(U256::default()),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
             ..Default::default()
         }
     }

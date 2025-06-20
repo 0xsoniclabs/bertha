@@ -121,9 +121,9 @@ mod tests {
             transactions: vec![],
             receipts: vec![],
             base_fee_per_gas: Some(U256::from(100u8)),
-            withdrawals_root: None,
-            blob_gas_used: None,
-            excess_blob_gas: None,
+            withdrawals_root: Some(Hash::try_from_hex(EMPTY_TREE_ROOT_HASH).unwrap()),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
             requests_hash: None,
         };
