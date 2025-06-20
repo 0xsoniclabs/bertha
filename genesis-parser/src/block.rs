@@ -1,7 +1,7 @@
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use bertha_types::{Block, EMPTY_SHA3_OMMERS_HASH, Hash, HexConvert, Transaction, U256};
 
-use crate::transaction_receipt::StoredReceiptRlp;
+use crate::transaction_receipt::{StoredReceiptRlp, StoredReceiptRlpWithTxType};
 
 // Source: sonic/inter/ibr/inter_block_records.go
 #[derive(Debug, Clone, Default, PartialEq, Eq, RlpEncodable, RlpDecodable)]
@@ -39,6 +39,19 @@ impl TryFrom<IdxFullBlock> for Block {
 
         // timestamp is in nanoseconds
         let timestamp_secs = idx_full_block.block.timestamp.div_euclid(10u64.pow(9));
+
+        let receipts = idx_full_block
+            .block
+            .receipts
+            .into_iter()
+            .zip(&idx_full_block.block.txn)
+            .map(|(receipt, tx)| StoredReceiptRlpWithTxType {
+                receipt,
+                transaction_type: tx.transaction_type,
+            })
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, _>>()?;
+
         Ok(Self {
             parent_hash: idx_full_block.block.parent_hash,
             ommers_hash: Hash::try_from_hex(EMPTY_SHA3_OMMERS_HASH).unwrap(),
@@ -52,12 +65,7 @@ impl TryFrom<IdxFullBlock> for Block {
             prev_randao: idx_full_block.block.prev_randao,
             nonce: [0; 8],
             transactions: idx_full_block.block.txn,
-            receipts: idx_full_block
-                .block
-                .receipts
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<Vec<_>, _>>()?,
+            receipts,
             base_fee_per_gas: Some(idx_full_block.block.base_fee),
             withdrawals_root: None,
             blob_gas_used: None,

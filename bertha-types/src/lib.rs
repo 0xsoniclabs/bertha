@@ -24,4 +24,4 @@ pub type Bloom = [u8; 256];
 pub type Hash = [u8; 32];
 pub type Address = [u8; 20];
 
-pub(crate) use rlp_utils::*;
+pub use rlp_utils::*;
