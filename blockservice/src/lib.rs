@@ -1,3 +1,4 @@
+pub mod blockdb;
 mod error;
 mod proto;
 
