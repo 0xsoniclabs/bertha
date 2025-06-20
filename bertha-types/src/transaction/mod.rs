@@ -5,7 +5,7 @@ mod error;
 mod legacy_tx;
 mod set_code_tx;
 
-use alloy_rlp::{Decodable, Encodable, Header};
+use alloy_rlp::{Decodable, Encodable};
 use alloy_trie::{HashBuilder, Nibbles};
 use serde::{Deserialize, Serialize};
 
@@ -56,21 +56,19 @@ pub struct Transaction {
 
 impl Decodable for Transaction {
     fn decode(rlp: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
-        let header = Header::decode(rlp)?;
-        if header.list {
-            Ok(LegacyTx::decode(rlp, header.payload_length)?.into())
+        if rlp.is_empty() {
+            return Err(alloy_rlp::Error::InputTooShort);
+        }
+        let type_ = rlp[0];
+        if type_ > 0x7f {
+            Ok(LegacyTx::decode(rlp)?.into())
         } else {
-            if rlp.is_empty() {
-                return Err(alloy_rlp::Error::InputTooShort);
-            }
-            let type_ = rlp[0];
-            let mut inner_data = &rlp[1..header.payload_length];
-            *rlp = &rlp[header.payload_length..];
+            *rlp = &rlp[1..];
             match type_ {
-                1 => Ok(AccessListTx::decode(&mut inner_data)?.into()),
-                2 => Ok(DynamicFeeTx::decode(&mut inner_data)?.into()),
-                3 => Ok(BlobTx::decode(&mut inner_data)?.into()),
-                4 => Ok(SetCodeTx::decode(&mut inner_data)?.into()),
+                1 => Ok(AccessListTx::decode(rlp)?.into()),
+                2 => Ok(DynamicFeeTx::decode(rlp)?.into()),
+                3 => Ok(BlobTx::decode(rlp)?.into()),
+                4 => Ok(SetCodeTx::decode(rlp)?.into()),
                 _ => Err(alloy_rlp::Error::Custom("invalid transaction type")),
             }
         }
@@ -84,10 +82,8 @@ impl Encodable for Transaction {
             tx: T,
             out: &mut dyn alloy_rlp::BufMut,
         ) {
-            let mut buf = Vec::new();
-            buf.push(transaction_type as u8);
-            tx.encode(&mut buf);
-            RlpString(buf).encode(out);
+            out.put_u8(transaction_type as u8);
+            tx.encode(out);
         }
 
         // In case the conversion to one of the inner types fails (the transaction is invalid),
@@ -114,6 +110,7 @@ impl Encodable for Transaction {
 }
 
 impl Transaction {
+    #[allow(dead_code)]
     fn encode_value(&self) -> Vec<u8> {
         let mut out = Vec::new();
         self.encode(&mut out);
@@ -121,44 +118,31 @@ impl Transaction {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct BlockTransactions(Vec<Transaction>);
+#[allow(dead_code)]
+pub fn verify(
+    transactions: Vec<Transaction>,
+    transactions_root: &Hash,
+) -> Result<(), VerificationError> {
+    let encode_key = |index: usize| -> Vec<u8> {
+        let mut v = Vec::new();
+        index.encode(&mut v);
+        v
+    };
+    let mut trie = HashBuilder::default();
+    let mut leaves: Vec<_> = transactions
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (Nibbles::unpack(encode_key(i)), r.encode_value()))
+        .collect();
+    leaves.sort();
+    leaves.into_iter().for_each(|l| trie.add_leaf(l.0, &l.1));
 
-impl BlockTransactions {
-    pub fn verify(
-        &self,
-        transactions_root: &Hash,
-    ) -> Result<VerifiedBlockTransactions, VerificationError> {
-        let encode_key = |index: usize| -> Vec<u8> {
-            let mut v = Vec::new();
-            index.encode(&mut v);
-            v
-        };
-        let mut trie = HashBuilder::default();
-        let mut leaves: Vec<_> = self
-            .0
-            .iter()
-            .enumerate()
-            .map(|(i, r)| (Nibbles::unpack(encode_key(i)), r.encode_value()))
-            .collect();
-        leaves.sort_by(|l, r| l.cmp(&r));
-        leaves.into_iter().for_each(|l| trie.add_leaf(l.0, &l.1));
+    let root: [u8; 32] = trie.root().into();
 
-        let root: [u8; 32] = trie.root().into();
-
-        if Hash::from(root) == *transactions_root {
-            Ok(VerifiedBlockTransactions {
-                transactions: self.0.clone(),
-            })
-        } else {
-            Err(VerificationError::TransactionVerificationError)
-        }
+    if Hash::from(root) != *transactions_root {
+        return Err(VerificationError::TransactionVerificationError);
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VerifiedBlockTransactions {
-    pub transactions: Vec<Transaction>,
+    Ok(())
 }
 
 /// The Ethereum transaction types, as defined by EIP 2718, EIP 2930, EIP 1559, EIP 4844, and EIP
@@ -381,6 +365,8 @@ where
 
 #[cfg(test)]
 mod tests {
+
+    use alloy_rlp::Header;
 
     use super::*;
     use crate::HexConvert;
@@ -954,307 +940,236 @@ mod tests {
         //   - non-empty
 
         [
-            (
-                Transaction {
-                    transaction_type: TransactionType::try_from_hex("0x0").unwrap(),
-                    chain_id: U256::try_from_hex("0x0").unwrap(),
-                    nonce: u64::try_from_hex("0x0").unwrap(),
-                    to: None,
-                    gas_limit: u64::try_from_hex("0x0").unwrap(),
-                    gas_price: U256::try_from_hex("0x0").unwrap(),
-                    max_priority_fee_per_gas: U256::default(),
-                    max_fee_per_gas: U256::default(),
-                    value: U256::try_from_hex("0x0").unwrap(),
-                    data: Vec::try_from_hex("0x").unwrap(),
-                    y_parity: U256::try_from_hex("0x25").unwrap(),
-                    r: U256::try_from_hex(
-                        "0x81f84dfa55a3b2e8abd5f03605e386c20a71050103dd518c4bf27c4b9308d0b4",
-                    )
-                    .unwrap(),
-                    s: U256::try_from_hex(
-                        "0x4339e8f47dd680a7f5d49ace126c6bbbad5ee7a6ba1dcb3114b2294565c8b134",
-                    )
-                    .unwrap(),
-                    access_list: Vec::new(),
-                    max_fee_per_blob_gas: U256::default(),
-                    blob_versioned_hashes: Vec::new(),
-                    authorization_list: Vec::new(),
-                },
-                const_hex::decode(
-                    "0xf84980808080808025a081f84dfa55a3b2e8abd5f03605e386c20a71050103dd518c4bf27c4b9308d0b4a04339e8f47dd680a7f5d49ace126c6bbbad5ee7a6ba1dcb3114b2294565c8b134",
-                ).unwrap()
-            ),
-            (
-                Transaction {
-                    transaction_type: TransactionType::try_from_hex("0x0").unwrap(),
-                    chain_id: U256::try_from_hex("0x0").unwrap(),
-                    nonce: u64::try_from_hex("0x0").unwrap(),
-                    to: None,
-                    gas_limit: u64::try_from_hex("0x0").unwrap(),
-                    gas_price: U256::try_from_hex("0x0").unwrap(),
-                    max_priority_fee_per_gas: U256::default(),
-                    max_fee_per_gas: U256::default(),
-                    value: U256::try_from_hex("0x0").unwrap(),
-                    data: Vec::try_from_hex("0x01").unwrap(),
-                    y_parity: U256::try_from_hex("0x26").unwrap(),
-                    r: U256::try_from_hex(
-                        "0x8ce4b169534418abbe9410e8fcdff4cd47e10265588b55dfa96c70f6fd62c6bf",
-                    )
-                    .unwrap(),
-                    s: U256::try_from_hex(
-                        "0x23869888069d3b974aba703cf31a06eeed8466e9981697f54ec0709cd65b2ca4",
-                    )
-                    .unwrap(),
-                    access_list: Vec::new(),
-                    max_fee_per_blob_gas: U256::default(),
-                    blob_versioned_hashes: Vec::new(),
-                    authorization_list: Vec::new(),
-                },
-                const_hex::decode("f84980808080800126a08ce4b169534418abbe9410e8fcdff4cd47e10265588b55dfa96c70f6fd62c6bfa023869888069d3b974aba703cf31a06eeed8466e9981697f54ec0709cd65b2ca4").unwrap()
-            ),
-            (
-                Transaction {
-                    transaction_type: TransactionType::try_from_hex("0x1").unwrap(),
-                    chain_id: U256::try_from_hex("0x1").unwrap(),
-                    nonce: u64::try_from_hex("0x0").unwrap(),
-                    gas_price: U256::try_from_hex("0x0").unwrap(),
-                    gas_limit: u64::try_from_hex("0x0").unwrap(),
-                    to: None,
-                    value: U256::try_from_hex("0x0").unwrap(),
-                    data: Vec::try_from_hex("0x").unwrap(),
-                    access_list: Vec::new(),
-                    max_fee_per_gas: U256::default(),
-                    max_priority_fee_per_gas: U256::default(),
-                    blob_versioned_hashes: Vec::new(),
-                    max_fee_per_blob_gas: U256::default(),
-                    authorization_list: Vec::new(),
-                    y_parity: U256::try_from_hex("0x1").unwrap(),
-                    r: U256::try_from_hex(
-                        "0x3ef69057fef8e5910debc8e52189c0eb57184cbe58415c58ac67d78b7c6d29ce",
-                    )
-                    .unwrap(),
-                    s: U256::try_from_hex(
-                        "0x7673ba8e62f61bd1cd7f026d14c96d014e070b915a185948647fba29659ca352",
-                    )
-                    .unwrap(),
-                },
-                const_hex::decode(
-                    "0xb84e01f84b01808080808080c001a03ef69057fef8e5910debc8e52189c0eb57184cbe58415c58ac67d78b7c6d29cea07673ba8e62f61bd1cd7f026d14c96d014e070b915a185948647fba29659ca352",
-                ).unwrap()
-            ),
-            (
-                Transaction {
-                    transaction_type: TransactionType::try_from_hex("0x2").unwrap(),
-                    chain_id: U256::try_from_hex("0x1").unwrap(),
-                    nonce: u64::try_from_hex("0x0").unwrap(),
-                    gas_price: U256::default(),
-                    gas_limit: u64::try_from_hex("0x0").unwrap(),
-                    to: None,
-                    value: U256::try_from_hex("0x0").unwrap(),
-                    data: Vec::try_from_hex("0x").unwrap(),
-                    access_list: Vec::new(),
-                    max_fee_per_gas: U256::try_from_hex("0x0").unwrap(),
-                    max_priority_fee_per_gas: U256::try_from_hex("0x0").unwrap(),
-                    blob_versioned_hashes: Vec::new(),
-                    max_fee_per_blob_gas: U256::default(),
-                    authorization_list: Vec::new(),
-                    y_parity: U256::try_from_hex("0x1").unwrap(),
-                    r: U256::try_from_hex(
-                        "0xc4dd060b048fc2b257e2a1e00ea3741884ca32b40e2ada3b70eec4f69bea1947",
-                    )
-                    .unwrap(),
-                    s: U256::try_from_hex(
-                        "0x41949023f06ea394e9c2bfb5c02bf67ede6ec813c9e71a6936900aa676dd1050",
-                    )
-                    .unwrap(),
-                },
-                const_hex::decode(
-                    "0xb84f02f84c0180808080808080c001a0c4dd060b048fc2b257e2a1e00ea3741884ca32b40e2ada3b70eec4f69bea1947a041949023f06ea394e9c2bfb5c02bf67ede6ec813c9e71a6936900aa676dd1050"
-                ).unwrap()
-            ),
-            (
-                Transaction {
-                    transaction_type: TransactionType::try_from_hex("0x3").unwrap(),
-                    chain_id: U256::try_from_hex("0x1").unwrap(),
-                    nonce: u64::try_from_hex("0x0").unwrap(),
-                    gas_price: U256::default(),
-                    gas_limit: u64::try_from_hex("0x0").unwrap(),
-                    to: Some(
-                        Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
-                    ),
-                    value: U256::try_from_hex("0x0").unwrap(),
-                    data: Vec::try_from_hex("0x").unwrap(),
-                    access_list: Vec::new(),
-                    max_fee_per_gas: U256::try_from_hex("0x0").unwrap(),
-                    max_priority_fee_per_gas: U256::try_from_hex("0x0").unwrap(),
-                    blob_versioned_hashes: Vec::new(),
-                    max_fee_per_blob_gas: U256::try_from_hex("0x0").unwrap(),
-                    authorization_list: Vec::new(),
-                    y_parity: U256::try_from_hex("0x0").unwrap(),
-                    r: U256::try_from_hex(
-                        "0x265974ddd1be7ef0cacd823784e994a8029a776becf760eea18a7a356f2e206c",
-                    )
-                    .unwrap(),
-                    s: U256::try_from_hex(
-                        "0x351c528fba4ca69eaa850fc30f8e16bed9c083f2bb77ab89ef1c301de582c1e2",
-                    )
-                    .unwrap(),
-                },
-                const_hex::decode(
-                    "0xb86503f86201808080809400000000000000000000000000000000000000008080c080c080a0265974ddd1be7ef0cacd823784e994a8029a776becf760eea18a7a356f2e206ca0351c528fba4ca69eaa850fc30f8e16bed9c083f2bb77ab89ef1c301de582c1e2"
-                ).unwrap()
-            ),
-            (
-                Transaction {
-                    transaction_type: TransactionType::try_from_hex("0x3").unwrap(),
-                    chain_id: U256::try_from_hex("0x1").unwrap(),
-                    nonce: u64::try_from_hex("0x0").unwrap(),
-                    to: Some(
-                        Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
-                    ),
-                    gas_limit: u64::try_from_hex("0x0").unwrap(),
-                    gas_price: U256::default(),
-                    max_priority_fee_per_gas: U256::try_from_hex("0x0").unwrap(),
-                    max_fee_per_gas: U256::try_from_hex("0x0").unwrap(),
-                    max_fee_per_blob_gas: U256::try_from_hex("0x0").unwrap(),
-                    value: U256::try_from_hex("0x0").unwrap(),
-                    data: Vec::try_from_hex("0x").unwrap(),
-                    access_list: Vec::new(),
-                    blob_versioned_hashes: vec![
-                        Hash::try_from_hex(
-                            "0x0000000000000000000000000000000000000000000000000000000000000000",
-                        )
-                        .unwrap(),
-                    ],
-                    authorization_list: Vec::new(),
-                    y_parity: U256::try_from_hex("0x0").unwrap(),
-                    r: U256::try_from_hex(
-                        "0xea9aff2ec0c4b370ae14a055ffa0d7e5e3a00e039be41412548078c96a35cca5",
-                    )
-                    .unwrap(),
-                    s: U256::try_from_hex(
-                        "0x36f768887cf167a25be29f6f127836517ea067193d4c07e7f147767d43d91d57",
-                    )
-                    .unwrap(),
-                },
-                const_hex::decode("b88603f88301808080809400000000000000000000000000000000000000008080c080e1a0000000000000000000000000000000000000000000000000000000000000000080a0ea9aff2ec0c4b370ae14a055ffa0d7e5e3a00e039be41412548078c96a35cca5a036f768887cf167a25be29f6f127836517ea067193d4c07e7f147767d43d91d57").unwrap()
-            ),
-            (
-                Transaction {
-                    transaction_type: TransactionType::try_from_hex("0x3").unwrap(),
-                    chain_id: U256::try_from_hex("0x1").unwrap(),
-                    nonce: u64::try_from_hex("0x0").unwrap(),
-                    gas_price: U256::default(),
-                    gas_limit: u64::try_from_hex("0x0").unwrap(),
-                    to: Some(
-                        Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
-                    ),
-                    value: U256::try_from_hex("0x0").unwrap(),
-                    data: Vec::try_from_hex("0x").unwrap(),
-                    access_list: vec![AccessListEntry {
-                        address: Address::try_from_hex("0x0000000000000000000000000000000000000000")
-                            .unwrap(),
-                        storage_keys: Vec::new(),
-                    }],
-                    max_fee_per_gas: U256::try_from_hex("0x0").unwrap(),
-                    max_priority_fee_per_gas: U256::try_from_hex("0x0").unwrap(),
-                    blob_versioned_hashes: Vec::new(),
-                    max_fee_per_blob_gas: U256::try_from_hex("0x0").unwrap(),
-                    authorization_list: Vec::new(),
-                    y_parity: U256::try_from_hex("0x1").unwrap(),
-                    r: U256::try_from_hex(
-                        "0xc11bf40b64864762c1a38f045ab45a19eefe17b21c2d508c11221b4e54889613",
-                    )
-                    .unwrap(),
-                    s: U256::try_from_hex(
-                        "0x37e4802da391446247aaa73613f07fb7291864314d6788d20cf17a5b407e0330",
-                    )
-                    .unwrap(),
-                },
-                const_hex::decode(
-                    "0xb87c03f87901808080809400000000000000000000000000000000000000008080d7d6940000000000000000000000000000000000000000c080c001a0c11bf40b64864762c1a38f045ab45a19eefe17b21c2d508c11221b4e54889613a037e4802da391446247aaa73613f07fb7291864314d6788d20cf17a5b407e0330"
-                ).unwrap()
-            ),
-            (
-                Transaction {
-                    transaction_type: TransactionType::try_from_hex("0x4").unwrap(),
-                    chain_id: U256::try_from_hex("0x1").unwrap(),
-                    nonce: u64::try_from_hex("0x0").unwrap(),
-                    gas_price: U256::default(),
-                    gas_limit: u64::try_from_hex("0x0").unwrap(),
-                    to: Some(
-                        Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
-                    ),
-                    value: U256::try_from_hex("0x0").unwrap(),
-                    data: Vec::try_from_hex("0x").unwrap(),
-                    access_list: Vec::new(),
-                    max_fee_per_gas: U256::try_from_hex("0x0").unwrap(),
-                    max_priority_fee_per_gas: U256::try_from_hex("0x0").unwrap(),
-                    blob_versioned_hashes: Vec::new(),
-                    max_fee_per_blob_gas: U256::default(),
-                    authorization_list: Vec::new(),
-                    y_parity: U256::try_from_hex("0x1").unwrap(),
-                    r: U256::try_from_hex(
-                        "0x81dcbcae18a4ca0e228c63d02a699c65653fe898581c1fe4f9b4a519e038b969",
-                    )
-                    .unwrap(),
-                    s: U256::try_from_hex(
-                        "0x5fd2c190dd5001139230f62c133aa77407c77c86752b6408cbcff6a09a43401d",
-                    )
-                    .unwrap(),
-                },
-                const_hex::decode(
-                    "0xb86404f86101808080809400000000000000000000000000000000000000008080c0c001a081dcbcae18a4ca0e228c63d02a699c65653fe898581c1fe4f9b4a519e038b969a05fd2c190dd5001139230f62c133aa77407c77c86752b6408cbcff6a09a43401d"
-                ).unwrap()
-            ),
-            (
-                Transaction {
-                    transaction_type: TransactionType::try_from_hex("0x4").unwrap(),
-                    chain_id: U256::try_from_hex("0x1").unwrap(),
-                    nonce: u64::try_from_hex("0x0").unwrap(),
-                    gas_price: U256::default(),
-                    gas_limit: u64::try_from_hex("0x0").unwrap(),
-                    to: Some(
-                        Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
-                    ),
-                    value: U256::try_from_hex("0x0").unwrap(),
-                    data: Vec::try_from_hex("0x").unwrap(),
-                    access_list: Vec::new(),
-                    max_fee_per_gas: U256::try_from_hex("0x0").unwrap(),
-                    max_priority_fee_per_gas: U256::try_from_hex("0x0").unwrap(),
-                    blob_versioned_hashes: Vec::new(),
-                    max_fee_per_blob_gas: U256::default(),
-                    authorization_list: vec![SetCodeAuthorization {
-                        chain_id: U256::try_from_hex("0x0").unwrap(),
-                        address: Address::try_from_hex("0x0000000000000000000000000000000000000000")
-                            .unwrap(),
-                        nonce: u64::try_from_hex("0x0").unwrap(),
-                        y_parity: u8::try_from_hex("0x0").unwrap(),
-                        r: U256::try_from_hex("0x0").unwrap(),
-                        s: U256::try_from_hex("0x0").unwrap(),
-                    }],
-                    y_parity: U256::try_from_hex("0x0").unwrap(),
-                    r: U256::try_from_hex(
-                        "0x9ae41ab490c59fd1e1aae4df6a7d96931ae25e9f2120106dff8f8e6d079f6366",
-                    )
-                    .unwrap(),
-                    s: U256::try_from_hex(
-                        "0x2d5bc1c108b11cda410cd7b42a342341c51012e4636a15c8c5ebb2fc5bed2962",
-                    )
-                    .unwrap(),
-                },
-                const_hex::decode(
-                    "0xb87f04f87c01808080809400000000000000000000000000000000000000008080c0dbda809400000000000000000000000000000000000000008080808080a09ae41ab490c59fd1e1aae4df6a7d96931ae25e9f2120106dff8f8e6d079f6366a02d5bc1c108b11cda410cd7b42a342341c51012e4636a15c8c5ebb2fc5bed2962"
-                ).unwrap()
-            )
+	(Transaction {
+			transaction_type: TransactionType::try_from(0).unwrap(),
+			chain_id: U256::try_from_hex("1").unwrap(),
+			nonce: 0,
+			gas_price: U256::try_from_hex("0").unwrap(),
+			gas_limit: 0,
+			to: None,
+			value: U256::try_from_hex("0").unwrap(),
+			data: vec![],
+			access_list: vec![],
+			max_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			max_priority_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			blob_versioned_hashes: vec![],
+			max_fee_per_blob_gas: U256::try_from_hex("0").unwrap(),
+			authorization_list: vec![],
+			y_parity: U256::try_from_hex("25").unwrap(),
+			r: U256::try_from_hex("81f84dfa55a3b2e8abd5f03605e386c20a71050103dd518c4bf27c4b9308d0b4").unwrap(),
+			s: U256::try_from_hex("4339e8f47dd680a7f5d49ace126c6bbbad5ee7a6ba1dcb3114b2294565c8b134").unwrap(),
+		}, const_hex::decode("f84980808080808025a081f84dfa55a3b2e8abd5f03605e386c20a71050103dd518c4bf27c4b9308d0b4a04339e8f47dd680a7f5d49ace126c6bbbad5ee7a6ba1dcb3114b2294565c8b134").unwrap()),
+	(Transaction {
+			transaction_type: TransactionType::try_from(1).unwrap(),
+			chain_id: U256::try_from_hex("1").unwrap(),
+			nonce: 0,
+			gas_price: U256::try_from_hex("0").unwrap(),
+			gas_limit: 0,
+			to: None,
+			value: U256::try_from_hex("0").unwrap(),
+			data: vec![],
+			access_list: vec![],
+			max_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			max_priority_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			blob_versioned_hashes: vec![],
+			max_fee_per_blob_gas: U256::try_from_hex("0").unwrap(),
+			authorization_list: vec![],
+			y_parity: U256::try_from_hex("1").unwrap(),
+			r: U256::try_from_hex("3ef69057fef8e5910debc8e52189c0eb57184cbe58415c58ac67d78b7c6d29ce").unwrap(),
+			s: U256::try_from_hex("7673ba8e62f61bd1cd7f026d14c96d014e070b915a185948647fba29659ca352").unwrap(),
+		}, const_hex::decode("01f84b01808080808080c001a03ef69057fef8e5910debc8e52189c0eb57184cbe58415c58ac67d78b7c6d29cea07673ba8e62f61bd1cd7f026d14c96d014e070b915a185948647fba29659ca352").unwrap()),
+	(Transaction {
+			transaction_type: TransactionType::try_from(2).unwrap(),
+			chain_id: U256::try_from_hex("1").unwrap(),
+			nonce: 0,
+			gas_price: U256::try_from_hex("0").unwrap(),
+			gas_limit: 0,
+			to: None,
+			value: U256::try_from_hex("0").unwrap(),
+			data: vec![],
+			access_list: vec![],
+			max_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			max_priority_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			blob_versioned_hashes: vec![],
+			max_fee_per_blob_gas: U256::try_from_hex("0").unwrap(),
+			authorization_list: vec![],
+			y_parity: U256::try_from_hex("1").unwrap(),
+			r: U256::try_from_hex("c4dd060b048fc2b257e2a1e00ea3741884ca32b40e2ada3b70eec4f69bea1947").unwrap(),
+			s: U256::try_from_hex("41949023f06ea394e9c2bfb5c02bf67ede6ec813c9e71a6936900aa676dd1050").unwrap(),
+		}, const_hex::decode("02f84c0180808080808080c001a0c4dd060b048fc2b257e2a1e00ea3741884ca32b40e2ada3b70eec4f69bea1947a041949023f06ea394e9c2bfb5c02bf67ede6ec813c9e71a6936900aa676dd1050").unwrap()),
+	(Transaction {
+			transaction_type: TransactionType::try_from(3).unwrap(),
+			chain_id: U256::try_from_hex("1").unwrap(),
+			nonce: 0,
+			gas_price: U256::try_from_hex("0").unwrap(),
+			gas_limit: 0,
+			to: Some(Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap()),
+			value: U256::try_from_hex("0").unwrap(),
+			data: vec![],
+			access_list: vec![],
+			max_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			max_priority_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			blob_versioned_hashes: vec![],
+			max_fee_per_blob_gas: U256::try_from_hex("0").unwrap(),
+			authorization_list: vec![],
+			y_parity: U256::try_from_hex("0").unwrap(),
+			r: U256::try_from_hex("265974ddd1be7ef0cacd823784e994a8029a776becf760eea18a7a356f2e206c").unwrap(),
+			s: U256::try_from_hex("351c528fba4ca69eaa850fc30f8e16bed9c083f2bb77ab89ef1c301de582c1e2").unwrap(),
+		}, const_hex::decode("03f86201808080809400000000000000000000000000000000000000008080c080c080a0265974ddd1be7ef0cacd823784e994a8029a776becf760eea18a7a356f2e206ca0351c528fba4ca69eaa850fc30f8e16bed9c083f2bb77ab89ef1c301de582c1e2").unwrap()),
+	(Transaction {
+			transaction_type: TransactionType::try_from(4).unwrap(),
+			chain_id: U256::try_from_hex("1").unwrap(),
+			nonce: 0,
+			gas_price: U256::try_from_hex("0").unwrap(),
+			gas_limit: 0,
+			to: Some(Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap()),
+			value: U256::try_from_hex("0").unwrap(),
+			data: vec![],
+			access_list: vec![],
+			max_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			max_priority_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			blob_versioned_hashes: vec![],
+			max_fee_per_blob_gas: U256::try_from_hex("0").unwrap(),
+			authorization_list: vec![],
+			y_parity: U256::try_from_hex("1").unwrap(),
+			r: U256::try_from_hex("81dcbcae18a4ca0e228c63d02a699c65653fe898581c1fe4f9b4a519e038b969").unwrap(),
+			s: U256::try_from_hex("5fd2c190dd5001139230f62c133aa77407c77c86752b6408cbcff6a09a43401d").unwrap(),
+		}, const_hex::decode("04f86101808080809400000000000000000000000000000000000000008080c0c001a081dcbcae18a4ca0e228c63d02a699c65653fe898581c1fe4f9b4a519e038b969a05fd2c190dd5001139230f62c133aa77407c77c86752b6408cbcff6a09a43401d").unwrap()),
+	(Transaction {
+			transaction_type: TransactionType::try_from(0).unwrap(),
+			chain_id: U256::try_from_hex("1").unwrap(),
+			nonce: 0,
+			gas_price: U256::try_from_hex("0").unwrap(),
+			gas_limit: 0,
+			to: Some(Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap()),
+			value: U256::try_from_hex("0").unwrap(),
+			data: vec![1],
+			access_list: vec![],
+			max_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			max_priority_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			blob_versioned_hashes: vec![],
+			max_fee_per_blob_gas: U256::try_from_hex("0").unwrap(),
+			authorization_list: vec![],
+			y_parity: U256::try_from_hex("26").unwrap(),
+			r: U256::try_from_hex("350dc3b31ffeb15168c044ea80ca9594403181f840d8876806a3d806c31fe438").unwrap(),
+			s: U256::try_from_hex("79b24680f9df4b793988bc2d9b6cc7af03a6eb30cf8477acc409df85ea6790a4").unwrap(),
+		}, const_hex::decode("f85d808080940000000000000000000000000000000000000000800126a0350dc3b31ffeb15168c044ea80ca9594403181f840d8876806a3d806c31fe438a079b24680f9df4b793988bc2d9b6cc7af03a6eb30cf8477acc409df85ea6790a4").unwrap()),
+	(Transaction {
+			transaction_type: TransactionType::try_from(1).unwrap(),
+			chain_id: U256::try_from_hex("1").unwrap(),
+			nonce: 0,
+			gas_price: U256::try_from_hex("0").unwrap(),
+			gas_limit: 0,
+			to: Some(Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap()),
+			value: U256::try_from_hex("0").unwrap(),
+			data: vec![1],
+			access_list: vec![AccessListEntry {
+			address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
+			storage_keys: vec![Hash::try_from_hex("0x0x0000000000000000000000000000000000000000000000000000000000000000").unwrap()],
+			}],
+			max_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			max_priority_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			blob_versioned_hashes: vec![],
+			max_fee_per_blob_gas: U256::try_from_hex("0").unwrap(),
+			authorization_list: vec![],
+			y_parity: U256::try_from_hex("1").unwrap(),
+			r: U256::try_from_hex("5a303eb0e6e34a9aacb875e2bf38f59200953e1788059911dab3972da6b295d").unwrap(),
+			s: U256::try_from_hex("5e7e848eb74b669391b4618fffde2e6276a8988001e76c505a8de5388b8147ba").unwrap(),
+		}, const_hex::decode("01f898018080809400000000000000000000000000000000000000008001f838f7940000000000000000000000000000000000000000e1a0000000000000000000000000000000000000000000000000000000000000000001a005a303eb0e6e34a9aacb875e2bf38f59200953e1788059911dab3972da6b295da05e7e848eb74b669391b4618fffde2e6276a8988001e76c505a8de5388b8147ba").unwrap()),
+	(Transaction {
+			transaction_type: TransactionType::try_from(2).unwrap(),
+			chain_id: U256::try_from_hex("1").unwrap(),
+			nonce: 0,
+			gas_price: U256::try_from_hex("0").unwrap(),
+			gas_limit: 0,
+			to: Some(Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap()),
+			value: U256::try_from_hex("0").unwrap(),
+			data: vec![1],
+			access_list: vec![AccessListEntry {
+			address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
+			storage_keys: vec![Hash::try_from_hex("0x0x0000000000000000000000000000000000000000000000000000000000000000").unwrap()],
+			}],
+			max_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			max_priority_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			blob_versioned_hashes: vec![],
+			max_fee_per_blob_gas: U256::try_from_hex("0").unwrap(),
+			authorization_list: vec![],
+			y_parity: U256::try_from_hex("0").unwrap(),
+			r: U256::try_from_hex("55c58033b0a0c214c55dd1e5351776447646cec2c671f98268abd69e335dfa1b").unwrap(),
+			s: U256::try_from_hex("71a9c9102b5a96ea2c33251414747cf4e91ba40de460a3d9dbe2a57a0da5536f").unwrap(),
+		}, const_hex::decode("02f89901808080809400000000000000000000000000000000000000008001f838f7940000000000000000000000000000000000000000e1a0000000000000000000000000000000000000000000000000000000000000000080a055c58033b0a0c214c55dd1e5351776447646cec2c671f98268abd69e335dfa1ba071a9c9102b5a96ea2c33251414747cf4e91ba40de460a3d9dbe2a57a0da5536f").unwrap()),
+	(Transaction {
+			transaction_type: TransactionType::try_from(3).unwrap(),
+			chain_id: U256::try_from_hex("1").unwrap(),
+			nonce: 0,
+			gas_price: U256::try_from_hex("0").unwrap(),
+			gas_limit: 0,
+			to: Some(Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap()),
+			value: U256::try_from_hex("0").unwrap(),
+			data: vec![1],
+			access_list: vec![AccessListEntry {
+			address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
+			storage_keys: vec![Hash::try_from_hex("0x0x0000000000000000000000000000000000000000000000000000000000000000").unwrap()],
+			}],
+			max_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			max_priority_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			blob_versioned_hashes: vec![Hash::try_from_hex("0x0x0000000000000000000000000000000000000000000000000000000000000000").unwrap()],
+			max_fee_per_blob_gas: U256::try_from_hex("0").unwrap(),
+			authorization_list: vec![],
+			y_parity: U256::try_from_hex("0").unwrap(),
+			r: U256::try_from_hex("40b6a9e81a195c29134e1401af37d804d8d27fcb5eedf7325cb049e03bf9e886").unwrap(),
+			s: U256::try_from_hex("63638842f5f08ace28de43fec9a27bf79eee2ed1968cfacdba5f159033fa8079").unwrap(),
+		}, const_hex::decode("03f8bc01808080809400000000000000000000000000000000000000008001f838f7940000000000000000000000000000000000000000e1a0000000000000000000000000000000000000000000000000000000000000000080e1a0000000000000000000000000000000000000000000000000000000000000000080a040b6a9e81a195c29134e1401af37d804d8d27fcb5eedf7325cb049e03bf9e886a063638842f5f08ace28de43fec9a27bf79eee2ed1968cfacdba5f159033fa8079").unwrap()),
+	(Transaction {
+			transaction_type: TransactionType::try_from(4).unwrap(),
+			chain_id: U256::try_from_hex("1").unwrap(),
+			nonce: 0,
+			gas_price: U256::try_from_hex("0").unwrap(),
+			gas_limit: 0,
+			to: Some(Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap()),
+			value: U256::try_from_hex("0").unwrap(),
+			data: vec![1],
+			access_list: vec![AccessListEntry {
+			address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
+			storage_keys: vec![Hash::try_from_hex("0x0x0000000000000000000000000000000000000000000000000000000000000000").unwrap()],
+			}],
+			max_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			max_priority_fee_per_gas: U256::try_from_hex("0").unwrap(),
+			blob_versioned_hashes: vec![],
+			max_fee_per_blob_gas: U256::try_from_hex("0").unwrap(),
+			authorization_list: vec![SetCodeAuthorization {
+			chain_id: U256::try_from_hex("0").unwrap(),
+			address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
+			nonce: 0,
+			y_parity: 0,
+			r: U256::try_from_hex("0").unwrap(),
+			s: U256::try_from_hex("0").unwrap(),
+		}],
+			y_parity: U256::try_from_hex("0").unwrap(),
+			r: U256::try_from_hex("32f9e3fa16ea2ef827312d02ec27b92564d5b84f3dd60511770b24ffe7a1cc65").unwrap(),
+			s: U256::try_from_hex("1ea1ea8a6a58c5ec601239a2c98d46af129c88a0f7f279fe7dc6f8ef67e9ba44").unwrap(),
+		}, const_hex::decode("04f8b501808080809400000000000000000000000000000000000000008001f838f7940000000000000000000000000000000000000000e1a00000000000000000000000000000000000000000000000000000000000000000dbda809400000000000000000000000000000000000000008080808080a032f9e3fa16ea2ef827312d02ec27b92564d5b84f3dd60511770b24ffe7a1cc65a01ea1ea8a6a58c5ec601239a2c98d46af129c88a0f7f279fe7dc6f8ef67e9ba44").unwrap()),
         ]
+    }
+
+    impl Transaction {
+        // Canonicalizes the transaction by converting to the appropriate specialized type
+        pub fn canonicalize(&self) -> Result<Self, TransactionError> {
+            match self.transaction_type {
+                TransactionType::Legacy => Ok(LegacyTx::try_from(self.clone())?.into()),
+                TransactionType::AccessList => Ok(AccessListTx::try_from(self.clone())?.into()),
+                TransactionType::DynamicFee => Ok(DynamicFeeTx::try_from(self.clone())?.into()),
+                TransactionType::Blob => Ok(BlobTx::try_from(self.clone())?.into()),
+                TransactionType::SetCode => Ok(SetCodeTx::try_from(self.clone())?.into()),
+            }
+        }
     }
 
     #[test]
     fn can_be_encoded_to_rlp() {
         for (tx, rlp) in generate_transactions_with_rlp() {
             let mut buf = Vec::new();
-            tx.encode(&mut buf);
+            tx.canonicalize().unwrap().encode(&mut buf);
             assert_eq!(buf, rlp, "Encoded RLP should match expected value");
         }
     }
@@ -1265,13 +1180,22 @@ mod tests {
         let mut buf = Vec::new();
         invalid_blob_tx.encode(&mut buf);
         assert_eq!(buf, [alloy_rlp::EMPTY_STRING_CODE]);
+
+        let invalid_set_code_tx = make_transaction(TransactionType::SetCode, false);
+        let mut buf = Vec::new();
+        invalid_set_code_tx.encode(&mut buf);
+        assert_eq!(buf, [alloy_rlp::EMPTY_STRING_CODE]);
     }
 
     #[test]
     fn can_be_decoded_from_rlp() {
         for (tx, rlp) in generate_transactions_with_rlp() {
             let decoded = Transaction::decode(&mut &rlp[..]).unwrap();
-            assert_eq!(decoded, tx, "Decoded Transaction should match expected one");
+            assert_eq!(
+                decoded,
+                tx.canonicalize().unwrap(),
+                "Decoded Transaction should match expected one"
+            );
         }
     }
 
@@ -1292,193 +1216,18 @@ mod tests {
         );
     }
 
+    #[test]
     fn block_transactions_can_be_verified() {
-        #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct BlockWithRlp {
-            transactions: Vec<Transaction>,
-            transactions_root: AsHex<Hash>,
-        }
-        let block: BlockWithRlp = serde_json::from_str(BLOCK_WITH_RLP).unwrap();
-        let block_transactions = BlockTransactions(block.transactions.clone());
-        let res = block_transactions.verify(&block.transactions_root.0);
+        let transactions = generate_transactions_with_rlp()
+            .into_iter()
+            .map(|(tx, _)| tx)
+            .collect::<Vec<_>>();
+        let res = verify(transactions,
+            &Hash::try_from_hex(
+                "0xe7d54bad0ddbb2433a6e3578c6cce654d57d6a233e5994d991d9c5b7221ad284", // Generated using the test data generator
+            )
+            .unwrap(),
+        );
         assert!(res.is_ok(), "Block transactions should verify successfully");
     }
-
-    // Those data have been generated using the internal go generator
-    const BLOCK_WITH_RLP: &str = r#"{
-            "transactions": [
-                    {
-                        "blockHash": "0xd5686dbd1c4c342fff8b18fe7a927a7a839a2d3f7db330e814f4d5e1c8313fd0",
-                        "blockNumber": "0x0",
-                        "from": "0x0000000000000000000000000000000000000000",
-                        "gas": "0x0",
-                        "gasPrice": "0x0",
-                        "hash": "0x62e69699feff0bbce44fd35b766edef2e4b82b6837003f427921479b0a4d9ba8",
-                        "input": "0x",
-                        "nonce": "0x0",
-                        "transactionIndex": "0x0",
-                        "value": "0x0",
-                        "type": "0x0",
-                        "chainId": "0x1",
-                        "v": "0x25",
-                        "r": "0x81f84dfa55a3b2e8abd5f03605e386c20a71050103dd518c4bf27c4b9308d0b4",
-                        "s": "0x4339e8f47dd680a7f5d49ace126c6bbbad5ee7a6ba1dcb3114b2294565c8b134"
-                    },
-                    {
-                        "blockHash": "0xd5686dbd1c4c342fff8b18fe7a927a7a839a2d3f7db330e814f4d5e1c8313fd0",
-                        "blockNumber": "0x0",
-                        "from": "0x0000000000000000000000000000000000000000",
-                        "gas": "0x0",
-                        "gasPrice": "0x0",
-                        "hash": "0x62e69699feff0bbce44fd35b766edef2e4b82b6837003f427921479b0a4d9ba8",
-                        "input": "0x",
-                        "nonce": "0x0",
-                        "transactionIndex": "0x1",
-                        "value": "0x0",
-                        "type": "0x0",
-                        "chainId": "0x1",
-                        "v": "0x25",
-                        "r": "0x81f84dfa55a3b2e8abd5f03605e386c20a71050103dd518c4bf27c4b9308d0b4",
-                        "s": "0x4339e8f47dd680a7f5d49ace126c6bbbad5ee7a6ba1dcb3114b2294565c8b134"
-                    },
-                    {
-                        "blockHash": "0xd5686dbd1c4c342fff8b18fe7a927a7a839a2d3f7db330e814f4d5e1c8313fd0",
-                        "blockNumber": "0x0",
-                        "from": "0x0000000000000000000000000000000000000000",
-                        "gas": "0x0",
-                        "gasPrice": "0x0",
-                        "hash": "0x62e69699feff0bbce44fd35b766edef2e4b82b6837003f427921479b0a4d9ba8",
-                        "input": "0x",
-                        "nonce": "0x0",
-                        "transactionIndex": "0x2",
-                        "value": "0x0",
-                        "type": "0x0",
-                        "chainId": "0x1",
-                        "v": "0x25",
-                        "r": "0x81f84dfa55a3b2e8abd5f03605e386c20a71050103dd518c4bf27c4b9308d0b4",
-                        "s": "0x4339e8f47dd680a7f5d49ace126c6bbbad5ee7a6ba1dcb3114b2294565c8b134"
-                    },
-                    {
-                        "blockHash": "0xd5686dbd1c4c342fff8b18fe7a927a7a839a2d3f7db330e814f4d5e1c8313fd0",
-                        "blockNumber": "0x0",
-                        "from": "0x0000000000000000000000000000000000000000",
-                        "gas": "0x0",
-                        "gasPrice": "0x0",
-                        "hash": "0x62e69699feff0bbce44fd35b766edef2e4b82b6837003f427921479b0a4d9ba8",
-                        "input": "0x",
-                        "nonce": "0x0",
-                        "transactionIndex": "0x3",
-                        "value": "0x0",
-                        "type": "0x0",
-                        "chainId": "0x1",
-                        "v": "0x25",
-                        "r": "0x81f84dfa55a3b2e8abd5f03605e386c20a71050103dd518c4bf27c4b9308d0b4",
-                        "s": "0x4339e8f47dd680a7f5d49ace126c6bbbad5ee7a6ba1dcb3114b2294565c8b134"
-                    },
-                    {
-                        "blockHash": "0xd5686dbd1c4c342fff8b18fe7a927a7a839a2d3f7db330e814f4d5e1c8313fd0",
-                        "blockNumber": "0x0",
-                        "from": "0x0000000000000000000000000000000000000000",
-                        "gas": "0x0",
-                        "gasPrice": "0x0",
-                        "hash": "0xe4c5708bf94447cbbc551914ee620fa7d148fbc9417d5e3623fd5d5dcfc83aea",
-                        "input": "0x01",
-                        "nonce": "0x0",
-                        "transactionIndex": "0x4",
-                        "value": "0x0",
-                        "type": "0x0",
-                        "chainId": "0x1",
-                        "v": "0x26",
-                        "r": "0x8ce4b169534418abbe9410e8fcdff4cd47e10265588b55dfa96c70f6fd62c6bf",
-                        "s": "0x23869888069d3b974aba703cf31a06eeed8466e9981697f54ec0709cd65b2ca4"
-                    },
-                    {
-                        "blockHash": "0xd5686dbd1c4c342fff8b18fe7a927a7a839a2d3f7db330e814f4d5e1c8313fd0",
-                        "blockNumber": "0x0",
-                        "from": "0x0000000000000000000000000000000000000000",
-                        "gas": "0x0",
-                        "gasPrice": "0x0",
-                        "hash": "0xe4c5708bf94447cbbc551914ee620fa7d148fbc9417d5e3623fd5d5dcfc83aea",
-                        "input": "0x01",
-                        "nonce": "0x0",
-                        "transactionIndex": "0x5",
-                        "value": "0x0",
-                        "type": "0x0",
-                        "chainId": "0x1",
-                        "v": "0x26",
-                        "r": "0x8ce4b169534418abbe9410e8fcdff4cd47e10265588b55dfa96c70f6fd62c6bf",
-                        "s": "0x23869888069d3b974aba703cf31a06eeed8466e9981697f54ec0709cd65b2ca4"
-                    },
-                    {
-                        "blockHash": "0xd5686dbd1c4c342fff8b18fe7a927a7a839a2d3f7db330e814f4d5e1c8313fd0",
-                        "blockNumber": "0x0",
-                        "from": "0x0000000000000000000000000000000000000000",
-                        "gas": "0x0",
-                        "gasPrice": "0x0",
-                        "hash": "0xe4c5708bf94447cbbc551914ee620fa7d148fbc9417d5e3623fd5d5dcfc83aea",
-                        "input": "0x01",
-                        "nonce": "0x0",
-                        "transactionIndex": "0x6",
-                        "value": "0x0",
-                        "type": "0x0",
-                        "chainId": "0x1",
-                        "v": "0x26",
-                        "r": "0x8ce4b169534418abbe9410e8fcdff4cd47e10265588b55dfa96c70f6fd62c6bf",
-                        "s": "0x23869888069d3b974aba703cf31a06eeed8466e9981697f54ec0709cd65b2ca4"
-                    },
-                    {
-                        "blockHash": "0xd5686dbd1c4c342fff8b18fe7a927a7a839a2d3f7db330e814f4d5e1c8313fd0",
-                        "blockNumber": "0x0",
-                        "from": "0x0000000000000000000000000000000000000000",
-                        "gas": "0x0",
-                        "gasPrice": "0x0",
-                        "hash": "0xe4c5708bf94447cbbc551914ee620fa7d148fbc9417d5e3623fd5d5dcfc83aea",
-                        "input": "0x01",
-                        "nonce": "0x0",
-                        "transactionIndex": "0x7",
-                        "value": "0x0",
-                        "type": "0x0",
-                        "chainId": "0x1",
-                        "v": "0x26",
-                        "r": "0x8ce4b169534418abbe9410e8fcdff4cd47e10265588b55dfa96c70f6fd62c6bf",
-                        "s": "0x23869888069d3b974aba703cf31a06eeed8466e9981697f54ec0709cd65b2ca4"
-                    },
-                    {
-                        "blockHash": "0xd5686dbd1c4c342fff8b18fe7a927a7a839a2d3f7db330e814f4d5e1c8313fd0",
-                        "blockNumber": "0x0",
-                        "from": "0x0000000000000000000000000000000000000000",
-                        "gas": "0x0",
-                        "gasPrice": "0x0",
-                        "hash": "0x62e69699feff0bbce44fd35b766edef2e4b82b6837003f427921479b0a4d9ba8",
-                        "input": "0x",
-                        "nonce": "0x0",
-                        "transactionIndex": "0x8",
-                        "value": "0x0",
-                        "type": "0x0",
-                        "chainId": "0x1",
-                        "v": "0x25",
-                        "r": "0x81f84dfa55a3b2e8abd5f03605e386c20a71050103dd518c4bf27c4b9308d0b4",
-                        "s": "0x4339e8f47dd680a7f5d49ace126c6bbbad5ee7a6ba1dcb3114b2294565c8b134"
-                    },
-                    {
-                        "blockHash": "0xd5686dbd1c4c342fff8b18fe7a927a7a839a2d3f7db330e814f4d5e1c8313fd0",
-                        "blockNumber": "0x0",
-                        "from": "0x0000000000000000000000000000000000000000",
-                        "gas": "0x0",
-                        "gasPrice": "0x0",
-                        "hash": "0x62e69699feff0bbce44fd35b766edef2e4b82b6837003f427921479b0a4d9ba8",
-                        "input": "0x",
-                        "nonce": "0x0",
-                        "transactionIndex": "0x9",
-                        "value": "0x0",
-                        "type": "0x0",
-                        "chainId": "0x1",
-                        "v": "0x25",
-                        "r": "0x81f84dfa55a3b2e8abd5f03605e386c20a71050103dd518c4bf27c4b9308d0b4",
-                        "s": "0x4339e8f47dd680a7f5d49ace126c6bbbad5ee7a6ba1dcb3114b2294565c8b134"
-                    }
-                ],
-            "transactionsRoot": "0x1435f761a97f471853fcd73386269527883d2b060d912e64607cc831a9e3ba39"
-        }"#;
 }
