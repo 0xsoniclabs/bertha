@@ -28,26 +28,6 @@ impl<R: Read> SliceReader<R> {
         }
     }
 
-    /// Fills the internal buffer with bytes from the reader if the unconsumed part of the buffer
-    /// (after index [SliceReader::buffer_idx] contains less that [SliceReader::min_slice_size],
-    /// unless the reader is empty.
-    fn fill_buffer(&mut self) -> Result<(), Error> {
-        if self.buffer_idx + self.min_slice_size >= self.buffer.len() && !self.reader_empty {
-            let remaining = self.buffer.len() - self.buffer_idx;
-            self.buffer.copy_within(self.buffer_idx.., 0);
-            self.buffer.truncate(remaining);
-            self.buffer_idx = 0;
-            self.reader
-                .by_ref()
-                .take((self.buffer_size - remaining) as u64)
-                .read_to_end(&mut self.buffer)?;
-            if self.buffer.len() == remaining {
-                self.reader_empty = true;
-            }
-        }
-        Ok(())
-    }
-
     /// Processes the internal buffer with a function `f` that takes a mutable reference to a slice
     /// of the buffer. The function `f` is expected to shrink the slice by the amount of data
     /// that it read. If the buffer is empty, `Ok(None)` is returned, otherwise `Ok(Some(value))`
@@ -68,6 +48,26 @@ impl<R: Read> SliceReader<R> {
         let consumed = slice_len - slice.len();
         self.buffer_idx += consumed;
         res.map(Some).map_err(Into::into)
+    }
+
+    /// Fills the internal buffer with bytes from the reader if the unconsumed part of the buffer
+    /// (after index [SliceReader::buffer_idx] contains less that [SliceReader::min_slice_size],
+    /// unless the reader is empty.
+    fn fill_buffer(&mut self) -> Result<(), Error> {
+        if self.buffer_idx + self.min_slice_size >= self.buffer.len() && !self.reader_empty {
+            let remaining = self.buffer.len() - self.buffer_idx;
+            self.buffer.copy_within(self.buffer_idx.., 0);
+            self.buffer.truncate(remaining);
+            self.buffer_idx = 0;
+            self.reader
+                .by_ref()
+                .take((self.buffer_size - remaining) as u64)
+                .read_to_end(&mut self.buffer)?;
+            if self.buffer.len() == remaining {
+                self.reader_empty = true;
+            }
+        }
+        Ok(())
     }
 }
 

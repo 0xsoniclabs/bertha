@@ -80,11 +80,9 @@ fn check_file_header(mut reader: impl Read) -> Result<(), Error> {
     Ok(())
 }
 
-fn parse_unit_with_buffer(
-    mut reader: impl Read + Seek,
-    reader_len: usize,
-    unit_buffer: &mut [u8],
-) -> Result<Unit, Error> {
+fn parse_unit_with_buffer(mut reader: impl Read + Seek, reader_len: usize) -> Result<Unit, Error> {
+    // must be large enough to hold the entire encoded [Unit]
+    let mut unit_buffer = [0u8; 1024];
     let unit_buf_len = cmp::min(
         unit_buffer.len(),
         reader_len - reader.stream_position()? as usize,
@@ -103,9 +101,6 @@ fn parse_unit_with_buffer(
 // Source: sonic/opera/genesisstore/disk.go (OpenGenesisStore)
 /// Parses the genesis file and returns the metadata (chain id and unit descriptors).
 pub fn parse_metadata(mut reader: impl BufRead + Seek) -> Result<GenesisMetadata, Error> {
-    // must be large enough to hold the entire encoded [Unit]
-    let mut unit_buffer = [0u8; 1024];
-
     let mut header = None;
     let mut units = HashMap::new();
 
@@ -121,7 +116,7 @@ pub fn parse_metadata(mut reader: impl BufRead + Seek) -> Result<GenesisMetadata
 
         check_file_header(&mut reader)?;
 
-        let unit = parse_unit_with_buffer(&mut reader, len as usize, &mut unit_buffer)?;
+        let unit = parse_unit_with_buffer(&mut reader, len as usize)?;
 
         match &header {
             Some(h) => {
