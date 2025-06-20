@@ -1,5 +1,3 @@
-// Source: go-ethereum/core/types/receipt.go
-
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use bertha_types::{Hash, Log, RlpString, TransactionReceipt, TransactionType};
 
@@ -8,7 +6,6 @@ pub(crate) struct StoredReceiptRlpWithTxType {
     pub transaction_type: TransactionType,
 }
 
-// Source: go-ethereum/core/types/receipt.go (storedReceiptRLP)
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub(crate) struct StoredReceiptRlp {
     post_state_or_status: RlpString,
@@ -16,7 +13,6 @@ pub(crate) struct StoredReceiptRlp {
     logs: Vec<Log>,
 }
 
-// Source: go-ethereum/core/types/receipt.go (SetStatus)
 const RECEIPT_STATUS_SUCCESS_RLP: &[u8] = &[0x01];
 const RECEIPT_STATUS_FAILED_RLP: &[u8] = &[];
 const RECEIPT_STATUS_SUCCESS: u64 = 1;
@@ -31,7 +27,6 @@ impl TryFrom<StoredReceiptRlpWithTxType> for TransactionReceipt {
             transaction_type,
         }: StoredReceiptRlpWithTxType,
     ) -> Result<Self, Self::Error> {
-        // Source: go-ethereum/core/types/receipt.go (SetStatus, SetFromRLP)
         let status = match receipt.post_state_or_status.0.as_slice() {
             RECEIPT_STATUS_FAILED_RLP => RECEIPT_STATUS_FAILED,
             RECEIPT_STATUS_SUCCESS_RLP => RECEIPT_STATUS_SUCCESS,
@@ -57,7 +52,6 @@ impl TryFrom<StoredReceiptRlpWithTxType> for TransactionReceipt {
 impl From<TransactionReceipt> for StoredReceiptRlp {
     fn from(receipt: TransactionReceipt) -> Self {
         Self {
-            // Source: go-ethereum/core/types/receipt.go (statusEncoding)
             // in Sonic post_state / root is not used and always empty
             post_state_or_status: if receipt.status == RECEIPT_STATUS_FAILED {
                 RlpString(Vec::from(RECEIPT_STATUS_FAILED_RLP))

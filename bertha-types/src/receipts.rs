@@ -41,7 +41,6 @@ impl Encodable for TransactionReceipt {
     }
 
     fn encode(&self, out: &mut dyn BufMut) {
-        // see: https://github.com/ethereum/go-ethereum/blob/a511553e448c947a0fe8f34acf7bb6f9818c2b49/core/types/receipt.go#L122-L140
         if self.transaction_type != TransactionType::Legacy {
             out.put_u8(self.transaction_type as u8);
         }
