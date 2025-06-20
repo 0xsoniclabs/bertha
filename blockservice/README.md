@@ -1,6 +1,6 @@
 # Block Service
 
-The block service allows manage, transfer and retrieve block datasets for Ethereum-compatible blockchains in bulk.
+The block service allows to manage, transfer and retrieve block datasets for Ethereum-compatible blockchains in bulk.
 
 ## Dependencies
 
