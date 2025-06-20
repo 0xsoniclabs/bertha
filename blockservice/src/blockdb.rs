@@ -265,6 +265,22 @@ mod tests {
     }
 
     #[test]
+    fn rocksblockdb_removes_secondary_path_on_drop() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        {
+            RocksBlockDb::create(tmpdir.path()).unwrap();
+        }
+        let secondary_path;
+        {
+            let db = RocksBlockDb::open_for_reading(tmpdir.path()).unwrap();
+            assert!(db._secondary_path.is_some());
+            secondary_path = db._secondary_path.as_ref().unwrap().path().to_owned();
+            assert!(secondary_path.exists());
+        }
+        assert!(!secondary_path.exists());
+    }
+
+    #[test]
     fn rocksblockdb_open_for_reading_returns_error_if_db_does_not_exist() {
         let tmpdir = tempfile::tempdir().unwrap();
         let result = RocksBlockDb::open_for_reading(tmpdir.path());
