@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     io::{self, BufRead, Read, Seek, SeekFrom, Take},
+    num::NonZeroUsize,
 };
 
 use alloy_rlp::Decodable;
@@ -12,6 +13,9 @@ use crate::{
     units::UnitDescriptor,
 };
 
+/// An iterator that parses blocks from a compressed genesis file lazily while they are consumed.
+/// It yields [Result<Block, Error>] to be able to propagate errors during parsing.
+/// Once an error was returned, the iterator will not yield any more blocks.
 pub struct BlockParser<R: BufRead> {
     slice_reader: SliceReader<GzDecoder<Take<R>>>,
     error: bool,
@@ -22,6 +26,10 @@ impl<R: BufRead + Seek> BlockParser<R> {
     const MAX_MEM_USAGE: usize = 256 * 1024 * 1024; // 256 MiB
 
     pub fn try_new(mut reader: R, units: &HashMap<String, UnitDescriptor>) -> Result<Self, Error> {
+        // In theory, the genesis file can contain multiple block units (named `brs`, `brs_1`,
+        // `brs_2`, ...). However, in practice only `brs` is used. Because it simplifies the code,
+        // we only support a single block unit named `brs` here. In case there are multiple
+        // block units, we will only use the first one and print a warning.
         // Source: sonic/opera/genesisstore/store_genesis.go ((Blocks)ForEach)
         if units.keys().filter(|key| key.starts_with("brs_")).count() > 0 {
             println!("WARNING: file contains multiple block units, but only the first one is used");
@@ -30,12 +38,14 @@ impl<R: BufRead + Seek> BlockParser<R> {
             .get("brs")
             .ok_or(Error::Genesis(GenesisError::BlocksUnitMissing))?;
 
+        // Now seek to the start of the blocks unit (offset) and decompress `compressed_size` bytes.
         // Source: sonic/opera/genesisstore/disk.go (OpenGenesisStore -> ReaderProvider)
         reader.seek(SeekFrom::Start(blocks_unit.offset as u64))?;
         let compressed_blocks_reader = reader.take(blocks_unit.compressed_size);
 
         let mut blocks_reader = GzDecoder::new(compressed_blocks_reader);
 
+        // The payload starts with the piece size, the size and the hashes.
         // Source: sonic/opera/genesisstore/fileshash/reader_file.go (init)
         let piece_size = u32::from_be_bytes(read_bytes(&mut blocks_reader)?) as usize;
         let size = u64::from_be_bytes(read_bytes(&mut blocks_reader)?) as usize;
@@ -63,11 +73,12 @@ impl<R: BufRead + Seek> BlockParser<R> {
             &mut io::sink(),
         )?;
 
+        // everything else that is left in the reader are the encoded blocks
         Ok(Self {
             slice_reader: SliceReader::new(
                 blocks_reader,
                 Self::MAX_MEM_USAGE,
-                Self::MAX_MEM_USAGE / 2,
+                NonZeroUsize::new(Self::MAX_MEM_USAGE / 2).unwrap(), // This is > 0
             ),
             error: false,
         })
@@ -81,13 +92,13 @@ impl<R: BufRead> Iterator for BlockParser<R> {
         if self.error {
             return None;
         }
-        // Source: sonic/opera/genesisstore/fileshash/reader_file.go (readFromPiece, readNewPiece)
-        // in Go, they essentially use a hand written buffered reader of size `piece_size`.
-        // This works because the rlp lib in go can read from streams.
-        // alloy_rlp can not read from streams but but needs a slice of bytes.
+        // In Go, a hand written buffered reader of size `piece_size` is used.
+        // This works because the rlp lib in Go can read from streams.
+        // alloy_rlp can not read from streams but needs a slice of bytes.
         // Because encoded blocks can span across piece boundaries, we used the `SliceReader` which
         // always holds *enough* bytes in its buffer to decode a full block (unlike a BufReader
-        // which only refills the buffer if it is empty).
+        // which only refills the buffer when it is empty).
+        // Source: sonic/opera/genesisstore/fileshash/reader_file.go (readFromPiece, readNewPiece)
         match self.slice_reader.process_with(IdxFullBlock::decode) {
             Ok(Some(block)) => Some(
                 Block::try_from(block).map_err(|msg| Error::Rlp(alloy_rlp::Error::Custom(msg))),

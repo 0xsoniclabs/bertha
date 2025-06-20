@@ -9,6 +9,10 @@ mod block;
 mod block_parser;
 mod error;
 mod slice_reader;
+// the module can not be `#[cfg(test)]` because then it can not be used in tests of other crates,
+// but by making it `#[doc(hidden)]` it is not included in the public API documentation
+#[doc(hidden)]
+pub mod test_utils;
 mod transaction_receipt;
 mod units;
 
@@ -52,72 +56,17 @@ fn read_bytes<const N: usize>(mut reader: impl Read) -> Result<[u8; N], io::Erro
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Cursor, Read};
+    use std::io::Cursor;
 
-    use alloy_rlp::Encodable;
-    use bertha_types::Hash;
-    use flate2::{Compression, bufread::GzEncoder};
-
-    use crate::{
-        Genesis,
-        block::IdxFullBlock,
-        units::{GenesisHeader, HEADER, Unit, VERSION},
-    };
+    use crate::{Genesis, test_utils::generate_test_genesis};
 
     #[test]
     fn parses_whole_genesis_file_and_yields_all_blocks() {
-        const PIECE_SIZE: u32 = 1000;
-        const SIZE: u64 = 10000;
-
-        // this buffer will hold the piece size, size, hashes and blocks
-        // it gets compressed and then added to `buffer``
-        let mut unit_data = Vec::new();
-
-        // add piece_size, size and hashes
-        unit_data.extend_from_slice(&PIECE_SIZE.to_be_bytes());
-        unit_data.extend_from_slice(&SIZE.to_be_bytes());
-        for _ in 0..(SIZE as usize / PIECE_SIZE as usize) {
-            unit_data.extend_from_slice(&[0u8; 32]); // dummy hashes
-        }
-
-        // add multiple encoded blocks
-        for _ in 0..3 {
-            IdxFullBlock::default().encode(&mut unit_data);
-        }
-
-        let uncompressed_size = unit_data.len() as u64;
-        let mut compressed_unit_data = Vec::new();
-        let compressed_size = GzEncoder::new(Cursor::new(&mut unit_data), Compression::fast())
-            .read_to_end(&mut compressed_unit_data)
-            .unwrap() as u64;
-
-        let header = GenesisHeader {
-            genesis_id: [0u8; 32],
-            network_id: 1,
-            network_name: "test_network".to_string(),
-        };
-
-        let mut buf = Vec::new();
-        // write the header and version
-        buf.extend_from_slice(&HEADER);
-        buf.extend_from_slice(&VERSION);
-        // write unit
-        let unit = Unit {
-            unit_name: "brs".to_owned(),
-            header: header.clone(),
-        };
-        unit.encode(&mut buf);
-        // write hash
-        buf.extend_from_slice(&Hash::default());
-        // write compressed size
-        buf.extend_from_slice(&compressed_size.to_be_bytes());
-        // write uncompressed size
-        buf.extend_from_slice(&uncompressed_size.to_be_bytes());
-        // add compressed blocks unit data
-        buf.extend(compressed_unit_data);
-
+        let chain_id = 146;
+        let blocks = 3;
+        let buf = generate_test_genesis(chain_id, blocks);
         let mut genesis = Genesis::parse(Cursor::new(buf)).unwrap();
-        assert_eq!(genesis.chain_id(), header.network_id);
-        assert_eq!(genesis.blocks().count(), 3);
+        assert_eq!(genesis.chain_id(), chain_id);
+        assert_eq!(genesis.blocks().count(), blocks);
     }
 }

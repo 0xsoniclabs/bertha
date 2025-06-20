@@ -12,6 +12,7 @@ use crate::{
     read_bytes,
 };
 
+/// Metadata for part of the genesis file that contains data of a specific type (e.g. blocks).
 // Source: sonic/opera/genesisstore/disk.go (Unit)
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct Unit {
@@ -19,6 +20,7 @@ pub struct Unit {
     pub header: GenesisHeader,
 }
 
+/// A header that contains metadata about the chain this genesis file belongs to.
 // Source: sonic/opera/genesis/types.go (Header)
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub struct GenesisHeader {
@@ -27,6 +29,8 @@ pub struct GenesisHeader {
     pub network_name: String,
 }
 
+/// A description of where the data of a unit can be found within the genesis file, and how large it
+/// is (compressed and uncompressed).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnitDescriptor {
     pub offset: usize,
@@ -34,6 +38,7 @@ pub struct UnitDescriptor {
     pub uncompressed_size: u64,
 }
 
+/// A container which contains all metadata needed to parse blocks from the genesis file.
 pub struct GenesisMetadata {
     pub chain_id: u64,
     pub units: HashMap<String, UnitDescriptor>,
@@ -42,9 +47,9 @@ pub struct GenesisMetadata {
 pub const HEADER: [u8; 4] = [0x64, 0x1b, 0x00, 0xac];
 pub const VERSION: [u8; 4] = [0x00, 0x02, 0x00, 0x01];
 
-// Source: sonic/opera/genesisstore/disk.go (checkFileHeader)
 /// Checks that the next bytes in the reader match the expected genesis file header and version.
-fn check_file_header(mut reader: impl Read) -> Result<(), Error> {
+// Source: sonic/opera/genesisstore/disk.go (checkFileHeader)
+fn read_file_header(mut reader: impl Read) -> Result<(), Error> {
     match read_bytes(&mut reader) {
         Ok(HEADER) => (),
         Ok(header) => {
@@ -80,7 +85,11 @@ fn check_file_header(mut reader: impl Read) -> Result<(), Error> {
     Ok(())
 }
 
-fn parse_unit_with_buffer(mut reader: impl Read + Seek, reader_len: usize) -> Result<Unit, Error> {
+// Parses a [Unit] from the reader by first materializing enough bytes into a buffer
+// and then decoding the [Unit] from that buffer. This is necessary because alloy_rlp
+// does not support decoding directly from a reader, but requires a slice of bytes.
+// Afterwards the underlying reader is seeked to the position right after the [Unit].
+fn parse_unit(mut reader: impl Read + Seek, reader_len: usize) -> Result<Unit, Error> {
     // must be large enough to hold the entire encoded [Unit]
     let mut unit_buffer = [0u8; 1024];
     let unit_buf_len = cmp::min(
@@ -91,15 +100,15 @@ fn parse_unit_with_buffer(mut reader: impl Read + Seek, reader_len: usize) -> Re
     // enough bytes of the reader into a buffer and pass that buffer to the decoder
     let unit_buffer = &mut unit_buffer[..unit_buf_len];
     reader.read_exact(unit_buffer)?;
-    let mut unit_buffer = &*unit_buffer;
+    let mut unit_buffer = &*unit_buffer; // convert a mutable slice to an immutable one
     let unit = Unit::decode(&mut unit_buffer)?;
     // now seek backward the number of bytes that have not been consumed when decoding the [Unit]
     reader.seek_relative(-(unit_buffer.len() as i64))?;
     Ok(unit)
 }
 
-// Source: sonic/opera/genesisstore/disk.go (OpenGenesisStore)
 /// Parses the genesis file and returns the metadata (chain id and unit descriptors).
+// Source: sonic/opera/genesisstore/disk.go (OpenGenesisStore)
 pub fn parse_metadata(mut reader: impl BufRead + Seek) -> Result<GenesisMetadata, Error> {
     let mut header = None;
     let mut units = HashMap::new();
@@ -114,9 +123,9 @@ pub fn parse_metadata(mut reader: impl BufRead + Seek) -> Result<GenesisMetadata
             break;
         }
 
-        check_file_header(&mut reader)?;
+        read_file_header(&mut reader)?;
 
-        let unit = parse_unit_with_buffer(&mut reader, len as usize)?;
+        let unit = parse_unit(&mut reader, len as usize)?;
 
         match &header {
             Some(h) => {
@@ -162,7 +171,7 @@ mod tests {
 
     use crate::{
         Error, GenesisError,
-        units::{GenesisHeader, HEADER, Unit, VERSION, check_file_header, parse_metadata},
+        units::{GenesisHeader, HEADER, Unit, VERSION, parse_metadata, read_file_header},
     };
 
     #[test]
@@ -170,7 +179,7 @@ mod tests {
         let mut buf = Vec::new();
         buf.extend_from_slice(&HEADER);
         buf.extend_from_slice(&VERSION);
-        assert!(check_file_header(buf.as_slice()).is_ok());
+        assert!(read_file_header(buf.as_slice()).is_ok());
     }
 
     #[test]
@@ -178,7 +187,7 @@ mod tests {
         // empty buffer = header missing
         let buf = Vec::new();
         assert!(matches!(
-            check_file_header(buf.as_slice()).unwrap_err(),
+            read_file_header(buf.as_slice()).unwrap_err(),
             Error::Genesis(GenesisError::HeaderMissing)
         ));
 
@@ -186,7 +195,7 @@ mod tests {
         let mut buf = Vec::new();
         buf.extend_from_slice(&[0, 0, 0, 0]);
         assert!(matches!(
-            check_file_header(buf.as_slice()).unwrap_err(),
+            read_file_header(buf.as_slice()).unwrap_err(),
             Error::Genesis(GenesisError::InvalidHeader {
                 got: [0, 0, 0, 0],
                 expected: HEADER,
@@ -197,7 +206,7 @@ mod tests {
         let mut buf = Vec::new();
         buf.extend_from_slice(&HEADER);
         assert!(matches!(
-            check_file_header(buf.as_slice()).unwrap_err(),
+            read_file_header(buf.as_slice()).unwrap_err(),
             Error::Genesis(GenesisError::HeaderMissing)
         ));
 
@@ -206,7 +215,7 @@ mod tests {
         buf.extend_from_slice(&HEADER);
         buf.extend_from_slice(&[0, 0, 0, 0]);
         assert!(matches!(
-            check_file_header(buf.as_slice()).unwrap_err(),
+            read_file_header(buf.as_slice()).unwrap_err(),
             Error::Genesis(GenesisError::InvalidFileVersion {
                 got: [0, 0, 0, 0],
                 expected: VERSION,
@@ -247,8 +256,11 @@ mod tests {
 
         let meta = parse_metadata(Cursor::new(buf)).unwrap();
         assert_eq!(meta.chain_id, header.network_id);
-        for (unit_name, descriptor) in meta.units {
-            assert!(unit_name.starts_with("test_unit"));
+
+        let mut units: Vec<_> = meta.units.into_iter().collect();
+        units.sort_by(|(unit_name1, _), (unit_name2, _)| unit_name1.cmp(unit_name2));
+        for (i, (unit_name, descriptor)) in units.into_iter().enumerate() {
+            assert_eq!(*unit_name, format!("test_unit{i}"));
             assert_eq!(descriptor.compressed_size, COMPRESSED_SIZE);
             assert_eq!(descriptor.uncompressed_size, UNCOMPRESSED_SIZE);
         }

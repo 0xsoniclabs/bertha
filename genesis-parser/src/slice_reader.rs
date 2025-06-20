@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::{io::Read, num::NonZeroUsize};
 
 use crate::error::Error;
 
@@ -17,7 +17,14 @@ pub struct SliceReader<R: Read> {
 }
 
 impl<R: Read> SliceReader<R> {
-    pub fn new(source: R, buffer_size: usize, min_slice_size: usize) -> Self {
+    /// Creates a new [SliceReader] with the given source, buffer size and minimum slice size.
+    /// The buffer size must be greater than or equal to the minimum slice size.
+    /// If this is not the case, the buffer size is set to twice the minimum slice size.
+    pub fn new(source: R, mut buffer_size: usize, min_slice_size: NonZeroUsize) -> Self {
+        let min_slice_size = min_slice_size.get();
+        if buffer_size < min_slice_size {
+            buffer_size = min_slice_size * 2;
+        }
         Self {
             reader: source,
             reader_empty: false,
@@ -73,6 +80,8 @@ impl<R: Read> SliceReader<R> {
 
 #[cfg(test)]
 mod tests {
+    use std::{io::Read, num::NonZeroUsize};
+
     use super::SliceReader;
     use crate::Error;
 
@@ -86,13 +95,36 @@ mod tests {
     }
 
     #[test]
+    fn new_checks_buffer_size_is_greater_or_equal_to_min_slice_size() {
+        // buffer size > min slice size
+        let reader = SliceReader::new(std::io::empty(), 2, NonZeroUsize::new(1).unwrap());
+        assert_eq!(reader.buffer_size, 2);
+        assert_eq!(reader.min_slice_size, 1);
+
+        // buffer size == min slice size
+        let reader = SliceReader::new(std::io::empty(), 1, NonZeroUsize::new(1).unwrap());
+        assert_eq!(reader.buffer_size, 1);
+        assert_eq!(reader.min_slice_size, 1);
+
+        // buffer size < min slice size
+        let reader = SliceReader::new(std::io::empty(), 0, NonZeroUsize::new(1).unwrap());
+        // buffer size is set to twice the min slice size
+        assert_eq!(reader.buffer_size, 2);
+        assert_eq!(reader.min_slice_size, 1);
+    }
+
+    #[test]
     fn buffer_has_always_slice_size_unless_reader_is_empty() {
         const BUF_SIZE: usize = 10;
         const MIN_SLICE_SIZE: usize = 6;
         const DATA_SIZE: usize = 28;
 
         let data = [0u8; DATA_SIZE];
-        let mut reader = SliceReader::new(data.as_slice(), BUF_SIZE, MIN_SLICE_SIZE);
+        let mut reader = SliceReader::new(
+            data.as_slice(),
+            BUF_SIZE,
+            NonZeroUsize::new(MIN_SLICE_SIZE).unwrap(),
+        );
 
         for _ in 0..DATA_SIZE / MIN_SLICE_SIZE {
             reader
@@ -123,6 +155,64 @@ mod tests {
                 .process_with(|slice| consume(slice, 1))
                 .unwrap()
                 .is_none()
+        );
+        // Now the underlying reader and the unconsumed part of the buffer are empty
+        assert!(
+            reader
+                .process_with(|slice| {
+                    assert!(slice.is_empty());
+                    Result::<(), Error>::Ok(())
+                })
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn process_with_propagates_errors_from_mapping_function() {
+        const BUF_SIZE: usize = 10;
+        const MIN_SLICE_SIZE: usize = 6;
+        const DATA_SIZE: usize = 28;
+
+        let data = [0u8; DATA_SIZE];
+        let mut reader = SliceReader::new(
+            data.as_slice(),
+            BUF_SIZE,
+            NonZeroUsize::new(MIN_SLICE_SIZE).unwrap(),
+        );
+
+        assert!(matches!(
+            reader.process_with(|_| {
+                Result::<(), Error>::Err(Error::Genesis(crate::GenesisError::BlocksUnitMissing))
+            }),
+            Err(Error::Genesis(crate::GenesisError::BlocksUnitMissing))
+        ));
+    }
+
+    #[test]
+    fn process_with_propagates_errors_from_reader() {
+        const BUF_SIZE: usize = 10;
+        const MIN_SLICE_SIZE: usize = 6;
+
+        struct ErrorReader;
+        impl Read for ErrorReader {
+            fn read(&mut self, _buf: &mut [u8]) -> Result<usize, std::io::Error> {
+                Err(std::io::Error::other("simulated read error"))
+            }
+        }
+
+        let mut reader = SliceReader::new(
+            ErrorReader,
+            BUF_SIZE,
+            NonZeroUsize::new(MIN_SLICE_SIZE).unwrap(),
+        );
+
+        assert!(
+            reader
+                .process_with(|_| Result::<(), Error>::Ok(()))
+                .unwrap_err()
+                .to_string()
+                .contains("simulated read error")
         );
     }
 }
