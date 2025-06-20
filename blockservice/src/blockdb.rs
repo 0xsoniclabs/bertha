@@ -104,7 +104,7 @@ impl RocksBlockDb {
         opts
     }
 
-    fn get_key(chain_id: u64, block_number: u64) -> [u8; 16] {
+    fn make_key(chain_id: u64, block_number: u64) -> [u8; 16] {
         let mut key = [0u8; 16];
         key[0..8].copy_from_slice(&chain_id.to_be_bytes());
         key[8..16].copy_from_slice(&block_number.to_be_bytes());
@@ -115,13 +115,13 @@ impl RocksBlockDb {
 impl BlockDb for RocksBlockDb {
     fn get_raw(&self, chain_id: u64, block_number: u64) -> Result<Option<Vec<u8>>, Error> {
         self.db
-            .get(Self::get_key(chain_id, block_number))
+            .get(Self::make_key(chain_id, block_number))
             .map_err(|e| Error::StorageLayer(e.to_string()))
     }
 
     fn put_raw(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
         self.db
-            .put(Self::get_key(chain_id, block_number), data)
+            .put(Self::make_key(chain_id, block_number), data)
             .map_err(|e| Error::StorageLayer(e.to_string()))
     }
 }
@@ -133,7 +133,7 @@ mod tests {
     use super::*;
     use crate::proto;
 
-    struct StubDb(pub Vec<u8>);
+    struct StubDb(Vec<u8>);
     impl BlockDb for StubDb {
         fn get_raw(&self, _chain_id: u64, _block_number: u64) -> Result<Option<Vec<u8>>, Error> {
             Ok(Some(self.0.clone()))
@@ -329,7 +329,7 @@ mod tests {
         let data = b"test data";
 
         db.put_raw(chain_id, block_number, data).unwrap();
-        let key = RocksBlockDb::get_key(chain_id, block_number);
+        let key = RocksBlockDb::make_key(chain_id, block_number);
         let value = db.db.get(key).unwrap().unwrap();
         assert_eq!(value, data);
     }
@@ -356,7 +356,7 @@ mod tests {
         let chain_id = 1;
         let block_number = 42;
         let data = b"test data";
-        let key = RocksBlockDb::get_key(chain_id, block_number);
+        let key = RocksBlockDb::make_key(chain_id, block_number);
         db.db.put(key, data).unwrap();
 
         let result = db.get_raw(chain_id, block_number).unwrap();
