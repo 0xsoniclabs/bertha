@@ -1,5 +1,7 @@
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use bertha_types::{Block, EMPTY_SHA3_OMMERS_HASH, Hash, HexConvert, Transaction, U256};
+use bertha_types::{
+    Block, EMPTY_SHA3_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, HexConvert, Transaction, U256,
+};
 
 use crate::transaction_receipt::{StoredReceiptRlp, StoredReceiptRlpWithTxType};
 
@@ -67,7 +69,7 @@ impl TryFrom<IdxFullBlock> for Block {
             transactions: idx_full_block.block.txn,
             receipts,
             base_fee_per_gas: Some(idx_full_block.block.base_fee),
-            withdrawals_root: None,
+            withdrawals_root: Some(Hash::try_from_hex(EMPTY_TREE_ROOT_HASH).unwrap()),
             blob_gas_used: None,
             excess_blob_gas: None,
             parent_beacon_block_root: None,
