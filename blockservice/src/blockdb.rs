@@ -4,7 +4,7 @@ use bertha_types::Block;
 use prost::Message;
 use tempfile::TempDir;
 
-use crate::error::Error;
+use crate::{error::Error, proto};
 
 impl From<rocksdb::Error> for Error {
     fn from(e: rocksdb::Error) -> Self {
@@ -12,7 +12,7 @@ impl From<rocksdb::Error> for Error {
     }
 }
 
-/// A database allows to store and and query [Block]s for multiple different blockchains.
+/// A database that allows to store and and query [Block]s for multiple different blockchains.
 /// Blocks are encoded as protobuf messages before being stored in the database.
 /// As database operations may fail for various reasons, all methods return a [Result].
 pub trait BlockDb {
@@ -21,7 +21,7 @@ pub trait BlockDb {
     fn get(&self, chain_id: u64, block_number: u64) -> Result<Option<Block>, Error> {
         match self.get_raw(chain_id, block_number)? {
             Some(data) => Ok(Some(Block::try_from(
-                crate::proto::Block::decode(data.as_slice()).map_err(Error::Protobuf)?,
+                proto::Block::decode(data.as_slice()).map_err(Error::Protobuf)?,
             )?)),
             None => Ok(None),
         }
@@ -31,7 +31,7 @@ pub trait BlockDb {
     /// The block number is obtained from the block itself.
     fn put(&mut self, chain_id: u64, block: Block) -> Result<(), Error> {
         let number = block.number;
-        let data = crate::proto::Block::from(block).encode_to_vec();
+        let data = proto::Block::from(block).encode_to_vec();
         self.put_raw(chain_id, number, &data)
     }
 
