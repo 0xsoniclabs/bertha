@@ -5,19 +5,15 @@ mod error;
 mod legacy_tx;
 mod set_code_tx;
 
-#[cfg(test)]
-use alloy_rlp::Decodable;
-use alloy_rlp::Encodable;
+use alloy_rlp::{Decodable, Encodable};
 use serde::{Deserialize, Serialize};
 
-#[cfg(test)]
-use crate::eip_2718_utils::EIP2718Unmarshallable;
 pub use crate::transaction::{
     access_list_tx::AccessListEntry, error::TransactionError, set_code_tx::SetCodeAuthorization,
 };
 use crate::{
     Address, AsHex, Hash, HexConvert, RlpNil, RlpString, U256,
-    eip_2718_utils::Eip2718Marshallable,
+    eip_2718_utils::{EIP2718Unmarshallable, Eip2718Marshallable},
     parse_hex_error::ParseHexError,
     transaction::{
         access_list_tx::AccessListTx, blob_tx::BlobTx, dynamic_fee_tx::DynamicFeeTx,
@@ -95,7 +91,6 @@ impl Eip2718Marshallable for Transaction {
     }
 }
 
-#[cfg(test)]
 impl EIP2718Unmarshallable for Transaction {
     fn unmarshal(buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
         if buf.is_empty() {

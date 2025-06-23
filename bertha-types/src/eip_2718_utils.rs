@@ -13,7 +13,6 @@ pub trait Eip2718Marshallable {
 }
 
 /// A trait for types that can be unmarshaled from EIP-2718 specification.
-#[cfg(test)]
 pub trait EIP2718Unmarshallable: Sized {
     /// Unmarshal an object encoded according to EIP-2718 specification.
     fn unmarshal(data: &mut &[u8]) -> Result<Self, alloy_rlp::Error>;
