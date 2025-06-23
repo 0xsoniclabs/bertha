@@ -43,6 +43,8 @@ jobs:
         components: clippy
     - name: install protoc
       uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: load cache
       uses: Swatinem/rust-cache@v2
     - name: cargo clippy
@@ -59,6 +61,8 @@ jobs:
       uses: dtolnay/rust-toolchain@1.86
     - name: install protoc
       uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: load cache
       uses: Swatinem/rust-cache@v2
     - name: cargo doc
@@ -80,6 +84,8 @@ jobs:
       uses: dtolnay/rust-toolchain@1.86
     - name: install protoc
       uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: install rocksdb
       uses: awalsh128/cache-apt-pkgs-action@latest
       with:
@@ -100,6 +106,8 @@ jobs:
       uses: dtolnay/rust-toolchain@1.86
     - name: install protoc
       uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: install rocksdb
       uses: awalsh128/cache-apt-pkgs-action@latest
       with:
