@@ -1,6 +1,6 @@
 use alloy_rlp::{RlpDecodable, RlpEncodable};
 use bertha_types::{
-    Block, EMPTY_SHA3_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, HexConvert, Transaction, U256,
+    Block, EMPTY_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, HexConvert, Transaction, U256,
 };
 
 use crate::transaction_receipt::{StoredReceiptRlp, StoredReceiptRlpWithTxType};
@@ -60,7 +60,7 @@ impl TryFrom<IdxFullBlock> for Block {
 
         Ok(Self {
             parent_hash: idx_full_block.block.parent_hash,
-            ommers_hash: Hash::try_from_hex(EMPTY_SHA3_OMMERS_HASH).unwrap(),
+            ommers_hash: Hash::try_from_hex(EMPTY_OMMERS_HASH).unwrap(),
             beneficiary: Default::default(),
             state_root: idx_full_block.block.state_root,
             difficulty: idx_full_block.block.difficulty,
@@ -89,7 +89,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn block_from_idx_full_block_converts_timestamp_duration_and_extra_data() {
+    fn block_try_from_idx_full_block_converts_timestamp_and_duration_and_extra_data() {
         let idx_full_block = IdxFullBlock {
             block: FullBlock {
                 block_hash: Hash::from([0; 32]),
@@ -111,7 +111,7 @@ mod tests {
 
         let block = Block {
             parent_hash: Hash::from([1; 32]),
-            ommers_hash: Hash::try_from_hex(EMPTY_SHA3_OMMERS_HASH).unwrap(),
+            ommers_hash: Hash::try_from_hex(EMPTY_OMMERS_HASH).unwrap(),
             beneficiary: Default::default(),
             state_root: Hash::from([2; 32]),
             difficulty: 42,
@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn block_from_idx_full_block_returns_error_when_status_is_invalid() {
+    fn block_try_from_idx_full_block_returns_error_when_status_is_invalid() {
         let idx_full_block = IdxFullBlock {
             block: FullBlock {
                 block_hash: Hash::from([0; 32]),

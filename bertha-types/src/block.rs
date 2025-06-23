@@ -1,5 +1,5 @@
 use crate::{
-    Address, EMPTY_SHA3_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, HexConvert, Transaction,
+    Address, EMPTY_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, HexConvert, Transaction,
     TransactionReceipt, U256,
 };
 
@@ -60,7 +60,7 @@ impl Block {
     pub fn default_sonic() -> Self {
         Block {
             // in Sonic the ommers_hash is always set to the empty hash
-            ommers_hash: Hash::try_from_hex(EMPTY_SHA3_OMMERS_HASH).unwrap(),
+            ommers_hash: Hash::try_from_hex(EMPTY_OMMERS_HASH).unwrap(),
             // in Sonic the extra_data must be 12 bytes long because it holds the duration and
             // nanoseconds part of the timestamp
             extra_data: vec![0; 12],
