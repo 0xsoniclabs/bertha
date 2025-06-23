@@ -15,12 +15,12 @@ mod u256;
 pub use as_hex::AsHex;
 pub use block::Block;
 pub use block_header::BlockHeader;
-pub use eip_2718_utils::{EIP2718Unmarshallable, Eip2718Marshallable};
+pub use eip_2718_utils::{EIP2718Unmarshallable, Eip2718Marshallable, compute_root_hash, verify};
 pub use error::VerificationError;
 pub use hex_convert::HexConvert;
 pub use known_hashes::*;
 pub use log::Log;
-pub use receipts::{BlockReceipt, TransactionReceipt};
+pub use receipts::TransactionReceipt;
 pub use transaction::{AccessListEntry, SetCodeAuthorization, Transaction, TransactionType};
 pub use u256::U256;
 

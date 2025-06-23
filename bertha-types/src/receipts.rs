@@ -1,10 +1,7 @@
 use alloy_rlp::{BufMut, Encodable, Header};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    Address, AsHex, Bloom, Eip2718Marshallable, Hash, Log, TransactionType, VerificationError,
-    eip_2718_utils::verify,
-};
+use crate::{AsHex, Bloom, Eip2718Marshallable, Log, TransactionType};
 
 /// Receipt for a transaction.
 /// The receipt provides information about the execution of the transaction like the amount of gas
@@ -97,52 +94,10 @@ impl From<TransactionReceipt> for JsonRpcTransactionReceipt {
     }
 }
 
-/// Receipts for the transactions of a block.
-/// The receipts provide information about the execution of the transactions like the amount of gas
-/// that was used or the emitted logs.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(transparent)]
-pub struct BlockReceipt(Vec<TransactionReceipt>);
-
-impl BlockReceipt {
-    /// Verifies the block receipt by computing the receipts root hash and comparing it with the
-    /// provided one.
-    pub fn verify(self, receipts_root: &Hash) -> Result<VerifiedBlockReceipt, VerificationError> {
-        verify(&self.0, receipts_root)?;
-        Ok(VerifiedBlockReceipt(self.0))
-    }
-}
-
-#[cfg(test)]
-impl From<Vec<TransactionReceipt>> for BlockReceipt {
-    fn from(value: Vec<TransactionReceipt>) -> Self {
-        Self(value)
-    }
-}
-
-/// A verified block receipt is a block receipt that has been verified against the receipts root.
-/// For more information refer to [BlockReceipt].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VerifiedBlockReceipt(Vec<TransactionReceipt>);
-
-impl VerifiedBlockReceipt {
-    /// Returns the logs of the block receipt that match the given address and topics.
-    pub fn into_logs(self, address: Option<&Address>, topics: &[Hash]) -> Vec<Log> {
-        self.0
-            .into_iter()
-            .flat_map(|receipt| receipt.logs)
-            .filter(|log| {
-                address.map(|addr| *addr == log.address).unwrap_or(true)
-                    && topics.iter().all(|topic| log.topics.contains(topic))
-            })
-            .collect()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Hash, HexConvert};
+    use crate::{Address, Hash, HexConvert, verify};
 
     #[test]
 
@@ -167,86 +122,8 @@ mod tests {
         assert_eq!(receipt.marshal(), Vec::try_from_hex("0x02f9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
     }
 
-    #[test]
-    fn get_logs_filters_by_all_provided_constraints() {
-        let address = Address::try_from_hex("0xaf93888cbd250300470a1618206e036e11470149").unwrap();
-        let topics = vec![
-            Hash::try_from_hex(
-                "0x0000000000000000000000000000000000000000000000000000000000000001",
-            )
-            .unwrap(),
-            Hash::try_from_hex(
-                "0x0000000000000000000000000000000000000000000000000000000000000002",
-            )
-            .unwrap(),
-            Hash::try_from_hex(
-                "0x0000000000000000000000000000000000000000000000000000000000000003",
-            )
-            .unwrap(),
-        ];
-        let log = Log {
-            address,
-            topics: topics.clone(),
-            data: Vec::default(),
-        };
-        let receipt = TransactionReceipt {
-            status: 0,
-            cumulative_gas_used: 0,
-            logs: vec![log.clone()],
-            transaction_type: TransactionType::Legacy,
-        };
-        let block_receipt = VerifiedBlockReceipt(vec![receipt]);
-
-        assert_eq!(
-            block_receipt.clone().into_logs(None, &[]),
-            vec![log.clone()]
-        );
-        assert_eq!(
-            block_receipt.clone().into_logs(Some(&address), &[]),
-            vec![log.clone()]
-        );
-        for topic in topics.clone() {
-            assert_eq!(
-                block_receipt.clone().into_logs(Some(&address), &[topic]),
-                vec![log.clone()]
-            );
-        }
-        assert_eq!(
-            block_receipt.clone().into_logs(None, &topics),
-            vec![log.clone()]
-        );
-        for topic in topics.clone() {
-            assert_eq!(
-                block_receipt.clone().into_logs(None, &[topic]),
-                vec![log.clone()]
-            );
-        }
-        assert_eq!(
-            block_receipt.clone().into_logs(Some(&address), &topics),
-            vec![log.clone()]
-        );
-        for topic in topics.clone() {
-            assert_eq!(
-                block_receipt.clone().into_logs(None, &[topic]),
-                vec![log.clone()]
-            );
-        }
-        assert_eq!(
-            block_receipt
-                .clone()
-                .into_logs(Some(&Address::default()), &topics),
-            vec![]
-        );
-        assert_eq!(
-            block_receipt
-                .clone()
-                .into_logs(Some(&address), &[Hash::default()]),
-            vec![]
-        );
-    }
-
-    fn get_real_block_receipt() -> BlockReceipt {
-        BlockReceipt(vec![
+    fn get_transaction_receipts() -> Vec<TransactionReceipt> {
+        vec![
             TransactionReceipt {
                 cumulative_gas_used: 77081,
                 logs: vec![
@@ -295,35 +172,35 @@ mod tests {
                 status: 1,
                 transaction_type: TransactionType::DynamicFee,
             },
-        ])
+        ]
     }
 
     #[test]
     fn logs_bloom_is_computed_correctly() {
-        let block_receipt = get_real_block_receipt();
+        let receipts = get_transaction_receipts();
 
         let expected = Bloom::try_from_hex("0x00100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000004000000000002000000008040000000000000000040000000000000000000001000000000000002000000000000000000020000000010000000810000000000000000000000000000000000000000000800080000040000080000000000000000400000000000008000000000000800000020000000000000000000000000000000003040800000000000000000000000000000000400000000000000000000000000000000000080000000000000000000000000000000000000000000000").unwrap();
-        let received = block_receipt.0[0].logs_bloom();
+        let received = receipts[0].logs_bloom();
         assert_eq!(received, expected);
 
         let expected = [0; 256];
-        let received = block_receipt.0[1].logs_bloom();
+        let received = receipts[1].logs_bloom();
         assert_eq!(received, expected);
     }
 
     #[test]
     fn block_receipt_verify_computes_root_hash_correctly_and_compares_it_with_specified_root() {
-        let receipt = get_real_block_receipt();
+        let receipts = get_transaction_receipts();
 
         // Receipts hash fetched from the SONIC chain
         let receipts_root = Hash::try_from_hex(
             "0x158c87d05e49fa970a24cee4d209ff36c7cf1f3ac30a98175582beb82f44f8b3",
         )
         .unwrap();
-        assert!(receipt.clone().verify(&receipts_root).is_ok());
+        assert!(verify(&receipts, &receipts_root).is_ok());
 
         let receipts_root = Hash::default();
-        assert!(receipt.verify(&receipts_root).is_err());
+        assert!(verify(&receipts, &receipts_root).is_err());
     }
 
     #[test]
