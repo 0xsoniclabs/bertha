@@ -23,7 +23,7 @@ pub fn verify<T: Eip2718Marshallable>(
     data: &[T],
     expected_root: &Hash,
 ) -> Result<(), VerificationError> {
-    if Hash::from(compute_root_hash(data)) != *expected_root {
+    if compute_root_hash(data) != *expected_root {
         return Err(VerificationError::TransactionVerificationError);
     }
     Ok(())

@@ -1203,7 +1203,7 @@ mod tests {
     }
 
     #[test]
-    fn block_transactions_can_be_verified() {
+    fn transactions_can_be_verified() {
         let transactions = generate_transactions_with_rlp()
             .into_iter()
             .map(|(tx, _)| tx)
