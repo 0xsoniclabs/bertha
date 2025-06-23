@@ -34,7 +34,6 @@ impl TransactionReceipt {
 impl Eip2718Marshallable for TransactionReceipt {
     fn marshal(&self) -> Vec<u8> {
         let mut out = Vec::new();
-        // see: https://github.com/ethereum/go-ethereum/blob/a511553e448c947a0fe8f34acf7bb6f9818c2b49/core/types/receipt.go#L122-L140
         if self.transaction_type != TransactionType::Legacy {
             out.put_u8(self.transaction_type as u8);
         }
