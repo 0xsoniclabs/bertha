@@ -1,6 +1,7 @@
 mod as_hex;
 mod block;
 mod block_header;
+mod eip_2718_utils;
 mod error;
 mod hex_convert;
 mod known_hashes;
@@ -14,6 +15,7 @@ mod u256;
 pub use as_hex::AsHex;
 pub use block::Block;
 pub use block_header::BlockHeader;
+pub use eip_2718_utils::Eip2718Marshallable;
 pub use error::VerificationError;
 pub use hex_convert::HexConvert;
 pub use known_hashes::*;

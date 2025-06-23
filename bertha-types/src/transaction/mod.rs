@@ -5,15 +5,19 @@ mod error;
 mod legacy_tx;
 mod set_code_tx;
 
-use alloy_rlp::{Decodable, Encodable};
-use alloy_trie::{HashBuilder, Nibbles};
+#[cfg(test)]
+use alloy_rlp::Decodable;
+use alloy_rlp::Encodable;
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+use crate::eip_2718_utils::EIP2718Unmarshallable;
 pub use crate::transaction::{
     access_list_tx::AccessListEntry, error::TransactionError, set_code_tx::SetCodeAuthorization,
 };
 use crate::{
-    Address, AsHex, Hash, HexConvert, RlpNil, RlpString, U256, VerificationError,
+    Address, AsHex, Hash, HexConvert, RlpNil, RlpString, U256,
+    eip_2718_utils::Eip2718Marshallable,
     parse_hex_error::ParseHexError,
     transaction::{
         access_list_tx::AccessListTx, blob_tx::BlobTx, dynamic_fee_tx::DynamicFeeTx,
@@ -54,29 +58,8 @@ pub struct Transaction {
     pub s: U256,
 }
 
-impl Decodable for Transaction {
-    fn decode(rlp: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
-        if rlp.is_empty() {
-            return Err(alloy_rlp::Error::InputTooShort);
-        }
-        let type_ = rlp[0];
-        if type_ > 0x7f {
-            Ok(LegacyTx::decode(rlp)?.into())
-        } else {
-            *rlp = &rlp[1..];
-            match type_ {
-                1 => Ok(AccessListTx::decode(rlp)?.into()),
-                2 => Ok(DynamicFeeTx::decode(rlp)?.into()),
-                3 => Ok(BlobTx::decode(rlp)?.into()),
-                4 => Ok(SetCodeTx::decode(rlp)?.into()),
-                _ => Err(alloy_rlp::Error::Custom("invalid transaction type")),
-            }
-        }
-    }
-}
-
-impl Encodable for Transaction {
-    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+impl Eip2718Marshallable for Transaction {
+    fn marshal(&self) -> Vec<u8> {
         fn encode_with_type_as_rlp_string<T: Encodable>(
             transaction_type: TransactionType,
             tx: T,
@@ -86,63 +69,52 @@ impl Encodable for Transaction {
             tx.encode(out);
         }
 
+        let mut out = Vec::new();
         // In case the conversion to one of the inner types fails (the transaction is invalid),
         // we encode an empty string to make sure decoding fails when this data is ingested
         // again. This is essentially a trash in -> trash out policy.
         match self.transaction_type {
             TransactionType::Legacy => LegacyTx::try_from(self.clone())
-                .map(|tx| tx.encode(out))
-                .unwrap_or_else(|_| "".encode(out)),
+                .map(|tx| tx.encode(&mut out))
+                .unwrap_or_else(|_| "".encode(&mut out)),
             TransactionType::AccessList => AccessListTx::try_from(self.clone())
-                .map(|tx| encode_with_type_as_rlp_string(self.transaction_type, tx, out))
-                .unwrap_or_else(|_| "".encode(out)),
+                .map(|tx| encode_with_type_as_rlp_string(self.transaction_type, tx, &mut out))
+                .unwrap_or_else(|_| "".encode(&mut out)),
             TransactionType::DynamicFee => DynamicFeeTx::try_from(self.clone())
-                .map(|tx| encode_with_type_as_rlp_string(self.transaction_type, tx, out))
-                .unwrap_or_else(|_| "".encode(out)),
+                .map(|tx| encode_with_type_as_rlp_string(self.transaction_type, tx, &mut out))
+                .unwrap_or_else(|_| "".encode(&mut out)),
             TransactionType::Blob => BlobTx::try_from(self.clone())
-                .map(|tx| encode_with_type_as_rlp_string(self.transaction_type, tx, out))
-                .unwrap_or_else(|_| "".encode(out)),
+                .map(|tx| encode_with_type_as_rlp_string(self.transaction_type, tx, &mut out))
+                .unwrap_or_else(|_| "".encode(&mut out)),
             TransactionType::SetCode => SetCodeTx::try_from(self.clone())
-                .map(|tx| encode_with_type_as_rlp_string(self.transaction_type, tx, out))
-                .unwrap_or_else(|_| "".encode(out)),
+                .map(|tx| encode_with_type_as_rlp_string(self.transaction_type, tx, &mut out))
+                .unwrap_or_else(|_| "".encode(&mut out)),
         };
-    }
-}
 
-impl Transaction {
-    #[allow(dead_code)]
-    fn encode_value(&self) -> Vec<u8> {
-        let mut out = Vec::new();
-        self.encode(&mut out);
         out
     }
 }
 
-#[allow(dead_code)]
-pub fn verify(
-    transactions: Vec<Transaction>,
-    transactions_root: &Hash,
-) -> Result<(), VerificationError> {
-    let encode_key = |index: usize| -> Vec<u8> {
-        let mut v = Vec::new();
-        index.encode(&mut v);
-        v
-    };
-    let mut trie = HashBuilder::default();
-    let mut leaves: Vec<_> = transactions
-        .iter()
-        .enumerate()
-        .map(|(i, r)| (Nibbles::unpack(encode_key(i)), r.encode_value()))
-        .collect();
-    leaves.sort();
-    leaves.into_iter().for_each(|l| trie.add_leaf(l.0, &l.1));
-
-    let root: [u8; 32] = trie.root().into();
-
-    if Hash::from(root) != *transactions_root {
-        return Err(VerificationError::TransactionVerificationError);
+#[cfg(test)]
+impl EIP2718Unmarshallable for Transaction {
+    fn unmarshal(buf: &mut &[u8]) -> Result<Self, alloy_rlp::Error> {
+        if buf.is_empty() {
+            return Err(alloy_rlp::Error::InputTooShort);
+        }
+        let type_ = buf[0];
+        if type_ > 0x7f {
+            Ok(LegacyTx::decode(buf)?.into())
+        } else {
+            *buf = &buf[1..];
+            match type_ {
+                1 => Ok(AccessListTx::decode(buf)?.into()),
+                2 => Ok(DynamicFeeTx::decode(buf)?.into()),
+                3 => Ok(BlobTx::decode(buf)?.into()),
+                4 => Ok(SetCodeTx::decode(buf)?.into()),
+                _ => Err(alloy_rlp::Error::Custom("invalid transaction type")),
+            }
+        }
     }
-    Ok(())
 }
 
 /// The Ethereum transaction types, as defined by EIP 2718, EIP 2930, EIP 1559, EIP 4844, and EIP
@@ -369,7 +341,7 @@ mod tests {
     use alloy_rlp::Header;
 
     use super::*;
-    use crate::HexConvert;
+    use crate::{HexConvert, eip_2718_utils::verify};
 
     #[test]
     fn is_valid_correctly_checks_transaction() {
@@ -1172,7 +1144,8 @@ mod tests {
     }
 
     impl Transaction {
-        // Canonicalizes the transaction by converting to the appropriate specialized type
+        /// Canonicalizes the transaction by converting it to the appropriate specialized type
+        /// and back, thereby resetting all unused fields to their default values.
         pub fn canonicalize(self) -> Result<Self, TransactionError> {
             match self.transaction_type {
                 TransactionType::Legacy => Ok(LegacyTx::try_from(self)?.into()),
@@ -1187,31 +1160,31 @@ mod tests {
     #[test]
     fn can_be_encoded_to_rlp() {
         for (tx, rlp) in generate_transactions_with_rlp() {
-            let mut buf = Vec::new();
-            tx.canonicalize().unwrap().encode(&mut buf);
-            assert_eq!(buf, rlp, "Encoded RLP should match expected value");
+            assert_eq!(
+                tx.canonicalize().unwrap().marshal(),
+                rlp,
+                "Encoded RLP should match expected value"
+            );
         }
     }
 
     #[test]
     fn encodes_invalid_transaction_to_empty_string() {
         let invalid_blob_tx = make_transaction(TransactionType::Blob, false);
-        let mut buf = Vec::new();
-        invalid_blob_tx.encode(&mut buf);
-        assert_eq!(buf, [alloy_rlp::EMPTY_STRING_CODE]);
+        let marshalled = invalid_blob_tx.marshal();
+        assert_eq!(marshalled, [alloy_rlp::EMPTY_STRING_CODE]);
 
         let invalid_set_code_tx = make_transaction(TransactionType::SetCode, false);
-        let mut buf = Vec::new();
-        invalid_set_code_tx.encode(&mut buf);
-        assert_eq!(buf, [alloy_rlp::EMPTY_STRING_CODE]);
+        let marshalled = invalid_set_code_tx.marshal();
+        assert_eq!(marshalled, [alloy_rlp::EMPTY_STRING_CODE]);
     }
 
     #[test]
     fn can_be_decoded_from_rlp() {
         for (tx, rlp) in generate_transactions_with_rlp() {
-            let decoded = Transaction::decode(&mut &rlp[..]).unwrap();
+            let unmarshalled = Transaction::unmarshal(&mut &rlp[..]).unwrap();
             assert_eq!(
-                decoded,
+                unmarshalled,
                 tx.canonicalize().unwrap(),
                 "Decoded Transaction should match expected one"
             );
@@ -1221,14 +1194,13 @@ mod tests {
     #[test]
     fn fails_to_decode_when_transaction_type_is_invalid() {
         let tx = make_transaction(TransactionType::AccessList, false);
-        let mut buf = Vec::new();
-        tx.encode(&mut buf);
-        let mut rlp = buf.as_slice();
+        let mut marshalled = tx.marshal();
+        let mut rlp = marshalled.as_slice();
         Header::decode(&mut rlp).unwrap();
-        let header_len = buf.len() - rlp.len();
+        let header_len = marshalled.len() - rlp.len();
         // next next byte is used for the transaction type
-        buf[header_len] = 0x05; // Set an invalid transaction type
-        let decoded = Transaction::decode(&mut &buf[..]);
+        marshalled[header_len] = 0x05; // Set an invalid transaction type
+        let decoded = Transaction::unmarshal(&mut &marshalled[..]);
         assert_eq!(
             decoded,
             Err(alloy_rlp::Error::Custom("invalid transaction type"))
@@ -1241,7 +1213,7 @@ mod tests {
             .into_iter()
             .map(|(tx, _)| tx)
             .collect::<Vec<_>>();
-        let res = verify(transactions,
+        let res = verify(&transactions,
             &Hash::try_from_hex(
                 "0xe7d54bad0ddbb2433a6e3578c6cce654d57d6a233e5994d991d9c5b7221ad284", // Generated using the test data generator
             )
