@@ -1,4 +1,4 @@
-use alloy_rlp::{Decodable, RlpEncodable};
+use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde::Serialize;
 
 use crate::{
@@ -7,7 +7,7 @@ use crate::{
 };
 
 /// A legacy Ethereum transaction, as defined in [EIP-2718](https://eips.ethereum.org/EIPS/eip-2718).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, RlpEncodable)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, RlpEncodable, RlpDecodable)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LegacyTx {
     pub nonce: AsHex<u64>,
@@ -37,37 +37,6 @@ impl LegacyTx {
             )));
         }
         Ok(())
-    }
-
-    // This is essentially [Decodable::decode] but because the header was parsed already in
-    // [Transaction::decode], it can not be read again. However, the payload length is needed
-    // so we have to pass it explicitly.
-    pub fn decode(b: &mut &[u8], payload_length: usize) -> alloy_rlp::Result<Self> {
-        let started_len = b.len();
-        if started_len < payload_length {
-            return Err(alloy_rlp::Error::InputTooShort);
-        }
-        let this = Self {
-            nonce: Decodable::decode(b)?,
-            gas_price: Decodable::decode(b)?,
-            gas_limit: Decodable::decode(b)?,
-            to: Decodable::decode(b)?,
-            value: Decodable::decode(b)?,
-            data: Decodable::decode(b)?,
-            w: Decodable::decode(b)?,
-            r: Decodable::decode(b)?,
-            s: Decodable::decode(b)?,
-        };
-        let consumed = started_len - b.len();
-        if consumed != payload_length {
-            return Err(alloy_rlp::Error::ListLengthMismatch {
-                expected: payload_length,
-
-                got: consumed,
-            });
-        }
-
-        Ok(this)
     }
 }
 

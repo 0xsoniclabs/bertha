@@ -1,13 +1,10 @@
 use alloy_rlp::{BufMut, Encodable, Header};
-use alloy_trie::{HashBuilder, Nibbles};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
-use crate::{Address, AsHex, Bloom, Hash, Log, transaction::TransactionType};
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Error)]
-#[error("the computed receipt root did not match the receipt root of the block header")]
-pub struct ReceiptVerificationError;
+use crate::{
+    Address, AsHex, Bloom, Eip2718Marshallable, Hash, Log, TransactionType, VerificationError,
+    eip_2718_utils::verify,
+};
 
 /// Receipt for a transaction.
 /// The receipt provides information about the execution of the transaction like the amount of gas
@@ -34,40 +31,25 @@ impl TransactionReceipt {
     }
 }
 
-impl Encodable for TransactionReceipt {
-    fn length(&self) -> usize {
-        let payload_length = self.rlp_payload_length();
-        payload_length + alloy_rlp::length_of_length(payload_length)
-    }
-
-    fn encode(&self, out: &mut dyn BufMut) {
+impl Eip2718Marshallable for TransactionReceipt {
+    fn marshal(&self) -> Vec<u8> {
+        let mut out = Vec::new();
         if self.transaction_type != TransactionType::Legacy {
             out.put_u8(self.transaction_type as u8);
         }
         Header {
             list: true,
-            payload_length: self.rlp_payload_length(),
+            payload_length: self.status.length()
+                + self.cumulative_gas_used.length()
+                + self.logs_bloom().length()
+                + self.logs.length(),
         }
-        .encode(out);
-        self.status.encode(out);
-        self.cumulative_gas_used.encode(out);
-        self.logs_bloom().encode(out);
-        self.logs.encode(out);
-    }
-}
-
-impl TransactionReceipt {
-    fn rlp_payload_length(&self) -> usize {
-        self.status.length()
-            + self.cumulative_gas_used.length()
-            + self.logs_bloom().length()
-            + self.logs.length()
-    }
-
-    fn encode_value(&self) -> Vec<u8> {
-        let mut v = Vec::new();
-        self.encode(&mut v);
-        v
+        .encode(&mut out);
+        self.status.encode(&mut out);
+        self.cumulative_gas_used.encode(&mut out);
+        self.logs_bloom().encode(&mut out);
+        self.logs.encode(&mut out);
+        out
     }
 }
 
@@ -125,33 +107,9 @@ pub struct BlockReceipt(Vec<TransactionReceipt>);
 impl BlockReceipt {
     /// Verifies the block receipt by computing the receipts root hash and comparing it with the
     /// provided one.
-    pub fn verify(
-        self,
-        receipts_root: &Hash,
-    ) -> Result<VerifiedBlockReceipt, ReceiptVerificationError> {
-        let mut trie = HashBuilder::default();
-        let encode_key = |key: usize| {
-            let mut v = Vec::new();
-            key.encode(&mut v);
-            v
-        };
-        let mut leaves: Vec<_> = self
-            .0
-            .iter()
-            .enumerate()
-            .map(|(i, r)| (Nibbles::unpack(encode_key(i)), r.encode_value()))
-            .collect();
-        leaves.sort_by(|l, r| l.0.cmp(&r.0));
-        leaves.into_iter().for_each(|l| trie.add_leaf(l.0, &l.1));
-
-        let root: [u8; 32] = trie.root().into();
-        let root = Hash::from(root);
-
-        if root == *receipts_root {
-            Ok(VerifiedBlockReceipt(self.0))
-        } else {
-            Err(ReceiptVerificationError)
-        }
+    pub fn verify(self, receipts_root: &Hash) -> Result<VerifiedBlockReceipt, VerificationError> {
+        verify(&self.0, receipts_root)?;
+        Ok(VerifiedBlockReceipt(self.0))
     }
 }
 
@@ -198,15 +156,15 @@ mod tests {
         };
 
         // if the type == legacy transaction type (0) -> type field not encoded
-        assert_eq!(receipt.encode_value(), Vec::try_from_hex("0xf9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
+        assert_eq!(receipt.marshal(), Vec::try_from_hex("0xf9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
 
         // if the type != legacy transaction type (0) -> type field encoded
         receipt.transaction_type = TransactionType::AccessList;
-        assert_eq!(receipt.encode_value(), Vec::try_from_hex("0x01f9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
+        assert_eq!(receipt.marshal(), Vec::try_from_hex("0x01f9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
 
         // if the type != legacy transaction type (0) -> type field encoded
         receipt.transaction_type = TransactionType::DynamicFee;
-        assert_eq!(receipt.encode_value(), Vec::try_from_hex("0x02f9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
+        assert_eq!(receipt.marshal(), Vec::try_from_hex("0x02f9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
     }
 
     #[test]
