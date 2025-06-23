@@ -1,4 +1,7 @@
-use crate::{Address, Hash, Transaction, TransactionReceipt, U256};
+use crate::{
+    Address, EMPTY_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, HexConvert, Transaction,
+    TransactionReceipt, U256,
+};
 
 /// An Ethereum-compatible block in "normal form", that is, without any redundant or derived fields.
 ///
@@ -50,4 +53,23 @@ pub struct Block {
 
     /// Added by EIP-7685
     pub requests_hash: Option<Hash>,
+}
+
+impl Block {
+    /// Returns a new block with default values that upholds the invariants of Sonic.
+    pub fn default_sonic() -> Self {
+        Block {
+            // in Sonic the ommers_hash is always set to the empty hash
+            ommers_hash: Hash::try_from_hex(EMPTY_OMMERS_HASH).unwrap(),
+            // in Sonic the extra_data must be 12 bytes long because it holds the duration and
+            // nanoseconds part of the timestamp
+            extra_data: vec![0; 12],
+            withdrawals_root: Some(Hash::try_from_hex(EMPTY_TREE_ROOT_HASH).unwrap()),
+            // in Sonic the base_fee_per_gas is always set, so default to 0 instead of None
+            base_fee_per_gas: Some(U256::default()),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            ..Default::default()
+        }
+    }
 }

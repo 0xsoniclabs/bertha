@@ -41,7 +41,7 @@ impl<T> RlpNil<T> {
     }
 }
 
-/// A wrapper type to encode and decode [Vec<u8>] as a RLP string and not as a RLP list.
+/// A wrapper type to encode and decode [`Vec<u8>`] as a RLP string and not as a RLP list.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct RlpString(pub Vec<u8>);
