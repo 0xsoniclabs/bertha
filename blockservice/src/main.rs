@@ -221,23 +221,40 @@ mod tests {
     fn import_aborts_on_invalid_snapshot_file() {
         let tmpdir = tempfile::tempdir().unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
-        let mut genesis_data = genesis_parser::test_utils::generate_test_genesis(0, 5);
+        let genesis_data = genesis_parser::test_utils::generate_test_genesis(0, 5);
         let data_len = genesis_data.len();
         let corruption = [0xde, 0xad, 0xbe, 0xef];
-        genesis_data[data_len - corruption.len()..].copy_from_slice(&corruption); // Corrupt the last part of the file
-        std::fs::write(&genesis_file, genesis_data).unwrap();
-
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
         init(None::<&Path>).unwrap();
-        let args = Args::parse_from(["blockservice", "import", genesis_file.to_str().unwrap()]);
-        let result = execute(args);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("corrupt gzip stream")
-        );
+
+        // Corrupted header
+        {
+            let mut genesis_data = genesis_data.clone();
+            genesis_data[0..corruption.len()].copy_from_slice(&corruption); // Corrupt the first part of the file
+            std::fs::write(&genesis_file, genesis_data).unwrap();
+
+            let args = Args::parse_from(["blockservice", "import", genesis_file.to_str().unwrap()]);
+            let result = execute(args);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().to_string().contains("invalid header"));
+        }
+
+        // Corrupted block
+        {
+            let mut genesis_data = genesis_data.clone();
+            genesis_data[data_len - corruption.len()..].copy_from_slice(&corruption); // Corrupt the last part of the file
+            std::fs::write(&genesis_file, genesis_data).unwrap();
+
+            let args = Args::parse_from(["blockservice", "import", genesis_file.to_str().unwrap()]);
+            let result = execute(args);
+            assert!(result.is_err());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("corrupt gzip stream")
+            );
+        }
     }
 
     #[test]
