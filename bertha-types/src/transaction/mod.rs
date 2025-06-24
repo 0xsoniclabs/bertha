@@ -339,9 +339,7 @@ mod tests {
     use crate::{
         HexConvert,
         eip_2718_utils::verify,
-        test_data::test_data_transaction::tests::transaction::{
-            TRANSACTION_ROOT, generate_transactions_with_data,
-        },
+        test_data::test_data_transaction::{TRANSACTION_ROOT, generate_transactions_with_data},
     };
 
     #[test]

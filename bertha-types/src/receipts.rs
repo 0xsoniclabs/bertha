@@ -99,9 +99,7 @@ mod tests {
     use super::*;
     use crate::{
         Hash, HexConvert,
-        test_data::test_data_receipts::tests::receipt::{
-            RECEIPTS_ROOT, generate_receipts_with_data,
-        },
+        test_data::test_data_receipts::{RECEIPTS_ROOT, generate_receipts_with_data},
         verify,
     };
 
