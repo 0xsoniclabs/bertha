@@ -11,27 +11,27 @@ func toRustBlock(block BlockWithReceipts) string {
 	blockData := block.Block
 	receipts := block.Receipts
 
-	base_fee_per_gas := ""
+	baseFeePerGas := ""
 	if blockData.Header().BaseFee != nil {
-		base_fee_per_gas = fmt.Sprintf("base_fee_per_gas: Some(U256::try_from_hex(\"%s\").unwrap()),\n", blockData.Header().BaseFee.Text(16))
+		baseFeePerGas = fmt.Sprintf("base_fee_per_gas: Some(U256::try_from_hex(\"%s\").unwrap()),\n", blockData.Header().BaseFee.Text(16))
 	}
-	withdrawals_root := ""
+	withdrawalsRoot := ""
 	if blockData.Header().WithdrawalsHash != nil {
-		withdrawals_root = fmt.Sprintf("withdrawals_root: Some(Hash::try_from_hex(\"%s\").unwrap()),\n", blockData.Header().WithdrawalsHash.Hex())
+		withdrawalsRoot = fmt.Sprintf("withdrawals_root: Some(Hash::try_from_hex(\"%s\").unwrap()),\n", blockData.Header().WithdrawalsHash.Hex())
 	}
-	blob_gas_used := ""
+	blobGasUsed := ""
 	if blockData.Header().BlobGasUsed != nil {
-		blob_gas_used = fmt.Sprintf("blob_gas_used: Some(%d),\n", *blockData.Header().BlobGasUsed)
+		blobGasUsed = fmt.Sprintf("blob_gas_used: Some(%d),\n", *blockData.Header().BlobGasUsed)
 	}
-	excess_blob_gas := ""
+	excessBlobGas := ""
 	if blockData.Header().ExcessBlobGas != nil {
-		excess_blob_gas = fmt.Sprintf("excess_blob_gas: Some(%d),\n", *blockData.Header().ExcessBlobGas)
+		excessBlobGas = fmt.Sprintf("excess_blob_gas: Some(%d),\n", *blockData.Header().ExcessBlobGas)
 	}
-	request_hash := ""
+	requestHash := ""
 	if blockData.Header().RequestsHash != nil {
-		request_hash = fmt.Sprintf("request_hash: Some(Hash::try_from_hex(\"%s\").unwrap())", blockData.Header().RequestsHash.Hex())
+		requestHash = fmt.Sprintf("request_hash: Some(Hash::try_from_hex(\"%s\").unwrap())", blockData.Header().RequestsHash.Hex())
 	}
-	block_nonce, _ := blockData.Header().Nonce.MarshalText()
+	blockNonce, _ := blockData.Header().Nonce.MarshalText()
 	return fmt.Sprintf(
 		`Block {
 			parent_hash: Hash::try_from_hex("%s").unwrap(),
@@ -60,17 +60,17 @@ func toRustBlock(block BlockWithReceipts) string {
 		blockData.Header().Time,
 		hexutil.Bytes(blockData.Header().Extra).String(),
 		blockData.Header().MixDigest.Hex(),
-		block_nonce,
+		blockNonce,
 		toRustVector(blockData.Transactions(), func(tx *types.Transaction) string {
 			return ToRustTransaction(tx)
 		}),
 		toRustVector(receipts, func(receipt *types.Receipt) string {
 			return toRustReceipt(receipt)
 		}),
-		base_fee_per_gas,
-		withdrawals_root,
-		blob_gas_used,
-		excess_blob_gas,
-		request_hash,
+		baseFeePerGas,
+		withdrawalsRoot,
+		blobGasUsed,
+		excessBlobGas,
+		requestHash,
 	)
 }

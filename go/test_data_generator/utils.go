@@ -12,7 +12,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// Generated with crypto.GenerateKey()
+// KEY generated with crypto.GenerateKey()
 var KEY = crypto.ToECDSAUnsafe(common.FromHex("066361a741d5da2eb952b1d6061d60f4ce0efab63a10fff4137e7605e6a5702d"))
 
 // NamedField is a utility struct to represent a struct field by its name and value.
@@ -70,15 +70,15 @@ func generateStruct[T any](constructor func() T, values [][]NamedField) iter.Seq
 			v := reflect.ValueOf(constructor())
 			for _, field := range modifier {
 				f := v.Elem().FieldByName(field.Name)
-				field_value := reflect.ValueOf(field.Value)
+				fieldValue := reflect.ValueOf(field.Value)
 				if !f.IsValid() {
 					continue //Skip field
 				}
 				if f.Kind() != reflect.Ptr {
 
 					// Depending if the field type is a pointer or not, we need to dereference it or not
-					if field_value.Kind() == reflect.Ptr {
-						if field_value.IsNil() {
+					if fieldValue.Kind() == reflect.Ptr {
+						if fieldValue.IsNil() {
 							continue // Skip nil pointer fields
 						}
 						f.Set(reflect.ValueOf(field.Value).Elem())
@@ -116,20 +116,20 @@ func _cartesianProductRecursion[T any](current []T, elements [][]T, callback fun
 
 // Utility function to return a nil pointer of type T
 // This allow reflect to recognize the null pointer as an interface{} type
-func get_null_ptr[T any]() *T {
+func getNullPtr[T any]() *T {
 	return nil
 }
 
 // signTransaction is a testing helper that signs a transaction with the
 // key from the provided account
 func signTransaction(
-	chainId *big.Int,
+	chainID *big.Int,
 	payload types.TxData,
 	key *ecdsa.PrivateKey,
 ) *types.Transaction {
 	res, err := types.SignTx(
 		types.NewTx(payload),
-		types.NewPragueSigner(chainId),
+		types.NewPragueSigner(chainID),
 		key)
 	if err != nil {
 		panic("failed to sign transaction: " + err.Error())
