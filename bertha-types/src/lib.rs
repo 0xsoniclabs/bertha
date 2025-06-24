@@ -9,6 +9,8 @@ mod log;
 mod parse_hex_error;
 mod receipts;
 mod rlp_utils;
+#[cfg(test)]
+mod test_data;
 mod transaction;
 mod u256;
 
