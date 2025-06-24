@@ -2,6 +2,7 @@ use std::path::Path;
 
 use bertha_types::Block;
 use prost::Message;
+use rocksdb::WriteBatchWithTransaction;
 use tempfile::TempDir;
 
 use crate::{error::Error, proto};
@@ -76,6 +77,15 @@ pub trait BlockDb {
             })
         })
     }
+
+    /// Deletes all blocks for the specified chain-ID in the range from `from_block`
+    /// (inclusive) to `to_block` (exclusive).
+    fn delete_range(
+        &mut self,
+        chain_id: u64,
+        from_block: Option<u64>,
+        to_block: Option<u64>,
+    ) -> Result<(), Error>;
 
     /// Retrieves the raw protobuf-encoded data for the specified chain-ID and block number.
     /// Returns [None] if the block does not exist.
@@ -244,6 +254,22 @@ impl BlockDb for RocksBlockDb {
     ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
         self.iterate_with_direction_raw(chain_id, from, rocksdb::Direction::Reverse)
     }
+
+    fn delete_range(
+        &mut self,
+        chain_id: u64,
+        from_block: Option<u64>,
+        to_block: Option<u64>,
+    ) -> Result<(), Error> {
+        let from = Self::make_key(chain_id, from_block.unwrap_or(0));
+        let to = Self::make_key(chain_id, to_block.unwrap_or(u64::MAX));
+
+        let mut batch = WriteBatchWithTransaction::<false>::default();
+        batch.delete_range(from, to);
+        self.db.write(batch)?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -283,6 +309,15 @@ mod tests {
             _from: u64,
         ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
             std::iter::once(Ok((0, self.0.clone().into_boxed_slice())))
+        }
+
+        fn delete_range(
+            &mut self,
+            _chain_id: u64,
+            _from_block: Option<u64>,
+            _to_block: Option<u64>,
+        ) -> Result<(), Error> {
+            unimplemented!()
         }
     }
 
@@ -606,5 +641,66 @@ mod tests {
                 Err(Error::StorageLayer("unexpected key length".to_string()))
             ],
         );
+    }
+
+    #[test]
+    fn rocksblockdb_delete_range_deletes_blocks_in_range() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let chain_id = 1;
+
+        // Insert blocks 1 to 5
+        for i in 1..=5 {
+            db.put_raw(chain_id, i, format!("block {i}").as_bytes())
+                .unwrap();
+        }
+
+        // Delete blocks 2 to 4
+        db.delete_range(chain_id, Some(2), Some(4)).unwrap();
+
+        // Check remaining blocks
+        assert_eq!(db.get_raw(chain_id, 1).unwrap(), Some(b"block 1".to_vec()));
+        assert_eq!(db.get_raw(chain_id, 2).unwrap(), None);
+        assert_eq!(db.get_raw(chain_id, 3).unwrap(), None);
+        assert_eq!(db.get_raw(chain_id, 4).unwrap(), Some(b"block 4".to_vec())); // range end is exclusive
+        assert_eq!(db.get_raw(chain_id, 5).unwrap(), Some(b"block 5".to_vec()));
+    }
+
+    #[test]
+    fn rocksblockdb_delete_succeeds_if_no_blocks_in_range() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+
+        // delete range when no blocks exist
+        db.delete_range(1, Some(1), Some(5)).unwrap();
+    }
+
+    #[test]
+    fn rocksblockdb_delete_range_returns_error_if_start_greater_than_end() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let chain_id = 1;
+
+        // Insert blocks 1 to 5
+        for i in 1..=5 {
+            db.put_raw(chain_id, i, format!("block {i}").as_bytes())
+                .unwrap();
+        }
+
+        // Delete range with start greater than end
+        assert_eq!(
+            db.delete_range(chain_id, Some(2), Some(1)),
+            Err(Error::StorageLayer(
+                "Invalid argument: end key comes before start key".to_string(),
+            ))
+        );
+
+        // Ensure all blocks are still present
+        for i in 1..=5 {
+            assert_eq!(
+                db.get_raw(chain_id, i).unwrap(),
+                Some(format!("block {i}").as_bytes().to_vec())
+            );
+        }
     }
 }

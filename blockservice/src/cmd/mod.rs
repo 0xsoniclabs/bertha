@@ -6,10 +6,12 @@ use std::{
 
 pub use import::import;
 pub use init::init;
+pub use purge::purge;
 pub use verify::verify;
 
 mod import;
 mod init;
+mod purge;
 mod verify;
 
 #[cfg(test)]
