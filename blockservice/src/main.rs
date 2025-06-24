@@ -50,25 +50,21 @@ fn import(path: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
     );
     let before = std::time::Instant::now();
     for result in blocks {
-        match result {
-            Ok(block) => {
-                if block_count == 0 {
-                    // We rely on the fact that blocks are stored in reverse order.
-                    total_blocks = block.number + 1;
-                    println!("Importing {total_blocks} blocks for chain ID {chain_id}");
-                    progress_bar.set_length(total_blocks);
-                }
-
-                // We use put_raw so we can count bytes.
-                let number = block.number;
-                let protoblock = blockservice::proto::Block::from(block).encode_to_vec();
-                uncompressed_bytes_written += protoblock.len();
-                db.put_raw(chain_id, number, &protoblock)?;
-                block_count += 1;
-                progress_bar.set_position(block_count);
-            }
-            Err(e) => return Err(e.into()),
+        let block = result?;
+        if block_count == 0 {
+            // We rely on the fact that blocks are stored in reverse order.
+            total_blocks = block.number + 1;
+            println!("Importing {total_blocks} blocks for chain ID {chain_id}");
+            progress_bar.set_length(total_blocks);
         }
+
+        // We use put_raw so we can count bytes.
+        let number = block.number;
+        let protoblock = blockservice::proto::Block::from(block).encode_to_vec();
+        uncompressed_bytes_written += protoblock.len();
+        db.put_raw(chain_id, number, &protoblock)?;
+        block_count += 1;
+        progress_bar.set_position(block_count);
     }
     let elapsed = before.elapsed();
     progress_bar.finish();
