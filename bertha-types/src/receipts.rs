@@ -97,195 +97,61 @@ impl From<TransactionReceipt> for JsonRpcTransactionReceipt {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Address, Hash, HexConvert, verify};
-
-    #[test]
-
-    fn encode_value_encodes_transaction_receipt_in_rlp_and_respects_different_encoding_depending_on_type()
-     {
-        let mut receipt = TransactionReceipt {
-            status: 1,
-            cumulative_gas_used: 21000,
-            logs: vec![],
-            transaction_type: TransactionType::Legacy,
-        };
-
-        // if the type == legacy transaction type (0) -> type field not encoded
-        assert_eq!(receipt.marshal(), Vec::try_from_hex("0xf9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
-
-        // if the type != legacy transaction type (0) -> type field encoded
-        receipt.transaction_type = TransactionType::AccessList;
-        assert_eq!(receipt.marshal(), Vec::try_from_hex("0x01f9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
-
-        // if the type != legacy transaction type (0) -> type field encoded
-        receipt.transaction_type = TransactionType::DynamicFee;
-        assert_eq!(receipt.marshal(), Vec::try_from_hex("0x02f9010801825208b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c0").unwrap());
-    }
-
-    fn get_transaction_receipts() -> Vec<TransactionReceipt> {
-        vec![
-            TransactionReceipt {
-                cumulative_gas_used: 77081,
-                logs: vec![
-                    Log {
-                        address: Address::try_from_hex(
-                            "0x5a91d3042b71a92f6757fa937763d03cc65ed8bc",
-                        )
-                        .unwrap(),
-                        topics: vec![
-                            Hash::try_from_hex("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap(),
-                            Hash::try_from_hex("0x000000000000000000000000234172247c94723a2a439bcd685c1699d54a95b0").unwrap(),
-                            Hash::try_from_hex("0x00000000000000000000000099a35a6301043a02add89b613a58eee2c46750a2").unwrap(),
-                        ],
-                        data: Vec::try_from_hex("0x000000000000000000000000000000000000000000000000002386f26fc10000").unwrap(),
-                    },
-                    Log {
-                        address: Address::try_from_hex("61a2777db1271ef53329a13d05098f47ceaa7021")
-                            .unwrap(),
-                        topics: vec![
-                            Hash::try_from_hex("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef").unwrap(),
-                            Hash::try_from_hex("0x00000000000000000000000099a35a6301043a02add89b613a58eee2c46750a2").unwrap(),
-                            Hash::try_from_hex("0x000000000000000000000000234172247c94723a2a439bcd685c1699d54a95b0").unwrap(),
-                        ],
-                        data: Vec::try_from_hex("0x0000000000000000000000000000000000000000000000000584dea1b5674d10").unwrap(),
-                    },
-                    Log {
-                        address: Address::try_from_hex(
-                            "0x99a35a6301043a02add89b613a58eee2c46750a2",
-                        )
-                        .unwrap(),
-                        topics: vec![
-                            Hash::try_from_hex("0xcd3829a3813dc3cdd188fd3d01dcf3268c16be2fdd2dd21d0665418816e46062").unwrap(),
-                            Hash::try_from_hex("0x000000000000000000000000234172247c94723a2a439bcd685c1699d54a95b0").unwrap(),
-                            Hash::try_from_hex("0x0000000000000000000000005a91d3042b71a92f6757fa937763d03cc65ed8bc").unwrap(),
-                            Hash::try_from_hex("0x00000000000000000000000061a2777db1271ef53329a13d05098f47ceaa7021").unwrap(),
-                        ],
-                        data: Vec::try_from_hex("0x000000000000000000000000000000000000000000000000002386f26fc100000000000000000000000000000000000000000000000000000584dea1b5674d10").unwrap(),
-                    },
-                ],
-                status: 1,
-                transaction_type: TransactionType::DynamicFee,
-            },
-            TransactionReceipt {
-                cumulative_gas_used: 98081,
-                logs: vec![],
-                status: 1,
-                transaction_type: TransactionType::DynamicFee,
-            },
-        ]
-    }
+    use crate::{
+        Hash, HexConvert,
+        test_data::test_data_receipts::tests::receipt::{
+            RECEIPTS_ROOT, generate_receipts_with_data,
+        },
+        verify,
+    };
 
     #[test]
     fn logs_bloom_is_computed_correctly() {
-        let receipts = get_transaction_receipts();
-
-        let expected = Bloom::try_from_hex("0x00100000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000004000000000002000000008040000000000000000040000000000000000000001000000000000002000000000000000000020000000010000000810000000000000000000000000000000000000000000800080000040000080000000000000000400000000000008000000000000800000020000000000000000000000000000000003040800000000000000000000000000000000400000000000000000000000000000000000080000000000000000000000000000000000000000000000").unwrap();
-        let received = receipts[0].logs_bloom();
-        assert_eq!(received, expected);
-
-        let expected = [0; 256];
-        let received = receipts[1].logs_bloom();
-        assert_eq!(received, expected);
+        for receipt_data in generate_receipts_with_data() {
+            let receipt = receipt_data.receipt;
+            let computed_bloom = receipt.logs_bloom();
+            assert_eq!(computed_bloom, receipt_data.bloom);
+        }
     }
 
     #[test]
-    fn block_receipt_verify_computes_root_hash_correctly_and_compares_it_with_specified_root() {
-        let receipts = get_transaction_receipts();
-
-        // Receipts hash fetched from the SONIC chain
-        let receipts_root = Hash::try_from_hex(
-            "0x158c87d05e49fa970a24cee4d209ff36c7cf1f3ac30a98175582beb82f44f8b3",
-        )
-        .unwrap();
-        assert!(verify(&receipts, &receipts_root).is_ok());
-
-        let receipts_root = Hash::default();
-        assert!(verify(&receipts, &receipts_root).is_err());
+    fn can_be_encoded_to_rlp() {
+        for value in generate_receipts_with_data() {
+            let rlp_bytes = value.receipt.marshal();
+            assert_eq!(
+                rlp_bytes, value.rlp_encoding,
+                "Encoded RLP should match the expected value"
+            );
+        }
     }
 
     #[test]
-    fn can_be_serialized_to_json() {
-        let address_hex = "0x1234567890abcdef1234567890abcdef12345678";
-        let topic1_hex = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef12345678ababaabababaab";
-        let topic2_hex = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef12345678ababaabababaab";
-        let bloom_hex = "0x00000000000000000000800000000000000000020000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
-
-        let log = Log {
-            address: Address::try_from_hex(address_hex).unwrap(),
-            topics: vec![
-                Hash::try_from_hex(topic1_hex).unwrap(),
-                Hash::try_from_hex(topic2_hex).unwrap(),
-            ],
-            data: vec![1, 2, 3, 4, 5],
-        };
-
-        let receipt = TransactionReceipt {
-            cumulative_gas_used: 12345,
-            logs: vec![log.clone()],
-            status: 1,
-            transaction_type: TransactionType::DynamicFee,
-        };
-
-        let expected_json = format!(
-            r#"{{
-            "type":"0x2",
-            "status":"0x1",
-            "cumulativeGasUsed":"0x3039",
-            "logsBloom":"{bloom_hex}",
-            "logs":[{{
-                "address":"{address_hex}",
-                "topics":["{topic1_hex}","{topic2_hex}"],
-                "data":"0x0102030405"
-            }}]
-            }}"#,
-        )
-        .replace(" ", "")
-        .replace("\n", "");
-
-        assert_eq!(serde_json::to_string(&receipt).unwrap(), expected_json);
+    fn can_be_serialized_and_deserialized_from_json() {
+        for value in generate_receipts_with_data() {
+            let serialized = serde_json::to_value(&value.receipt)
+                .expect("Serialization to JSON should not fail");
+            let expected_value = serde_json::to_value(
+                serde_json::from_str::<TransactionReceipt>(&value.json_representation)
+                    .expect("Deserialization from JSON should not fail"),
+            )
+            .unwrap();
+            assert_eq!(
+                serialized, expected_value,
+                "Serialized JSON should match the expected value"
+            );
+        }
     }
 
     #[test]
-    fn can_be_deserialized_from_json() {
-        let address_hex = "0x1234567890abcdef1234567890abcdef12345678";
-        let topic1_hex = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef12345678ababaabababaab";
-        let topic2_hex = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcdef12345678ababaabababaab";
-        let bloom_hex = "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
-
-        let json = format!(
-            r#"{{
-            "cumulativeGasUsed":"0x3039",
-            "logs":[{{
-                "address":"{address_hex}",
-                "topics":["{topic1_hex}","{topic2_hex}"],
-                "data":"0x0102030405"
-            }}],
-            "logsBloom":"{bloom_hex}",
-            "status":"0x1",
-            "transactionIndex":"0x0",
-            "type":"0x2"
-            }}"#,
-        );
-
-        let expected_log = Log {
-            address: Address::try_from_hex(address_hex).unwrap(),
-            topics: vec![
-                Hash::try_from_hex(topic1_hex).unwrap(),
-                Hash::try_from_hex(topic2_hex).unwrap(),
-            ],
-            data: vec![1, 2, 3, 4, 5],
-        };
-
-        let expected_receipt = TransactionReceipt {
-            cumulative_gas_used: 12345,
-            logs: vec![expected_log.clone()],
-            status: 1,
-            transaction_type: TransactionType::DynamicFee,
-        };
-
-        assert_eq!(
-            serde_json::from_str::<TransactionReceipt>(&json).unwrap(),
-            expected_receipt
+    fn can_be_verified() {
+        let receipts = generate_receipts_with_data()
+            .into_iter()
+            .map(|value| value.receipt)
+            .collect::<Vec<_>>();
+        let root = Hash::try_from_hex(RECEIPTS_ROOT).expect("Invalid receipts root hex");
+        assert!(
+            verify(&receipts, &root).is_ok(),
+            "Receipts verification should succeed"
         );
     }
 }
