@@ -6,7 +6,7 @@ The block service allows to manage, transfer and retrieve block datasets for Eth
 
 - The [`protoc` protobuf compiler](https://protobuf.dev/installation/) (tested with version 3.21.12, the default on Ubuntu 24.04)
 - [RocksDB](https://rocksdb.org/) (tested with version 8.9, the default on Ubuntu 24.04)
-- [Clang](https://clang.llvm.org/get_started.html) 
+- [Clang](https://clang.llvm.org/get_started.html) for generating the RocksDB Rust bindings
 
 ## Installation
 
