@@ -446,13 +446,23 @@ func dumpBlocks(data []BlockWithReceipts) string {
 // formatAndPrintRustCode formats the given Rust code using rustfmt and prints it to stdout.
 // NOTE: It assumes that a `rustgfmt.toml` file is present in the root directory of the project (../../).
 func formatAndPrintRustCode(rust_code string) {
+	// Format once with a very high max_width to ensure rustfmt does not skip the type formatting
 	cmd := exec.Command("rustfmt", "+nightly", "--edition", "2024", "--config-path", "../../", "--config", "max_width=100000", "--config", "struct_lit_width=0")
 	cmd.Stdin = strings.NewReader(rust_code)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		panic("Failed to format Rust code: " + err.Error())
 	}
-	fmt.Println(string(output))
+	// Because the max_width is set to a very high value, some of the standard formatting rules might not apply.
+	// So we run rustfmt again with the default settings to ensure proper formatting.
+	cmd = exec.Command("rustfmt", "+nightly", "--edition", "2024", "--config-path", "../../")
+	cmd.Stdin = bytes.NewReader(output)
+	output, err = cmd.CombinedOutput()
+	if err != nil {
+		panic("Failed to re-format Rust code: " + err.Error())
+	}
+
+	fmt.Print(string(output))
 }
 
 // Generate a main function that allow to select from the command line if to generate block headers, transactions, or receipts. Add an optional flag for the RLP encoding

@@ -2,9 +2,13 @@
 #[cfg(test)]
 pub mod tests {
     pub mod transaction {
-        use crate::{AccessListEntry, Address, Hash, HexConvert, SetCodeAuthorization, Transaction, TransactionType, U256};
+        use crate::{
+            AccessListEntry, Address, Hash, HexConvert, SetCodeAuthorization, Transaction,
+            TransactionType, U256,
+        };
 
-        pub const TRANSACTION_ROOT: &str = "0x4edda3bd959ab6cc8ee9a29dcddb49ac975b609367298a44afd6fc4bb2fbd082";
+        pub const TRANSACTION_ROOT: &str =
+            "0x4edda3bd959ab6cc8ee9a29dcddb49ac975b609367298a44afd6fc4bb2fbd082";
 
         #[derive(Debug, Clone)]
         pub struct TransactionWithTestData {
@@ -13,7 +17,8 @@ pub mod tests {
             pub json_representation: String,
         }
 
-        pub fn generate_transactions_with_data() -> impl IntoIterator<Item = TransactionWithTestData> {
+        pub fn generate_transactions_with_data() -> impl IntoIterator<Item = TransactionWithTestData>
+        {
             [
                 TransactionWithTestData {
                     transaction: Transaction {
@@ -6091,4 +6096,3 @@ pub mod tests {
         }
     }
 }
-

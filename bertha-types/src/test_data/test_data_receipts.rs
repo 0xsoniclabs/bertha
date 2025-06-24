@@ -4,7 +4,8 @@ pub mod tests {
     pub mod receipt {
         use crate::{Address, Bloom, Hash, HexConvert, Log, TransactionReceipt, TransactionType};
 
-        pub const RECEIPTS_ROOT: &str = "0x36f0fe19bd84b8f7c8c475b78ff27d4213220b94e15a22c5e300a11decf213ff";
+        pub const RECEIPTS_ROOT: &str =
+            "0x36f0fe19bd84b8f7c8c475b78ff27d4213220b94e15a22c5e300a11decf213ff";
 
         #[derive(Debug, Clone)]
         pub struct TransactionReceiptWithTestData {
@@ -14,7 +15,8 @@ pub mod tests {
             pub json_representation: String,
         }
 
-        pub fn generate_receipts_with_data() -> impl IntoIterator<Item = TransactionReceiptWithTestData> {
+        pub fn generate_receipts_with_data()
+        -> impl IntoIterator<Item = TransactionReceiptWithTestData> {
             [
                 TransactionReceiptWithTestData {
                     receipt: TransactionReceipt {
@@ -235,4 +237,3 @@ pub mod tests {
         }
     }
 }
-
