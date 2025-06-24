@@ -5,10 +5,13 @@ edition = "2024"
 publish = false
 
 [dependencies]
-bertha-types = { path = "../bertha-types" }
-prost = "0.13.5"
-rocksdb = "0.23.0"
 tempfile = "3.20.0"
+bertha-types = { path = "../bertha-types" }
+rocksdb = { version = "0.23.0", default-features = false, features = [
+    "lz4",
+    "bindgen-runtime",
+] }
+prost = "0.13.5"
 thiserror = "2.0.12"
 tonic = "0.13.1"
 clap = { version = "4.5.40", features = ["derive"] }
