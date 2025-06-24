@@ -1,5 +1,6 @@
 pub mod blockdb;
+mod cli;
 mod error;
-mod proto;
+pub mod proto;
 
 pub use error::Error;
