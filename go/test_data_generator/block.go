@@ -7,6 +7,14 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
+// BlockHeaderFieldCases contains the corner cases for the fields of a block header.
+var BlockHeaderFieldCases = map[string][]any{
+	"Extra": {
+		[]byte{},
+		[]byte{0x1},
+	},
+}
+
 func toRustBlock(block BlockWithReceipts) string {
 	blockData := block.Block
 	receipts := block.Receipts

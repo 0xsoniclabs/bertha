@@ -4,8 +4,51 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
+
+// transactionFieldCases contains the corner cases for the fields of a transaction.
+var transactionFieldCases = map[string][]any{
+	"To": {
+		getNullPtr[common.Address](),
+		new(common.Address),
+	},
+	"AccessList": {
+		types.AccessList{},
+		types.AccessList{
+			types.AccessTuple{
+				Address:     common.Address{},
+				StorageKeys: []common.Hash{},
+			},
+		},
+		types.AccessList{
+			types.AccessTuple{
+				Address: common.Address{},
+				StorageKeys: []common.Hash{
+					{},
+				},
+			},
+		},
+	},
+	"Data": {
+		[]byte{},
+		[]byte{0x1},
+	},
+
+	"BlobHashes": {
+		[]common.Hash{},
+		[]common.Hash{
+			{},
+		},
+	},
+	"AuthList": {
+		[]types.SetCodeAuthorization{},
+		[]types.SetCodeAuthorization{
+			{},
+		},
+	},
+}
 
 func ToRustTransaction(tx *types.Transaction) string {
 	to := "None"

@@ -12,8 +12,10 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// KEY generated with crypto.GenerateKey()
-var KEY = crypto.ToECDSAUnsafe(common.FromHex("066361a741d5da2eb952b1d6061d60f4ce0efab63a10fff4137e7605e6a5702d"))
+// getTestKey() returns a dummy private key for transaction signature
+func getTransactionSignatureKey() *ecdsa.PrivateKey {
+	return crypto.ToECDSAUnsafe(common.FromHex("066361a741d5da2eb952b1d6061d60f4ce0efab63a10fff4137e7605e6a5702d"))
+}
 
 // NamedField is a utility struct to represent a struct field by its name and value.
 type NamedField struct {
@@ -145,6 +147,29 @@ func seqToSlice[T any](seq iter.Seq[T]) []T {
 		return true
 	})
 	return res
+}
+
+// Flatten the outer dimension of a slice
+func flattenSlice[T any](values [][]T) []T {
+	var flat []T
+	for _, v := range values {
+		flat = append(flat, v...)
+	}
+	return flat
+}
+
+// generateNamedFields converts a map of field names to slices of values into a slice of slices of NamedField.
+// Each slice contains the same field name with different values
+func generateNamedFields(values map[string][]any) [][]NamedField {
+	fields := [][]NamedField{}
+	for fieldName, fieldValues := range values {
+		field := []NamedField{}
+		for _, v := range fieldValues {
+			field = append(field, NamedField{fieldName, v})
+		}
+		fields = append(fields, field)
+	}
+	return fields
 }
 
 // Rust conversion utility functions

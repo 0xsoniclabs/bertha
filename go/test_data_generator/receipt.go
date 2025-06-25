@@ -3,8 +3,38 @@ package main
 import (
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
+
+// transactionReceiptFieldCases contains the corner cases for the fields of a transaction receipt.
+var transactionReceiptFieldCases = map[string][]any{
+	"Type": {
+		uint8(types.LegacyTxType),
+		uint8(types.AccessListTxType),
+		uint8(types.DynamicFeeTxType),
+		uint8(types.BlobTxType),
+		uint8(types.SetCodeTxType),
+	},
+	"Logs": {
+		[]*types.Log{},
+		generateLogs(),
+	},
+}
+
+// logFieldCases contains the corner cases for the fields of a log.
+var logFieldCases = map[string][]any{
+	"Topics": {
+		[]common.Hash{},
+		[]common.Hash{
+			{},
+		},
+	},
+	"Data": {
+		[]byte{},
+		[]byte{0x1},
+	},
+}
 
 func toRustReceipt(receipt *types.Receipt) string {
 	return fmt.Sprintf(`TransactionReceipt {
@@ -22,6 +52,5 @@ func toRustReceipt(receipt *types.Receipt) string {
 }
 
 func toRustBloom(r *types.Receipt) string {
-	bloom := r.Bloom.Bytes()
-	return toRustByteArray(bloom)
+	return toRustByteArray(r.Bloom.Bytes())
 }

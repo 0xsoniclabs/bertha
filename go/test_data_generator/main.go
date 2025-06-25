@@ -17,133 +17,61 @@ import (
 )
 
 func generateTransactions() []*types.Transaction {
-	transactionFields := [][]NamedField{
-		{
-			{
-				"To",
-				getNullPtr[common.Address](),
-			},
-			{
-				"To",
-				new(common.Address),
-			},
-		},
-		{
-			{
-				"AccessList",
-				types.AccessList{},
-			},
-			{
-				"AccessList",
-				types.AccessList{
-					types.AccessTuple{
-						Address:     common.Address{},
-						StorageKeys: []common.Hash{},
-					},
-				},
-			},
-			{
-				"AccessList",
-				types.AccessList{
-					types.AccessTuple{
-						Address: common.Address{},
-						StorageKeys: []common.Hash{
-							{},
-						},
-					},
-				},
-			},
-		},
-		{
-			{
-				"Data",
-				[]byte{},
-			},
-			{
-				"Data",
-				[]byte{0x1},
-			},
-		},
-		{
-			{
-				"BlobHashes",
-				[]common.Hash{},
-			},
-			{
-				"BlobHashes",
-				[]common.Hash{
-					{},
-				},
-			},
-		},
-		{
-			{
-				"AuthList",
-				[]types.SetCodeAuthorization{},
-			},
-			{
-				"AuthList",
-				[]types.SetCodeAuthorization{
-					{},
-				},
-			},
-		},
-	}
+	return generateTransactionsWithFields(transactionFieldCases)
+}
+
+func generateTransactionsWithFields(fields map[string][]any) []*types.Transaction {
+	transactionFields := generateNamedFields(fields)
 
 	txs := []*types.Transaction{}
 	for payload := range generateStruct(func() *types.LegacyTx { return &types.LegacyTx{GasPrice: common.Big0} }, transactionFields) {
-		txs = append(txs, signTransaction(big.NewInt(1), payload, KEY))
+		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
 	}
 	for payload := range generateStruct(func() *types.AccessListTx { return &types.AccessListTx{GasPrice: common.Big0} }, transactionFields) {
-		txs = append(txs, signTransaction(big.NewInt(1), payload, KEY))
+		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
 	}
 	for payload := range generateStruct(func() *types.DynamicFeeTx { return &types.DynamicFeeTx{} }, transactionFields) {
-		txs = append(txs, signTransaction(big.NewInt(1), payload, KEY))
+		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
 	}
 	for payload := range generateStruct(func() *types.BlobTx { return &types.BlobTx{} }, transactionFields) {
-		txs = append(txs, signTransaction(big.NewInt(1), payload, KEY))
+		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
 	}
 	for payload := range generateStruct(func() *types.SetCodeTx { return &types.SetCodeTx{} }, transactionFields) {
-		txs = append(txs, signTransaction(big.NewInt(1), payload, KEY))
+		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
+	}
+	return txs
+}
+
+func generateTransactionsWithFieldsAndType(txType uint8, fields map[string][]any) []*types.Transaction {
+	transactionFields := generateNamedFields(fields)
+	var txs []*types.Transaction
+	for payload := range generateStruct(func() any {
+		switch txType {
+		case types.LegacyTxType:
+			return &types.LegacyTx{GasPrice: common.Big0}
+		case types.AccessListTxType:
+			return &types.AccessListTx{GasPrice: common.Big0}
+		case types.DynamicFeeTxType:
+			return &types.DynamicFeeTx{}
+		case types.BlobTxType:
+			return &types.BlobTx{}
+		case types.SetCodeTxType:
+			return &types.SetCodeTx{}
+		default:
+			panic(fmt.Sprintf("Unknown transaction type: %d", txType))
+		}
+	}, transactionFields) {
+		txs = append(txs, signTransaction(big.NewInt(1), payload.(types.TxData), getTransactionSignatureKey()))
 	}
 	return txs
 }
 
 func generateTransactionsReceipts() []*types.Receipt {
-	transactionReceiptFields := [][]NamedField{
-		{
-			{
-				"Type",
-				uint8(types.LegacyTxType),
-			},
-			{
-				"Type",
-				uint8(types.AccessListTxType),
-			},
-			{
-				"Type",
-				uint8(types.DynamicFeeTxType),
-			},
-			{
-				"Type",
-				uint8(types.BlobTxType),
-			},
-			{
-				"Type",
-				uint8(types.SetCodeTxType),
-			},
-		},
-		{
-			{
-				"Logs",
-				[]*types.Log{},
-			},
-			{
-				"Logs",
-				generateLogs(),
-			},
-		},
-	}
+	return generateTransactionsReceiptsWithFields(transactionReceiptFieldCases)
+}
+
+func generateTransactionsReceiptsWithFields(fields map[string][]any) []*types.Receipt {
+	transactionReceiptFields := generateNamedFields(fields)
 	receipts := generateStruct(func() *types.Receipt {
 		return &types.Receipt{
 			Status: 1,
@@ -160,48 +88,21 @@ func generateTransactionsReceipts() []*types.Receipt {
 }
 
 func generateBlockHeaders() []*types.Header {
-	blockFields := [][]NamedField{
-		{
-			{
-				"Extra",
-				[]byte{},
-			},
-			{
-				"Extra",
-				[]byte{0x1},
-			},
-		},
-	}
+	return generateBlockHeadersWithFields(BlockHeaderFieldCases)
+}
 
+func generateBlockHeadersWithFields(fields map[string][]any) []*types.Header {
+	blockFields := generateNamedFields(fields)
 	blocks := generateStruct(func() *types.Header { return &types.Header{} }, blockFields)
 	return seqToSlice(blocks)
 }
 
 func generateLogs() []*types.Log {
-	logFields := [][]NamedField{
-		{
-			{
-				"Topics",
-				[]common.Hash{},
-			},
-			{
-				"Topics",
-				[]common.Hash{
-					{},
-				},
-			},
-		},
-		{
-			{
-				"Data",
-				[]byte{},
-			},
-			{
-				"Data",
-				[]byte{0x1},
-			},
-		},
-	}
+	return generateLogsWithFields(logFieldCases)
+}
+
+func generateLogsWithFields(fields map[string][]any) []*types.Log {
+	logFields := generateNamedFields(fields)
 	logs := generateStruct(func() *types.Log { return &types.Log{} }, logFields)
 	return seqToSlice(logs)
 }
@@ -209,87 +110,57 @@ func generateLogs() []*types.Log {
 func generateBlocks() []BlockWithReceipts {
 
 	blockHeaders := generateBlockHeaders()
-	var blockFields [][]NamedField
+	var blockFields = make(map[string][]any)
 	// Add each block as an individual field
+	blockFields["Header"] = []any{}
 	for _, block := range blockHeaders {
-		blockFields = append(blockFields, []NamedField{
-			{
-				"Header",
-				block,
-			},
-		})
+		blockFields["Header"] = append(blockFields["Header"], block)
 	}
 
 	// Add transactions and receipts as fields
-	legacyTx := &types.LegacyTx{}
-	accessListTx := &types.AccessListTx{}
-	dynamicFeeTx := &types.DynamicFeeTx{}
-	blockFields = append(blockFields, [][]NamedField{
-		{
-			{
-				"Transactions",
-				[]*types.Transaction{},
-			},
-			{
-				"Transactions",
-				[]*types.Transaction{
-					signTransaction(big.NewInt(1), legacyTx, KEY),
-				},
-			},
-			{
-				"Transactions",
-				[]*types.Transaction{
-					signTransaction(big.NewInt(1), legacyTx, KEY),
-					signTransaction(big.NewInt(1), accessListTx, KEY),
-				},
-			},
-			{
-				"Transactions",
-				[]*types.Transaction{
-					signTransaction(big.NewInt(1), legacyTx, KEY),
-					signTransaction(big.NewInt(1), accessListTx, KEY),
-					signTransaction(big.NewInt(1), dynamicFeeTx, KEY),
-				},
-			},
+	defaultFields := map[string][]any{}
+	transactions := [][]*types.Transaction{
+		generateTransactionsWithFieldsAndType(types.LegacyTxType, defaultFields),
+		flattenSlice([][]*types.Transaction{
+			generateTransactionsWithFieldsAndType(types.LegacyTxType, defaultFields),
+			generateTransactionsWithFieldsAndType(types.AccessListTxType, defaultFields),
+		}),
+		flattenSlice([][]*types.Transaction{
+			generateTransactionsWithFieldsAndType(types.LegacyTxType, defaultFields),
+			generateTransactionsWithFieldsAndType(types.AccessListTxType, defaultFields),
+			generateTransactionsWithFieldsAndType(types.DynamicFeeTxType, defaultFields),
+			generateTransactionsWithFieldsAndType(types.BlobTxType, defaultFields),
+			generateTransactionsWithFieldsAndType(types.SetCodeTxType, defaultFields),
+		}),
+	}
+	// Generate matching receipts
+	receipts := make([][]*types.Receipt, len(transactions))
+	for i, txs := range transactions {
+		receipts[i] = make([]*types.Receipt, len(txs))
+		for j := range receipts[i] {
+			receipts[i][j] = &types.Receipt{}
+		}
+	}
+
+	// Add to blockFields
+	blockFields["Transactions"] = []any{flattenSlice(transactions)}
+	blockFields["Receipts"] = []any{flattenSlice(receipts)}
+
+	blockFields["Uncles"] = []any{
+		[]*types.Header{},
+		[]*types.Header{
+			{},
 		},
-		{
-			{
-				"Receipts",
-				[]*types.Receipt{},
-			},
-			{
-				"Receipts",
-				generateTransactionsReceipts(),
-			},
+	}
+	blockFields["Withdrawals"] = []any{
+		[]*types.Withdrawal{},
+		[]*types.Withdrawal{
+			{},
 		},
-		{
-			{
-				"Uncles",
-				[]*types.Header{},
-			},
-			{
-				"Uncles",
-				[]*types.Header{
-					{},
-				},
-			},
-		},
-		{
-			{
-				"Withdrawals",
-				[]*types.Withdrawal{},
-			},
-			{
-				"Withdrawals",
-				[]*types.Withdrawal{
-					{},
-				},
-			},
-		},
-	}...)
+	}
 
 	blocks := constructAndGenerateData(
-		blockFields,
+		generateNamedFields(blockFields),
 		func(fields []NamedField) BlockWithReceipts {
 			header := &types.Header{}
 			var receipts []*types.Receipt
@@ -310,9 +181,13 @@ func generateBlocks() []BlockWithReceipts {
 				}
 			}
 			// New block computes the transaction hash root and receipts root
+			block := types.NewBlock(header, &body, receipts, trie.NewStackTrie(nil))
+			receiptsContainer := types.Receipts(receipts)
+			// Ignoring blobGasPrice as we don't need them
+			_ = receiptsContainer.DeriveFields(params.MainnetChainConfig, block.Header().Hash(), block.NumberU64(), block.Time(), block.BaseFee(), common.Big0, body.Transactions)
 			return BlockWithReceipts{
 				Block:    types.NewBlock(header, &body, receipts, trie.NewStackTrie(nil)),
-				Receipts: receipts,
+				Receipts: []*types.Receipt(receipts),
 			}
 		},
 	)
@@ -420,6 +295,7 @@ func dumpBlocks(data []BlockWithReceipts) string {
 		_ = block.Block.Header().EncodeRLP(&blockEncoding)
 		transactionRoot := block.Block.Header().TxHash.Hex()
 		receiptsRoot := block.Block.Header().ReceiptHash.Hex()
+		// NOTE: consider adding the receipts json marshalling to match the rust block structure
 		jsonRepresentation, _ := json.Marshal(gethapi.RPCMarshalBlock(block.Block, true, true, params.MainnetChainConfig))
 		rustCode += "BlockWithTestData {\n"
 		rustCode += fmt.Sprintf("\t\tblock: %s,\n", rustBlock)
