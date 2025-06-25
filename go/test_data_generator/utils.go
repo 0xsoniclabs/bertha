@@ -116,12 +116,6 @@ func _cartesianProductRecursion[T any](current []T, elements [][]T, callback fun
 	return true
 }
 
-// Utility function to return a nil pointer of type T
-// This allow reflect to recognize the null pointer as an interface{} type
-func getNullPtr[T any]() *T {
-	return nil
-}
-
 // signTransaction is a testing helper that signs a transaction with the
 // key from the provided account
 func signTransaction(

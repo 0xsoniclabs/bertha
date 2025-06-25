@@ -16,7 +16,11 @@
 
 // Geth path: core/internal/ethapi/api.go
 
-package gethapi
+// Changelist:
+// - Deleted everything apart from RPCMarshalHeader, RPCMarshalBlock, RPCTransaction, newRPCTransactionWithoutBlock, newRPCTransactionFromBlockIndex, newRPCTransaction and effectiveGasPrice
+
+// Package geth provides functions taken from the go-ethereum library to marshal Ethereum blocks and transactions
+package geth
 
 import (
 	"math/big"

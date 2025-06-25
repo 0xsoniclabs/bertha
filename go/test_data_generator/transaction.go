@@ -11,7 +11,7 @@ import (
 // transactionFieldCases contains the corner cases for the fields of a transaction.
 var transactionFieldCases = map[string][]any{
 	"To": {
-		getNullPtr[common.Address](),
+		(*common.Address)(nil),
 		new(common.Address),
 	},
 	"AccessList": {

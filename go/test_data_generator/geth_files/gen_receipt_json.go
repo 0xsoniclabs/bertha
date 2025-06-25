@@ -18,8 +18,10 @@
 
 // Geth path: core/types/
 // Changelist:
+// - Deleted everything except for MarshallReceiptJson
 // - removed "omitempty" tag from "type" field
-package gethapi
+
+package geth
 
 import (
 	"encoding/json"
@@ -36,8 +38,8 @@ func MarshallReceiptJson(r *types.Receipt) ([]byte, error) {
 		PostState         hexutil.Bytes  `json:"root"`
 		Status            hexutil.Uint64 `json:"status"`
 		CumulativeGasUsed hexutil.Uint64 `json:"cumulativeGasUsed" gencodec:"required"`
-		Bloom             types.Bloom          `json:"logsBloom"         gencodec:"required"`
-		Logs              []*types.Log         `json:"logs"              gencodec:"required"`
+		Bloom             types.Bloom    `json:"logsBloom"         gencodec:"required"`
+		Logs              []*types.Log   `json:"logs"              gencodec:"required"`
 		TxHash            common.Hash    `json:"transactionHash" gencodec:"required"`
 		ContractAddress   common.Address `json:"contractAddress"`
 		GasUsed           hexutil.Uint64 `json:"gasUsed" gencodec:"required"`

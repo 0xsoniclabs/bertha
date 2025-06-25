@@ -40,6 +40,12 @@ func toRustBlock(block BlockWithReceipts) string {
 		requestHash = fmt.Sprintf("request_hash: Some(Hash::try_from_hex(\"%s\").unwrap())", blockData.Header().RequestsHash.Hex())
 	}
 	blockNonce, _ := blockData.Header().Nonce.MarshalText()
+	transactions := toRustVector(blockData.Transactions(), func(tx *types.Transaction) string {
+		return ToRustTransaction(tx)
+	})
+	rustReceipt := toRustVector(receipts, func(receipt *types.Receipt) string {
+		return toRustReceipt(receipt)
+	})
 	return fmt.Sprintf(
 		`Block {
 			parent_hash: Hash::try_from_hex("%s").unwrap(),
@@ -69,12 +75,8 @@ func toRustBlock(block BlockWithReceipts) string {
 		hexutil.Bytes(blockData.Header().Extra).String(),
 		blockData.Header().MixDigest.Hex(),
 		blockNonce,
-		toRustVector(blockData.Transactions(), func(tx *types.Transaction) string {
-			return ToRustTransaction(tx)
-		}),
-		toRustVector(receipts, func(receipt *types.Receipt) string {
-			return toRustReceipt(receipt)
-		}),
+		transactions,
+		rustReceipt,
 		baseFeePerGas,
 		withdrawalsRoot,
 		blobGasUsed,
