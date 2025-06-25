@@ -35,12 +35,56 @@ pub trait BlockDb {
         self.put_raw(chain_id, number, &data)
     }
 
+    /// Iterates over all blocks for the specified chain-ID starting from the given block number.
+    /// The sequence of blocks is ordered by block number and may contain gaps for missing
+    /// blocks.
+    fn iterate(&self, chain_id: u64, from: u64) -> impl Iterator<Item = Result<Block, Error>> {
+        self.iterate_raw(chain_id, from).map(|result| {
+            result.and_then(|(_, data)| {
+                let block = proto::Block::decode(data.as_ref()).map_err(Error::Protobuf)?;
+                Block::try_from(block)
+            })
+        })
+    }
+
+    /// Like [BlockDb::iterate], but iterates in reverse order.
+    fn iterate_reverse(
+        &self,
+        chain_id: u64,
+        from: u64,
+    ) -> impl Iterator<Item = Result<Block, Error>> {
+        self.iterate_reverse_raw(chain_id, from).map(|result| {
+            result.and_then(|(_, data)| {
+                let block = proto::Block::decode(data.as_ref()).map_err(Error::Protobuf)?;
+                Block::try_from(block)
+            })
+        })
+    }
+
     /// Retrieves the raw protobuf-encoded data for the specified chain-ID and block number.
     /// Returns [None] if the block does not exist.
     fn get_raw(&self, chain_id: u64, block_number: u64) -> Result<Option<Vec<u8>>, Error>;
 
     /// Stores the raw protobuf-encoded data for the specified chain-ID and block number.
     fn put_raw(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error>;
+
+    /// Iterates over raw protobuf-encoded blocks for the specified chain-ID starting from the given
+    /// block number.
+    /// Returns an iterator that yields tuples of (block number, data).
+    /// The sequence of blocks is ordered by block number and may contain gaps for missing
+    /// blocks.
+    fn iterate_raw(
+        &self,
+        chain_id: u64,
+        from: u64,
+    ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>>;
+
+    /// Like `iterate_raw`, but iterates in reverse order.
+    fn iterate_reverse_raw(
+        &self,
+        chain_id: u64,
+        from: u64,
+    ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>>;
 }
 
 /// A block database using RocksDB as its storage layer.
@@ -110,6 +154,50 @@ impl RocksBlockDb {
         key[8..16].copy_from_slice(&block_number.to_be_bytes());
         key
     }
+
+    /// Iterates over raw protobuf-encoded blocks for the specified chain-ID starting from the given
+    /// block number in the given direction.
+    /// Returns an iterator that yields tuples of (block number, data).
+    /// The sequence of blocks is ordered by block number (depending on the direction in ascending
+    /// or descending order) and may contain gaps for missing blocks.
+    fn iterate_with_direction_raw(
+        &self,
+        chain_id: u64,
+        from: u64,
+        direction: rocksdb::Direction,
+    ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
+        self.db
+            .iterator(rocksdb::IteratorMode::From(
+                &Self::make_key(chain_id, from),
+                direction,
+            ))
+            .map(|result| {
+                result.map_err(Error::from).and_then(|(key, value)| {
+                    if key.len() != 16 {
+                        return Err(Error::StorageLayer("unexpected key length".to_string()));
+                    }
+                    let chain_id = u64::from_be_bytes(key[0..8].try_into().unwrap());
+                    let block_number = u64::from_be_bytes(key[8..16].try_into().unwrap());
+                    Ok((chain_id, block_number, value))
+                })
+            })
+            // if an error occurs, we return the error but stop afterwards
+            .take_while({
+                let mut error_occurred = false;
+                move |result| {
+                    if error_occurred {
+                        return false;
+                    }
+                    if let Ok((cid, _, _)) = result {
+                        *cid == chain_id
+                    } else {
+                        error_occurred = true;
+                        true
+                    }
+                }
+            })
+            .map(|result| result.map(|(_, block_number, value)| (block_number, value)))
+    }
 }
 
 impl BlockDb for RocksBlockDb {
@@ -123,6 +211,22 @@ impl BlockDb for RocksBlockDb {
         self.db
             .put(Self::make_key(chain_id, block_number), data)
             .map_err(|e| Error::StorageLayer(e.to_string()))
+    }
+
+    fn iterate_raw(
+        &self,
+        chain_id: u64,
+        from: u64,
+    ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
+        self.iterate_with_direction_raw(chain_id, from, rocksdb::Direction::Forward)
+    }
+
+    fn iterate_reverse_raw(
+        &self,
+        chain_id: u64,
+        from: u64,
+    ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
+        self.iterate_with_direction_raw(chain_id, from, rocksdb::Direction::Reverse)
     }
 }
 
@@ -147,6 +251,22 @@ mod tests {
         ) -> Result<(), Error> {
             self.0 = data.to_vec();
             Ok(())
+        }
+
+        fn iterate_raw(
+            &self,
+            _chain_id: u64,
+            _from: u64,
+        ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
+            std::iter::once(Ok((0, self.0.clone().into_boxed_slice())))
+        }
+
+        fn iterate_reverse_raw(
+            &self,
+            _chain_id: u64,
+            _from: u64,
+        ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
+            std::iter::once(Ok((0, self.0.clone().into_boxed_slice())))
         }
     }
 
@@ -187,6 +307,47 @@ mod tests {
         };
         db.put(0, block.clone()).unwrap();
         assert_eq!(proto::Block::decode(db.0.as_slice()).unwrap(), block.into());
+    }
+
+    #[test]
+    fn blockdb_iterate_converts_from_protobuf() {
+        let mut db = StubDb(vec![]);
+        let block = Block {
+            number: 123,
+            parent_hash: Hash::try_from_hex(
+                "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            )
+            .unwrap(),
+            ..Block::default()
+        };
+        db.put(0, block.clone()).unwrap();
+
+        // Forward
+        let mut iter = db.iterate(0, 0);
+        let received = iter.next().unwrap().unwrap();
+        assert_eq!(received, block);
+
+        // Reverse
+        let mut iter = db.iterate_reverse(0, 0);
+        let received = iter.next().unwrap().unwrap();
+        assert_eq!(received, block);
+    }
+
+    #[test]
+    fn blockdb_iterate_returns_error_for_invalid_protobuf() {
+        let db = StubDb(vec![0, 1, 2, 3]);
+
+        // Forward
+        let mut iter = db.iterate(0, 0);
+        let result = iter.next().unwrap();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
+
+        // Reverse
+        let mut iter = db.iterate_reverse(0, 0);
+        let result = iter.next().unwrap();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
     }
 
     #[test]
@@ -361,5 +522,62 @@ mod tests {
 
         let result = db.get_raw(chain_id, block_number).unwrap();
         assert_eq!(result, Some(data.to_vec()));
+    }
+
+    #[test]
+    fn rocksblockdb_iterate_raw_returns_blocks_for_single_chain_in_order() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+
+        db.put_raw(0, 0, b"block0-0").unwrap();
+        db.put_raw(7, 2, b"block7-2").unwrap();
+        db.put_raw(7, 3, b"block7-3").unwrap();
+        db.put_raw(7, 6, b"block7-6").unwrap(); // insert out of order
+        db.put_raw(7, 4, b"block7-4").unwrap();
+        db.put_raw(9, 1, b"block9-1").unwrap();
+
+        // Forward
+        let blocks: Vec<_> = db.iterate_raw(7, 3).collect::<Result<_, _>>().unwrap();
+        assert_eq!(
+            blocks,
+            vec![
+                (3u64, Box::from(b"block7-3".as_slice())),
+                (4u64, Box::from(b"block7-4".as_slice())),
+                (6u64, Box::from(b"block7-6".as_slice()))
+            ]
+        );
+
+        // Reverse
+        let blocks: Vec<_> = db
+            .iterate_reverse_raw(7, 4)
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            blocks,
+            vec![
+                (4u64, Box::from(b"block7-4".as_slice())),
+                (3u64, Box::from(b"block7-3".as_slice())),
+                (2u64, Box::from(b"block7-2".as_slice()))
+            ]
+        );
+    }
+
+    #[test]
+    fn rocksblockdb_iterate_raw_returns_error_if_error_occurs_and_stops() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+
+        db.put_raw(0, 0, b"block0-0").unwrap();
+        db.db.put([0; 17], b"block0-1").unwrap();
+        db.put_raw(0, 2, b"block0-2").unwrap();
+
+        let blocks: Vec<_> = db.iterate_raw(0, 0).collect();
+        assert_eq!(
+            blocks,
+            vec![
+                Ok((0u64, Box::from(b"block0-0".as_slice()))),
+                Err(Error::StorageLayer("unexpected key length".to_string()))
+            ],
+        );
     }
 }
