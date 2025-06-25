@@ -10,9 +10,13 @@ use crate::{
 };
 
 /// Returns a dummy genesis file with the specified number of blocks.
-/// Additionally it adds the specified blocks at the end in case they are provided.
+/// Additionally it adds the specified extra blocks at the end in case they are provided.
 /// This can be used to generate invalid data.
-pub fn generate_test_genesis(network_id: u64, num_blocks: usize, blocks: Vec<Block>) -> Vec<u8> {
+pub fn generate_test_genesis(
+    network_id: u64,
+    num_blocks: usize,
+    extra_blocks: Vec<Block>,
+) -> Vec<u8> {
     const PIECE_SIZE: u32 = 1000;
     const SIZE: u64 = 10000;
 
@@ -38,7 +42,7 @@ pub fn generate_test_genesis(network_id: u64, num_blocks: usize, blocks: Vec<Blo
         prev_hash = block.to_header().compute_hash();
         all_blocks.push(block);
     }
-    all_blocks.extend(blocks);
+    all_blocks.extend(extra_blocks);
     for block in all_blocks.into_iter().rev() {
         IdxFullBlock::try_from(block)
             .unwrap()
