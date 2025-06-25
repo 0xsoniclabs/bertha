@@ -10,7 +10,10 @@ const BLOCK_DB_NAME: &str = ".blockdb";
 fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
         Command::Init { path } => cmd::init(path),
-        Command::Import { snapshot_file } => cmd::import(snapshot_file),
+        Command::Import {
+            snapshot_file,
+            verify,
+        } => cmd::import(snapshot_file, verify),
         Command::List { chain_id: _ } => todo!(),
         Command::Verify {
             chain_id,

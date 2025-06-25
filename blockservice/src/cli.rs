@@ -17,8 +17,13 @@ pub enum Command {
         /// The path to the block database. Defaults to the current working directory.
         path: Option<PathBuf>,
     },
-    /// Import all blocks from the specified snapshot (`.g`) file into the block database.
-    Import { snapshot_file: PathBuf },
+    /// Import all blocks from the specified snapshot (`.g`) file into the block database, and
+    /// optionally also verify the parent hashes.
+    Import {
+        snapshot_file: PathBuf,
+        #[arg(long, default_value_t = false)]
+        verify: bool,
+    },
     /// List all locally stored block ranges for all chains or only for the specific chain if
     /// specified.
     List { chain_id: Option<u64> },
@@ -62,7 +67,7 @@ Usage: blockservice <COMMAND>
 
 Commands:
   init    Initialize a new block database in the current directory or at the specified path
-  import  Import all blocks from the specified snapshot (`.g`) file into the block database
+  import  Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
   list    List all locally stored block ranges for all chains or only for the specific chain if specified
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
@@ -99,7 +104,7 @@ Usage: blockservice <COMMAND>
 
 Commands:
   init    Initialize a new block database in the current directory or at the specified path
-  import  Import all blocks from the specified snapshot (`.g`) file into the block database
+  import  Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
   list    List all locally stored block ranges for all chains or only for the specific chain if specified
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
@@ -185,6 +190,7 @@ For more information, try '--help'.
         let expected = Args {
             command: Command::Import {
                 snapshot_file: PathBuf::from(path),
+                verify: false,
             },
         };
         parse_and_compare(&args, Ok(expected));
@@ -194,15 +200,16 @@ For more information, try '--help'.
     fn call_with_import_subcommand_with_help_argument_prints_subcommand_help() {
         let args = ["blockservice", "import", "--help"];
         let expected = "\
-Import all blocks from the specified snapshot (`.g`) file into the block database
+Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
 
-Usage: blockservice import <SNAPSHOT_FILE>
+Usage: blockservice import [OPTIONS] <SNAPSHOT_FILE>
 
 Arguments:
   <SNAPSHOT_FILE>
 
 Options:
-  -h, --help  Print help
+      --verify
+  -h, --help    Print help
 ";
         parse_and_compare(&args, Err(expected));
     }
@@ -213,7 +220,7 @@ Options:
         let expected = "\
 error: unexpected argument 'invalid' found
 
-Usage: blockservice import <SNAPSHOT_FILE>
+Usage: blockservice import [OPTIONS] <SNAPSHOT_FILE>
 
 For more information, try '--help'.
 ";
