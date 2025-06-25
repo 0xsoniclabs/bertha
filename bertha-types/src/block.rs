@@ -1,6 +1,8 @@
+use ethbloom::{Bloom, Input};
+
 use crate::{
-    Address, EMPTY_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, HexConvert, Transaction,
-    TransactionReceipt, U256,
+    Address, BlockHeader, EMPTY_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, HexConvert, Transaction,
+    TransactionReceipt, U256, compute_root_hash,
 };
 
 /// An Ethereum-compatible block in "normal form", that is, without any redundant or derived fields.
@@ -70,6 +72,63 @@ impl Block {
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0),
             ..Default::default()
+        }
+    }
+
+    pub fn to_header(&self) -> BlockHeader {
+        let mut logs_bloom = Bloom::zero();
+        for receipt in &self.receipts {
+            for log in &receipt.logs {
+                logs_bloom.accrue(Input::Raw(&log.address));
+                for topic in &log.topics {
+                    logs_bloom.accrue(Input::Raw(topic));
+                }
+            }
+        }
+
+        let receipts_root = compute_root_hash(&self.receipts);
+        let transactions_root = compute_root_hash(&self.transactions);
+
+        let gas_used = self
+            .receipts
+            .last()
+            .map(|tx| tx.cumulative_gas_used)
+            .unwrap_or_default();
+
+        BlockHeader {
+            parent_hash: self.parent_hash,
+            sha3_uncles: self.ommers_hash,
+            miner: self.beneficiary,
+            state_root: self.state_root,
+            transactions_root,
+            receipts_root,
+            logs_bloom: logs_bloom.0,
+            difficulty: U256::from(self.difficulty),
+            number: self.number,
+            gas_limit: self.gas_limit,
+            gas_used,
+            timestamp: self.timestamp,
+            extra_data: self.extra_data.clone(),
+            mix_hash: self.prev_randao,
+            nonce: self.nonce,
+            base_fee_per_gas: self.base_fee_per_gas,
+            withdrawals_root: self.withdrawals_root,
+            blob_gas_used: self.blob_gas_used,
+            excess_blob_gas: self.excess_blob_gas,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_data::test_data_blocks::generate_blocks_with_data;
+
+    #[test]
+    fn block_to_header_to_hash_produces_correct_hash() {
+        for data in generate_blocks_with_data() {
+            let block = data.block;
+            let hash = data.block_hash;
+            assert_eq!(block.to_header().compute_hash(), hash)
         }
     }
 }
