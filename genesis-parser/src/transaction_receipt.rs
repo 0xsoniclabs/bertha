@@ -7,7 +7,7 @@ pub(crate) struct StoredReceiptRlpWithTxType {
     pub transaction_type: TransactionType,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 pub(crate) struct StoredReceiptRlp {
     pub post_state_or_status: RlpString,
     pub cumulative_gas_used: u64,
