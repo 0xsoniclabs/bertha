@@ -117,10 +117,67 @@ impl TryFrom<IdxFullBlock> for Block {
     }
 }
 
+impl TryFrom<Block> for IdxFullBlock {
+    type Error = &'static str;
+
+    fn try_from(value: Block) -> Result<Self, Self::Error> {
+        let block_hash = value.to_header().compute_hash();
+
+        let gas_used = value
+            .receipts
+            .last()
+            .map(|tx| tx.cumulative_gas_used)
+            .unwrap_or_default();
+
+        let timestamp_secs = value.timestamp;
+        let timestamp_nanos = u32::from_be_bytes(
+            value
+                .extra_data
+                .get(0..4)
+                .ok_or("extra_data should be at least 12 bytes long")?
+                .try_into()
+                .map_err(|_| "extra_data should be at least 12 bytes long")?,
+        ) as u64;
+        let timestamp = timestamp_secs * 10u64.pow(9) + timestamp_nanos;
+
+        let duration = u64::from_be_bytes(
+            value
+                .extra_data
+                .get(4..12)
+                .ok_or("extra_data should be at least 12 bytes long")?
+                .try_into()
+                .map_err(|_| "extra_data should be at least 12 bytes long")?,
+        );
+
+        let transactions = value.transactions.into_iter().map(RlpTransaction).collect();
+        let receipts = value.receipts.into_iter().map(From::from).collect();
+
+        Ok(IdxFullBlock {
+            block: FullBlock {
+                block_hash,
+                parent_hash: value.parent_hash,
+                state_root: value.state_root,
+                timestamp,
+                duration,
+                difficulty: value.difficulty,
+                gas_limit: value.gas_limit,
+                gas_used,
+                base_fee: value.base_fee_per_gas.unwrap_or_default(),
+                prev_randao: value.prev_randao,
+                epoch: 0, // Epoch is not used in this context
+                transactions,
+                receipts,
+            },
+            block_number: value.number,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bertha_types::{
-        AccessListEntry, Address, RlpString, SetCodeAuthorization, TransactionType,
+        AccessListEntry, Address, RlpString, SetCodeAuthorization, TransactionReceipt,
+        TransactionType,
     };
 
     use super::*;
@@ -139,7 +196,7 @@ mod tests {
                 gas_used: 5000000,
                 base_fee: U256::from(100u8),
                 prev_randao: Hash::from([3; 32]),
-                epoch: 1,
+                epoch: 0,
                 transactions: vec![],
                 receipts: vec![],
             },
@@ -178,41 +235,12 @@ mod tests {
     fn block_try_from_idx_full_block_returns_error_when_status_is_invalid() {
         let idx_full_block = IdxFullBlock {
             block: FullBlock {
-                block_hash: Hash::from([0; 32]),
-                parent_hash: Hash::from([1; 32]),
-                state_root: Hash::from([2; 32]),
-                timestamp: 1234567890123,
-                duration: 1000,
-                difficulty: 42,
-                gas_limit: 8000000,
-                gas_used: 5000000,
-                base_fee: U256::from(100u8),
-                prev_randao: Hash::from([3; 32]),
-                epoch: 1,
-                transactions: vec![RlpTransaction(Transaction {
-                    transaction_type: TransactionType::Legacy,
-                    chain_id: U256::default(),
-                    nonce: u64::default(),
-                    gas_price: U256::default(),
-                    gas_limit: u64::default(),
-                    to: None,
-                    value: U256::default(),
-                    data: Vec::default(),
-                    access_list: Vec::default(),
-                    max_fee_per_gas: U256::default(),
-                    max_priority_fee_per_gas: U256::default(),
-                    blob_versioned_hashes: Vec::default(),
-                    max_fee_per_blob_gas: U256::default(),
-                    authorization_list: Vec::default(),
-                    y_parity: U256::default(),
-                    r: U256::default(),
-                    s: U256::default(),
-                })],
+                transactions: vec![RlpTransaction(Transaction::default())],
                 receipts: vec![StoredReceiptRlp {
                     post_state_or_status: RlpString(vec![1, 2, 3]), // Invalid status
-                    cumulative_gas_used: 0,
-                    logs: vec![],
+                    ..StoredReceiptRlp::default()
                 }],
+                ..FullBlock::default()
             },
             block_number: 0,
         };
@@ -221,6 +249,84 @@ mod tests {
             Block::try_from(idx_full_block),
             Err("invalid receipt status")
         );
+    }
+
+    #[test]
+    fn idx_full_block_try_from_block_converts_extra_data_to_timestamp_and_duration_and_computes_gas_used_and_block_hash()
+     {
+        let block = Block {
+            parent_hash: Hash::from([1; 32]),
+            ommers_hash: Hash::try_from_hex(EMPTY_OMMERS_HASH).unwrap(),
+            beneficiary: Default::default(),
+            state_root: Hash::from([2; 32]),
+            difficulty: 42,
+            number: 0,
+            gas_limit: 8000000,
+            timestamp: 1234,
+            extra_data: vec![
+                0x21, 0xd9, 0x50, 0xcb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xe8,
+            ],
+            prev_randao: Hash::from([3; 32]),
+            nonce: [0; 8],
+            transactions: vec![Transaction::default()],
+            receipts: vec![TransactionReceipt {
+                cumulative_gas_used: 5000000,
+                ..TransactionReceipt::default()
+            }],
+            base_fee_per_gas: Some(U256::from(100u8)),
+            withdrawals_root: Some(Hash::try_from_hex(EMPTY_TREE_ROOT_HASH).unwrap()),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            parent_beacon_block_root: None,
+            requests_hash: None,
+        };
+
+        let idx_full_block = IdxFullBlock {
+            block: FullBlock {
+                block_hash: block.to_header().compute_hash(),
+                parent_hash: Hash::from([1; 32]),
+                state_root: Hash::from([2; 32]),
+                timestamp: 1234567890123, // seconds from timestamp + nanoseconds from extra_data
+                duration: 1000,
+                difficulty: 42,
+                gas_limit: 8000000,
+                gas_used: 5000000,
+                base_fee: U256::from(100u8),
+                prev_randao: Hash::from([3; 32]),
+                epoch: 0,
+                transactions: vec![RlpTransaction(Transaction::default())],
+                receipts: vec![StoredReceiptRlp {
+                    cumulative_gas_used: 5000000,
+                    ..StoredReceiptRlp::default()
+                }],
+            },
+            block_number: 0,
+        };
+
+        assert_eq!(IdxFullBlock::try_from(block).unwrap(), idx_full_block);
+    }
+
+    #[test]
+    fn idx_full_block_try_from_block_returns_error_if_extra_data_to_short() {
+        let block = Block {
+            extra_data: vec![0; 3],
+            ..Block::default_sonic()
+        };
+        assert_eq!(
+            IdxFullBlock::try_from(block),
+            Err("extra_data should be at least 12 bytes long")
+        );
+    }
+
+    #[test]
+    fn block_try_from_idx_full_block_try_from_block_is_identity() {
+        let block = Block {
+            extra_data: vec![1; 12],
+            transactions: vec![Transaction::default()],
+            ..Block::default_sonic()
+        };
+        let converted = Block::try_from(IdxFullBlock::try_from(block.clone()).unwrap()).unwrap();
+        assert_eq!(converted, block);
     }
 
     /// Generates a set of transactions with their RLP encodings.

@@ -197,7 +197,8 @@ mod tests {
         let genesis_file = tmpdir.path().join("genesis.g");
         let num_blocks = 5;
         let chain_id = 62;
-        let genesis_data = genesis_parser::test_utils::generate_test_genesis(chain_id, num_blocks);
+        let genesis_data =
+            genesis_parser::test_utils::generate_test_genesis(chain_id, num_blocks, Vec::new());
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
@@ -217,7 +218,7 @@ mod tests {
     fn import_aborts_on_invalid_snapshot_file() {
         let tmpdir = tempfile::tempdir().unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
-        let genesis_data = genesis_parser::test_utils::generate_test_genesis(0, 5);
+        let genesis_data = genesis_parser::test_utils::generate_test_genesis(0, 5, Vec::new());
         let data_len = genesis_data.len();
         let corruption = [0xde, 0xad, 0xbe, 0xef];
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
@@ -257,7 +258,7 @@ mod tests {
     fn import_aborts_on_database_error() {
         let tmpdir = tempfile::tempdir().unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
-        let genesis_data = genesis_parser::test_utils::generate_test_genesis(0, 5);
+        let genesis_data = genesis_parser::test_utils::generate_test_genesis(0, 5, Vec::new());
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
         // Create a read-only database

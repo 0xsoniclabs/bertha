@@ -1,16 +1,18 @@
 use std::io::{Cursor, Read};
 
 use alloy_rlp::Encodable;
-use bertha_types::Hash;
+use bertha_types::{Block, Hash};
 use flate2::{Compression, bufread::GzEncoder};
 
 use crate::{
-    block::{FullBlock, IdxFullBlock},
+    block::IdxFullBlock,
     units::{GenesisHeader, HEADER, Unit, VERSION},
 };
 
-/// Returns a dummy genesis file.
-pub fn generate_test_genesis(network_id: u64, num_blocks: usize) -> Vec<u8> {
+/// Returns a dummy genesis file with the specified number of blocks.
+/// Additionally it adds the specified blocks at the end in case they are provided.
+/// This can be used to generate invalid data.
+pub fn generate_test_genesis(network_id: u64, num_blocks: usize, blocks: Vec<Block>) -> Vec<u8> {
     const PIECE_SIZE: u32 = 1000;
     const SIZE: u64 = 10000;
 
@@ -25,14 +27,24 @@ pub fn generate_test_genesis(network_id: u64, num_blocks: usize) -> Vec<u8> {
         unit_data.extend_from_slice(&[0u8; 32]); // dummy hashes
     }
 
-    // add multiple encoded blocks
-    for i in 0..num_blocks {
-        IdxFullBlock {
-            block_number: (num_blocks - i - 1) as u64,
-            block: FullBlock::default(),
-        }
-        .encode(&mut unit_data);
+    let mut prev_hash = Hash::default();
+    let mut all_blocks = Vec::new();
+    for block_number in 0..num_blocks as u64 {
+        let block = Block {
+            number: block_number,
+            parent_hash: prev_hash,
+            ..Block::default_sonic()
+        };
+        prev_hash = block.to_header().compute_hash();
+        all_blocks.push(block);
     }
+    all_blocks.extend(blocks);
+    for block in all_blocks.into_iter().rev() {
+        IdxFullBlock::try_from(block)
+            .unwrap()
+            .encode(&mut unit_data);
+    }
+
     let uncompressed_size = unit_data.len();
     let mut compressed_unit_data = Vec::new();
     let compressed_size = GzEncoder::new(Cursor::new(&mut unit_data), Compression::fast())
