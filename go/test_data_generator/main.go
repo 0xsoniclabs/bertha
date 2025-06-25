@@ -167,6 +167,7 @@ func generateBlocks() []BlockWithReceipts {
 				receipts[i][j] = &types.Receipt{}
 			}
 			includeLogs = !includeLogs // Toggle includeLogs for next iteration
+			receipts[i][j].Bloom = types.CreateBloom(receipts[i][j])
 		}
 
 	}
