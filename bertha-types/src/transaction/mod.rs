@@ -54,6 +54,30 @@ pub struct Transaction {
     pub s: U256,
 }
 
+impl Default for Transaction {
+    fn default() -> Self {
+        Transaction {
+            transaction_type: TransactionType::Legacy,
+            chain_id: U256::default(),
+            nonce: u64::default(),
+            gas_price: U256::default(),
+            gas_limit: u64::default(),
+            to: Some(Address::default()),
+            value: U256::default(),
+            data: Vec::default(),
+            access_list: Vec::default(),
+            max_fee_per_gas: U256::default(),
+            max_priority_fee_per_gas: U256::default(),
+            blob_versioned_hashes: vec![Hash::default()],
+            max_fee_per_blob_gas: U256::default(),
+            authorization_list: Vec::default(),
+            y_parity: U256::default(),
+            r: U256::default(),
+            s: U256::default(),
+        }
+    }
+}
+
 impl Eip2718Marshallable for Transaction {
     fn marshal(&self) -> Vec<u8> {
         fn encode_with_type_as_rlp_string<T: Encodable>(
@@ -605,30 +629,6 @@ mod tests {
 
     fn to_value(json_str: &str) -> serde_json::Value {
         serde_json::from_str(json_str).unwrap()
-    }
-
-    impl Default for Transaction {
-        fn default() -> Self {
-            Transaction {
-                transaction_type: TransactionType::Legacy,
-                chain_id: U256::default(),
-                nonce: u64::default(),
-                gas_price: U256::default(),
-                gas_limit: u64::default(),
-                to: Some(Address::default()),
-                value: U256::default(),
-                data: Vec::default(),
-                access_list: Vec::default(),
-                max_fee_per_gas: U256::default(),
-                max_priority_fee_per_gas: U256::default(),
-                blob_versioned_hashes: vec![Hash::default()],
-                max_fee_per_blob_gas: U256::default(),
-                authorization_list: Vec::default(),
-                y_parity: U256::default(),
-                r: U256::default(),
-                s: U256::default(),
-            }
-        }
     }
 
     fn make_transaction(type_: TransactionType, include_to: bool) -> Transaction {

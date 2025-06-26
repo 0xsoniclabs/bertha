@@ -28,6 +28,17 @@ impl TransactionReceipt {
     }
 }
 
+impl Default for TransactionReceipt {
+    fn default() -> Self {
+        Self {
+            transaction_type: TransactionType::Legacy,
+            status: u64::default(),
+            cumulative_gas_used: u64::default(),
+            logs: Vec::default(),
+        }
+    }
+}
+
 impl Eip2718Marshallable for TransactionReceipt {
     fn marshal(&self) -> Vec<u8> {
         let mut out = Vec::new();
