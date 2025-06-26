@@ -47,10 +47,10 @@ pub trait BlockDb {
         })
     }
 
-    /// Iterates over all block numbers and blocks for the specified chain-ID starting from the
-    /// given block number. The sequence of blocks is ordered by block number and may contain
-    /// gaps for missing blocks.
-    fn iterate_with_key(
+    /// Iterates over all block numbers (extracted from the keys) and blocks for the specified
+    /// chain-ID starting from the given block number. The sequence is ordered by
+    /// block number and may contain gaps for missing blocks.
+    fn iterate_with_block_number(
         &self,
         chain_id: u64,
         from: u64,
@@ -349,7 +349,7 @@ mod tests {
         assert_eq!(received, block);
 
         // With Key
-        let mut iter = db.iterate_with_key(0, 0);
+        let mut iter = db.iterate_with_block_number(0, 0);
         let received = iter.next().unwrap().unwrap().1;
         assert_eq!(received, block);
     }
@@ -371,7 +371,7 @@ mod tests {
         assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
 
         // With Key
-        let mut iter = db.iterate_with_key(0, 0);
+        let mut iter = db.iterate_with_block_number(0, 0);
         let result = iter.next().unwrap();
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
