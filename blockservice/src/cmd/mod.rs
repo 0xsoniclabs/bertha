@@ -6,11 +6,13 @@ use std::{
 
 pub use import::import;
 pub use init::init;
+pub use list::list;
 pub use purge::purge;
 pub use verify::verify;
 
 mod import;
 mod init;
+mod list;
 mod purge;
 mod verify;
 
