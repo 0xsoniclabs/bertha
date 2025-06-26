@@ -3,18 +3,146 @@ package main
 import (
 	"fmt"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
-// BlockHeaderFieldCases contains the corner cases for the fields of a block header.
-var BlockHeaderFieldCases = map[string][]any{
+// blockHeaderFieldCases contains the corner cases for the fields of a block header.
+var blockHeaderFieldCases = map[string][]any{
 	"Extra": {
 		[]byte{},
 		[]byte{0x1},
 	},
 }
 
+// generateBlockHeaders returns the corner cases for the fields of a block
+func getBlockFieldCases() map[string][]any {
+	var blockFields = make(map[string][]any)
+
+	blockFields["Header"] = []any{}
+	for _, block := range generateBlockHeaders() {
+		blockFields["Header"] = append(blockFields["Header"], block)
+	}
+
+	// Add transactions and receipts as fields
+	defaultFields := map[string][]any{
+		"AccessList": {
+			types.AccessList{},
+			types.AccessList{
+				types.AccessTuple{
+					Address: common.Address{},
+					StorageKeys: []common.Hash{
+						{},
+					},
+				},
+			},
+		},
+		"AuthList": {
+			[]types.SetCodeAuthorization{},
+			[]types.SetCodeAuthorization{
+				{},
+			},
+		},
+	}
+	transactions := [][]*types.Transaction{
+		{},
+		generateTransactionsWithFieldsAndType(types.LegacyTxType, defaultFields),
+		flattenSlice([][]*types.Transaction{
+			generateTransactionsWithFieldsAndType(types.LegacyTxType, defaultFields),
+			generateTransactionsWithFieldsAndType(types.AccessListTxType, defaultFields),
+		}),
+		flattenSlice([][]*types.Transaction{
+			generateTransactionsWithFieldsAndType(types.LegacyTxType, defaultFields),
+			generateTransactionsWithFieldsAndType(types.AccessListTxType, defaultFields),
+			generateTransactionsWithFieldsAndType(types.DynamicFeeTxType, defaultFields),
+			generateTransactionsWithFieldsAndType(types.BlobTxType, defaultFields),
+			generateTransactionsWithFieldsAndType(types.SetCodeTxType, defaultFields),
+		}),
+	}
+	// Generate matching receipts
+	// For simplicity, we will alternate between including logs and not including logs in the receipts.
+	includeLogs := false
+	receipts := make([][]*types.Receipt, len(transactions))
+	for i, txs := range transactions {
+		receipts[i] = make([]*types.Receipt, len(txs))
+		for j := range receipts[i] {
+			if includeLogs {
+				receipts[i][j] = &types.Receipt{
+					Logs: []*types.Log{
+						{},
+					},
+				}
+			} else {
+				receipts[i][j] = &types.Receipt{}
+			}
+			includeLogs = !includeLogs
+			receipts[i][j].Bloom = types.CreateBloom(receipts[i][j])
+		}
+
+	}
+
+	// Add to blockFields
+	blockFields["Transactions"] = []any{}
+	for _, txSlice := range transactions {
+		blockFields["Transactions"] = append(blockFields["Transactions"], txSlice)
+	}
+	blockFields["Receipts"] = []any{}
+	for _, receiptSlice := range receipts {
+		blockFields["Receipts"] = append(blockFields["Receipts"], receiptSlice)
+	}
+
+	blockFields["Uncles"] = []any{
+		[]*types.Header{},
+		[]*types.Header{
+			{},
+		},
+	}
+
+	blockFields["Withdrawals"] = []any{
+		[]*types.Withdrawal{},
+		[]*types.Withdrawal{
+			{},
+		},
+	}
+
+	return blockFields
+}
+
+// BuildBlock construct a BlockWithReceipts from the given fields.
+// Every fields are default-initialized if not provided.
+func BuildBlock(fields []NamedField) BlockWithReceipts {
+	header := &types.Header{}
+	var receipts []*types.Receipt
+	var body types.Body
+	body.Transactions = []*types.Transaction{}
+	body.Uncles = []*types.Header{}
+	body.Withdrawals = []*types.Withdrawal{}
+
+	for _, field := range fields {
+		switch field.Name {
+		case "Header":
+			header = field.Value.(*types.Header)
+		case "Transactions":
+			body.Transactions = field.Value.([]*types.Transaction)
+		case "Receipts":
+			receipts = field.Value.([]*types.Receipt)
+		case "Uncles":
+			body.Uncles = field.Value.([]*types.Header)
+		case "Withdrawals":
+			body.Withdrawals = field.Value.([]*types.Withdrawal)
+		}
+	}
+	// New block computes the transaction hash root and receipts root
+	block := types.NewBlock(header, &body, receipts, trie.NewStackTrie(nil))
+	return BlockWithReceipts{
+		Block:    block,
+		Receipts: []*types.Receipt(receipts),
+	}
+}
+
+// toRustBlock converts a BlockWithReceipts to the Bertha Block type in Rust.
 func toRustBlock(block BlockWithReceipts) string {
 	blockData := block.Block
 	receipts := block.Receipts

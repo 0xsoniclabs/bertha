@@ -6,6 +6,7 @@ import (
 	"iter"
 	"math/big"
 	"reflect"
+	"sort"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -62,6 +63,35 @@ func constructAndGenerateData[K any, Piece any](
 	)
 }
 
+// SetValueInStruct sets the value of a field in a struct T by its name.
+// Returns true if the field was found and set, false otherwise.
+func SetValueInStruct[T any, K any](data T, fieldName string, value K) bool {
+	dataValue := reflect.ValueOf(data)
+	var f reflect.Value
+	if dataValue.Kind() == reflect.Ptr {
+		f = reflect.ValueOf(data).Elem().FieldByName(fieldName)
+	} else {
+		f = reflect.ValueOf(data).FieldByName(fieldName)
+	}
+	if !f.IsValid() {
+		return false
+	}
+	fieldValue := reflect.ValueOf(value)
+	if f.Kind() != reflect.Ptr {
+		if fieldValue.Kind() == reflect.Ptr {
+			if fieldValue.IsNil() {
+				return false
+			}
+			f.Set(fieldValue.Elem())
+		} else {
+			f.Set(fieldValue)
+		}
+	} else {
+		f.Set(fieldValue)
+	}
+	return true
+}
+
 // generateStruct sets the fields of a struct T based on the provided values.
 // It uses reflection to set the fields of the struct based on the NamedField values.
 func generateStruct[T any](constructor func() T, values [][]NamedField) iter.Seq[T] {
@@ -69,30 +99,13 @@ func generateStruct[T any](constructor func() T, values [][]NamedField) iter.Seq
 		constructor,
 		values,
 		func(constructor func() T, modifier []NamedField) T {
-			v := reflect.ValueOf(constructor())
+			v := constructor()
 			for _, field := range modifier {
-				f := v.Elem().FieldByName(field.Name)
-				fieldValue := reflect.ValueOf(field.Value)
-				if !f.IsValid() {
-					continue //Skip field
+				if !SetValueInStruct(v, field.Name, field.Value) {
+					continue
 				}
-				if f.Kind() != reflect.Ptr {
-
-					// Depending if the field type is a pointer or not, we need to dereference it or not
-					if fieldValue.Kind() == reflect.Ptr {
-						if fieldValue.IsNil() {
-							continue // Skip nil pointer fields
-						}
-						f.Set(reflect.ValueOf(field.Value).Elem())
-					} else {
-						f.Set(reflect.ValueOf(field.Value))
-					}
-				} else {
-					f.Set(reflect.ValueOf(field.Value))
-				}
-
 			}
-			return v.Interface().(T)
+			return v
 		},
 	)
 }
@@ -152,11 +165,19 @@ func flattenSlice[T any](values [][]T) []T {
 	return flat
 }
 
-// generateNamedFields converts a map of field names to slices of values into a slice of slices of NamedField.
+// toNamedFields converts a map of field names to slices of values into a slice of slices of NamedField.
 // Each slice contains the same field name with different values
-func generateNamedFields(values map[string][]any) [][]NamedField {
+// NOTE: The fields are ordered by field name.
+func toNamedFields(values map[string][]any) [][]NamedField {
 	fields := [][]NamedField{}
-	for fieldName, fieldValues := range values {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, fieldName := range keys {
+		fieldValues := values[fieldName]
 		field := []NamedField{}
 		for _, v := range fieldValues {
 			field = append(field, NamedField{fieldName, v})
@@ -166,8 +187,9 @@ func generateNamedFields(values map[string][]any) [][]NamedField {
 	return fields
 }
 
-// Rust conversion utility functions
+// ########## Rust conversion utility functions ########## //
 
+// toRustVector converts a slice of data of type T into a Rust vector string representation using the rustStringGen marshalling function
 func toRustVector[T any](data []T, rustStringGen func(v T) string) string {
 	if len(data) == 0 {
 		return "vec![]"
@@ -181,6 +203,7 @@ func toRustVector[T any](data []T, rustStringGen func(v T) string) string {
 	return entries
 }
 
+// toRustLogList converts a slice of Go logs to a Bertha Log type in Rust.
 func toRustLogList(logs []*types.Log) string {
 	return toRustVector(logs, func(log *types.Log) string {
 		return fmt.Sprintf(`Log {
@@ -191,6 +214,7 @@ func toRustLogList(logs []*types.Log) string {
 	})
 }
 
+// toRustAccessList converts  a Go AccessList to a Bertha AccessList type in Rust.
 func toRustAccessList(accessList types.AccessList) string {
 	return toRustVector(accessList, func(entry types.AccessTuple) string {
 		return fmt.Sprintf(`AccessListEntry {
@@ -200,12 +224,14 @@ func toRustAccessList(accessList types.AccessList) string {
 	})
 }
 
+// toRustHashList converts a slice of Go common.Hash to a Bertha Hash type in Rust.
 func toRustHashList(hashes []common.Hash) string {
 	return toRustVector(hashes, func(hash common.Hash) string {
 		return fmt.Sprintf("Hash::try_from_hex(\"0x%s\").unwrap()", hash.Hex())
 	})
 }
 
+// toRustTransaction converts a Go transaction to the Bertha Transaction type in Rust.
 func toRustAuthorizationList(authList []types.SetCodeAuthorization) string {
 	return toRustVector(authList, func(auth types.SetCodeAuthorization) string {
 		return fmt.Sprintf(`SetCodeAuthorization {
@@ -220,6 +246,7 @@ func toRustAuthorizationList(authList []types.SetCodeAuthorization) string {
 	})
 }
 
+// toRustByteVec converts a byte slice to a Rust byte vector string representation.
 func toRustByteVec(data []byte) string {
 	if len(data) == 0 {
 		return "vec![]"
@@ -235,6 +262,7 @@ func toRustByteVec(data []byte) string {
 	return fmt.Sprintf("vec![%s]", byteString)
 }
 
+// toRustByteArray converts a byte slice to a Rust array string representation.
 func toRustByteArray(data []byte) string {
 	if len(data) == 0 {
 		return "[]"

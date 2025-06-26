@@ -16,12 +16,14 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 )
 
+// generateTransactions generates a slice of transactions for each combination of [transaction::transactionFieldCases].
 func generateTransactions() []*types.Transaction {
 	return generateTransactionsWithFields(transactionFieldCases)
 }
 
+// generateTransactionsWithFields generates a slice of transactions for each combination of fields
 func generateTransactionsWithFields(fields map[string][]any) []*types.Transaction {
-	transactionFields := generateNamedFields(fields)
+	transactionFields := toNamedFields(fields)
 
 	txs := []*types.Transaction{}
 	for payload := range generateStruct(func() *types.LegacyTx { return &types.LegacyTx{GasPrice: common.Big0} }, transactionFields) {
@@ -42,8 +44,9 @@ func generateTransactionsWithFields(fields map[string][]any) []*types.Transactio
 	return txs
 }
 
+// generateTransactionsWithFieldsAndType generates a slice of transactions of type txType for each combination of fields.
 func generateTransactionsWithFieldsAndType(txType uint8, fields map[string][]any) []*types.Transaction {
-	transactionFields := generateNamedFields(fields)
+	transactionFields := toNamedFields(fields)
 	var txs []*types.Transaction
 	for payload := range generateStruct(func() any {
 		switch txType {
@@ -66,18 +69,20 @@ func generateTransactionsWithFieldsAndType(txType uint8, fields map[string][]any
 	return txs
 }
 
+// generateTransactionsReceipts generates a slice of receipts for each combination of [receipt::transactionReceiptFieldCases].
 func generateTransactionsReceipts() []*types.Receipt {
 	return generateTransactionsReceiptsWithFields(transactionReceiptFieldCases)
 }
 
+// generateTransactionsReceiptsWithFields generates a slice of receipts for each combination of fields.
 func generateTransactionsReceiptsWithFields(fields map[string][]any) []*types.Receipt {
-	transactionReceiptFields := generateNamedFields(fields)
+	transactionReceiptFields := toNamedFields(fields)
 	receipts := generateStruct(func() *types.Receipt {
 		return &types.Receipt{
 			Status: 1,
 		}
 	}, transactionReceiptFields)
-	// convert sequence to slice
+
 	receiptsSlice := []*types.Receipt{}
 	for receipt := range receipts {
 		// Compute bloom
@@ -87,144 +92,72 @@ func generateTransactionsReceiptsWithFields(fields map[string][]any) []*types.Re
 	return receiptsSlice
 }
 
+// generateBlockHeaders generates a slice of block headers for each combination of [block::blockHeaderFieldCases].
 func generateBlockHeaders() []*types.Header {
-	return generateBlockHeadersWithFields(BlockHeaderFieldCases)
+	return generateBlockHeadersWithFields(blockHeaderFieldCases)
 }
 
+// generateBlockHeadersWithFields generates a slice of block headers for each combination of fields.
 func generateBlockHeadersWithFields(fields map[string][]any) []*types.Header {
-	blockFields := generateNamedFields(fields)
+	blockFields := toNamedFields(fields)
 	blocks := generateStruct(func() *types.Header { return &types.Header{} }, blockFields)
 	return seqToSlice(blocks)
 }
 
+// generateLogs generates a slice of logs for each combination of [receipt::logFieldCases].
 func generateLogs() []*types.Log {
 	return generateLogsWithFields(logFieldCases)
 }
 
+// generateLogsWithFields generates a slice of logs for each combination of fields.
 func generateLogsWithFields(fields map[string][]any) []*types.Log {
-	logFields := generateNamedFields(fields)
+	logFields := toNamedFields(fields)
 	logs := generateStruct(func() *types.Log { return &types.Log{} }, logFields)
 	return seqToSlice(logs)
 }
 
+// generateBlocks generates a slice of blocks with receipts for each combination of [block::getBlockFieldCases].
+// The generated blocks follow the following rules:
+// 1. The parent hash of each block is set to the previous block's hash.
+// 2. The number of transactions in each block matches the number of receipts.
 func generateBlocks() []BlockWithReceipts {
-
-	blockHeaders := generateBlockHeaders()
-	var blockFields = make(map[string][]any)
-	// Add each block as an individual field
-	blockFields["Header"] = []any{}
-	for _, block := range blockHeaders {
-		blockFields["Header"] = append(blockFields["Header"], block)
-	}
-
-	// Add transactions and receipts as fields
-	defaultFields := map[string][]any{
-		"AccessList": {
-			types.AccessList{},
-			types.AccessList{
-				types.AccessTuple{
-					Address: common.Address{},
-					StorageKeys: []common.Hash{
-						{},
-					},
-				},
-			},
-		},
-		"AuthList": {
-			[]types.SetCodeAuthorization{},
-			[]types.SetCodeAuthorization{
-				{},
-			},
-		},
-	}
-	transactions := [][]*types.Transaction{
-		generateTransactionsWithFieldsAndType(types.LegacyTxType, defaultFields),
-		flattenSlice([][]*types.Transaction{
-			generateTransactionsWithFieldsAndType(types.LegacyTxType, defaultFields),
-			generateTransactionsWithFieldsAndType(types.AccessListTxType, defaultFields),
-		}),
-		flattenSlice([][]*types.Transaction{
-			generateTransactionsWithFieldsAndType(types.LegacyTxType, defaultFields),
-			generateTransactionsWithFieldsAndType(types.AccessListTxType, defaultFields),
-			generateTransactionsWithFieldsAndType(types.DynamicFeeTxType, defaultFields),
-			generateTransactionsWithFieldsAndType(types.BlobTxType, defaultFields),
-			generateTransactionsWithFieldsAndType(types.SetCodeTxType, defaultFields),
-		}),
-	}
-	// Generate matching receipts
-	includeLogs := false
-	receipts := make([][]*types.Receipt, len(transactions))
-	for i, txs := range transactions {
-		receipts[i] = make([]*types.Receipt, len(txs))
-		for j := range receipts[i] {
-			if includeLogs {
-				receipts[i][j] = &types.Receipt{
-					Logs: []*types.Log{
-						{},
-					},
-				}
-			} else {
-				receipts[i][j] = &types.Receipt{}
-			}
-			includeLogs = !includeLogs // Toggle includeLogs for next iteration
-			receipts[i][j].Bloom = types.CreateBloom(receipts[i][j])
-		}
-
-	}
-
-	// Add to blockFields
-	blockFields["Transactions"] = []any{flattenSlice(transactions)}
-	blockFields["Receipts"] = []any{flattenSlice(receipts)}
-
-	blockFields["Uncles"] = []any{
-		[]*types.Header{},
-		[]*types.Header{
-			{},
-		},
-	}
-	blockFields["Withdrawals"] = []any{
-		[]*types.Withdrawal{},
-		[]*types.Withdrawal{
-			{},
-		},
-	}
-
+	blockFields := getBlockFieldCases()
 	blocks := constructAndGenerateData(
-		generateNamedFields(blockFields),
-		func(fields []NamedField) BlockWithReceipts {
-			header := &types.Header{}
-			var receipts []*types.Receipt
-			var body types.Body
-
-			for _, field := range fields {
-				switch field.Name {
-				case "Header":
-					header = field.Value.(*types.Header)
-				case "Transactions":
-					body.Transactions = field.Value.([]*types.Transaction)
-				case "Receipts":
-					receipts = field.Value.([]*types.Receipt)
-				case "Uncles":
-					body.Uncles = field.Value.([]*types.Header)
-				case "Withdrawals":
-					body.Withdrawals = field.Value.([]*types.Withdrawal)
-				}
-			}
-			// New block computes the transaction hash root and receipts root
-			block := types.NewBlock(header, &body, receipts, trie.NewStackTrie(nil))
-			receiptsContainer := types.Receipts(receipts)
-			// Ignoring blobGasPrice as we don't need them
-			_ = receiptsContainer.DeriveFields(params.MainnetChainConfig, block.Header().Hash(), block.NumberU64(), block.Time(), block.BaseFee(), common.Big0, body.Transactions)
-			return BlockWithReceipts{
-				Block:    types.NewBlock(header, &body, receipts, trie.NewStackTrie(nil)),
-				Receipts: []*types.Receipt(receipts),
-			}
-		},
+		toNamedFields(blockFields),
+		BuildBlock,
 	)
 
-	return seqToSlice(blocks)
+	// remove all blocks with mismatched receipt and transactions count
+	filteredBlocks := []BlockWithReceipts{}
+	for block := range blocks {
+		if len(block.Block.Transactions()) == len(block.Receipts) {
+			filteredBlocks = append(filteredBlocks, block)
+		}
+	}
+
+	// Set the parent hash for each block to the previous block's hash
+	for i := 0; i < len(filteredBlocks); i++ {
+		headerWithParent := filteredBlocks[i].Block.Header()
+		if i == 0 {
+			headerWithParent.ParentHash = common.Hash{}
+		} else {
+			headerWithParent.ParentHash = filteredBlocks[i-1].Block.Hash()
+		}
+
+		filteredBlocks[i] = BlockWithReceipts{
+			Block:    types.NewBlock(headerWithParent, filteredBlocks[i].Block.Body(), filteredBlocks[i].Receipts, trie.NewStackTrie(nil)),
+			Receipts: filteredBlocks[i].Receipts,
+		}
+	}
+
+	return filteredBlocks
 }
 
+// dumpTransactions generates a Rust iterator over transactions with test data.
+// It includes:
+// 1. The transaction
+// 2. The transaction byte marshalling
+// 3. The transaction JSON representation
 func dumpTransactions(data []*types.Transaction) string {
 	rustCode := `
 	// This file is generated by go/test_data_generator/main.go
@@ -263,6 +196,12 @@ func dumpTransactions(data []*types.Transaction) string {
 	return rustCode
 }
 
+// dumpReceipts generates a Rust iterator over receipts with test data.
+// It includes:
+// 1. The receipt
+// 2. The receipt bloom
+// 3. The receipt byte marshalling
+// 4. The receipt JSON representation
 func dumpReceipts(data []*types.Receipt) string {
 	rustCode := `
     // This file is generated by go/test_data_generator/main.go
@@ -303,6 +242,14 @@ func dumpReceipts(data []*types.Receipt) string {
 	return rustCode
 }
 
+// dumpBlocks generates a Rust iterator over blocks with test data.
+// It includes:
+// 1. The block
+// 2. The block hash
+// 3. The transaction root hash
+// 4. The receipts root hash
+// 5. The RLP encoding of the block
+// 6. The JSON representation of the block
 func dumpBlocks(data []BlockWithReceipts) string {
 	rustCode := `
 	// This file is generated by go/test_data_generator/main.go

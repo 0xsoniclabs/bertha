@@ -36,6 +36,7 @@ var logFieldCases = map[string][]any{
 	},
 }
 
+// toRustReceipt converts a Go transaction receipt to the Bertha TransactionReceipt type in Rust.
 func toRustReceipt(receipt *types.Receipt) string {
 	return fmt.Sprintf(`TransactionReceipt {
 		transaction_type: TransactionType::try_from(%d).unwrap(),
@@ -51,6 +52,7 @@ func toRustReceipt(receipt *types.Receipt) string {
 	)
 }
 
+// toRustBloom converts a Go bloom filter to the Bertha Bloom type in Rust.
 func toRustBloom(r *types.Receipt) string {
 	return toRustByteArray(r.Bloom.Bytes())
 }
