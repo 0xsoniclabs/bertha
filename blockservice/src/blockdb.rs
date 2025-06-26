@@ -17,6 +17,188 @@ impl From<rocksdb::Error> for Error {
 /// Blocks are encoded as protobuf messages before being stored in the database.
 /// As database operations may fail for various reasons, all methods return a [Result].
 pub trait BlockDb {
+    /// Key for storing the IDs of all chains in the database.
+    /// The ranges for each chain-ID are stored using the chain-ID as key.
+    /// Chain ID 0 is invalid.
+    const CHAIN_IDS_KEY: u64 = 0;
+
+    /// Retrieves the IDs of all chains stored in the database.
+    fn get_chain_ids(&self) -> Result<Vec<u64>, Error> {
+        Ok(self
+            .get_metadata_raw(Self::CHAIN_IDS_KEY)?
+            .unwrap_or_default())
+    }
+
+    /// Stores the IDs of all chains in the database.
+    fn put_chain_ids(&mut self, chain_ids: &[u64]) -> Result<(), Error> {
+        self.put_metadata_raw(Self::CHAIN_IDS_KEY, chain_ids)
+    }
+
+    /// Retrieves the stored ranges of blocks for the specified chain-ID.
+    /// The start and end of each range are inclusive.
+    fn get_ranges_of_chain_id(&self, chain_id: u64) -> Result<Vec<(u64, u64)>, Error> {
+        let data = self.get_metadata_raw(chain_id)?.unwrap_or_default();
+        if data.len() % 2 != 0 {
+            return Err(Error::StorageLayer(format!(
+                "invalid ranges for chain ID {}: data length {} not a multiple of 2",
+                chain_id,
+                data.len()
+            )));
+        }
+        Ok(data
+            .chunks_exact(2)
+            // slices are guaranteed to be of length 2 so the index access will not fail
+            .map(|chunk| (chunk[0], chunk[1]))
+            .collect())
+    }
+
+    /// Stores the ranges of blocks for the specified chain-ID.
+    /// The start and end of each range are inclusive.
+    fn put_ranges_of_chain_id(
+        &mut self,
+        chain_id: u64,
+        ranges: &[(u64, u64)],
+    ) -> Result<(), Error> {
+        let data: Vec<u64> = ranges
+            .iter()
+            .flat_map(|&(start, end)| [start, end])
+            .collect();
+        self.put_metadata_raw(chain_id, &data)
+    }
+
+    /// Adds a chain ID to the list of chain IDs stored in the database.
+    fn add_chain_id_to_chain_ids(&mut self, chain_id: u64) -> Result<(), Error> {
+        // assumption:
+        // - ids are sorted
+        // - ids are not duplicated
+        let mut chain_ids = self.get_chain_ids()?;
+        match chain_ids.binary_search(&chain_id) {
+            // chain_id already exists, no need to add it
+            Ok(_) => Ok(()),
+            Err(idx) => {
+                // chain_id does not exist, insert it at the correct position
+                chain_ids.insert(idx, chain_id);
+                self.put_chain_ids(&chain_ids)
+            }
+        }
+    }
+
+    /// Removes a chain ID from the list of chain IDs stored in the database.
+    fn remove_chain_id_from_chain_ids(&mut self, chain_id: u64) -> Result<(), Error> {
+        // assumption:
+        // - ids are sorted
+        // - ids are not duplicated
+        let mut chain_ids = self.get_chain_ids()?;
+        if let Ok(idx) = chain_ids.binary_search(&chain_id) {
+            // chain_id exists, remove it
+            chain_ids.remove(idx);
+            self.put_chain_ids(&chain_ids)
+        } else {
+            // chain_id does not exist, no need to remove it
+            Ok(())
+        }
+    }
+
+    /// Adds a key to the ranges of blocks stored in the database for the specified chain-ID.
+    /// If this is the first entry for the chain ID, the chain ID is added to the list of chain IDs.
+    fn add_key_to_ranges(&mut self, chain_id: u64, key: u64) -> Result<(), Error> {
+        // assumption:
+        // - ranges are valid (start <= end)
+        // - ranges are non-overlapping
+        // - ranges are sorted
+
+        self.add_chain_id_to_chain_ids(chain_id)?;
+
+        let mut ranges = self.get_ranges_of_chain_id(chain_id)?;
+
+        // iterate over index to allow insertion
+        for i in 0..ranges.len() {
+            let (start, end) = ranges[i];
+            if key + 1 < start {
+                ranges.insert(i, (key, key));
+                return self.put_ranges_of_chain_id(chain_id, &ranges);
+            } else if key + 1 == start {
+                ranges[i].0 = key; // extend the start of the range to include the key
+                // no need to check for merge with previous range, because this would have been
+                // handles by extending the end of the previous range
+                return self.put_ranges_of_chain_id(chain_id, &ranges);
+            } else if start <= key && key <= end {
+                // key is already in the range, no need to add it
+                return Ok(());
+            } else if key == end + 1 {
+                ranges[i].1 = key; // extend the end of the range to include the key
+                if i + 1 < ranges.len() && ranges[i + 1].0 == key + 1 {
+                    // merge with next range
+                    ranges[i].1 = ranges[i + 1].1; // extend the end of the current range to include the next range
+                    ranges.remove(i + 1); // remove the next range
+                }
+                return self.put_ranges_of_chain_id(chain_id, &ranges);
+            }
+        }
+        // key is greater than all existing ranges, add it at the end
+        ranges.push((key, key));
+        self.put_ranges_of_chain_id(chain_id, &ranges)
+    }
+
+    /// Removes a range of blocks from the ranges of blocks stored in the database for the specified
+    /// chain-ID. If this is the last entry for the chain ID, the chain ID is removed from the list
+    /// of chain IDs.
+    fn remove_range_from_ranges(
+        &mut self,
+        chain_id: u64,
+        (del_start, del_end): (u64, u64),
+    ) -> Result<(), Error> {
+        // assumption:
+        // - ranges are valid (start <= end)
+        // - ranges are non-overlapping
+        // - ranges are sorted
+
+        self.remove_chain_id_from_chain_ids(chain_id)?;
+
+        let mut ranges = self.get_ranges_of_chain_id(chain_id)?;
+        if ranges.is_empty() {
+            return Ok(());
+        }
+
+        let mut i = 0;
+        while i < ranges.len() {
+            let (start, end) = ranges[i];
+            // The deletion range is before all following ranges
+            if del_end < start {
+                break;
+            }
+            // No overlap
+            else if end < del_start || del_end < start {
+                i += 1;
+                continue;
+            }
+            // Full overlap: remove the range
+            else if del_start <= start && end <= del_end {
+                ranges.remove(i);
+                continue;
+            }
+            // Overlap at end of existing range: trim right
+            else if start < del_start && end <= del_end {
+                ranges[i].1 = del_start - 1;
+                i += 1;
+                continue;
+            }
+            // Overlap at start of existing range: trim left
+            else if del_start <= start && del_end < end {
+                ranges[i].0 = del_end + 1;
+                break;
+            }
+            // Middle overlap: split into two ranges
+            else if start < del_start && del_end < end {
+                let right = (del_end + 1, end);
+                ranges[i].1 = del_start - 1;
+                ranges.insert(i + 1, right);
+                break;
+            }
+        }
+        self.put_ranges_of_chain_id(chain_id, &ranges)
+    }
+
     /// Retrieves a block for the specified chain-ID and block number.
     /// Returns [None] if the block does not exist.
     fn get(&self, chain_id: u64, block_number: u64) -> Result<Option<Block>, Error> {
@@ -78,14 +260,20 @@ pub trait BlockDb {
         })
     }
 
-    /// Deletes all blocks for the specified chain-ID in the range from `from_block`
-    /// (inclusive) to `to_block` (exclusive).
+    /// Deletes all blocks for the specified chain-ID in the range from `from_block` (defaults to 0;
+    /// inclusive) to `to_block` (defaults to u64::MAX; inclusive).
     fn delete_range(
         &mut self,
         chain_id: u64,
         from_block: Option<u64>,
         to_block: Option<u64>,
     ) -> Result<(), Error>;
+
+    /// Retrieves the raw metadata for the specified key.
+    fn get_metadata_raw(&self, key: u64) -> Result<Option<Vec<u64>>, Error>;
+
+    /// Stores the raw metadata for the specified key.
+    fn put_metadata_raw(&mut self, key: u64, data: &[u64]) -> Result<(), Error>;
 
     /// Retrieves the raw protobuf-encoded data for the specified chain-ID and block number.
     /// Returns [None] if the block does not exist.
@@ -197,29 +385,36 @@ impl RocksBlockDb {
                 &Self::make_key(chain_id, from),
                 direction,
             ))
-            .map(|result| {
-                result.map_err(Error::from).and_then(|(key, value)| {
-                    if key.len() != 16 {
-                        return Err(Error::StorageLayer("unexpected key length".to_string()));
-                    }
-                    let chain_id = u64::from_be_bytes(key[0..8].try_into().unwrap());
-                    let block_number = u64::from_be_bytes(key[8..16].try_into().unwrap());
-                    Ok((chain_id, block_number, value))
-                })
-            })
-            // if an error occurs, we return the error but stop afterwards
-            .take_while({
-                let mut error_occurred = false;
+            .map_while({
+                let mut stop = false;
                 move |result| {
-                    if error_occurred {
-                        return false;
+                    if stop {
+                        return None;
                     }
-                    if let Ok((cid, _, _)) = result {
-                        *cid == chain_id
-                    } else {
-                        error_occurred = true;
-                        true
+                    let (key, value) = match result {
+                        Ok((key, value)) => (key, value),
+                        Err(e) => return Some(Err(Error::StorageLayer(e.to_string()))),
+                    };
+                    if key.len() == 8 {
+                        // we got metadata, so there is no more data for this chain id
+                        stop = true;
+                        return None;
                     }
+                    if key.len() != 16 {
+                        // we got an error: return the error and stop the iteration
+                        stop = true;
+                        return Some(Err(Error::StorageLayer(format!(
+                            "unexpected key length {}",
+                            key.len()
+                        ))));
+                    }
+                    let cid = u64::from_be_bytes(key[0..8].try_into().unwrap());
+                    if cid != chain_id {
+                        stop = true;
+                        return None;
+                    }
+                    let block_number = u64::from_be_bytes(key[8..16].try_into().unwrap());
+                    Some(Ok((cid, block_number, value)))
                 }
             })
             .map(|result| result.map(|(_, block_number, value)| (block_number, value)))
@@ -227,6 +422,37 @@ impl RocksBlockDb {
 }
 
 impl BlockDb for RocksBlockDb {
+    fn get_metadata_raw(&self, key: u64) -> Result<Option<Vec<u64>>, Error> {
+        self.db
+            .get(key.to_be_bytes())
+            .map_err(|e| Error::StorageLayer(e.to_string()))?
+            .map(|value| {
+                if value.len() % 8 != 0 {
+                    return Err(Error::StorageLayer(format!(
+                        "invalid metadata length: data length {} not a multiple of 8 bytes",
+                        value.len()
+                    )));
+                }
+                Ok(value
+                    .chunks_exact(8)
+                    // the length is a multiple of 8, so we can safely unwrap
+                    .map(|chunk| u64::from_be_bytes(chunk.try_into().unwrap()))
+                    .collect())
+            })
+            .transpose()
+    }
+
+    fn put_metadata_raw(&mut self, key: u64, data: &[u64]) -> Result<(), Error> {
+        self.db
+            .put(
+                key.to_be_bytes(),
+                data.iter()
+                    .flat_map(|v| v.to_be_bytes())
+                    .collect::<Vec<u8>>(),
+            )
+            .map_err(|e| Error::StorageLayer(e.to_string()))
+    }
+
     fn get_raw(&self, chain_id: u64, block_number: u64) -> Result<Option<Vec<u8>>, Error> {
         self.db
             .get(Self::make_key(chain_id, block_number))
@@ -236,7 +462,8 @@ impl BlockDb for RocksBlockDb {
     fn put_raw(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
         self.db
             .put(Self::make_key(chain_id, block_number), data)
-            .map_err(|e| Error::StorageLayer(e.to_string()))
+            .map_err(|e| Error::StorageLayer(e.to_string()))?;
+        self.add_key_to_ranges(chain_id, block_number)
     }
 
     fn iterate_raw(
@@ -261,14 +488,16 @@ impl BlockDb for RocksBlockDb {
         from_block: Option<u64>,
         to_block: Option<u64>,
     ) -> Result<(), Error> {
-        let from = Self::make_key(chain_id, from_block.unwrap_or(0));
-        let to = Self::make_key(chain_id, to_block.unwrap_or(u64::MAX));
+        let from_block = from_block.unwrap_or(0);
+        let to_block = to_block.unwrap_or(u64::MAX);
+        let from = Self::make_key(chain_id, from_block);
+        let to = Self::make_key(chain_id, to_block);
 
         let mut batch = WriteBatchWithTransaction::<false>::default();
         batch.delete_range(from, to);
         self.db.write(batch)?;
 
-        Ok(())
+        self.remove_range_from_ranges(chain_id, (from_block, to_block))
     }
 }
 
@@ -288,6 +517,32 @@ mod tests {
     }
 
     impl BlockDb for StubDb {
+        fn get_metadata_raw(&self, key: u64) -> Result<Option<Vec<u64>>, Error> {
+            let Some(value) = self.0.get(key.to_be_bytes().as_slice()) else {
+                return Ok(None);
+            };
+
+            if value.len() % 8 != 0 {
+                return Err(Error::StorageLayer(format!(
+                    "invalid metadata length: data length {} not a multiple of 8 bytes",
+                    value.len()
+                )));
+            }
+            Ok(Some(
+                value
+                    .chunks_exact(8)
+                    .map(|chunk| u64::from_be_bytes(chunk.try_into().unwrap()))
+                    .collect(),
+            ))
+        }
+
+        fn put_metadata_raw(&mut self, key: u64, data: &[u64]) -> Result<(), Error> {
+            let key = key.to_be_bytes().to_vec();
+            let value = data.iter().flat_map(|v| v.to_be_bytes()).collect();
+            self.0.insert(key, value);
+            Ok(())
+        }
+
         fn get_raw(&self, chain_id: u64, block_number: u64) -> Result<Option<Vec<u8>>, Error> {
             let key = make_data_key(chain_id, block_number);
             Ok(self.0.get(&key).cloned())
@@ -350,6 +605,204 @@ mod tests {
             .into_iter()
             .flat_map(u64::to_be_bytes)
             .collect()
+    }
+
+    fn make_meta_value(value: impl IntoIterator<Item = u64>) -> Vec<u8> {
+        value.into_iter().flat_map(u64::to_be_bytes).collect()
+    }
+
+    fn make_range_value(ranges: impl IntoIterator<Item = (u64, u64)>) -> Vec<u8> {
+        make_meta_value(ranges.into_iter().flat_map(|(start, end)| [start, end]))
+    }
+
+    #[test]
+    fn blockdb_get_chain_ids_queries_key_zero() {
+        let mut db = StubDb::new();
+        db.0.insert(0u64.to_be_bytes().to_vec(), make_meta_value([1u64, 2u64]));
+        assert_eq!(db.get_chain_ids(), Ok(vec![1, 2]),);
+    }
+
+    #[test]
+    fn blockdb_get_chain_ids_returns_empty_vec_if_no_chain_ids_stored() {
+        let db = StubDb::new();
+        assert_eq!(db.get_chain_ids(), Ok(Vec::new()));
+    }
+
+    #[test]
+    fn blockdb_get_chain_ids_returns_error_if_data_length_is_invalid() {
+        let mut db = StubDb::new();
+        db.0.insert(
+            0u64.to_be_bytes().to_vec(),
+            vec![0], // not a multiple of 8 bytes
+        );
+        assert_eq!(
+            db.get_chain_ids(),
+            Err(Error::StorageLayer(
+                "invalid metadata length: data length 1 not a multiple of 8 bytes".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn blockdb_put_chain_ids_writes_chain_ids_to_key_zero() {
+        let mut db = StubDb::new();
+        let ids = [0, 1];
+        db.put_chain_ids(&ids).unwrap();
+        assert_eq!(
+            db.0.get(0u64.to_be_bytes().as_slice()),
+            Some(&make_meta_value(ids))
+        );
+    }
+
+    #[test]
+    fn blockdb_get_ranges_of_chain_id_converts_tuples() {
+        let ranges = [(0, 1), (2, 3), (4, 5)];
+        let mut db = StubDb::new();
+        db.0.insert(1u64.to_be_bytes().to_vec(), make_range_value(ranges));
+        assert_eq!(db.get_ranges_of_chain_id(1).unwrap(), ranges);
+    }
+
+    #[test]
+    fn blockdb_get_ranges_of_chain_id_returns_error_if_data_length_is_invalid() {
+        let mut db = StubDb::new();
+        db.0.insert(
+            1u64.to_be_bytes().to_vec(),
+            // not a multiple of 2 8 bytes chunks
+            [0].into_iter().flat_map(u64::to_be_bytes).collect(),
+        );
+        assert_eq!(
+            db.get_ranges_of_chain_id(1),
+            Err(Error::StorageLayer(
+                "invalid ranges for chain ID 1: data length 1 not a multiple of 2".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn blockdb_put_ranges_of_chain_id_converts_tuples() {
+        let chain_id: u64 = 1;
+        let ranges = [(0, 1), (2, 3), (4, 5)];
+        let mut db = StubDb::new();
+        db.put_ranges_of_chain_id(chain_id, &ranges).unwrap();
+        assert_eq!(
+            db.0.get(chain_id.to_be_bytes().as_slice()),
+            Some(&make_range_value(ranges))
+        );
+    }
+
+    #[test]
+    fn blockdb_add_chain_id_to_chain_ids_adds_chain_id_if_not_exists_and_keep_list_sorted() {
+        let mut db = StubDb::new();
+        db.0.insert(0u64.to_be_bytes().to_vec(), make_meta_value([1u64, 3u64]));
+
+        // add non existing key
+        let chain_id: u64 = 2;
+        db.add_chain_id_to_chain_ids(chain_id).unwrap();
+        assert_eq!(
+            db.0.get(0u64.to_be_bytes().as_slice()),
+            Some(&make_meta_value([1, 2, 3]))
+        );
+
+        // add existing key
+        let chain_id: u64 = 1;
+        db.add_chain_id_to_chain_ids(chain_id).unwrap();
+        assert_eq!(
+            db.0.get(0u64.to_be_bytes().as_slice()),
+            Some(&make_meta_value([1, 2, 3]))
+        );
+    }
+
+    #[test]
+    fn blockdb_remove_chain_id_from_chain_ids_removes_chain_id_if_exists() {
+        let mut db = StubDb::new();
+        db.0.insert(
+            0u64.to_be_bytes().to_vec(),
+            make_meta_value([1u64, 2u64, 3u64]),
+        );
+
+        // remove non-existing key
+        db.remove_chain_id_from_chain_ids(4).unwrap();
+        assert_eq!(
+            db.0.get(0u64.to_be_bytes().as_slice()),
+            Some(&make_meta_value([1, 2, 3]))
+        );
+
+        // remove existing key
+        db.remove_chain_id_from_chain_ids(2).unwrap();
+        assert_eq!(
+            db.0.get(0u64.to_be_bytes().as_slice()),
+            Some(&make_meta_value([1, 3]))
+        );
+    }
+
+    #[test]
+    fn blockdb_add_key_to_ranges_adds_key_if_not_exists_and_keeps_ranges_disjunct_and_sorted() {
+        let chain_id: u64 = 1;
+        let init_ranges = [(3, 4), (9, 10), (12, 13)];
+        let mut db = StubDb::new();
+
+        let cases = [
+            // add non-existing key before existing ranges
+            (0, vec![(0, 0), (3, 4), (9, 10), (12, 13)]),
+            // add non-existing key between existing ranges
+            (6, vec![(3, 4), (6, 6), (9, 10), (12, 13)]),
+            // add non-existing key after existing ranges
+            (15, vec![(3, 4), (9, 10), (12, 13), (15, 15)]),
+            // add non-existing key adjacent to start of existing range
+            (2, vec![(2, 4), (9, 10), (12, 13)]),
+            // add non-existing key adjacent to end of existing range
+            (5, vec![(3, 5), (9, 10), (12, 13)]),
+            // add non-existing key adjacent to end of one range and start of another
+            (11, vec![(3, 4), (9, 13)]),
+            // add existing key
+            (3, vec![(3, 4), (9, 10), (12, 13)]),
+        ];
+        for (new_key, expected_ranges) in cases {
+            db.0.insert(
+                chain_id.to_be_bytes().to_vec(),
+                make_range_value(init_ranges),
+            ); // reset value
+            db.add_key_to_ranges(chain_id, new_key).unwrap();
+            assert_eq!(
+                db.0.get(chain_id.to_be_bytes().as_slice()),
+                Some(&make_range_value(expected_ranges))
+            );
+        }
+    }
+
+    #[test]
+    fn blockdb_remove_range_from_ranges_removes_range_if_exists() {
+        let chain_id: u64 = 1;
+        let init_ranges = [(3, 4), (9, 10), (12, 13)];
+        let mut db = StubDb::new();
+
+        let cases = [
+            // remove start of existing range
+            ((3, 3), vec![(4, 4), (9, 10), (12, 13)]),
+            // remove end of existing range
+            ((4, 4), vec![(3, 3), (9, 10), (12, 13)]),
+            // remove full existing range
+            ((3, 4), vec![(9, 10), (12, 13)]),
+            // remove range that spans parts of multiple existing ranges
+            ((4, 9), vec![(3, 3), (10, 10), (12, 13)]),
+            // remove range that spans multiple existing ranges
+            ((3, 13), vec![]),
+            // remove non-existing range before first existing ranges
+            ((0, 1), vec![(3, 4), (9, 10), (12, 13)]),
+            // remove non-existing range after first existing range
+            ((6, 6), vec![(3, 4), (9, 10), (12, 13)]),
+        ];
+        for (del_range, expected_ranges) in cases {
+            db.0.insert(
+                chain_id.to_be_bytes().to_vec(),
+                make_range_value(init_ranges),
+            ); // reset value
+            db.remove_range_from_ranges(chain_id, del_range).unwrap();
+            assert_eq!(
+                db.0.get(chain_id.to_be_bytes().as_slice()),
+                Some(&make_range_value(expected_ranges))
+            );
+        }
     }
 
     #[test]
@@ -584,6 +1037,108 @@ mod tests {
     }
 
     #[test]
+    fn rocksblockdb_get_metadata_raw_returns_raw_metadata() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
+
+        let key = 1u64;
+        let data = [1u64; 2];
+        db.db
+            .put(
+                key.to_be_bytes(),
+                data.into_iter()
+                    .flat_map(u64::to_be_bytes)
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap();
+
+        let result = db.get_metadata_raw(key).unwrap();
+        assert_eq!(result, Some(data.to_vec()));
+
+        // query non existing key
+        let key = 2u64;
+
+        let result = db.get_metadata_raw(key).unwrap();
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn rocksblockdb_get_metadata_raw_returns_error_if_value_length_is_invalid() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let key = 1u64;
+        let data = [1u8]; // not a multiple of 8 bytes
+        db.db.put(key.to_be_bytes(), data).unwrap();
+
+        assert_eq!(
+            db.get_metadata_raw(key),
+            Err(Error::StorageLayer(
+                "invalid metadata length: data length 1 not a multiple of 8 bytes".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn rocksblockdb_put_metadata_raw_write_raw_metadata() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let key = 1u64;
+        let data = [1u64; 2];
+
+        db.put_metadata_raw(key, &data).unwrap();
+
+        let result = db.db.get(key.to_be_bytes()).unwrap();
+
+        assert_eq!(
+            result,
+            Some(
+                data.into_iter()
+                    .flat_map(u64::to_be_bytes)
+                    .collect::<Vec<_>>()
+            )
+        );
+    }
+
+    #[test]
+    fn blockrocksdb_put_raw_adds_range_and_chain_id() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+
+        let chain_id = 146;
+        let block_number = 123;
+        db.put_raw(chain_id, block_number, b"block").unwrap();
+
+        assert_eq!(
+            db.db.get(0u64.to_be_bytes().as_slice()),
+            Ok(Some(make_meta_value([chain_id])))
+        );
+        assert_eq!(
+            db.db.get(chain_id.to_be_bytes().as_slice()),
+            Ok(Some(make_range_value([(block_number, block_number)])))
+        );
+    }
+
+    #[test]
+    fn blockrocksdb_delete_range_removes_range_and_chain_id() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+
+        let chain_id = 146;
+        let block_number = 123;
+        db.put_chain_ids(&[chain_id]).unwrap();
+        db.put_ranges_of_chain_id(chain_id, &[(block_number, block_number)])
+            .unwrap();
+        db.delete_range(chain_id, Some(block_number), Some(block_number))
+            .unwrap();
+
+        assert_eq!(db.db.get(0u64.to_be_bytes().as_slice()), Ok(Some(vec![])));
+        assert_eq!(
+            db.db.get(chain_id.to_be_bytes().as_slice()),
+            Ok(Some(vec![]))
+        );
+    }
+
+    #[test]
     fn rocksblockdb_put_raw_writes_raw_data() {
         let tmpdir = tempfile::tempdir().unwrap();
         let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
@@ -635,7 +1190,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
-        db.put_raw(0, 0, b"block0-0").unwrap();
+        db.put_raw(1, 0, b"block1-0").unwrap();
         db.put_raw(7, 2, b"block7-2").unwrap();
         db.put_raw(7, 3, b"block7-3").unwrap();
         db.put_raw(7, 6, b"block7-6").unwrap(); // insert out of order
@@ -670,19 +1225,23 @@ mod tests {
 
     #[test]
     fn rocksblockdb_iterate_raw_returns_error_if_error_occurs_and_stops() {
+        let chain_id = 1;
+
         let tmpdir = tempfile::tempdir().unwrap();
         let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
-        db.put_raw(0, 0, b"block0-0").unwrap();
-        db.db.put([0; 17], b"block0-1").unwrap();
-        db.put_raw(0, 2, b"block0-2").unwrap();
+        db.put_raw(chain_id, 0, b"block1-0").unwrap();
+        let mut invalid_key = [0; 17];
+        invalid_key[0..8].copy_from_slice(&chain_id.to_be_bytes());
+        db.db.put(invalid_key, b"block0-1").unwrap();
+        db.put_raw(chain_id, 2, b"block1-2").unwrap();
 
-        let blocks: Vec<_> = db.iterate_raw(0, 0).collect();
+        let blocks: Vec<_> = db.iterate_raw(chain_id, 0).collect();
         assert_eq!(
             blocks,
             vec![
-                Ok((0u64, Box::from(b"block0-0".as_slice()))),
-                Err(Error::StorageLayer("unexpected key length".to_string()))
+                Ok((0u64, Box::from(b"block1-0".as_slice()))),
+                Err(Error::StorageLayer("unexpected key length 17".to_string()))
             ],
         );
     }
@@ -711,7 +1270,7 @@ mod tests {
     }
 
     #[test]
-    fn rocksblockdb_delete_succeeds_if_no_blocks_in_range() {
+    fn rocksblockdb_delete_range_succeeds_if_no_blocks_in_range() {
         let tmpdir = tempfile::tempdir().unwrap();
         let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
