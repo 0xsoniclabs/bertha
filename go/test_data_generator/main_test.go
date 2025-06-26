@@ -17,25 +17,25 @@ func TestGenerateTransactionsGeneratesAllValueCases(t *testing.T) {
 
 	for fieldName, values := range transactionFieldCases {
 		for _, value := range values {
-			legacy_tx := types.LegacyTx{}
-			if SetValueInStruct(&legacy_tx, fieldName, value) {
-				expectedCombination = append(expectedCombination, signTransaction(big.NewInt(1), types.TxData(&legacy_tx), getTransactionSignatureKey()))
+			legacyTx := types.LegacyTx{}
+			if SetValueInStruct(&legacyTx, fieldName, value) {
+				expectedCombination = append(expectedCombination, signTransaction(big.NewInt(1), types.TxData(&legacyTx), getTransactionSignatureKey()))
 			}
-			access_list_tx := types.AccessListTx{}
-			if SetValueInStruct(&access_list_tx, fieldName, value) {
-				expectedCombination = append(expectedCombination, signTransaction(big.NewInt(1), types.TxData(&access_list_tx), getTransactionSignatureKey()))
+			accessListTx := types.AccessListTx{}
+			if SetValueInStruct(&accessListTx, fieldName, value) {
+				expectedCombination = append(expectedCombination, signTransaction(big.NewInt(1), types.TxData(&accessListTx), getTransactionSignatureKey()))
 			}
-			dynamic_fee_tx := types.DynamicFeeTx{}
-			if SetValueInStruct(&dynamic_fee_tx, fieldName, value) {
-				expectedCombination = append(expectedCombination, signTransaction(big.NewInt(1), types.TxData(&dynamic_fee_tx), getTransactionSignatureKey()))
+			dynamicFeeTx := types.DynamicFeeTx{}
+			if SetValueInStruct(&dynamicFeeTx, fieldName, value) {
+				expectedCombination = append(expectedCombination, signTransaction(big.NewInt(1), types.TxData(&dynamicFeeTx), getTransactionSignatureKey()))
 			}
-			blob_tx := types.BlobTx{}
-			if SetValueInStruct(&blob_tx, fieldName, value) {
-				expectedCombination = append(expectedCombination, signTransaction(big.NewInt(1), types.TxData(&blob_tx), getTransactionSignatureKey()))
+			blobTx := types.BlobTx{}
+			if SetValueInStruct(&blobTx, fieldName, value) {
+				expectedCombination = append(expectedCombination, signTransaction(big.NewInt(1), types.TxData(&blobTx), getTransactionSignatureKey()))
 			}
-			set_code_tx := types.SetCodeTx{}
-			if SetValueInStruct(&set_code_tx, fieldName, value) {
-				expectedCombination = append(expectedCombination, signTransaction(big.NewInt(1), types.TxData(&set_code_tx), getTransactionSignatureKey()))
+			setCodeTx := types.SetCodeTx{}
+			if SetValueInStruct(&setCodeTx, fieldName, value) {
+				expectedCombination = append(expectedCombination, signTransaction(big.NewInt(1), types.TxData(&setCodeTx), getTransactionSignatureKey()))
 			}
 		}
 	}
@@ -58,7 +58,7 @@ func TestGenerateTransactionsGeneratesAllValueCases(t *testing.T) {
 
 func TestGenerateTransactionReceiptsGenerateAllValueCase(t *testing.T) {
 	receipts := generateTransactionsReceipts()
-	expectedCombination := []*types.Receipt{}
+	expectedReceiptsCombination := []*types.Receipt{}
 
 	for fieldName, values := range transactionReceiptFieldCases {
 		for _, value := range values {
@@ -67,26 +67,22 @@ func TestGenerateTransactionReceiptsGenerateAllValueCase(t *testing.T) {
 			}
 			if SetValueInStruct(&receipt, fieldName, value) {
 				receipt.Bloom = types.CreateBloom(&receipt)
-				expectedCombination = append(expectedCombination, &receipt)
+				expectedReceiptsCombination = append(expectedReceiptsCombination, &receipt)
 			}
 		}
 	}
 
-	for _, receiptCombination := range expectedCombination {
+	for _, expectedReceipts := range expectedReceiptsCombination {
+		// Use encoding as receipts are not comparable
 		found := false
 		for _, receipt := range receipts {
-			// Use encoding as receipts are not comparable
-			var receiptEncoding bytes.Buffer
-			receipt.EncodeRLP(&receiptEncoding)
-			var expectedEncoding bytes.Buffer
-			receiptCombination.EncodeRLP(&expectedEncoding)
-			if bytes.Equal(receiptEncoding.Bytes(), expectedEncoding.Bytes()) {
+			if haveSameEncoding(receipt, expectedReceipts) {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("Expected receipt %v not found in generated receipts", receiptCombination)
+			t.Errorf("Expected receipt %v not found in generated receipts", expectedReceipts)
 		}
 	}
 
@@ -102,27 +98,27 @@ func TestGenerateTransactionReceiptsGenerateAllValueCase(t *testing.T) {
 
 func TestGenerateBlockHeadersGenerateAllValueCase(t *testing.T) {
 	headers := generateBlockHeaders()
-	expectedCombination := []*types.Header{}
+	expectedBlockHeaderCombination := []*types.Header{}
 
 	for fieldName, values := range blockHeaderFieldCases {
 		for _, value := range values {
 			header := types.Header{}
 			if SetValueInStruct(&header, fieldName, value) {
-				expectedCombination = append(expectedCombination, &header)
+				expectedBlockHeaderCombination = append(expectedBlockHeaderCombination, &header)
 			}
 		}
 	}
 
-	for _, headerCombination := range expectedCombination {
+	for _, expectedHeader := range expectedBlockHeaderCombination {
 		found := false
 		for _, header := range headers {
-			if header.Hash() == headerCombination.Hash() {
+			if header.Hash() == expectedHeader.Hash() {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("Expected header %v not found in generated headers", headerCombination)
+			t.Errorf("Expected header %v not found in generated headers", expectedHeader)
 		}
 	}
 
@@ -138,31 +134,27 @@ func TestGenerateBlockHeadersGenerateAllValueCase(t *testing.T) {
 
 func TestGenerateLogsGeneratesAllValueCase(t *testing.T) {
 	logs := generateLogs()
-	expectedCombination := []*types.Log{}
+	expectedLogCombination := []*types.Log{}
 
 	for fieldName, values := range logFieldCases {
 		for _, value := range values {
 			log := types.Log{}
 			if SetValueInStruct(&log, fieldName, value) {
-				expectedCombination = append(expectedCombination, &log)
+				expectedLogCombination = append(expectedLogCombination, &log)
 			}
 		}
 	}
 
-	for _, logCombination := range expectedCombination {
+	for _, expectedLog := range expectedLogCombination {
 		found := false
 		for _, log := range logs {
-			var logEncoding bytes.Buffer
-			log.EncodeRLP(&logEncoding)
-			var expectedEncoding bytes.Buffer
-			logCombination.EncodeRLP(&expectedEncoding)
-			if bytes.Equal(logEncoding.Bytes(), expectedEncoding.Bytes()) {
+			if haveSameEncoding(log, expectedLog) {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("Expected log %v not found in generated logs", logCombination)
+			t.Errorf("Expected log %v not found in generated logs", expectedLog)
 		}
 	}
 
@@ -185,7 +177,7 @@ func TestGenerateBlocksGenerateAllValueCase(t *testing.T) {
 		blocks[i].Block = types.NewBlock(headerWithoutParentHash, block.Block.Body(), block.Receipts, trie.NewStackTrie(nil))
 	}
 
-	expectedCombination := []BlockWithReceipts{}
+	expectedBlockWithReceiptsCombinations := []BlockWithReceipts{}
 	blockFields := toNamedFields(getBlockFieldCases())
 	// Generate a block with every field set to one of its possible values
 	end := false
@@ -202,34 +194,28 @@ func TestGenerateBlocksGenerateAllValueCase(t *testing.T) {
 			continue
 		}
 		idx++
-		expectedCombination = append(expectedCombination, BuildBlock(fields))
+		expectedBlockWithReceiptsCombinations = append(expectedBlockWithReceiptsCombinations, BuildBlock(fields))
 	}
 
 	// remove all blocks with mismatched receipt and transactions count
 	filteredBlocks := []BlockWithReceipts{}
-	for _, block := range expectedCombination {
+	for _, block := range expectedBlockWithReceiptsCombinations {
 		if len(block.Block.Transactions()) == len(block.Receipts) {
 			filteredBlocks = append(filteredBlocks, block)
 		}
 	}
+	expectedBlockWithReceiptsCombinations = filteredBlocks
 
-	for _, blockCombination := range filteredBlocks {
+	for _, expectedBlockWithReceipt := range expectedBlockWithReceiptsCombinations {
 		found := false
-		var expectedEncoding bytes.Buffer
-		blockCombination.Block.EncodeRLP(&expectedEncoding)
 		for _, block := range blocks {
-			var blockEncoding bytes.Buffer
-			block.Block.EncodeRLP(&blockEncoding)
-			equality := bytes.Equal(blockEncoding.Bytes(), expectedEncoding.Bytes())
-			// equality := blockCombination.Block.Hash() == block.Block.Hash()
-			same_encoding := checkSameEncoding(block.Receipts, blockCombination.Receipts)
-			if equality && same_encoding {
+			if haveSameEncoding(block.Block, expectedBlockWithReceipt.Block) && sliceHaveSameEncoding(block.Receipts, expectedBlockWithReceipt.Receipts) {
 				found = true
 				break
 			}
 		}
 		if !found {
-			t.Errorf("Expected block %v not found in generated blocks", blockCombination)
+			t.Errorf("Expected block %v not found in generated blocks", expectedBlockWithReceipt)
 		}
 	}
 
@@ -265,16 +251,26 @@ type Encodable interface {
 	EncodeRLP(w io.Writer) error
 }
 
-func checkSameEncoding[T Encodable](a []T, b []T) bool {
+func haveSameEncoding[T Encodable](a T, b T) bool {
+	var aEncoding bytes.Buffer
+	err := a.EncodeRLP(&aEncoding)
+	if err != nil {
+		panic(err)
+	}
+	var bEncoding bytes.Buffer
+	err = b.EncodeRLP(&bEncoding)
+	if err != nil {
+		panic(err)
+	}
+	return bytes.Equal(aEncoding.Bytes(), bEncoding.Bytes())
+}
+
+func sliceHaveSameEncoding[T Encodable](a []T, b []T) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
-		var aEncoding bytes.Buffer
-		a[i].EncodeRLP(&aEncoding)
-		var bEncoding bytes.Buffer
-		b[i].EncodeRLP(&bEncoding)
-		if !bytes.Equal(aEncoding.Bytes(), bEncoding.Bytes()) {
+		if !haveSameEncoding(a[i], b[i]) {
 			return false
 		}
 	}
