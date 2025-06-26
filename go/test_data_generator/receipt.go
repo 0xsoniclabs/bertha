@@ -9,21 +9,16 @@ import (
 
 // transactionReceiptFieldCases contains the corner cases for the fields of a transaction receipt.
 var transactionReceiptFieldCases = map[string][]any{
-	"Type": {
-		uint8(types.LegacyTxType),
-		uint8(types.AccessListTxType),
-		uint8(types.DynamicFeeTxType),
-		uint8(types.BlobTxType),
-		uint8(types.SetCodeTxType),
-	},
 	"Logs": {
 		[]*types.Log{},
 		generateLogs(),
 	},
+	"CumulativeGasUsed": toAnySlice(getUint64FieldCases()),
 }
 
 // logFieldCases contains the corner cases for the fields of a log.
 var logFieldCases = map[string][]any{
+	"BlockNumber": toAnySlice(getUint64FieldCases()),
 	"Topics": {
 		[]common.Hash{},
 		[]common.Hash{

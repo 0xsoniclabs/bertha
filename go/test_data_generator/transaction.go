@@ -10,6 +10,10 @@ import (
 
 // transactionFieldCases contains the corner cases for the fields of a transaction.
 var transactionFieldCases = map[string][]any{
+	// Numeric fields
+	"Nonce":      toAnySlice(getUint64FieldCases()),
+	"Gas":        toAnySlice(getUint64FieldCases()),
+	"BlobFeeCap": toAnySlice(getUint256FieldCases()),
 	"To": {
 		(*common.Address)(nil),
 		new(common.Address),

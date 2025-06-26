@@ -4,14 +4,19 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"iter"
+	"math"
 	"math/big"
+	"math/rand"
 	"reflect"
 	"sort"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/holiman/uint256"
 )
+
+var numGenerator = rand.New(rand.NewSource(42))
 
 // getTestKey() returns a dummy private key for transaction signature
 func getTransactionSignatureKey() *ecdsa.PrivateKey {
@@ -31,36 +36,47 @@ type BlockWithReceipts struct {
 	Receipts []*types.Receipt
 }
 
-// Construct an element of type T, modifies it with the provided pieces by transforming
-// it into type K, and yields the result.
-func generateData[T any, K any, Piece any](
+func generateStruct[T any](
 	constructor func() T,
-	pieces [][]Piece,
-	apply func(constructor func() T, modifier []Piece) K,
-) iter.Seq[K] {
-
-	return func(yield func(data K) bool) {
-		_cartesianProductRecursion(nil, pieces,
-			func(pieces []Piece) bool {
-				res := apply(constructor, pieces)
-				return yield(res)
-			})
-	}
+	structFields map[string][]any) iter.Seq[T] {
+	return generateDataWithMaxLengthCombination(
+		structFields,
+		func(fields []NamedField) T {
+			value := constructor()
+			for _, field := range fields {
+				if !SetValueInStruct(value, field.Name, field.Value) {
+					continue
+				}
+			}
+			return value
+		})
 }
 
-// constructAndGenerateData constructs an element of type K by applying the provided
-// transformation function to the pieces. The constructor is not used in this case
-func constructAndGenerateData[K any, Piece any](
-	pieces [][]Piece,
-	genFunction func(modifier []Piece) K,
-) iter.Seq[K] {
-	return generateData(
-		func() K { return *new(K) }, // Unused constructor
-		pieces,
-		func(constructor func() K, modifier []Piece) K {
-			return genFunction(modifier) // Apply the transformation ignoring the constructor
-		},
-	)
+func generateDataWithMaxLengthCombination[T any](
+	structFields map[string][]any,
+	apply func(fields []NamedField) T) iter.Seq[T] {
+	return func(yield func(data T) bool) {
+		idx := 0
+		for true {
+			fields := []NamedField{}
+			for fieldName, fieldValues := range structFields {
+				if idx < len(fieldValues) {
+					fields = append(fields, NamedField{Name: fieldName, Value: fieldValues[idx]})
+				}
+			}
+
+			if len(fields) == 0 {
+				return
+			}
+
+			data := apply(fields)
+
+			idx++
+			if !yield(data) {
+				break
+			}
+		}
+	}
 }
 
 // SetValueInStruct sets the value of a field in a struct T by its name.
@@ -88,43 +104,6 @@ func SetValueInStruct[T any, K any](data T, fieldName string, value K) bool {
 		}
 	} else {
 		f.Set(fieldValue)
-	}
-	return true
-}
-
-// generateStruct sets the fields of a struct T based on the provided values.
-// It uses reflection to set the fields of the struct based on the NamedField values.
-func generateStruct[T any](constructor func() T, values [][]NamedField) iter.Seq[T] {
-	return generateData(
-		constructor,
-		values,
-		func(constructor func() T, modifier []NamedField) T {
-			v := constructor()
-			for _, field := range modifier {
-				if !SetValueInStruct(v, field.Name, field.Value) {
-					continue
-				}
-			}
-			return v
-		},
-	)
-}
-
-// _cartesianProductRecursion is a recursive helper function that generates the Cartesian product of the provided elements.
-func _cartesianProductRecursion[T any](current []T, elements [][]T, callback func(data []T) bool) bool {
-	if len(elements) == 0 {
-		return callback(current)
-	}
-
-	var next [][]T
-	if len(elements) > 1 {
-		next = elements[1:]
-	}
-
-	for _, element := range elements[0] {
-		if !_cartesianProductRecursion(append(current, element), next, callback) {
-			return false
-		}
 	}
 	return true
 }
@@ -276,4 +255,45 @@ func toRustByteArray(data []byte) string {
 		}
 	}
 	return fmt.Sprintf("[%s]", byteString)
+}
+
+func getUint64FieldCases() []uint64 {
+	return []uint64{
+		0,
+		1,
+		math.MaxUint64,
+		math.MaxUint64 - 1,
+		numGenerator.Uint64(),
+	}
+}
+
+func getBigIntCases() []*big.Int {
+	return []*big.Int{
+		big.NewInt(0),
+		big.NewInt(1),
+		new(big.Int).SetUint64(math.MaxUint64),
+		new(big.Int).SetUint64(math.MaxUint64 - 1),
+		new(big.Int).SetUint64(numGenerator.Uint64()),
+	}
+}
+
+func getUint256FieldCases() []*uint256.Int {
+	max := uint256.Int([]uint64{math.MaxUint64, math.MaxUint64, math.MaxUint64, math.MaxUint64})
+	maxMinusOne := uint256.Int([]uint64{math.MaxUint64, math.MaxUint64, math.MaxUint64, math.MaxUint64 - 1})
+	randomValue := uint256.Int([]uint64{numGenerator.Uint64(), numGenerator.Uint64(), numGenerator.Uint64(), numGenerator.Uint64()})
+	return []*uint256.Int{
+		new(uint256.Int),
+		new(uint256.Int).SetUint64(1),
+		&max,
+		&maxMinusOne,
+		&randomValue,
+	}
+}
+
+func toAnySlice[T any](input []T) []any {
+	result := make([]any, len(input))
+	for i, v := range input {
+		result[i] = v
+	}
+	return result
 }

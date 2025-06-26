@@ -23,22 +23,32 @@ func generateTransactions() []*types.Transaction {
 
 // generateTransactionsWithFields generates a slice of transactions for each combination of fields
 func generateTransactionsWithFields(fields map[string][]any) []*types.Transaction {
-	transactionFields := toNamedFields(fields)
-
 	txs := []*types.Transaction{}
-	for payload := range generateStruct(func() *types.LegacyTx { return &types.LegacyTx{GasPrice: common.Big0} }, transactionFields) {
+	for payload := range generateStruct(func() *types.LegacyTx { return &types.LegacyTx{GasPrice: common.Big0} }, fields) {
 		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
 	}
-	for payload := range generateStruct(func() *types.AccessListTx { return &types.AccessListTx{GasPrice: common.Big0} }, transactionFields) {
+	for payload := range generateStruct(func() *types.AccessListTx { return &types.AccessListTx{GasPrice: common.Big0} }, fields) {
 		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
 	}
-	for payload := range generateStruct(func() *types.DynamicFeeTx { return &types.DynamicFeeTx{} }, transactionFields) {
+
+	fields["GasTipCap"] = toAnySlice(getBigIntCases())
+	fields["GasFeeCap"] = toAnySlice(getBigIntCases())
+	fields["GasPrice"] = toAnySlice(getBigIntCases())
+	fields["Value"] = toAnySlice(getBigIntCases())
+	fields["ChainId"] = toAnySlice(getBigIntCases())
+	for payload := range generateStruct(func() *types.DynamicFeeTx { return &types.DynamicFeeTx{} }, fields) {
 		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
 	}
-	for payload := range generateStruct(func() *types.BlobTx { return &types.BlobTx{} }, transactionFields) {
+
+	fields["GasTipCap"] = toAnySlice(getUint256FieldCases())
+	fields["GasFeeCap"] = toAnySlice(getUint256FieldCases())
+	fields["GasPrice"] = toAnySlice(getUint256FieldCases())
+	fields["Value"] = toAnySlice(getUint256FieldCases())
+	fields["ChainId"] = toAnySlice(getUint256FieldCases())
+	for payload := range generateStruct(func() *types.BlobTx { return &types.BlobTx{} }, fields) {
 		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
 	}
-	for payload := range generateStruct(func() *types.SetCodeTx { return &types.SetCodeTx{} }, transactionFields) {
+	for payload := range generateStruct(func() *types.SetCodeTx { return &types.SetCodeTx{} }, fields) {
 		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
 	}
 	return txs
@@ -46,7 +56,6 @@ func generateTransactionsWithFields(fields map[string][]any) []*types.Transactio
 
 // generateTransactionsWithFieldsAndType generates a slice of transactions of type txType for each combination of fields.
 func generateTransactionsWithFieldsAndType(txType uint8, fields map[string][]any) []*types.Transaction {
-	transactionFields := toNamedFields(fields)
 	var txs []*types.Transaction
 	for payload := range generateStruct(func() any {
 		switch txType {
@@ -63,7 +72,7 @@ func generateTransactionsWithFieldsAndType(txType uint8, fields map[string][]any
 		default:
 			panic(fmt.Sprintf("Unknown transaction type: %d", txType))
 		}
-	}, transactionFields) {
+	}, fields) {
 		txs = append(txs, signTransaction(big.NewInt(1), payload.(types.TxData), getTransactionSignatureKey()))
 	}
 	return txs
@@ -76,20 +85,30 @@ func generateTransactionsReceipts() []*types.Receipt {
 
 // generateTransactionsReceiptsWithFields generates a slice of receipts for each combination of fields.
 func generateTransactionsReceiptsWithFields(fields map[string][]any) []*types.Receipt {
-	transactionReceiptFields := toNamedFields(fields)
-	receipts := generateStruct(func() *types.Receipt {
+	receiptsSlice := []*types.Receipt{}
+	receiptsSlice = append(receiptsSlice, generateTransactionReceiptsWithFieldsAndType(types.LegacyTxType, fields)...)
+	receiptsSlice = append(receiptsSlice, generateTransactionReceiptsWithFieldsAndType(types.AccessListTxType, fields)...)
+	receiptsSlice = append(receiptsSlice, generateTransactionReceiptsWithFieldsAndType(types.DynamicFeeTxType, fields)...)
+	receiptsSlice = append(receiptsSlice, generateTransactionReceiptsWithFieldsAndType(types.BlobTxType, fields)...)
+	receiptsSlice = append(receiptsSlice, generateTransactionReceiptsWithFieldsAndType(types.SetCodeTxType, fields)...)
+	return receiptsSlice
+}
+
+// generateTransactionReceiptsWithFieldsAndType generates a slice of receipts of type txType for each combination of fields.
+func generateTransactionReceiptsWithFieldsAndType(txType uint8, fields map[string][]any) []*types.Receipt {
+	receipts := []*types.Receipt{}
+	for receipt := range generateStruct(func() *types.Receipt {
 		return &types.Receipt{
+			Type:   txType,
+			Logs:   []*types.Log{},
 			Status: 1,
 		}
-	}, transactionReceiptFields)
-
-	receiptsSlice := []*types.Receipt{}
-	for receipt := range receipts {
+	}, fields) {
 		// Compute bloom
 		receipt.Bloom = types.CreateBloom(receipt)
-		receiptsSlice = append(receiptsSlice, receipt)
+		receipts = append(receipts, receipt)
 	}
-	return receiptsSlice
+	return receipts
 }
 
 // generateBlockHeaders generates a slice of block headers for each combination of [block::blockHeaderFieldCases].
@@ -99,8 +118,7 @@ func generateBlockHeaders() []*types.Header {
 
 // generateBlockHeadersWithFields generates a slice of block headers for each combination of fields.
 func generateBlockHeadersWithFields(fields map[string][]any) []*types.Header {
-	blockFields := toNamedFields(fields)
-	blocks := generateStruct(func() *types.Header { return &types.Header{} }, blockFields)
+	blocks := generateStruct(func() *types.Header { return &types.Header{} }, fields)
 	return seqToSlice(blocks)
 }
 
@@ -111,8 +129,11 @@ func generateLogs() []*types.Log {
 
 // generateLogsWithFields generates a slice of logs for each combination of fields.
 func generateLogsWithFields(fields map[string][]any) []*types.Log {
-	logFields := toNamedFields(fields)
-	logs := generateStruct(func() *types.Log { return &types.Log{} }, logFields)
+	logs := generateStruct(func() *types.Log {
+		return &types.Log{
+			Topics: []common.Hash{},
+		}
+	}, fields)
 	return seqToSlice(logs)
 }
 
@@ -122,10 +143,7 @@ func generateLogsWithFields(fields map[string][]any) []*types.Log {
 // 2. The number of transactions in each block matches the number of receipts.
 func generateBlocks() []BlockWithReceipts {
 	blockFields := getBlockFieldCases()
-	blocks := constructAndGenerateData(
-		toNamedFields(blockFields),
-		BuildBlock,
-	)
+	blocks := generateDataWithMaxLengthCombination(blockFields, BuildBlock)
 
 	// remove all blocks with mismatched receipt and transactions count
 	filteredBlocks := []BlockWithReceipts{}
@@ -316,6 +334,7 @@ func formatAndPrintRustCode(rustCode string) {
 
 // Generate a main function that allow to select from the command line if to generate block headers, transactions, or receipts. Add an optional flag for the RLP encoding
 func main() {
+
 	switch os.Args[1] {
 	case "transactions":
 		txs := generateTransactions()
