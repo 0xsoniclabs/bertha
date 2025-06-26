@@ -64,7 +64,7 @@ mod tests {
     fn parses_whole_genesis_file_and_yields_all_blocks() {
         let chain_id = 146;
         let blocks = 3;
-        let buf = generate_test_genesis(chain_id, blocks);
+        let buf = generate_test_genesis(chain_id, blocks, Vec::new());
         let mut genesis = Genesis::parse(Cursor::new(buf)).unwrap();
         assert_eq!(genesis.chain_id(), chain_id);
         assert_eq!(genesis.blocks().count(), blocks);
