@@ -171,6 +171,14 @@ impl RocksBlockDb {
         // We use LZ4 compression for all levels, as recommended by the [RocksDB FAQ](https://github.com/facebook/rocksdb/wiki/rocksdb-faq).
         // TODO: Consider using ZStandard for bottommost layer if disk space is a concern.
         opts.set_compression_type(rocksdb::DBCompressionType::Lz4);
+        // If we open more files than allowed by the rlimit, the process will panic.
+        // To avoid this, we can either query the limit and set the constraint accordingly (e.g.
+        // NOFILE - 100; -10 is not enough), or always set the constrain to 1.
+        // According to the RocksDb documentation, a lower limit can decrease performance, but
+        // benchmarks have shown that at least for the initial genesis import, there is no
+        // significant difference.
+        // Therefore, we set it to 1 for the time being.
+        opts.set_max_open_files(1);
         opts
     }
 
