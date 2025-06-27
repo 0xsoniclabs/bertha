@@ -11,6 +11,11 @@ import (
 
 // blockHeaderFieldCases contains the corner cases for the fields of a block header.
 var blockHeaderFieldCases = map[string][]any{
+	"Difficulty": toAnySlice(getBigIntCases()),
+	"Number":     toAnySlice(getBigIntCases()),
+	"GasLimit":   toAnySlice(getUint64FieldCases()),
+	"Time":       toAnySlice(getUint64FieldCases()),
+	"Nonce":      toAnySlice(getBlockNonceFieldCases()),
 	"Extra": {
 		[]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, // 12 bytes
 	},

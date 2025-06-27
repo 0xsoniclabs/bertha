@@ -2,13 +2,13 @@ package main
 
 import (
 	"crypto/ecdsa"
+	"encoding/binary"
 	"fmt"
 	"iter"
 	"math"
 	"math/big"
 	"math/rand"
 	"reflect"
-	"sort"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -108,6 +108,25 @@ func SetValueInStruct[T any, K any](data T, fieldName string, value K) bool {
 	return true
 }
 
+// copyMap creates a deep copy of a map[string][]any.
+func copyMap(m map[string][]any) map[string][]any {
+	res := make(map[string][]any, len(m))
+	for k, v := range m {
+		res[k] = append([]any{}, v...)
+	}
+	return res
+}
+
+// Insert source map into destination map.
+// If a key exists, it overrides the value
+func insertMap(m map[string][]any, source map[string][]any) map[string][]any {
+	for k, v := range source {
+		m[k] = []any{}
+		m[k] = append(m[k], v...)
+	}
+	return m
+}
+
 // signTransaction is a testing helper that signs a transaction with the
 // key from the provided account
 func signTransaction(
@@ -142,28 +161,6 @@ func flattenSlice[T any](values [][]T) []T {
 		flat = append(flat, v...)
 	}
 	return flat
-}
-
-// toNamedFields converts a map of field names to slices of values into a slice of slices of NamedField.
-// Each slice contains the same field name with different values
-// NOTE: The fields are ordered by field name.
-func toNamedFields(values map[string][]any) [][]NamedField {
-	fields := [][]NamedField{}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	for _, fieldName := range keys {
-		fieldValues := values[fieldName]
-		field := []NamedField{}
-		for _, v := range fieldValues {
-			field = append(field, NamedField{fieldName, v})
-		}
-		fields = append(fields, field)
-	}
-	return fields
 }
 
 // ########## Rust conversion utility functions ########## //
@@ -287,6 +284,18 @@ func getUint256FieldCases() []*uint256.Int {
 		&max,
 		&maxMinusOne,
 		&randomValue,
+	}
+}
+
+func getBlockNonceFieldCases() []types.BlockNonce {
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, numGenerator.Uint64())
+	return []types.BlockNonce{
+		{0, 0, 0, 0, 0, 0, 0, 0},
+		{0, 0, 0, 0, 0, 0, 0, 1},
+		{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe},
+		types.BlockNonce(buf),
 	}
 }
 

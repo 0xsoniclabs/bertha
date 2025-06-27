@@ -18,7 +18,6 @@ var transactionReceiptFieldCases = map[string][]any{
 
 // logFieldCases contains the corner cases for the fields of a log.
 var logFieldCases = map[string][]any{
-	"BlockNumber": toAnySlice(getUint64FieldCases()),
 	"Topics": {
 		[]common.Hash{},
 		[]common.Hash{

@@ -18,33 +18,39 @@ import (
 
 // generateTransactions generates a slice of transactions for each combination of [transaction::transactionFieldCases].
 func generateTransactions() []*types.Transaction {
-	return generateTransactionsWithFields(transactionFieldCases)
+	txs := []*types.Transaction{}
+	for payload := range generateStruct(func() *types.LegacyTx { return &types.LegacyTx{} }, getLegacyAndAccessListFields()) {
+		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
+	}
+	for payload := range generateStruct(func() *types.AccessListTx { return &types.AccessListTx{} }, getLegacyAndAccessListFields()) {
+		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
+	}
+	for payload := range generateStruct(func() *types.DynamicFeeTx { return &types.DynamicFeeTx{} }, getDynamicFeeFields()) {
+		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
+	}
+	for payload := range generateStruct(func() *types.BlobTx { return &types.BlobTx{} }, getBlobAndSetCodeFields()) {
+		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
+	}
+	for payload := range generateStruct(func() *types.SetCodeTx { return &types.SetCodeTx{} }, getBlobAndSetCodeFields()) {
+		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
+	}
+	return txs
 }
 
 // generateTransactionsWithFields generates a slice of transactions for each combination of fields
 func generateTransactionsWithFields(fields map[string][]any) []*types.Transaction {
 	txs := []*types.Transaction{}
-	for payload := range generateStruct(func() *types.LegacyTx { return &types.LegacyTx{GasPrice: common.Big0} }, fields) {
+	for payload := range generateStruct(func() *types.LegacyTx { return &types.LegacyTx{} }, fields) {
 		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
 	}
-	for payload := range generateStruct(func() *types.AccessListTx { return &types.AccessListTx{GasPrice: common.Big0} }, fields) {
+	for payload := range generateStruct(func() *types.AccessListTx { return &types.AccessListTx{} }, fields) {
 		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
 	}
 
-	fields["GasTipCap"] = toAnySlice(getBigIntCases())
-	fields["GasFeeCap"] = toAnySlice(getBigIntCases())
-	fields["GasPrice"] = toAnySlice(getBigIntCases())
-	fields["Value"] = toAnySlice(getBigIntCases())
-	fields["ChainId"] = toAnySlice(getBigIntCases())
 	for payload := range generateStruct(func() *types.DynamicFeeTx { return &types.DynamicFeeTx{} }, fields) {
 		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
 	}
 
-	fields["GasTipCap"] = toAnySlice(getUint256FieldCases())
-	fields["GasFeeCap"] = toAnySlice(getUint256FieldCases())
-	fields["GasPrice"] = toAnySlice(getUint256FieldCases())
-	fields["Value"] = toAnySlice(getUint256FieldCases())
-	fields["ChainId"] = toAnySlice(getUint256FieldCases())
 	for payload := range generateStruct(func() *types.BlobTx { return &types.BlobTx{} }, fields) {
 		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
 	}
@@ -60,9 +66,9 @@ func generateTransactionsWithFieldsAndType(txType uint8, fields map[string][]any
 	for payload := range generateStruct(func() any {
 		switch txType {
 		case types.LegacyTxType:
-			return &types.LegacyTx{GasPrice: common.Big0}
+			return &types.LegacyTx{}
 		case types.AccessListTxType:
-			return &types.AccessListTx{GasPrice: common.Big0}
+			return &types.AccessListTx{}
 		case types.DynamicFeeTxType:
 			return &types.DynamicFeeTx{}
 		case types.BlobTxType:
@@ -153,17 +159,23 @@ func generateBlocks() []BlockWithReceipts {
 		}
 	}
 
-	// Set the parent hash for each block to the previous block's hash
 	for i := 0; i < len(filteredBlocks); i++ {
-		headerWithParent := filteredBlocks[i].Block.Header()
+		newHeader := filteredBlocks[i].Block.Header()
+		// Set the parent hash for each block to the previous block's hash
 		if i == 0 {
-			headerWithParent.ParentHash = common.Hash{}
+			newHeader.ParentHash = common.Hash{}
 		} else {
-			headerWithParent.ParentHash = filteredBlocks[i-1].Block.Hash()
+			newHeader.ParentHash = filteredBlocks[i-1].Block.Hash()
+		}
+		// Set the header gas used
+		if len(filteredBlocks[i].Receipts) > 0 {
+			newHeader.GasUsed = filteredBlocks[i].Receipts[len(filteredBlocks[i].Receipts)-1].GasUsed
+		} else {
+			newHeader.GasUsed = 0
 		}
 
 		filteredBlocks[i] = BlockWithReceipts{
-			Block:    types.NewBlock(headerWithParent, filteredBlocks[i].Block.Body(), filteredBlocks[i].Receipts, trie.NewStackTrie(nil)),
+			Block:    types.NewBlock(newHeader, filteredBlocks[i].Block.Body(), filteredBlocks[i].Receipts, trie.NewStackTrie(nil)),
 			Receipts: filteredBlocks[i].Receipts,
 		}
 	}

@@ -10,12 +10,11 @@ import (
 
 // transactionFieldCases contains the corner cases for the fields of a transaction.
 var transactionFieldCases = map[string][]any{
-	// Numeric fields
 	"Nonce":      toAnySlice(getUint64FieldCases()),
+	"GasPrice":   toAnySlice(getBigIntCases()),
 	"Gas":        toAnySlice(getUint64FieldCases()),
 	"BlobFeeCap": toAnySlice(getUint256FieldCases()),
 	"To": {
-		(*common.Address)(nil),
 		new(common.Address),
 	},
 	"AccessList": {
@@ -52,6 +51,37 @@ var transactionFieldCases = map[string][]any{
 			{},
 		},
 	},
+}
+
+var legacyAndAccessListFields = map[string][]any{
+	"To": {
+		(*common.Address)(nil),
+		new(common.Address),
+	},
+}
+
+var dynamicFeeFields = map[string][]any{
+	"GasTipCap": toAnySlice(getBigIntCases()),
+	"GasFeeCap": toAnySlice(getBigIntCases()),
+	"Value":     toAnySlice(getBigIntCases()),
+}
+
+var blobAndSetCodeFields = map[string][]any{
+	"GasTipCap": toAnySlice(getUint256FieldCases()),
+	"GasFeeCap": toAnySlice(getUint256FieldCases()),
+	"Value":     toAnySlice(getUint256FieldCases()),
+}
+
+func getLegacyAndAccessListFields() map[string][]any {
+	return insertMap(copyMap(transactionFieldCases), legacyAndAccessListFields)
+}
+
+func getDynamicFeeFields() map[string][]any {
+	return insertMap(copyMap(transactionFieldCases), dynamicFeeFields)
+}
+
+func getBlobAndSetCodeFields() map[string][]any {
+	return insertMap(copyMap(transactionFieldCases), blobAndSetCodeFields)
 }
 
 func ToRustTransaction(tx *types.Transaction) string {
