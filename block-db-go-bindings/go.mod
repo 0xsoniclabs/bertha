@@ -7,6 +7,8 @@ require github.com/linxGnu/grocksdb v1.8.12
 require (
 	github.com/ethereum/go-ethereum v1.16.0
 	github.com/holiman/uint256 v1.3.2
+	github.com/schollz/progressbar/v3 v3.18.0
+	github.com/urfave/cli/v3 v3.3.8
 	google.golang.org/protobuf v1.36.6
 )
 
@@ -24,11 +26,12 @@ require (
 	github.com/gofrs/flock v0.12.1 // indirect
 	github.com/golang/snappy v0.0.5-0.20220116011046-fa5810519dcb // indirect
 	github.com/klauspost/cpuid/v2 v2.0.9 // indirect
-	github.com/mattn/go-runewidth v0.0.13 // indirect
+	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/minio/sha256-simd v1.0.0 // indirect
+	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/mitchellh/mapstructure v1.4.1 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
-	github.com/rivo/uniseg v0.2.0 // indirect
+	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible // indirect
 	github.com/supranational/blst v0.3.14 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
@@ -36,6 +39,7 @@ require (
 	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/sync v0.12.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/term v0.30.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
