@@ -57,7 +57,7 @@ func generateDataWithMaxLengthCombination[T any](
 	apply func(fields []NamedField) T) iter.Seq[T] {
 	return func(yield func(data T) bool) {
 		idx := 0
-		for true {
+		for {
 			fields := []NamedField{}
 			for fieldName, fieldValues := range structFields {
 				if idx < len(fieldValues) {

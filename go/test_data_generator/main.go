@@ -37,29 +37,6 @@ func generateTransactions() []*types.Transaction {
 	return txs
 }
 
-// generateTransactionsWithFields generates a slice of transactions for each combination of fields
-func generateTransactionsWithFields(fields map[string][]any) []*types.Transaction {
-	txs := []*types.Transaction{}
-	for payload := range generateStruct(func() *types.LegacyTx { return &types.LegacyTx{} }, fields) {
-		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
-	}
-	for payload := range generateStruct(func() *types.AccessListTx { return &types.AccessListTx{} }, fields) {
-		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
-	}
-
-	for payload := range generateStruct(func() *types.DynamicFeeTx { return &types.DynamicFeeTx{} }, fields) {
-		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
-	}
-
-	for payload := range generateStruct(func() *types.BlobTx { return &types.BlobTx{} }, fields) {
-		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
-	}
-	for payload := range generateStruct(func() *types.SetCodeTx { return &types.SetCodeTx{} }, fields) {
-		txs = append(txs, signTransaction(big.NewInt(1), payload, getTransactionSignatureKey()))
-	}
-	return txs
-}
-
 // generateTransactionsWithFieldsAndType generates a slice of transactions of type txType for each combination of fields.
 func generateTransactionsWithFieldsAndType(txType uint8, fields map[string][]any) []*types.Transaction {
 	var txs []*types.Transaction
