@@ -8,6 +8,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 )
 
 // getTransactionFieldValueByMethod retrieves the value of a field from a transaction by its method name if it exists
@@ -161,17 +162,15 @@ func TestFilterFields(t *testing.T) {
 		{bar: 2, baz: 5},
 		{bar: 3, baz: 6},
 	}
-	if !filterFields(data, combinations, extractor) {
-		t.Errorf("Expected all combinations to be found, but some were not")
-	}
+
+	require.True(t, filterFields(data, combinations, extractor), "Expected all combinations to be found")
 
 	// Some combinations are not found
 	combinations = map[string][]any{
 		"bar": {1, 2, 4, 3},
 	}
-	if filterFields(data, combinations, extractor) {
-		t.Errorf("Expected some combinations to not be found, but all were found")
-	}
+
+	require.False(t, filterFields(data, combinations, extractor), "Expected some combinations to not be found")
 
 	// filterFields ignores fields that are not in the data
 	combinations = map[string][]any{
@@ -183,9 +182,7 @@ func TestFilterFields(t *testing.T) {
 		{bar: 1, baz: 5},  // only bar matches
 		{bar: 2, baz: 6},  // no matches
 	}
-	if !filterFields(data, combinations, extractor) {
-		t.Errorf("Expected some combinations to be found, but none were found")
-	}
+	require.True(t, filterFields(data, combinations, extractor), "Expected all combinations to be found")
 }
 
 func TestGenerateTransactionsGeneratesAllValueCases(t *testing.T) {
@@ -201,27 +198,15 @@ func TestGenerateTransactionsGeneratesAllValueCases(t *testing.T) {
 		return filterFields(filteredTransactions, remainingFields, getTransactionFieldValueByMethod)
 	}
 
-	if !checkFields(types.LegacyTxType, getLegacyAndAccessListFields()) {
-		t.Errorf("Expected all transaction fields to be covered, but the following fields were not found")
-	}
-	if !checkFields(types.AccessListTxType, getLegacyAndAccessListFields()) {
-		t.Errorf("Expected all access list transaction fields to be covered, but the following fields were not found")
-	}
-	if !checkFields(types.DynamicFeeTxType, getDynamicFeeFields()) {
-		t.Errorf("Expected all dynamic fee transaction fields to be covered, but the following fields were not found:")
-	}
-	if !checkFields(types.BlobTxType, getBlobAndSetCodeFields()) {
-		t.Errorf("Expected all blob transaction fields to be covered, but the following fields were not found")
-	}
-	if !checkFields(types.SetCodeTxType, getBlobAndSetCodeFields()) {
-		t.Errorf("Expected all set code transaction fields to be covered, but the following fields were not found")
-	}
+	require.True(t, checkFields(types.LegacyTxType, getLegacyAndAccessListFields()), "Expected all legacy transaction fields to be covered")
+	require.True(t, checkFields(types.AccessListTxType, getLegacyAndAccessListFields()), "Expected all access list transaction fields to be covered")
+	require.True(t, checkFields(types.DynamicFeeTxType, getDynamicFeeFields()), "Expected all dynamic fee transaction fields to be covered")
+	require.True(t, checkFields(types.BlobTxType, getBlobAndSetCodeFields()), "Expected all blob transaction fields to be covered")
+	require.True(t, checkFields(types.SetCodeTxType, getBlobAndSetCodeFields()), "Expected all set code transaction fields to be covered")
 
 	// Check that the number of transactions is equal to the product of the number of cases for each field
 	totalCombinations := 2*maxLenField(transactionFieldCases) + maxLenField(insertMap(copyMap(transactionFieldCases), dynamicFeeFields)) + 2*maxLenField(insertMap(copyMap(transactionFieldCases), blobAndSetCodeFields))
-	if len(transactions) != totalCombinations {
-		t.Errorf("Expected %d transactions, but got %d", totalCombinations, len(transactions))
-	}
+	require.Equal(t, totalCombinations, len(transactions), "Expected %d transactions, but got %d", totalCombinations, len(transactions))
 }
 
 func TestGenerateTransactionReceiptsGenerateAllValueCase(t *testing.T) {
@@ -237,47 +222,27 @@ func TestGenerateTransactionReceiptsGenerateAllValueCase(t *testing.T) {
 		return filterFields(filteredReceipts, remainingFields, getFieldValueFromStruct)
 	}
 
-	if !checkFields(types.LegacyTxType, copyMap(transactionReceiptFieldCases)) {
-		t.Errorf("Expected all legacy transaction receipt fields to be covered, but the following fields were not found")
-	}
-	if !checkFields(types.AccessListTxType, copyMap(transactionReceiptFieldCases)) {
-		t.Errorf("Expected all access list transaction receipt fields to be covered, but the following fields were not found")
-	}
-	if !checkFields(types.DynamicFeeTxType, copyMap(transactionReceiptFieldCases)) {
-		t.Errorf("Expected all dynamic fee transaction receipt fields to be covered, but the following fields were not found")
-	}
-	if !checkFields(types.BlobTxType, copyMap(transactionReceiptFieldCases)) {
-		t.Errorf("Expected all blob transaction receipt fields to be covered, but the following fields were not found")
-	}
-	if !checkFields(types.SetCodeTxType, copyMap(transactionReceiptFieldCases)) {
-		t.Errorf("Expected all set code transaction receipt fields to be covered, but the following fields were not found")
-	}
+	require.True(t, checkFields(types.LegacyTxType, copyMap(transactionReceiptFieldCases)), "Expected all legacy transaction receipt fields to be covered")
+	require.True(t, checkFields(types.AccessListTxType, copyMap(transactionReceiptFieldCases)), "Expected all access list transaction receipt fields to be covered")
+	require.True(t, checkFields(types.DynamicFeeTxType, copyMap(transactionReceiptFieldCases)), "Expected all dynamic fee transaction receipt fields to be covered")
+	require.True(t, checkFields(types.BlobTxType, copyMap(transactionReceiptFieldCases)), "Expected all blob transaction receipt fields to be covered")
+	require.True(t, checkFields(types.SetCodeTxType, copyMap(transactionReceiptFieldCases)), "Expected all set code transaction receipt fields to be covered")
 
 	// Check number of combinations
-	if len(receipts) != 5*maxLenField(transactionReceiptFieldCases) {
-		t.Errorf("Expected %d transaction receipts, but got %d", 5*maxLenField(transactionReceiptFieldCases), len(receipts))
-	}
+	require.Equal(t, 5*maxLenField(transactionReceiptFieldCases), len(receipts), "Expected %d transaction receipts, but got %d", 5*maxLenField(transactionReceiptFieldCases), len(receipts))
 }
 
 func TestGenerateBlockHeadersGenerateAllValueCase(t *testing.T) {
 	headers := generateBlockHeaders()
 
-	if !filterFields(headers, copyMap(blockHeaderFieldCases), getFieldValueFromStruct) {
-		t.Errorf("Expected all block header fields to be covered, but the following fields were not found")
-	}
-
-	if len(headers) != maxLenField(blockHeaderFieldCases) {
-		t.Errorf("Expected %d block headers, but got %d", maxLenField(blockHeaderFieldCases), len(headers))
-	}
-
+	require.True(t, filterFields(headers, copyMap(blockHeaderFieldCases), getFieldValueFromStruct), "Expected all block header fields to be covered")
+	require.Equal(t, maxLenField(blockHeaderFieldCases), len(headers), "Expected %d block headers, but got %d", maxLenField(blockHeaderFieldCases), len(headers))
 }
 
 func TestGenerateLogsGeneratesAllValueCase(t *testing.T) {
 	logs := generateLogs()
-
-	if !filterFields(logs, copyMap(logFieldCases), getFieldValueFromStruct) {
-		t.Errorf("Expected all log fields to be covered, but the following fields were not found")
-	}
+	require.True(t, filterFields(logs, copyMap(logFieldCases), getFieldValueFromStruct), "Expected all log fields to be covered")
+	require.Equal(t, maxLenField(logFieldCases), len(logs), "Expected %d logs, but got %d", maxLenField(logFieldCases), len(logs))
 }
 
 func TestGenerateBlocksGenerateAllValueCase(t *testing.T) {
@@ -285,10 +250,8 @@ func TestGenerateBlocksGenerateAllValueCase(t *testing.T) {
 	// Checks that all block header fields are initialized
 	for _, block := range blocks {
 		header := block.Block.Header()
-		if header.TxHash == (common.Hash{}) || header.ReceiptHash == (common.Hash{}) ||
-			header.UncleHash == (common.Hash{}) || *header.WithdrawalsHash == (common.Hash{}) {
-			t.Errorf("Block header hashes are not initialized for block %s", block.Block.Hash().Hex())
-		}
+		require.False(t, header.TxHash == (common.Hash{}) || header.ReceiptHash == (common.Hash{}) ||
+			header.UncleHash == (common.Hash{}) || *header.WithdrawalsHash == (common.Hash{}), "Block header hashes are not initialized for block %s", block.Block.Hash().Hex())
 	}
 	// Remove header as it is covered before
 	blockFields := getBlockFieldCases()
@@ -311,26 +274,18 @@ func TestGenerateBlocksGenerateAllValueCase(t *testing.T) {
 		return value[0].Interface(), true
 	}
 
-	if !filterFields(blocks, blockFields, blockFieldExtractor) {
-		t.Errorf("Expected all block fields to be covered, but the following fields were not  found")
-	}
-
-	if len(blocks) != maxLenField(getBlockFieldCases()) {
-		t.Errorf("Expected %d blocks, but got %d", maxLenField(blockFields), len(blocks))
-	}
+	require.True(t, filterFields(blocks, blockFields, blockFieldExtractor), "Expected all block fields to be covered")
+	require.Equal(t, maxLenField(getBlockFieldCases()), len(blocks), "Expected %d blocks, but got %d", maxLenField(blockFields), len(blocks))
 }
 
 func TestGenerateBlocksGeneratesBlocksWithMatchingParentHashes(t *testing.T) {
 	blocks := generateBlocks()
-	for i, block := range blocks {
-		if i == 0 {
-			if block.Block.ParentHash() != (common.Hash{}) {
-				t.Errorf("Expected first block to have empty parent hash, but got %s", block.Block.ParentHash().Hex())
-			}
-		} else {
-			if block.Block.ParentHash() != blocks[i-1].Block.Hash() {
-				t.Errorf("Expected block %d to have parent hash %s, but got %s", i, blocks[i-1].Block.Hash().Hex(), block.Block.ParentHash().Hex())
-			}
-		}
+	if len(blocks) == 0 {
+		return
+	}
+	require.Equal(t, blocks[0].Block.ParentHash(), common.Hash{}, "Expected first block to have empty parent hash")
+	for i, block := range blocks[1:] {
+		idx := i + 1
+		require.Equal(t, block.Block.ParentHash(), blocks[idx-1].Block.Hash(), "Expected block %d to have parent hash %s, but got %s", idx, blocks[idx-1].Block.Hash().Hex(), block.Block.ParentHash().Hex())
 	}
 }
