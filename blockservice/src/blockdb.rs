@@ -672,7 +672,7 @@ mod tests {
         let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
         // delete range when no blocks exist
-        db.delete_range(1, Some(1), Some(5)).unwrap();
+        assert!(db.delete_range(1, Some(1), Some(5)).is_ok());
     }
 
     #[test]
