@@ -21,10 +21,10 @@ func ConvertToGethBlock(block *blockdb.Block) (*types.Block, error) {
 
 	// Start by converting the transactions.
 	transactions := types.Transactions{}
-	for _, tx := range block.Transactions {
+	for i, tx := range block.Transactions {
 		transaction, err := toGethTransaction(tx)
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert transaction: %w", err)
+			return nil, fmt.Errorf("failed to convert transaction %d: %w", i, err)
 		}
 		transactions = append(transactions, transaction)
 	}
