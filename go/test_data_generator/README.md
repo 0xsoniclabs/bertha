@@ -12,7 +12,7 @@ The generator produces a test case for every "corner case" of a type. A "corner 
 - An inner struct
 
 It generates `max_len(type_field_cases)` values by scanning the field sequentially. The exhausted fields are default initialized.
-E.g. for a struct `foo{bar int, baz int}` and cases `bar: [1,2], baz: [3,4,5]`, the following cases are generated: `foo{bar: 1, baz: 3}, foo{bar: 2, baz: 4}, foo{bar: 0, baz: 6}`
+E.g. for a struct `foo{bar int, baz int}` and cases `bar: [1,2], baz: [3,4,5]`, the following cases are generated: `foo{bar: 1, baz: 3}, foo{bar: 2, baz: 4}, foo{bar: 0, baz: 5}`
 
 ## Additional notes  
 
