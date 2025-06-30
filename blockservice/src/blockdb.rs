@@ -274,41 +274,65 @@ impl BlockDb for RocksBlockDb {
 
 #[cfg(test)]
 mod tests {
-    use bertha_types::{Hash, HexConvert};
+    use std::collections::BTreeMap;
 
     use super::*;
     use crate::proto;
 
-    struct StubDb(Vec<u8>);
+    struct StubDb(BTreeMap<Vec<u8>, Vec<u8>>);
+
+    impl StubDb {
+        fn new() -> Self {
+            Self(BTreeMap::new())
+        }
+    }
+
     impl BlockDb for StubDb {
-        fn get_raw(&self, _chain_id: u64, _block_number: u64) -> Result<Option<Vec<u8>>, Error> {
-            Ok(Some(self.0.clone()))
+        fn get_raw(&self, chain_id: u64, block_number: u64) -> Result<Option<Vec<u8>>, Error> {
+            let key = make_data_key(chain_id, block_number);
+            Ok(self.0.get(&key).cloned())
         }
 
-        fn put_raw(
-            &mut self,
-            _chain_id: u64,
-            _block_number: u64,
-            data: &[u8],
-        ) -> Result<(), Error> {
-            self.0 = data.to_vec();
+        fn put_raw(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
+            let key = make_data_key(chain_id, block_number);
+            let value = data.to_vec();
+            self.0.insert(key, value);
             Ok(())
         }
 
         fn iterate_raw(
             &self,
-            _chain_id: u64,
-            _from: u64,
+            chain_id: u64,
+            from: u64,
         ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
-            std::iter::once(Ok((0, self.0.clone().into_boxed_slice())))
+            let key = make_data_key(chain_id, from);
+            self.0.range(key..).map(|(k, v)| {
+                let key = u64::from_be_bytes(
+                    k[8..16]
+                        .try_into()
+                        .map_err(|_| Error::StorageLayer("invalid key length".to_owned()))?,
+                );
+                Ok((key, v.clone().into_boxed_slice()))
+            })
         }
 
         fn iterate_reverse_raw(
             &self,
-            _chain_id: u64,
-            _from: u64,
+            chain_id: u64,
+            from: u64,
         ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
-            std::iter::once(Ok((0, self.0.clone().into_boxed_slice())))
+            let key = make_data_key(chain_id, from);
+            self.0
+                .range(key..)
+                .map(|(k, v)| {
+                    let key = u64::from_be_bytes(
+                        k[8..16]
+                            .try_into()
+                            .map_err(|_| Error::StorageLayer("invalid key length".to_owned()))?,
+                    );
+                    Ok((key, v.clone().into_boxed_slice()))
+                })
+                .rev()
         }
 
         fn delete_range(
@@ -317,96 +341,112 @@ mod tests {
             _from_block: Option<u64>,
             _to_block: Option<u64>,
         ) -> Result<(), Error> {
-            unimplemented!()
+            unimplemented!() // there is no delete_range_raw method so we test it directly on RocksBlockDb
         }
+    }
+
+    fn make_data_key(chain_id: u64, block_number: u64) -> Vec<u8> {
+        [chain_id, block_number]
+            .into_iter()
+            .flat_map(u64::to_be_bytes)
+            .collect()
     }
 
     #[test]
     fn blockdb_get_converts_from_protobuf() {
-        let block = Block {
-            number: 123,
-            parent_hash: Hash::try_from_hex(
-                "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            )
-            .unwrap(),
-            ..Block::default()
-        };
+        let block = Block::default();
 
-        let db = StubDb(proto::Block::from(block.clone()).encode_to_vec());
-        let received = db.get(0, 0).unwrap().unwrap();
+        let chain_id = 1;
+        let mut db = StubDb::new();
+        db.0.insert(
+            make_data_key(chain_id, block.number),
+            proto::Block::from(block.clone()).encode_to_vec(),
+        );
+        let received = db.get(chain_id, block.number).unwrap().unwrap();
         assert_eq!(received, block);
     }
 
     #[test]
     fn blockdb_get_returns_error_for_invalid_protobuf() {
-        let db = StubDb(vec![0, 1, 2, 3]);
-        let result = db.get(0, 0);
+        let chain_id = 1;
+        let block_number = 0;
+        let mut db = StubDb::new();
+        db.0.insert(
+            make_data_key(chain_id, block_number),
+            vec![0, 1, 2, 3], // invalid protobuf data
+        );
+        let result = db.get(chain_id, block_number);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
     }
 
     #[test]
     fn blockdb_put_converts_to_protobuf() {
-        let mut db = StubDb(vec![]);
-        let block = Block {
-            number: 123,
-            parent_hash: Hash::try_from_hex(
-                "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        let mut db = StubDb::new();
+        let chain_id: u64 = 1;
+        let block = Block::default();
+        db.put(chain_id, block.clone()).unwrap();
+        assert_eq!(
+            proto::Block::decode(
+                db.0.get(&make_data_key(chain_id, block.number))
+                    .unwrap()
+                    .as_slice()
             )
             .unwrap(),
-            ..Block::default()
-        };
-        db.put(0, block.clone()).unwrap();
-        assert_eq!(proto::Block::decode(db.0.as_slice()).unwrap(), block.into());
+            block.into()
+        );
     }
 
     #[test]
     fn blockdb_iterate_converts_from_protobuf() {
-        let mut db = StubDb(vec![]);
+        let chain_id = 1;
+        let mut db = StubDb::new();
         let block = Block {
             number: 123,
-            parent_hash: Hash::try_from_hex(
-                "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            )
-            .unwrap(),
             ..Block::default()
         };
-        db.put(0, block.clone()).unwrap();
+        db.put(chain_id, block.clone()).unwrap();
 
         // Forward
-        let mut iter = db.iterate(0, 0);
+        let mut iter = db.iterate(chain_id, 0);
         let received = iter.next().unwrap().unwrap();
         assert_eq!(received, block);
 
         // Reverse
-        let mut iter = db.iterate_reverse(0, 0);
+        let mut iter = db.iterate_reverse(chain_id, 0);
         let received = iter.next().unwrap().unwrap();
         assert_eq!(received, block);
 
-        // With Key
-        let mut iter = db.iterate_with_block_number(0, 0);
+        // With Block Number
+        let mut iter = db.iterate_with_block_number(chain_id, 0);
         let received = iter.next().unwrap().unwrap().1;
         assert_eq!(received, block);
     }
 
     #[test]
     fn blockdb_iterate_returns_error_for_invalid_protobuf() {
-        let db = StubDb(vec![0, 1, 2, 3]);
+        let chain_id = 1;
+        let block_number = 0;
+        let mut db = StubDb::new();
+        db.0.insert(
+            make_data_key(chain_id, block_number),
+            vec![0, 1, 2, 3], // invalid protobuf data
+        );
 
         // Forward
-        let mut iter = db.iterate(0, 0);
+        let mut iter = db.iterate(chain_id, block_number);
         let result = iter.next().unwrap();
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
 
         // Reverse
-        let mut iter = db.iterate_reverse(0, 0);
+        let mut iter = db.iterate_reverse(chain_id, block_number);
         let result = iter.next().unwrap();
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
 
-        // With Key
-        let mut iter = db.iterate_with_block_number(0, 0);
+        // With Block Number
+        let mut iter = db.iterate_with_block_number(chain_id, block_number);
         let result = iter.next().unwrap();
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
@@ -584,6 +624,10 @@ mod tests {
 
         let result = db.get_raw(chain_id, block_number).unwrap();
         assert_eq!(result, Some(data.to_vec()));
+
+        // query non existing key
+        let result = db.get_raw(chain_id, 100).unwrap();
+        assert_eq!(result, None);
     }
 
     #[test]
