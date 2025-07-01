@@ -1,5 +1,7 @@
+# Rust files
 /target
 /build
 # Vscode files
-.vscode/launch.json 
-
+.vscode/launch.json
+# DB
+.blockdb/
