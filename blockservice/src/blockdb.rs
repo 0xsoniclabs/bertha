@@ -638,25 +638,26 @@ mod tests {
     }
 
     #[test]
-    fn blockdb_add_key_to_ranges_adds_key_if_not_exists_and_keeps_ranges_disjunct_and_sorted() {
+    fn blockdb_add_block_number_to_ranges_adds_block_number_if_not_exists_and_keeps_ranges_disjunct_and_sorted()
+     {
         let chain_id: u64 = 1;
         let init_ranges = [(3, 4), (9, 10), (12, 13)];
         let mut db = StubDb::new();
 
         let cases = [
-            // add non-existing key before existing ranges
+            // add non-existing block number before existing ranges
             (0, vec![(0, 0), (3, 4), (9, 10), (12, 13)]),
-            // add non-existing key between existing ranges
+            // add non-existing block number between existing ranges
             (6, vec![(3, 4), (6, 6), (9, 10), (12, 13)]),
-            // add non-existing key after existing ranges
+            // add non-existing block number after existing ranges
             (15, vec![(3, 4), (9, 10), (12, 13), (15, 15)]),
-            // add non-existing key adjacent to start of existing range
+            // add non-existing block number adjacent to start of existing range
             (2, vec![(2, 4), (9, 10), (12, 13)]),
-            // add non-existing key adjacent to end of existing range
+            // add non-existing block number adjacent to end of existing range
             (5, vec![(3, 5), (9, 10), (12, 13)]),
-            // add non-existing key adjacent to end of one range and start of another
+            // add non-existing block number adjacent to end of one range and start of another
             (11, vec![(3, 4), (9, 13)]),
-            // add existing key
+            // add existing block number
             (3, vec![(3, 4), (9, 10), (12, 13)]),
         ];
         for (new_key, expected_ranges) in cases {
