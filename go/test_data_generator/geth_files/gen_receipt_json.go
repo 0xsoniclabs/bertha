@@ -50,27 +50,7 @@ type Receipt struct {
 	TransactionIndex  hexutil.Uint   `json:"transactionIndex"`
 }
 
-// MarshalJSON marshals as JSON.
-func MarshallReceiptJson(r *types.Receipt) ([]byte, error) {
-	var enc Receipt
-	enc.Type = hexutil.Uint64(r.Type)
-	enc.PostState = r.PostState
-	enc.Status = hexutil.Uint64(r.Status)
-	enc.CumulativeGasUsed = hexutil.Uint64(r.CumulativeGasUsed)
-	enc.Bloom = r.Bloom
-	enc.Logs = r.Logs
-	enc.TxHash = r.TxHash
-	enc.ContractAddress = r.ContractAddress
-	enc.GasUsed = hexutil.Uint64(r.GasUsed)
-	enc.EffectiveGasPrice = (*hexutil.Big)(r.EffectiveGasPrice)
-	enc.BlobGasUsed = hexutil.Uint64(r.BlobGasUsed)
-	enc.BlobGasPrice = (*hexutil.Big)(r.BlobGasPrice)
-	enc.BlockHash = r.BlockHash
-	enc.BlockNumber = (*hexutil.Big)(r.BlockNumber)
-	enc.TransactionIndex = hexutil.Uint(r.TransactionIndex)
-	return json.Marshal(&enc)
-}
-
+// RpcReceiptJson converts a Receipt to the RPC representation.
 func RpcReceiptJson(r *types.Receipt) Receipt {
 	var enc Receipt
 	enc.Type = hexutil.Uint64(r.Type)
@@ -89,4 +69,10 @@ func RpcReceiptJson(r *types.Receipt) Receipt {
 	enc.BlockNumber = (*hexutil.Big)(r.BlockNumber)
 	enc.TransactionIndex = hexutil.Uint(r.TransactionIndex)
 	return enc
+}
+
+// MarshalJSON marshals as JSON.
+func MarshallReceiptJson(r *types.Receipt) ([]byte, error) {
+	enc := RpcReceiptJson(r)
+	return json.Marshal(&enc)
 }

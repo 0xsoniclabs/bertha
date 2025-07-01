@@ -18,6 +18,7 @@
 
 // Changelist:
 // - Deleted everything apart from RPCMarshalHeader, RPCMarshalBlock, RPCTransaction, newRPCTransactionWithoutBlock, newRPCTransactionFromBlockIndex, newRPCTransaction and effectiveGasPrice
+// - add receipts to RPCMarshalBlock
 
 // Package geth provides functions taken from the go-ethereum library to marshal Ethereum blocks and transactions
 package geth
@@ -95,16 +96,14 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, receipts []*t
 		}
 		fields["transactions"] = transactions
 	}
-	// this was added
-	{
-		formattedReceipts := make([]interface{}, len(receipts))
-		for i, receipt := range receipts {
-			// formattedReceipt, _ :=
-			formattedReceipts[i] =
-				RpcReceiptJson(receipt)
-		}
-		fields["receipts"] = formattedReceipts
+
+	formattedReceipts := make([]interface{}, len(receipts))
+	for i, receipt := range receipts {
+		formattedReceipts[i] =
+			RpcReceiptJson(receipt)
 	}
+	fields["receipts"] = formattedReceipts
+
 	uncles := block.Uncles()
 	uncleHashes := make([]common.Hash, len(uncles))
 	for i, uncle := range uncles {

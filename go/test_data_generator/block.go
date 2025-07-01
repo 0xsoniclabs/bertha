@@ -72,18 +72,13 @@ func getBlockFieldCases() map[string][]any {
 	for i, txs := range transactions {
 		receipts[i] = make([]*types.Receipt, len(txs))
 		for j := range receipts[i] {
+			receipts[i][j] =
+				DefaultReceipt()
 			if includeLogs {
-				receipts[i][j] = &types.Receipt{
-					Logs: []*types.Log{
+				receipts[i][j].Logs =
+					[]*types.Log{
 						{Topics: []common.Hash{}},
-					},
-					Status: 1,
-				}
-			} else {
-				receipts[i][j] = &types.Receipt{
-					Logs:   []*types.Log{},
-					Status: 1,
-				}
+					}
 			}
 			includeLogs = !includeLogs
 			receipts[i][j].Bloom = types.CreateBloom(receipts[i][j])

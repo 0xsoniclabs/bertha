@@ -81,11 +81,9 @@ func generateTransactionsReceiptsWithFields(fields map[string][]any) []*types.Re
 func generateTransactionReceiptsWithFieldsAndType(txType uint8, fields map[string][]any) []*types.Receipt {
 	receipts := []*types.Receipt{}
 	for receipt := range generateStruct(func() *types.Receipt {
-		return &types.Receipt{
-			Type:   txType,
-			Logs:   []*types.Log{},
-			Status: 1,
-		}
+		receipt := DefaultReceipt()
+		receipt.Type = txType
+		return receipt
 	}, fields) {
 		// Compute bloom
 		receipt.Bloom = types.CreateBloom(receipt)
