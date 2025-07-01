@@ -99,9 +99,14 @@ pub trait BlockDb {
         }
     }
 
-    /// Adds a key to the ranges of blocks stored in the database for the specified chain-ID.
-    /// If this is the first entry for the chain ID, the chain ID is added to the list of chain IDs.
-    fn add_key_to_ranges(&mut self, chain_id: u64, key: u64) -> Result<(), Error> {
+    /// Adds a block number to the ranges of block numbers stored in the database for the specified
+    /// chain-ID. If this is the first block for the chain ID, the chain ID is added to the list
+    /// of chain IDs.
+    fn add_block_number_to_ranges(
+        &mut self,
+        chain_id: u64,
+        block_number: u64,
+    ) -> Result<(), Error> {
         // assumption:
         // - ranges are valid (start <= end)
         // - ranges are non-overlapping
@@ -114,35 +119,41 @@ pub trait BlockDb {
         // iterate over index to allow insertion
         for i in 0..ranges.len() {
             let (start, end) = ranges[i];
-            if key + 1 < start {
-                ranges.insert(i, (key, key));
+            // the block number is before the current range and not adjacent to it
+            if block_number + 1 < start {
+                ranges.insert(i, (block_number, block_number));
                 return self.put_ranges_of_chain_id(chain_id, &ranges);
-            } else if key + 1 == start {
-                ranges[i].0 = key; // extend the start of the range to include the key
+            }
+            // the block number is adjacent to the start of the current range
+            else if block_number + 1 == start {
+                ranges[i].0 = block_number; // extend the start of the range to include the block number
                 // no need to check for merge with previous range, because this would have been
-                // handles by extending the end of the previous range
+                // handled by extending the end of the previous range
                 return self.put_ranges_of_chain_id(chain_id, &ranges);
-            } else if start <= key && key <= end {
-                // key is already in the range, no need to add it
+            }
+            // the block number is within the current range
+            else if start <= block_number && block_number <= end {
                 return Ok(());
-            } else if key == end + 1 {
-                ranges[i].1 = key; // extend the end of the range to include the key
-                if i + 1 < ranges.len() && ranges[i + 1].0 == key + 1 {
-                    // merge with next range
+            }
+            // the block number is adjacent to the end of the current range
+            else if block_number == end + 1 {
+                ranges[i].1 = block_number; // extend the end of the range to include the block number
+                // check if we can merge with next range
+                if i + 1 < ranges.len() && ranges[i + 1].0 == block_number + 1 {
                     ranges[i].1 = ranges[i + 1].1; // extend the end of the current range to include the next range
                     ranges.remove(i + 1); // remove the next range
                 }
                 return self.put_ranges_of_chain_id(chain_id, &ranges);
             }
         }
-        // key is greater than all existing ranges, add it at the end
-        ranges.push((key, key));
+        // block number is greater than all existing ranges
+        ranges.push((block_number, block_number)); // add new range for block number
         self.put_ranges_of_chain_id(chain_id, &ranges)
     }
 
-    /// Removes a range of blocks from the ranges of blocks stored in the database for the specified
-    /// chain-ID. If this is the last entry for the chain ID, the chain ID is removed from the list
-    /// of chain IDs.
+    /// Removes a range of block numbers from the ranges of blocks stored in the database for the
+    /// specified chain-ID. If this is the last remaining block for the chain ID, the chain ID is
+    /// removed from the list of chain IDs.
     fn remove_range_from_ranges(
         &mut self,
         chain_id: u64,
@@ -397,7 +408,6 @@ impl RocksBlockDb {
                     };
                     if key.len() == 8 {
                         // we got metadata, so there is no more data for this chain id
-                        stop = true;
                         return None;
                     }
                     if key.len() != 16 {
@@ -410,7 +420,6 @@ impl RocksBlockDb {
                     }
                     let cid = u64::from_be_bytes(key[0..8].try_into().unwrap());
                     if cid != chain_id {
-                        stop = true;
                         return None;
                     }
                     let block_number = u64::from_be_bytes(key[8..16].try_into().unwrap());
@@ -463,7 +472,7 @@ impl BlockDb for RocksBlockDb {
         self.db
             .put(Self::make_key(chain_id, block_number), data)
             .map_err(|e| Error::StorageLayer(e.to_string()))?;
-        self.add_key_to_ranges(chain_id, block_number)
+        self.add_block_number_to_ranges(chain_id, block_number)
     }
 
     fn iterate_raw(
@@ -507,113 +516,6 @@ mod tests {
 
     use super::*;
     use crate::proto;
-
-    struct StubDb(BTreeMap<Vec<u8>, Vec<u8>>);
-
-    impl StubDb {
-        fn new() -> Self {
-            Self(BTreeMap::new())
-        }
-    }
-
-    impl BlockDb for StubDb {
-        fn get_metadata_raw(&self, key: u64) -> Result<Option<Vec<u64>>, Error> {
-            let Some(value) = self.0.get(key.to_be_bytes().as_slice()) else {
-                return Ok(None);
-            };
-
-            if value.len() % 8 != 0 {
-                return Err(Error::StorageLayer(format!(
-                    "invalid metadata length: data length {} not a multiple of 8 bytes",
-                    value.len()
-                )));
-            }
-            Ok(Some(
-                value
-                    .chunks_exact(8)
-                    .map(|chunk| u64::from_be_bytes(chunk.try_into().unwrap()))
-                    .collect(),
-            ))
-        }
-
-        fn put_metadata_raw(&mut self, key: u64, data: &[u64]) -> Result<(), Error> {
-            let key = key.to_be_bytes().to_vec();
-            let value = data.iter().flat_map(|v| v.to_be_bytes()).collect();
-            self.0.insert(key, value);
-            Ok(())
-        }
-
-        fn get_raw(&self, chain_id: u64, block_number: u64) -> Result<Option<Vec<u8>>, Error> {
-            let key = make_data_key(chain_id, block_number);
-            Ok(self.0.get(&key).cloned())
-        }
-
-        fn put_raw(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
-            let key = make_data_key(chain_id, block_number);
-            let value = data.to_vec();
-            self.0.insert(key, value);
-            Ok(())
-        }
-
-        fn iterate_raw(
-            &self,
-            chain_id: u64,
-            from: u64,
-        ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
-            let key = make_data_key(chain_id, from);
-            self.0.range(key..).map(|(k, v)| {
-                let key = u64::from_be_bytes(
-                    k[8..16]
-                        .try_into()
-                        .map_err(|_| Error::StorageLayer("invalid key length".to_owned()))?,
-                );
-                Ok((key, v.clone().into_boxed_slice()))
-            })
-        }
-
-        fn iterate_reverse_raw(
-            &self,
-            chain_id: u64,
-            from: u64,
-        ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
-            let key = make_data_key(chain_id, from);
-            self.0
-                .range(key..)
-                .map(|(k, v)| {
-                    let key = u64::from_be_bytes(
-                        k[8..16]
-                            .try_into()
-                            .map_err(|_| Error::StorageLayer("invalid key length".to_owned()))?,
-                    );
-                    Ok((key, v.clone().into_boxed_slice()))
-                })
-                .rev()
-        }
-
-        fn delete_range(
-            &mut self,
-            _chain_id: u64,
-            _from_block: Option<u64>,
-            _to_block: Option<u64>,
-        ) -> Result<(), Error> {
-            unimplemented!() // there is no delete_range_raw method so we test it directly on RocksBlockDb
-        }
-    }
-
-    fn make_data_key(chain_id: u64, block_number: u64) -> Vec<u8> {
-        [chain_id, block_number]
-            .into_iter()
-            .flat_map(u64::to_be_bytes)
-            .collect()
-    }
-
-    fn make_meta_value(value: impl IntoIterator<Item = u64>) -> Vec<u8> {
-        value.into_iter().flat_map(u64::to_be_bytes).collect()
-    }
-
-    fn make_range_value(ranges: impl IntoIterator<Item = (u64, u64)>) -> Vec<u8> {
-        make_meta_value(ranges.into_iter().flat_map(|(start, end)| [start, end]))
-    }
 
     #[test]
     fn blockdb_get_chain_ids_queries_key_zero() {
@@ -762,7 +664,7 @@ mod tests {
                 chain_id.to_be_bytes().to_vec(),
                 make_range_value(init_ranges),
             ); // reset value
-            db.add_key_to_ranges(chain_id, new_key).unwrap();
+            db.add_block_number_to_ranges(chain_id, new_key).unwrap();
             assert_eq!(
                 db.0.get(chain_id.to_be_bytes().as_slice()),
                 Some(&make_range_value(expected_ranges))
@@ -1089,14 +991,7 @@ mod tests {
 
         let result = db.db.get(key.to_be_bytes()).unwrap();
 
-        assert_eq!(
-            result,
-            Some(
-                data.into_iter()
-                    .flat_map(u64::to_be_bytes)
-                    .collect::<Vec<_>>()
-            )
-        );
+        assert_eq!(result, Some(make_meta_value(data)));
     }
 
     #[test]
@@ -1305,5 +1200,112 @@ mod tests {
                 Some(format!("block {i}").as_bytes().to_vec())
             );
         }
+    }
+
+    struct StubDb(BTreeMap<Vec<u8>, Vec<u8>>);
+
+    impl StubDb {
+        fn new() -> Self {
+            Self(BTreeMap::new())
+        }
+    }
+
+    impl BlockDb for StubDb {
+        fn get_metadata_raw(&self, key: u64) -> Result<Option<Vec<u64>>, Error> {
+            let Some(value) = self.0.get(key.to_be_bytes().as_slice()) else {
+                return Ok(None);
+            };
+
+            if value.len() % 8 != 0 {
+                return Err(Error::StorageLayer(format!(
+                    "invalid metadata length: data length {} not a multiple of 8 bytes",
+                    value.len()
+                )));
+            }
+            Ok(Some(
+                value
+                    .chunks_exact(8)
+                    .map(|chunk| u64::from_be_bytes(chunk.try_into().unwrap()))
+                    .collect(),
+            ))
+        }
+
+        fn put_metadata_raw(&mut self, key: u64, data: &[u64]) -> Result<(), Error> {
+            let key = key.to_be_bytes().to_vec();
+            let value = data.iter().flat_map(|v| v.to_be_bytes()).collect();
+            self.0.insert(key, value);
+            Ok(())
+        }
+
+        fn get_raw(&self, chain_id: u64, block_number: u64) -> Result<Option<Vec<u8>>, Error> {
+            let key = make_data_key(chain_id, block_number);
+            Ok(self.0.get(&key).cloned())
+        }
+
+        fn put_raw(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
+            let key = make_data_key(chain_id, block_number);
+            let value = data.to_vec();
+            self.0.insert(key, value);
+            Ok(())
+        }
+
+        fn iterate_raw(
+            &self,
+            chain_id: u64,
+            from: u64,
+        ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
+            let key = make_data_key(chain_id, from);
+            self.0.range(key..).map(|(k, v)| {
+                let key = u64::from_be_bytes(
+                    k[8..16]
+                        .try_into()
+                        .map_err(|_| Error::StorageLayer("invalid key length".to_owned()))?,
+                );
+                Ok((key, v.clone().into_boxed_slice()))
+            })
+        }
+
+        fn iterate_reverse_raw(
+            &self,
+            chain_id: u64,
+            from: u64,
+        ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
+            let key = make_data_key(chain_id, from);
+            self.0
+                .range(key..)
+                .map(|(k, v)| {
+                    let key = u64::from_be_bytes(
+                        k[8..16]
+                            .try_into()
+                            .map_err(|_| Error::StorageLayer("invalid key length".to_owned()))?,
+                    );
+                    Ok((key, v.clone().into_boxed_slice()))
+                })
+                .rev()
+        }
+
+        fn delete_range(
+            &mut self,
+            _chain_id: u64,
+            _from_block: Option<u64>,
+            _to_block: Option<u64>,
+        ) -> Result<(), Error> {
+            unimplemented!() // there is no delete_range_raw method so we test it directly on RocksBlockDb
+        }
+    }
+
+    fn make_data_key(chain_id: u64, block_number: u64) -> Vec<u8> {
+        [chain_id, block_number]
+            .into_iter()
+            .flat_map(u64::to_be_bytes)
+            .collect()
+    }
+
+    fn make_meta_value(value: impl IntoIterator<Item = u64>) -> Vec<u8> {
+        value.into_iter().flat_map(u64::to_be_bytes).collect()
+    }
+
+    fn make_range_value(ranges: impl IntoIterator<Item = (u64, u64)>) -> Vec<u8> {
+        make_meta_value(ranges.into_iter().flat_map(|(start, end)| [start, end]))
     }
 }
