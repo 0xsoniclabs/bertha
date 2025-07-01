@@ -285,7 +285,7 @@ func dumpBlocks(data []BlockWithReceipts) string {
 		transactionRoot := block.Block.Header().TxHash.Hex()
 		receiptsRoot := block.Block.Header().ReceiptHash.Hex()
 		// NOTE: consider adding the receipts json marshalling to match the rust block structure
-		jsonRepresentation, _ := json.Marshal(geth.RPCMarshalBlock(block.Block, true, true, params.MainnetChainConfig))
+		jsonRepresentation, _ := json.Marshal(geth.RPCMarshalBlock(block.Block, true, true, block.Receipts, params.MainnetChainConfig))
 		rustCode += "BlockWithTestData {\n"
 		rustCode += fmt.Sprintf("\t\tblock: %s,\n", rustBlock)
 		rustCode += fmt.Sprintf("\t\tblock_hash: Hash::try_from_hex(\"%s\").unwrap(),\n", block.Block.Hash().Hex())

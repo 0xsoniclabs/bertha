@@ -75,11 +75,15 @@ func getBlockFieldCases() map[string][]any {
 			if includeLogs {
 				receipts[i][j] = &types.Receipt{
 					Logs: []*types.Log{
-						{},
+						{Topics: []common.Hash{}},
 					},
+					Status: 1,
 				}
 			} else {
-				receipts[i][j] = &types.Receipt{}
+				receipts[i][j] = &types.Receipt{
+					Logs:   []*types.Log{},
+					Status: 1,
+				}
 			}
 			includeLogs = !includeLogs
 			receipts[i][j].Bloom = types.CreateBloom(receipts[i][j])
