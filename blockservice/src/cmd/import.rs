@@ -1,5 +1,6 @@
 use std::{fmt::Write, fs::File, io::BufReader, path::Path};
 
+use bertha_types::{Hash, HexConvert};
 use blockservice::blockdb::{BlockDb, RocksBlockDb};
 use genesis_parser::Genesis;
 use indicatif::{ProgressBar, ProgressState, ProgressStyle};
@@ -7,7 +8,7 @@ use prost::Message;
 
 use crate::BLOCK_DB_NAME;
 
-pub fn import(path: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::error::Error>> {
     let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize()?;
     let mut db = RocksBlockDb::open(db_path)?;
 
@@ -32,6 +33,8 @@ pub fn import(path: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> 
         })
         .progress_chars("#>-"),
     );
+
+    let mut prev_parent_hash: Option<Hash> = None;
     let before = std::time::Instant::now();
     for result in blocks {
         let block = result?;
@@ -40,6 +43,31 @@ pub fn import(path: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> 
             total_blocks = block.number + 1;
             println!("Importing {total_blocks} blocks for chain ID {chain_id}");
             progress_bar.set_length(total_blocks);
+        }
+
+        if verify {
+            // Note: blocks are in reverse order
+            if let Some(prev_parent_hash) = prev_parent_hash {
+                let block_hash = block.to_header().compute_hash();
+                if block_hash != prev_parent_hash {
+                    return Err(format!(
+                        "Parent hash mismatch for block {}: previous block hash {}, parent hash {}",
+                        block.number + 1,
+                        block_hash.to_hex(),
+                        prev_parent_hash.to_hex()
+                    )
+                    .into());
+                }
+            }
+            prev_parent_hash = Some(block.parent_hash);
+
+            if block.number == 0 && block.parent_hash != Hash::default() {
+                return Err(format!(
+                    "Block zero must have parent hash {}",
+                    Hash::default().to_hex()
+                )
+                .into());
+            }
         }
 
         // We use put_raw so we can count bytes.
@@ -67,6 +95,8 @@ pub fn import(path: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> 
 mod tests {
     use std::os::unix::fs::PermissionsExt;
 
+    use bertha_types::Block;
+
     use super::*;
     use crate::cmd::{ChangeWorkingDir, init};
 
@@ -83,13 +113,50 @@ mod tests {
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
         init(None::<&Path>).unwrap();
 
-        import(genesis_file.to_str().unwrap()).unwrap();
+        import(genesis_file.to_str().unwrap(), false).unwrap();
 
         let db = RocksBlockDb::open_for_reading(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
         for i in 0..num_blocks {
             let block = db.get(chain_id, i as u64).unwrap();
             assert!(block.is_some(), "Block {i} not found in the database");
         }
+    }
+
+    #[test]
+    fn fails_if_parent_hash_mismatches() {
+        let tmpdir = tempfile::tempdir().unwrap();
+
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+        init(None::<&Path>).unwrap();
+
+        let genesis_file = tmpdir.path().join("genesis.g");
+
+        // block 0 has non-zero parent hash
+        let extra_blocks = vec![Block {
+            parent_hash: [1; 32],
+            ..Block::default_sonic()
+        }];
+        let genesis_data = genesis_parser::test_utils::generate_test_genesis(1, 0, extra_blocks);
+        std::fs::write(&genesis_file, genesis_data).unwrap();
+
+        assert!(
+            import(genesis_file.to_str().unwrap(), true)
+                .unwrap_err()
+                .to_string()
+                .contains("Block zero must have parent hash 0x0000000000000000000000000000000000000000000000000000000000000000")
+        );
+
+        // hash(block_0) != block_1.parent_hash
+        let extra_blocks = vec![Block::default_sonic()];
+        let genesis_data = genesis_parser::test_utils::generate_test_genesis(1, 1, extra_blocks);
+        std::fs::write(&genesis_file, genesis_data).unwrap();
+
+        assert!(
+            import(genesis_file.to_str().unwrap(), true)
+                .unwrap_err()
+                .to_string()
+                .contains("Parent hash mismatch for block 1")
+        );
     }
 
     #[test]
@@ -108,7 +175,7 @@ mod tests {
             genesis_data[0..corruption.len()].copy_from_slice(&corruption); // Corrupt the first part of the file
             std::fs::write(&genesis_file, genesis_data).unwrap();
 
-            let result = import(genesis_file.to_str().unwrap());
+            let result = import(genesis_file.to_str().unwrap(), false);
             assert!(result.is_err());
             assert!(result.unwrap_err().to_string().contains("invalid header"));
         }
@@ -119,7 +186,7 @@ mod tests {
             genesis_data[data_len - corruption.len()..].copy_from_slice(&corruption); // Corrupt the last part of the file
             std::fs::write(&genesis_file, genesis_data).unwrap();
 
-            let result = import(genesis_file.to_str().unwrap());
+            let result = import(genesis_file.to_str().unwrap(), false);
             assert!(result.is_err());
             assert!(
                 result
@@ -140,7 +207,7 @@ mod tests {
         let db_path = tmpdir.path().join(BLOCK_DB_NAME);
         std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o555)).unwrap();
 
-        let result = import("somepath");
+        let result = import("somepath", true);
         // We expect an error because we cannot write to the database
         assert!(result.is_err());
         assert!(
