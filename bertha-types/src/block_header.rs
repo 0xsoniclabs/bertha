@@ -6,25 +6,35 @@ use sha3::Digest;
 use crate::{Address, AsHex, Bloom, Hash, U256};
 
 /// An Ethereum-compatible block header.
+///
+/// Fields are named according to the Ethereum Yellow Paper (Shanghai version).
+/// Go-ethereum and JSON RPC names, where they differ, are indicated through doc comments on each
+/// field.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 #[serde(from = "JsonRpcBlockHeader", into = "JsonRpcBlockHeader")]
 pub struct BlockHeader {
-    // The field names correspond to the names returned in the JSON RPC payload.
-    // Go-ethereum uses different names for some of them, see the comment on each line.
-    pub parent_hash: Hash,       // ParentHash
-    pub sha3_uncles: Hash,       // UncleHash
-    pub miner: Address,          // Coinbase
-    pub state_root: Hash,        // Root
-    pub transactions_root: Hash, // TxHash
-    pub receipts_root: Hash,     // ReceiptHash
-    pub logs_bloom: Bloom,       // Bloom
-    pub difficulty: U256,        // Difficulty
-    pub number: u64,             // Number
-    pub gas_limit: u64,          // GasLimit
-    pub gas_used: u64,           // GasUsed
-    pub timestamp: u64,          // Time
-    pub extra_data: Vec<u8>,     // Extra
-    pub mix_hash: Hash,          // MixDigest
+    pub parent_hash: Hash,
+    /// geth: UncleHash, JSON RPC: sha3Uncles
+    pub ommers_hash: Hash,
+    /// geth: Coinbase, JSON RPC: miner
+    pub beneficiary: Address,
+    /// geth: Root, JSON RPC: stateRoot
+    pub state_root: Hash,
+    /// geth: TxHash, JSON RPC: transactionsRoot
+    pub transactions_root: Hash,
+    /// geth: ReceiptHash, JSON RPC: receiptsRoot
+    pub receipts_root: Hash,
+    pub logs_bloom: Bloom,
+    pub difficulty: U256,
+    pub number: u64,
+    pub gas_limit: u64,
+    pub gas_used: u64,
+    /// geth: Time, JSON RPC: timestamp
+    pub timestamp: u64,
+    /// geth: Extra, JSON RPC: extraData
+    pub extra_data: Vec<u8>,
+    /// geth: MixDigest, JSON RPC: mixHash
+    pub prev_randao: Hash,
 
     /// The block nonce is a legacy field that was used for proof of work.
     /// For proof of stake it should always be "0x0000000000000000".
@@ -32,22 +42,24 @@ pub struct BlockHeader {
     /// NOTE: We don't use a [u64] type for this field,
     /// because that uses a variable length RLP encoding, where this fields needs to be
     /// encoded to a fixed length array of 8 bytes.
-    pub nonce: [u8; 8], // Nonce
+    pub nonce: [u8; 8],
 
     // Optional fields that have been added by EIP-1559, EIP-4895 and EIP-4844 and may not be
     // present in older blocks.
-    pub base_fee_per_gas: Option<U256>, // BaseFee
-    pub withdrawals_root: Option<Hash>, // WithdrawalsHash
-    pub blob_gas_used: Option<u64>,     // BlobGasUsed
-    pub excess_blob_gas: Option<u64>,   // ExcessBlobGas
+    /// geth: BaseFee, JSON RPC: baseFeePerGas
+    pub base_fee_per_gas: Option<U256>,
+    /// geth: WithdrawalsHash, JSON RPC: withdrawalsRoot
+    pub withdrawals_root: Option<Hash>,
+    pub blob_gas_used: Option<u64>,
+    pub excess_blob_gas: Option<u64>,
 }
 
 impl Default for BlockHeader {
     fn default() -> Self {
         Self {
             parent_hash: Hash::default(),
-            sha3_uncles: Hash::default(),
-            miner: Address::default(),
+            ommers_hash: Hash::default(),
+            beneficiary: Address::default(),
             state_root: Hash::default(),
             transactions_root: Hash::default(),
             receipts_root: Hash::default(),
@@ -58,7 +70,7 @@ impl Default for BlockHeader {
             gas_used: 0,
             timestamp: 0,
             extra_data: Vec::new(),
-            mix_hash: Hash::default(),
+            prev_randao: Hash::default(),
             nonce: <[u8; 8]>::default(),
             base_fee_per_gas: None,
             withdrawals_root: None,
@@ -81,8 +93,8 @@ impl Encodable for BlockHeader {
         }
         .encode(out);
         Encodable::encode(&self.parent_hash, out);
-        Encodable::encode(&self.sha3_uncles, out);
-        Encodable::encode(&self.miner, out);
+        Encodable::encode(&self.ommers_hash, out);
+        Encodable::encode(&self.beneficiary, out);
         Encodable::encode(&self.state_root, out);
         Encodable::encode(&self.transactions_root, out);
         Encodable::encode(&self.receipts_root, out);
@@ -93,7 +105,7 @@ impl Encodable for BlockHeader {
         Encodable::encode(&self.gas_used, out);
         Encodable::encode(&self.timestamp, out);
         Encodable::encode(&self.extra_data.as_slice(), out); // <- needs custom encoding
-        Encodable::encode(&self.mix_hash, out);
+        Encodable::encode(&self.prev_randao, out);
         Encodable::encode(&self.nonce, out);
         if let Some(val) = self.base_fee_per_gas.as_ref() {
             Encodable::encode(val, out)
@@ -134,8 +146,8 @@ impl Decodable for BlockHeader {
         }
         let this = Self {
             parent_hash: Decodable::decode(b)?,
-            sha3_uncles: Decodable::decode(b)?,
-            miner: Decodable::decode(b)?,
+            ommers_hash: Decodable::decode(b)?,
+            beneficiary: Decodable::decode(b)?,
             state_root: Decodable::decode(b)?,
             transactions_root: Decodable::decode(b)?,
             receipts_root: Decodable::decode(b)?,
@@ -146,7 +158,7 @@ impl Decodable for BlockHeader {
             gas_used: Decodable::decode(b)?,
             timestamp: Decodable::decode(b)?,
             extra_data: alloy_rlp::Header::decode_bytes(b, false)?.to_vec(), // custom
-            mix_hash: Decodable::decode(b)?,
+            prev_randao: Decodable::decode(b)?,
             nonce: Decodable::decode(b)?,
             base_fee_per_gas: if started_len - b.len() < payload_length {
                 if alloy_rlp::private::Option::map_or(b.first(), false, |b| {
@@ -211,8 +223,8 @@ impl Decodable for BlockHeader {
 impl BlockHeader {
     fn alloy_rlp_payload_length(&self) -> usize {
         Encodable::length(&self.parent_hash)
-            + Encodable::length(&self.sha3_uncles)
-            + Encodable::length(&self.miner)
+            + Encodable::length(&self.ommers_hash)
+            + Encodable::length(&self.beneficiary)
             + Encodable::length(&self.state_root)
             + Encodable::length(&self.transactions_root)
             + Encodable::length(&self.receipts_root)
@@ -223,7 +235,7 @@ impl BlockHeader {
             + Encodable::length(&self.gas_used)
             + Encodable::length(&self.timestamp)
             + Encodable::length(&self.extra_data.as_slice()) // custom
-            + Encodable::length(&self.mix_hash)
+            + Encodable::length(&self.prev_randao)
             + Encodable::length(&self.nonce)
             + self
                 .base_fee_per_gas
@@ -316,8 +328,8 @@ impl From<JsonRpcBlockHeader> for BlockHeader {
     fn from(value: JsonRpcBlockHeader) -> Self {
         Self {
             parent_hash: value.parent_hash.0,
-            sha3_uncles: value.sha3_uncles.0,
-            miner: value.miner.0,
+            ommers_hash: value.sha3_uncles.0,
+            beneficiary: value.miner.0,
             state_root: value.state_root.0,
             transactions_root: value.transactions_root.0,
             receipts_root: value.receipts_root.0,
@@ -328,7 +340,7 @@ impl From<JsonRpcBlockHeader> for BlockHeader {
             gas_used: value.gas_used.0,
             timestamp: value.timestamp.0,
             extra_data: value.extra_data.0,
-            mix_hash: value.mix_hash.0,
+            prev_randao: value.mix_hash.0,
             nonce: value.nonce.0,
             base_fee_per_gas: value.base_fee_per_gas.map(|v| v.0),
             withdrawals_root: value.withdrawals_root.map(|v| v.0),
@@ -342,8 +354,8 @@ impl From<BlockHeader> for JsonRpcBlockHeader {
     fn from(value: BlockHeader) -> Self {
         Self {
             parent_hash: AsHex(value.parent_hash),
-            sha3_uncles: AsHex(value.sha3_uncles),
-            miner: AsHex(value.miner),
+            sha3_uncles: AsHex(value.ommers_hash),
+            miner: AsHex(value.beneficiary),
             state_root: AsHex(value.state_root),
             transactions_root: AsHex(value.transactions_root),
             receipts_root: AsHex(value.receipts_root),
@@ -354,7 +366,7 @@ impl From<BlockHeader> for JsonRpcBlockHeader {
             gas_used: AsHex(value.gas_used),
             timestamp: AsHex(value.timestamp),
             extra_data: AsHex(value.extra_data),
-            mix_hash: AsHex(value.mix_hash),
+            mix_hash: AsHex(value.prev_randao),
             nonce: AsHex(value.nonce),
             base_fee_per_gas: value.base_fee_per_gas.map(AsHex),
             withdrawals_root: value.withdrawals_root.map(AsHex),
@@ -424,14 +436,14 @@ mod tests {
             .unwrap()
         );
         assert_eq!(
-            header.sha3_uncles,
+            header.ommers_hash,
             Hash::try_from_hex(
                 "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"
             )
             .unwrap()
         );
         assert_eq!(
-            header.miner,
+            header.beneficiary,
             Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap()
         );
         assert_eq!(
@@ -471,7 +483,7 @@ mod tests {
             Vec::try_from_hex("0x26a0531500000000125a1be0").unwrap()
         );
         assert_eq!(
-            header.mix_hash,
+            header.prev_randao,
             Hash::try_from_hex(
                 "0xa6e19a868c8d649c9624a52842417e1ba84bc11024fbe8ef9c9c4c596ae59a1c"
             )
@@ -502,8 +514,8 @@ mod tests {
     fn can_be_serialized_to_json() {
         let header: BlockHeader = BlockHeader {
             parent_hash: Hash::try_from_hex("0x4849bafd75ec931bd8b95e168ad52aa45eb942a7b0e294825b77696f95d33f67").unwrap(),
-            sha3_uncles: Hash::try_from_hex("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347").unwrap(),
-            miner: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
+            ommers_hash: Hash::try_from_hex("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347").unwrap(),
+            beneficiary: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
             state_root: Hash::try_from_hex("0x794ae8d5b4758807b0a043bf938ea7c3cbbaccfca400e2e6c5496f9974be45b5").unwrap(),
             transactions_root: Hash::try_from_hex("0x4caf573d465dd16b43dd8e7472e6d29cba30ccda22746f0273d10fd3360f17f8").unwrap(),
             receipts_root: Hash::try_from_hex("0x5f3e0100ab247f520f5a123792f54d8e15f44e9f1e00c43a28f40aad2897a1b1").unwrap(),
@@ -516,7 +528,7 @@ mod tests {
             gas_used: u64::try_from_hex("0x187e67").unwrap(),
             timestamp: u64::try_from_hex("0x67f3a650").unwrap(),
             extra_data: Vec::try_from_hex("0x26a0531500000000125a1be0").unwrap(),
-            mix_hash: Hash::try_from_hex("0xa6e19a868c8d649c9624a52842417e1ba84bc11024fbe8ef9c9c4c596ae59a1c").unwrap(),
+            prev_randao: Hash::try_from_hex("0xa6e19a868c8d649c9624a52842417e1ba84bc11024fbe8ef9c9c4c596ae59a1c").unwrap(),
             nonce: <[u8; 8]>::try_from_hex("0x0000000000000000").unwrap(),
             base_fee_per_gas: Some(U256::try_from_hex("0xba43b7400").unwrap()),
             withdrawals_root: Some(Hash::try_from_hex("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").unwrap()),
@@ -533,8 +545,8 @@ mod tests {
     fn can_be_encoded_to_rlp() {
         let mut header = BlockHeader {
             parent_hash: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
-            sha3_uncles: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
-            miner: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
+            ommers_hash: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            beneficiary: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
             state_root: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
             transactions_root: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
             receipts_root: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
@@ -545,7 +557,7 @@ mod tests {
             gas_used: u64::try_from_hex("0x0").unwrap(),
             timestamp: u64::try_from_hex("0x0").unwrap(),
             extra_data: Vec::try_from_hex("0x").unwrap(),
-            mix_hash: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            prev_randao: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
             nonce: <[u8; 8]>::try_from_hex("0x0000000000000000").unwrap(),
             base_fee_per_gas: None,
             withdrawals_root: None,
@@ -568,8 +580,8 @@ mod tests {
     fn can_be_decoded_from_rlp() {
         let mut header = BlockHeader {
             parent_hash: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
-            sha3_uncles: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
-            miner: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
+            ommers_hash: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            beneficiary: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
             state_root: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
             transactions_root: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
             receipts_root: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
@@ -580,7 +592,7 @@ mod tests {
             gas_used: u64::try_from_hex("0x0").unwrap(),
             timestamp: u64::try_from_hex("0x0").unwrap(),
             extra_data: Vec::try_from_hex("0x").unwrap(),
-            mix_hash: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
+            prev_randao: Hash::try_from_hex("0x0000000000000000000000000000000000000000000000000000000000000000").unwrap(),
             nonce: <[u8; 8]>::try_from_hex("0x0000000000000000").unwrap(),
             base_fee_per_gas: None,
             withdrawals_root: None,
