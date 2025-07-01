@@ -18,6 +18,7 @@
 
 // Changelist:
 // - Deleted everything apart from RPCMarshalHeader, RPCMarshalBlock, RPCTransaction, newRPCTransactionWithoutBlock, newRPCTransactionFromBlockIndex, newRPCTransaction and effectiveGasPrice
+// - add receipts to RPCMarshalBlock
 
 // Package geth provides functions taken from the go-ethereum library to marshal Ethereum blocks and transactions
 package geth
@@ -75,7 +76,7 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 // RPCMarshalBlock converts the given block to the RPC output which depends on fullTx. If inclTx is true transactions are
 // returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
 // transaction hashes.
-func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, config *params.ChainConfig) map[string]interface{} {
+func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, receipts []*types.Receipt, config *params.ChainConfig) map[string]interface{} {
 	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 
@@ -95,6 +96,14 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, config *param
 		}
 		fields["transactions"] = transactions
 	}
+
+	formattedReceipts := make([]interface{}, len(receipts))
+	for i, receipt := range receipts {
+		formattedReceipts[i] =
+			RpcReceiptJson(receipt)
+	}
+	fields["receipts"] = formattedReceipts
+
 	uncles := block.Uncles()
 	uncleHashes := make([]common.Hash, len(uncles))
 	for i, uncle := range uncles {

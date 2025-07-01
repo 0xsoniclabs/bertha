@@ -50,3 +50,11 @@ func toRustReceipt(receipt *types.Receipt) string {
 func toRustBloom(r *types.Receipt) string {
 	return toRustByteArray(r.Bloom.Bytes())
 }
+
+func DefaultReceipt() *types.Receipt {
+	return &types.Receipt{
+		PostState: []byte{},
+		Status:    1,
+		Logs:      []*types.Log{},
+	}
+}

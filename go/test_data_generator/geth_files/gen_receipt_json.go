@@ -20,6 +20,7 @@
 // Changelist:
 // - Deleted everything except for MarshallReceiptJson
 // - removed "omitempty" tag from "type" field
+// - added RpcReceiptJson
 
 package geth
 
@@ -31,25 +32,26 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-// MarshalJSON marshals as JSON.
-func MarshallReceiptJson(r *types.Receipt) ([]byte, error) {
-	type Receipt struct {
-		Type              hexutil.Uint64 `json:"type"`
-		PostState         hexutil.Bytes  `json:"root"`
-		Status            hexutil.Uint64 `json:"status"`
-		CumulativeGasUsed hexutil.Uint64 `json:"cumulativeGasUsed" gencodec:"required"`
-		Bloom             types.Bloom    `json:"logsBloom"         gencodec:"required"`
-		Logs              []*types.Log   `json:"logs"              gencodec:"required"`
-		TxHash            common.Hash    `json:"transactionHash" gencodec:"required"`
-		ContractAddress   common.Address `json:"contractAddress"`
-		GasUsed           hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
-		EffectiveGasPrice *hexutil.Big   `json:"effectiveGasPrice"`
-		BlobGasUsed       hexutil.Uint64 `json:"blobGasUsed,omitempty"`
-		BlobGasPrice      *hexutil.Big   `json:"blobGasPrice,omitempty"`
-		BlockHash         common.Hash    `json:"blockHash,omitempty"`
-		BlockNumber       *hexutil.Big   `json:"blockNumber,omitempty"`
-		TransactionIndex  hexutil.Uint   `json:"transactionIndex"`
-	}
+type Receipt struct {
+	Type              hexutil.Uint64 `json:"type"`
+	PostState         hexutil.Bytes  `json:"root"`
+	Status            hexutil.Uint64 `json:"status"`
+	CumulativeGasUsed hexutil.Uint64 `json:"cumulativeGasUsed" gencodec:"required"`
+	Bloom             types.Bloom    `json:"logsBloom"         gencodec:"required"`
+	Logs              []*types.Log   `json:"logs"              gencodec:"required"`
+	TxHash            common.Hash    `json:"transactionHash" gencodec:"required"`
+	ContractAddress   common.Address `json:"contractAddress"`
+	GasUsed           hexutil.Uint64 `json:"gasUsed" gencodec:"required"`
+	EffectiveGasPrice *hexutil.Big   `json:"effectiveGasPrice"`
+	BlobGasUsed       hexutil.Uint64 `json:"blobGasUsed,omitempty"`
+	BlobGasPrice      *hexutil.Big   `json:"blobGasPrice,omitempty"`
+	BlockHash         common.Hash    `json:"blockHash,omitempty"`
+	BlockNumber       *hexutil.Big   `json:"blockNumber,omitempty"`
+	TransactionIndex  hexutil.Uint   `json:"transactionIndex"`
+}
+
+// RpcReceiptJson converts a Receipt to the RPC representation.
+func RpcReceiptJson(r *types.Receipt) Receipt {
 	var enc Receipt
 	enc.Type = hexutil.Uint64(r.Type)
 	enc.PostState = r.PostState
@@ -66,5 +68,11 @@ func MarshallReceiptJson(r *types.Receipt) ([]byte, error) {
 	enc.BlockHash = r.BlockHash
 	enc.BlockNumber = (*hexutil.Big)(r.BlockNumber)
 	enc.TransactionIndex = hexutil.Uint(r.TransactionIndex)
+	return enc
+}
+
+// MarshalJSON marshals as JSON.
+func MarshallReceiptJson(r *types.Receipt) ([]byte, error) {
+	enc := RpcReceiptJson(r)
 	return json.Marshal(&enc)
 }
