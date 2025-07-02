@@ -14,12 +14,15 @@ rocksdb = { version = "0.23.0", default-features = false, features = [
 ] }
 tempfile = "3.20.0"
 thiserror = "2.0.12"
-tonic = "0.13.1"
+tonic = { version = "0.13.1", features = ["gzip"] }
+tokio = "1.45.1"
 clap = { version = "4.5.40", features = ["derive"] }
 indicatif = "0.17.11"
+tokio-stream = "0.1.17"
 
 [dev-dependencies]
 rand = "0.9.1"
+mockall = "0.13.1"
 
 [build-dependencies]
 tonic-build = "*"

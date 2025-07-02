@@ -19,6 +19,10 @@ pub const BLOCK_DB_NAME: &str = ".blockdb";
 /// A database that allows to store and and query [Block]s for multiple different blockchains.
 /// Blocks are encoded as protobuf messages before being stored in the database.
 /// As database operations may fail for various reasons, all methods return a [Result].
+///
+/// Currently, the block database uses 64-bit chain-IDs for convenience, as opposed to the 256-bit
+/// used by Ethereum. This could be changed in the future if needed.
+#[cfg_attr(test, mockall::automock)]
 pub trait BlockDb {
     /// Key for storing the IDs of all chains in the database.
     /// The ranges for each chain-ID are stored using the chain-ID as key.
@@ -160,7 +164,8 @@ pub trait BlockDb {
     fn remove_range_from_ranges(
         &mut self,
         chain_id: u64,
-        (del_start, del_end): (u64, u64),
+        del_start: u64,
+        del_end: u64,
     ) -> Result<(), Error> {
         // assumption:
         // - ranges are valid (start <= end)
@@ -305,7 +310,7 @@ pub trait BlockDb {
         &self,
         chain_id: u64,
         from: u64,
-    ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>>;
+    ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> + Send;
 
     /// Like `iterate_raw`, but iterates in reverse order.
     fn iterate_reverse_raw(
@@ -517,7 +522,7 @@ impl BlockDb for RocksBlockDb {
         batch.delete_range(from, to);
         self.db.write(batch)?;
 
-        self.remove_range_from_ranges(chain_id, (from_block, to_block))
+        self.remove_range_from_ranges(chain_id, from_block, to_block)
     }
 }
 
@@ -711,7 +716,8 @@ mod tests {
                 chain_id.to_be_bytes().to_vec(),
                 make_range_value(init_ranges),
             ); // reset value
-            db.remove_range_from_ranges(chain_id, del_range).unwrap();
+            db.remove_range_from_ranges(chain_id, del_range.0, del_range.1)
+                .unwrap();
             assert_eq!(
                 db.0.get(chain_id.to_be_bytes().as_slice()),
                 Some(&make_range_value(expected_ranges))

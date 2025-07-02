@@ -1,0 +1,22 @@
+syntax = "proto3";
+package rpc;
+
+service BlockRpc {
+  rpc GetBlock (BlockRequest) returns (EncodedBlock);
+  rpc GetBlockRange (BlockRangeRequest) returns (stream EncodedBlock);
+}
+
+message BlockRequest {
+  uint64 chainId = 1;
+  uint64 number = 2;
+}
+
+message BlockRangeRequest {
+  uint64 chainId = 1;
+  uint64 from = 2;
+  uint64 to = 3;
+}
+
+message EncodedBlock {
+  bytes data = 1;
+}
