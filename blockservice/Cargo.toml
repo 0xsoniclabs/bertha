@@ -19,11 +19,11 @@ tokio = "1.45.1"
 clap = { version = "4.5.40", features = ["derive"] }
 indicatif = "0.17.11"
 tokio-stream = "0.1.17"
-futures = "0.3.31"
 
 [dev-dependencies]
 rand = "0.9.1"
 mockall = "0.13.1"
+futures = "0.3.31"
 
 [build-dependencies]
 tonic-build = "*"
