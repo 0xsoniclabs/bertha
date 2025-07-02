@@ -1,12 +1,15 @@
-use std::sync::Arc;
+use std::{
+    net::{IpAddr, Ipv6Addr, SocketAddr},
+    sync::Arc,
+};
 
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{codec::CompressionEncoding, transport::Server};
 
 use crate::{blockdb::BlockDb, proto_rpc};
 
-#[derive(Debug)]
 /// A gRPC server that provides access to block data stored in a database.
+#[derive(Debug)]
 pub struct RpcServer<Db: BlockDb + Send + Sync + 'static> {
     db: Arc<Db>,
 }
@@ -17,14 +20,15 @@ impl<Db> RpcServer<Db>
 where
     Db: BlockDb + Send + Sync + 'static,
 {
-    /// Creates a new `RpcServer` instance with the provided database.
+    /// Creates a new [RpcServer] instance with the provided database.
     pub fn new(db: Db) -> Self {
         RpcServer { db: Arc::new(db) }
     }
 
     /// Starts the gRPC server on the specified port.
     pub async fn serve(self, port: u16) -> Result<(), Box<dyn std::error::Error>> {
-        let addr = format!("[::1]:{port}").parse()?;
+        // This allows both IPv4 and IPv6 connections
+        let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
 
         println!("Listening on {addr}...");
 
