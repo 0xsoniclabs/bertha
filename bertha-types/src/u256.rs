@@ -38,7 +38,7 @@ impl HexConvert for U256 {
     fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
         BnumU256::from_str_radix(value.trim_start_matches("0x"), 16)
             .map(Self)
-            .map_err(Into::<ParseHexError>::into)
+            .map_err(ParseHexError::from)
     }
 
     fn to_hex(&self) -> String {

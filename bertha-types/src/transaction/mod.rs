@@ -165,9 +165,9 @@ impl TryFrom<u8> for TransactionType {
 
 impl HexConvert for TransactionType {
     fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
-        let v = u8::from_str_radix(value.trim_start_matches("0x"), 16)
-            .map_err(Into::<ParseHexError>::into)?;
-        TransactionType::try_from(v)
+        u8::from_str_radix(value.trim_start_matches("0x"), 16)
+            .map_err(ParseHexError::from)?
+            .try_into()
             .map_err(|err: TransactionError| ParseHexError::Custom(err.to_string()))
     }
 

@@ -269,8 +269,7 @@ impl BlockHeader {
         let rlp = alloy_rlp::encode(self);
         let mut hasher = sha3::Keccak256::new();
         hasher.update(rlp);
-        let bytes: [u8; 32] = hasher.finalize().into();
-        Hash::from(bytes)
+        hasher.finalize().into()
     }
 
     /// Checks if it is possible that the block contains logs for the given address and topics.
@@ -680,7 +679,7 @@ mod tests {
         }
 
         let block = BlockHeader {
-            logs_bloom: Bloom::from(bloom.to_fixed_bytes()),
+            logs_bloom: bloom.to_fixed_bytes(),
             ..Default::default()
         };
 
