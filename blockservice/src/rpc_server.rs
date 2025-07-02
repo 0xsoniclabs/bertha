@@ -58,10 +58,12 @@ where
         let proto_rpc::BlockRequest { chain_id, number } = request.into_inner();
         let encoded_block = self.db.get_raw(chain_id, number);
 
-        println!(
-            "Received request for block {} on chain {} from {:?}",
-            number, chain_id, remote_addr
-        );
+        match remote_addr {
+            Some(addr) => {
+                println!("Received request for block {number} on chain {chain_id} from {addr}");
+            }
+            None => println!("Received request for block {number} on chain {chain_id}"),
+        }
 
         match encoded_block {
             Ok(Some(block)) => Ok(tonic::Response::new(proto_rpc::EncodedBlock {
