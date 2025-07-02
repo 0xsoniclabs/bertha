@@ -1,8 +1,6 @@
 use std::path::Path;
 
-use blockservice::blockdb::{BlockDb, RocksBlockDb};
-
-use crate::BLOCK_DB_NAME;
+use crate::blockdb::{BLOCK_DB_NAME, BlockDb, RocksBlockDb};
 
 pub fn list(
     chain_id: Option<u64>,
