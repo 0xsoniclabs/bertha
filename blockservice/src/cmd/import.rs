@@ -1,12 +1,14 @@
 use std::{fmt::Write, fs::File, io::BufReader, path::Path};
 
 use bertha_types::{Hash, HexConvert};
-use blockservice::blockdb::{BlockDb, RocksBlockDb};
 use genesis_parser::Genesis;
 use indicatif::{ProgressBar, ProgressState, ProgressStyle};
 use prost::Message;
 
-use crate::BLOCK_DB_NAME;
+use crate::{
+    blockdb::{BLOCK_DB_NAME, BlockDb, RocksBlockDb},
+    proto,
+};
 
 pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::error::Error>> {
     let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize()?;
@@ -72,7 +74,7 @@ pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::e
 
         // We use put_raw so we can count bytes.
         let number = block.number;
-        let protoblock = blockservice::proto::Block::from(block).encode_to_vec();
+        let protoblock = proto::Block::from(block).encode_to_vec();
         uncompressed_bytes_written += protoblock.len();
         db.put_raw(chain_id, number, &protoblock)?;
         block_count += 1;

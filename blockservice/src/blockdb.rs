@@ -13,6 +13,9 @@ impl From<rocksdb::Error> for Error {
     }
 }
 
+/// Default blockdb name
+pub const BLOCK_DB_NAME: &str = ".blockdb";
+
 /// A database that allows to store and and query [Block]s for multiple different blockchains.
 /// Blocks are encoded as protobuf messages before being stored in the database.
 /// As database operations may fail for various reasons, all methods return a [Result].

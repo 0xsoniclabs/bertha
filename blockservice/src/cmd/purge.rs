@@ -1,8 +1,6 @@
 use std::path::Path;
 
-use blockservice::blockdb::{BlockDb, RocksBlockDb};
-
-use crate::BLOCK_DB_NAME;
+use crate::blockdb::{BLOCK_DB_NAME, BlockDb, RocksBlockDb};
 
 pub fn purge(
     chain_id: u64,
@@ -25,7 +23,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        BLOCK_DB_NAME,
+        blockdb::BLOCK_DB_NAME,
         cmd::{ChangeWorkingDir, init},
     };
 

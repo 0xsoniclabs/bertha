@@ -1,9 +1,8 @@
 use std::path::Path;
 
 use bertha_types::{Hash, HexConvert};
-use blockservice::blockdb::{BlockDb, RocksBlockDb};
 
-use crate::BLOCK_DB_NAME;
+use crate::blockdb::{BLOCK_DB_NAME, BlockDb, RocksBlockDb};
 
 pub fn verify(
     chain_id: u64,
@@ -93,13 +92,12 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     use bertha_types::Block;
-    use blockservice::proto;
     use prost::Message;
 
     use super::*;
     use crate::{
-        BLOCK_DB_NAME,
         cmd::{ChangeWorkingDir, init},
+        proto,
     };
 
     #[test]
