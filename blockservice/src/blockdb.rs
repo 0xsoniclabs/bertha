@@ -527,7 +527,7 @@ impl BlockDb for RocksBlockDb {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
