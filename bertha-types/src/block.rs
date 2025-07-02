@@ -1,8 +1,9 @@
 use ethbloom::{Bloom, Input};
+use serde::{Deserialize, Serialize};
 
 use crate::{
-    Address, BlockHeader, EMPTY_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, HexConvert, Transaction,
-    TransactionReceipt, U256, compute_root_hash,
+    Address, AsHex, BlockHeader, EMPTY_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, HexConvert,
+    Transaction, TransactionReceipt, U256, compute_root_hash,
 };
 
 /// An Ethereum-compatible block in "normal form", that is, without any redundant or derived fields.
@@ -13,7 +14,8 @@ use crate::{
 /// Fields are named according to the Ethereum Yellow Paper (Shanghai version).
 /// Go-ethereum and JSON RPC names, where they differ, are indicated through doc comments on each
 /// field.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "JsonBlock", into = "JsonBlock")]
 pub struct Block {
     pub parent_hash: Hash,
     /// geth: UncleHash, JSON RPC: sha3Uncles
@@ -97,8 +99,8 @@ impl Block {
 
         BlockHeader {
             parent_hash: self.parent_hash,
-            sha3_uncles: self.ommers_hash,
-            miner: self.beneficiary,
+            ommers_hash: self.ommers_hash,
+            beneficiary: self.beneficiary,
             state_root: self.state_root,
             transactions_root,
             receipts_root,
@@ -109,7 +111,7 @@ impl Block {
             gas_used,
             timestamp: self.timestamp,
             extra_data: self.extra_data.clone(),
-            mix_hash: self.prev_randao,
+            prev_randao: self.prev_randao,
             nonce: self.nonce,
             base_fee_per_gas: self.base_fee_per_gas,
             withdrawals_root: self.withdrawals_root,
@@ -119,9 +121,90 @@ impl Block {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonBlock {
+    pub parent_hash: AsHex<Hash>,
+    pub sha3_uncles: AsHex<Hash>,
+    pub miner: AsHex<Address>,
+    pub state_root: AsHex<Hash>,
+    pub difficulty: AsHex<u64>,
+    pub number: AsHex<u64>,
+    pub gas_limit: AsHex<u64>,
+    pub timestamp: AsHex<u64>,
+    pub extra_data: AsHex<Vec<u8>>,
+    pub mix_hash: AsHex<Hash>,
+    pub nonce: AsHex<[u8; 8]>,
+    pub transactions: Vec<Transaction>,
+    pub receipts: Vec<TransactionReceipt>,
+    pub base_fee_per_gas: Option<AsHex<U256>>,
+    pub withdrawals_root: Option<AsHex<Hash>>,
+    pub blob_gas_used: Option<AsHex<u64>>,
+    pub excess_blob_gas: Option<AsHex<u64>>,
+    pub parent_beacon_block_root: Option<AsHex<Hash>>,
+    pub requests_hash: Option<AsHex<Hash>>,
+}
+
+impl From<Block> for JsonBlock {
+    fn from(block: Block) -> Self {
+        JsonBlock {
+            parent_hash: AsHex(block.parent_hash),
+            sha3_uncles: AsHex(block.ommers_hash),
+            miner: AsHex(block.beneficiary),
+            state_root: AsHex(block.state_root),
+            difficulty: AsHex(block.difficulty),
+            number: AsHex(block.number),
+            gas_limit: AsHex(block.gas_limit),
+            timestamp: AsHex(block.timestamp),
+            extra_data: AsHex(block.extra_data),
+            mix_hash: AsHex(block.prev_randao),
+            nonce: AsHex(block.nonce),
+            transactions: block.transactions,
+            receipts: block.receipts,
+            base_fee_per_gas: block.base_fee_per_gas.map(AsHex),
+            withdrawals_root: block.withdrawals_root.map(AsHex),
+            blob_gas_used: block.blob_gas_used.map(AsHex),
+            excess_blob_gas: block.excess_blob_gas.map(AsHex),
+            parent_beacon_block_root: block.parent_beacon_block_root.map(AsHex),
+            requests_hash: block.requests_hash.map(AsHex),
+        }
+    }
+}
+
+impl From<JsonBlock> for Block {
+    fn from(json_block: JsonBlock) -> Self {
+        Block {
+            parent_hash: json_block.parent_hash.0,
+            ommers_hash: json_block.sha3_uncles.0,
+            beneficiary: json_block.miner.0,
+            state_root: json_block.state_root.0,
+            difficulty: json_block.difficulty.0,
+            number: json_block.number.0,
+            gas_limit: json_block.gas_limit.0,
+            timestamp: json_block.timestamp.0,
+            extra_data: json_block.extra_data.0,
+            prev_randao: json_block.mix_hash.0,
+            nonce: json_block.nonce.0,
+            transactions: json_block.transactions,
+            receipts: json_block.receipts,
+            base_fee_per_gas: json_block.base_fee_per_gas.map(|v| v.0),
+            withdrawals_root: json_block.withdrawals_root.map(|v| v.0),
+            blob_gas_used: json_block.blob_gas_used.map(|v| v.0),
+            excess_blob_gas: json_block.excess_blob_gas.map(|v| v.0),
+            parent_beacon_block_root: json_block.parent_beacon_block_root.map(|v| v.0),
+            requests_hash: json_block.requests_hash.map(|v| v.0),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::test_data::test_data_blocks::generate_blocks_with_data;
+    use serde_json::Value;
+
+    use crate::{
+        Block, Transaction, TransactionReceipt,
+        test_data::test_data_blocks::generate_blocks_with_data,
+    };
 
     #[test]
     fn block_to_header_to_hash_produces_correct_hash() {
@@ -129,6 +212,59 @@ mod tests {
             let block = data.block;
             let hash = data.block_hash;
             assert_eq!(block.to_header().compute_hash(), hash)
+        }
+    }
+
+    #[test]
+    fn can_be_serialized_to_json() {
+        for data in generate_blocks_with_data() {
+            let block = data.block;
+
+            let mut expected = serde_json::from_str::<Value>(&data.json_representation).unwrap();
+            let expected_fields = expected.as_object_mut().unwrap();
+
+            let serialized_block = serde_json::to_value(&block).unwrap();
+
+            for (key, value) in serialized_block.as_object().unwrap() {
+                // skip optional fields that are null because they are not present in the
+                // expected JSON representation
+                let opts = [
+                    "baseFeePerGas",
+                    "withdrawalsRoot",
+                    "blobGasUsed",
+                    "excessBlobGas",
+                    "parentBeaconBlockRoot",
+                    "requestsHash",
+                ];
+                if opts.contains(&key.as_str()) && value.is_null() {
+                    continue;
+                }
+
+                let mut expected = expected_fields.get(key).unwrap().clone();
+                if key == "transactions" {
+                    // remove unused fields
+                    expected = serde_json::to_value(
+                        serde_json::from_value::<Vec<Transaction>>(expected).unwrap(),
+                    )
+                    .unwrap();
+                } else if key == "receipts" {
+                    // remove unused fields
+                    expected = serde_json::to_value(
+                        serde_json::from_value::<Vec<TransactionReceipt>>(expected).unwrap(),
+                    )
+                    .unwrap();
+                }
+                assert_eq!(*value, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn can_be_deserialized_from_json() {
+        for data in generate_blocks_with_data() {
+            let deserialized: Block = serde_json::from_str(&data.json_representation)
+                .expect("Deserialization from JSON should not fail");
+            assert_eq!(deserialized, data.block);
         }
     }
 }
