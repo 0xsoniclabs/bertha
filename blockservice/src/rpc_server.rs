@@ -82,54 +82,41 @@ where
         let remote_addr = request.remote_addr();
         let proto_rpc::BlockRangeRequest { chain_id, from, to } = request.into_inner();
 
-        if from >= to {
+        if from > to {
             return Err(tonic::Status::invalid_argument(
-                "Invalid block range: 'from' must be less than 'to'",
+                "Invalid block range: 'from' must be less than or equal to 'to'",
             ));
         }
 
-        println!(
-            "Received request for block range {}-{} on chain {} from {:?}",
-            from, to, chain_id, remote_addr
-        );
+        match remote_addr {
+            Some(remote_addr) => println!(
+                "Received request for block range {from}-{to} on chain {chain_id} from {remote_addr}"
+            ),
+            None => println!("Received request for block range {from}-{to} on chain {chain_id}",),
+        }
 
         let db = self.db.clone();
-        tokio::spawn(async move {
-            let mut error_occurred = false;
-            let it = db.iterate_raw(chain_id, from).take_while(move |result| {
-                if error_occurred {
-                    return false;
-                }
-                if let Ok((number, _)) = result {
-                    *number < to
-                } else {
-                    error_occurred = true;
-                    true
-                }
-            });
-
-            for result in it {
-                match result {
-                    Ok((_, block)) => {
-                        let encoded_block = proto_rpc::EncodedBlock {
-                            data: block.into_vec(),
-                        };
-                        if tx.send(Ok(encoded_block)).await.is_err() {
-                            break;
-                        }
+        for result in db.iterate_raw(chain_id, from) {
+            match result {
+                Ok((number, block)) => {
+                    if number > to {
+                        break;
                     }
-                    Err(e) => {
-                        if tx
-                            .send(Err(tonic::Status::internal(e.to_string())))
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
+                    let encoded_block = proto_rpc::EncodedBlock {
+                        data: block.into_vec(),
+                    };
+                    if tx.send(Ok(encoded_block)).await.is_err() {
+                        break;
                     }
+                }
+                Err(e) => {
+                    // try to send the error
+                    // because we always stop afterwards, we can ignore the result
+                    let _ = tx.send(Err(tonic::Status::internal(e.to_string()))).await;
+                    break;
                 }
             }
-        });
+        }
 
         Ok(tonic::Response::new(ReceiverStream::new(rx)))
     }
@@ -152,7 +139,7 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn serve_fails_with_incorrect_port() {
+    async fn serve_returns_error_if_binding_to_port_fails() {
         let db = MockBlockDb::new();
         let server = RpcServer::new(db);
 
@@ -223,10 +210,11 @@ mod tests {
     async fn get_block_range_returns_stream_of_blocks() {
         let mut db = MockBlockDb::new();
         let data = vec![
-            (1, 3, vec![2]),
+            (1, 3, vec![3]),
             (1, 7, vec![7]),
             (1, 8, vec![8]),
             (1, 9, vec![9]),
+            (1, 10, vec![10]),
         ];
         db.expect_iterate_raw().with(eq(1), eq(3)).returning({
             let data = data.clone();
@@ -256,36 +244,26 @@ mod tests {
             .await
             .expect("The stream should not yield an error");
 
-        assert_eq!(results.len(), 3);
+        assert_eq!(results.len(), 4);
         let results: Vec<_> = results.into_iter().map(|block| block.data).collect();
 
-        let expected: Vec<_> = data.into_iter().filter(|v| v.0 == 1).map(|v| v.2).collect();
-        assert_eq!(results, expected[0..3]); // last element not included
+        let expected: Vec<_> = data.into_iter().map(|v| v.2).collect();
+        assert_eq!(results, expected[0..4]); // last element not included
     }
 
     #[tokio::test]
     async fn get_block_range_returns_error_for_invalid_range() {
-        // 'from' is greater than or equal to 'to'
-        {
-            let server = RpcServer::new(MockBlockDb::new());
-            let request = Request::new(BlockRangeRequest {
-                chain_id: 1,
-                from: 5,
-                to: 5,
-            });
-            let response = server.get_block_range(request).await;
-            assert!(response.is_err());
-            assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
-
-            let request = Request::new(BlockRangeRequest {
-                chain_id: 1,
-                from: 10,
-                to: 5,
-            });
-            let response = server.get_block_range(request).await;
-            assert!(response.is_err());
-            assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
-        }
+        // From greater than To
+        let db = MockBlockDb::new();
+        let server = RpcServer::new(db);
+        let request = Request::new(BlockRangeRequest {
+            chain_id: 1,
+            from: 10,
+            to: 5,
+        });
+        let response = server.get_block_range(request).await;
+        assert!(response.is_err());
+        assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
     }
 
     #[tokio::test]
@@ -311,5 +289,10 @@ mod tests {
         let error = response.next().await.unwrap().unwrap_err();
         assert_eq!(error.code(), tonic::Code::Internal);
         assert!(error.message().contains("DB error"));
+
+        assert!(
+            response.next().await.is_none(),
+            "No more items should be in the stream after an error"
+        );
     }
 }
