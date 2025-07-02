@@ -24,6 +24,9 @@ tokio-stream = "0.1.17"
 [dev-dependencies]
 rand = "0.9.1"
 mockall = "0.13.1"
+hyper-util = "0.1.14"
+futures = "0.3.31"
+tower = "0.5.2"
 
 [build-dependencies]
 tonic-build = "*"
