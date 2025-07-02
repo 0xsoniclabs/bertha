@@ -186,16 +186,16 @@ mod tests {
     fn block_try_from_idx_full_block_converts_timestamp_and_duration_and_extra_data() {
         let idx_full_block = IdxFullBlock {
             block: FullBlock {
-                block_hash: Hash::from([0; 32]),
-                parent_hash: Hash::from([1; 32]),
-                state_root: Hash::from([2; 32]),
+                block_hash: [0; 32],
+                parent_hash: [1; 32],
+                state_root: [2; 32],
                 timestamp: 1234567890123,
                 duration: 1000,
                 difficulty: 42,
                 gas_limit: 8000000,
                 gas_used: 5000000,
                 base_fee: U256::from(100u8),
-                prev_randao: Hash::from([3; 32]),
+                prev_randao: [3; 32],
                 epoch: 0,
                 transactions: vec![],
                 receipts: vec![],
@@ -204,10 +204,10 @@ mod tests {
         };
 
         let block = Block {
-            parent_hash: Hash::from([1; 32]),
+            parent_hash: [1; 32],
             ommers_hash: Hash::try_from_hex(EMPTY_OMMERS_HASH).unwrap(),
             beneficiary: Default::default(),
-            state_root: Hash::from([2; 32]),
+            state_root: [2; 32],
             difficulty: 42,
             number: 0,
             gas_limit: 8000000,
@@ -216,7 +216,7 @@ mod tests {
             extra_data: vec![
                 0x21, 0xd9, 0x50, 0xcb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xe8,
             ],
-            prev_randao: Hash::from([3; 32]),
+            prev_randao: [3; 32],
             nonce: [0; 8],
             transactions: vec![],
             receipts: vec![],
@@ -255,10 +255,10 @@ mod tests {
     fn idx_full_block_try_from_block_converts_extra_data_to_timestamp_and_duration_and_computes_gas_used_and_block_hash()
      {
         let block = Block {
-            parent_hash: Hash::from([1; 32]),
+            parent_hash: [1; 32],
             ommers_hash: Hash::try_from_hex(EMPTY_OMMERS_HASH).unwrap(),
             beneficiary: Default::default(),
-            state_root: Hash::from([2; 32]),
+            state_root: [2; 32],
             difficulty: 42,
             number: 0,
             gas_limit: 8000000,
@@ -266,7 +266,7 @@ mod tests {
             extra_data: vec![
                 0x21, 0xd9, 0x50, 0xcb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xe8,
             ],
-            prev_randao: Hash::from([3; 32]),
+            prev_randao: [3; 32],
             nonce: [0; 8],
             transactions: vec![Transaction::default()],
             receipts: vec![TransactionReceipt {
@@ -284,15 +284,15 @@ mod tests {
         let idx_full_block = IdxFullBlock {
             block: FullBlock {
                 block_hash: block.to_header().compute_hash(),
-                parent_hash: Hash::from([1; 32]),
-                state_root: Hash::from([2; 32]),
+                parent_hash: [1; 32],
+                state_root: [2; 32],
                 timestamp: 1234567890123, // seconds from timestamp + nanoseconds from extra_data
                 duration: 1000,
                 difficulty: 42,
                 gas_limit: 8000000,
                 gas_used: 5000000,
                 base_fee: U256::from(100u8),
-                prev_randao: Hash::from([3; 32]),
+                prev_randao: [3; 32],
                 epoch: 0,
                 transactions: vec![RlpTransaction(Transaction::default())],
                 receipts: vec![StoredReceiptRlp {

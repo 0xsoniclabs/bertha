@@ -52,21 +52,21 @@ impl HexConvert for Vec<u8> {
 
 impl HexConvert for u64 {
     fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
-        u64::from_str_radix(value.trim_start_matches("0x"), 16).map_err(Into::<ParseHexError>::into)
+        u64::from_str_radix(value.trim_start_matches("0x"), 16).map_err(ParseHexError::from)
     }
 
     fn to_hex(&self) -> String {
-        format!("0x{:x}", self)
+        format!("0x{self:x}")
     }
 }
 
 impl HexConvert for u8 {
     fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
-        u8::from_str_radix(value.trim_start_matches("0x"), 16).map_err(Into::<ParseHexError>::into)
+        u8::from_str_radix(value.trim_start_matches("0x"), 16).map_err(ParseHexError::from)
     }
 
     fn to_hex(&self) -> String {
-        format!("0x{:x}", self)
+        format!("0x{self:x}")
     }
 }
 

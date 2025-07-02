@@ -847,7 +847,7 @@ mod tests {
                 requests_hash: Some(vec![0; 31]),
                 ..block.clone()
             };
-            let err = TryInto::<bertha_types::Block>::try_into(invalid_block).unwrap_err();
+            let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
             assert_eq!(err, Error::TypeConversion);
         }
     }
