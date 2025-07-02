@@ -13,7 +13,7 @@ fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             snapshot_file,
             verify,
         } => cmd::import(snapshot_file, verify),
-        Command::List { chain_id: _ } => todo!(),
+        Command::List { chain_id } => cmd::list(chain_id, std::io::stdout()),
         Command::Verify {
             chain_id,
             block_number,
