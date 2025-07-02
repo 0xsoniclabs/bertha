@@ -1,8 +1,6 @@
 use std::path::Path;
 
-use blockservice::blockdb::RocksBlockDb;
-
-use crate::BLOCK_DB_NAME;
+use crate::blockdb::{BLOCK_DB_NAME, RocksBlockDb};
 
 pub fn init(path: Option<impl AsRef<Path>>) -> Result<(), Box<dyn std::error::Error>> {
     let path = path

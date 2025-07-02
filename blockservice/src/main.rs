@@ -3,9 +3,8 @@ use clap::Parser;
 use crate::cli::{Args, Command};
 
 mod cli;
-mod cmd;
 
-const BLOCK_DB_NAME: &str = ".blockdb";
+use blockservice::cmd;
 
 fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
