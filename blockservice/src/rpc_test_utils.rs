@@ -1,4 +1,7 @@
-use std::vec::IntoIter;
+use std::{
+    sync::atomic::{AtomicU16, AtomicU64},
+    vec::IntoIter,
+};
 
 use hyper_util::rt::TokioIo;
 use tonic::transport::{Endpoint, Server, Uri};
@@ -10,13 +13,17 @@ use crate::{
 };
 
 pub const SERVER_STARTUP_TIMER: u64 = 100; // milliseconds
+static NEXT_TEST_PORT: AtomicU16 = AtomicU16::new(50051);
 
 /// A mock implementation of the BlockRpc service for testing purposes.
 /// This server can be used to simulate responses for the BlockRpc trait
 pub struct MockRpcServer {
     pub get_block_response: Result<Option<EncodedBlock>, tonic::Status>,
-    pub get_block_range_response: Result<Vec<Result<EncodedBlock, tonic::Status>>, tonic::Status>,
+    pub get_block_range_response:
+        Result<Vec<Vec<Result<EncodedBlock, tonic::Status>>>, tonic::Status>,
     pub list_response: Result<proto_rpc::EncodedChainRanges, tonic::Status>,
+    pub get_block_response_index: AtomicU64,
+    pub get_block_range_response_index: AtomicU64,
 }
 
 impl Default for MockRpcServer {
@@ -29,11 +36,13 @@ impl MockRpcServer {
     /// Construct a new MockRpcServer with default values.
     pub fn new() -> Self {
         MockRpcServer {
-            get_block_response: Ok(None),
-            get_block_range_response: Ok(vec![]),
             list_response: Ok(proto_rpc::EncodedChainRanges {
                 chain_ranges: vec![],
             }),
+            get_block_range_response_index: AtomicU64::new(0),
+            get_block_response_index: AtomicU64::new(0),
+            get_block_response: Ok(None),
+            get_block_range_response: Ok(vec![]),
         }
     }
 }
@@ -62,7 +71,16 @@ impl proto_rpc::block_rpc_server::BlockRpc for MockRpcServer {
         _request: tonic::Request<proto_rpc::BlockRangeRequest>,
     ) -> Result<tonic::Response<Self::GetBlockRangeStream>, tonic::Status> {
         match &self.get_block_range_response {
-            Ok(blocks) => Ok(tonic::Response::new(futures::stream::iter(blocks.clone()))),
+            Ok(blocks) => {
+                let blocks = blocks
+                    .get(
+                        self.get_block_range_response_index
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                            as usize,
+                    )
+                    .unwrap();
+                Ok(tonic::Response::new(futures::stream::iter(blocks.clone())))
+            }
             Err(e) => Err(tonic::Status::internal(e.to_string())),
         }
     }
@@ -78,17 +96,22 @@ impl proto_rpc::block_rpc_server::BlockRpc for MockRpcServer {
     }
 }
 
+//TODO: add testing for the MockRpcServer
+
 /// A mock server that can be stopped and polled for readiness.
 /// This is useful for testing commands where the client is constructed from an HTTP URI.
 pub struct DestructibleServer {
     start_channel: tokio::sync::oneshot::Sender<()>,
     end_channel: tokio::sync::oneshot::Receiver<()>,
+    port: u16,
 }
 
 impl DestructibleServer {
     /// Construct a new `DestructibleServer` with the given mock server and initialize the
     /// communication channels.
     pub fn new(mock_server: MockRpcServer) -> Self {
+        // Ensure no contention on the port
+        let port = NEXT_TEST_PORT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         // Create a pair of duplex streams to simulate the server and client communication
         let (start_tx, mut start_rc) = tokio::sync::oneshot::channel();
         let (mut end_tx, end_rc) = tokio::sync::oneshot::channel();
@@ -97,7 +120,7 @@ impl DestructibleServer {
                 .add_service(proto_rpc::block_rpc_server::BlockRpcServer::new(
                     mock_server,
                 ))
-                .serve_with_shutdown("[::1]:50051".parse().unwrap(), async move {
+                .serve_with_shutdown(format!("[::1]:{port}").parse().unwrap(), async move {
                     // Notify that the server has started
                     start_rc.close();
                     // Wait for the shutdown signal
@@ -110,7 +133,13 @@ impl DestructibleServer {
         DestructibleServer {
             start_channel: start_tx,
             end_channel: end_rc,
+            port,
         }
+    }
+
+    /// Get the URL of the server in the format `http://[::1]:<port>`.
+    pub fn get_url(&self) -> String {
+        format!("http://[::1]:{}", self.port)
     }
 
     /// A function to wait for the server to start.
@@ -124,6 +153,8 @@ impl DestructibleServer {
         self.end_channel.close();
     }
 }
+
+//TODO: add testing for the DestructibleServer
 
 /// Start a mock server and a client connected through a duplex stream.
 /// The server will respond to a single request before terminating.
@@ -140,7 +171,7 @@ pub async fn get_mock_server_and_client(mock_server: MockRpcServer) -> RpcClient
     assert!(mock_server.is_ok(), "Server failed to start");
 
     let mut client = Some(client);
-    let channel = Endpoint::try_from("http://[::]:50051")
+    let channel = Endpoint::try_from("http://[::1]:50051")
         .unwrap()
         .connect_with_connector(service_fn(move |_: Uri| {
             let client = client.take();

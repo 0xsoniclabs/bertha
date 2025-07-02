@@ -76,10 +76,9 @@ pub mod tests {
 
     #[tokio::test]
     async fn try_new_connects_successfully() {
-        let url = "http://[::1]:50051".to_string();
         let mut server = DestructibleServer::new(MockRpcServer::new());
         server.wait_for_start().await;
-        let rpc_client = RpcClient::try_new(url).await;
+        let rpc_client = RpcClient::try_new(server.get_url()).await;
         assert!(rpc_client.is_ok(), "Failed to connect to RPC server");
         server.shutdown();
     }
@@ -109,6 +108,7 @@ pub mod tests {
         {
             let encoded_block = EncodedBlock {
                 data: vec![1, 2, 3, 4],
+                number: 1,
             };
             let mut mock_rpc_server = MockRpcServer::new();
             mock_rpc_server.get_block_response = Ok(Some(encoded_block.clone()));
@@ -119,8 +119,8 @@ pub mod tests {
         }
         // Block not found
         {
-            let mock_rpc_server = MockRpcServer::new();
-
+            let mut mock_rpc_server = MockRpcServer::new();
+            mock_rpc_server.get_block_response = Ok(None);
             let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
             let result = rpc_client.get_block(1, 1).await;
             assert!(result.is_err(), "Expected error for non-existent block");
@@ -144,14 +144,16 @@ pub mod tests {
     #[tokio::test]
     async fn get_block_range_returns_blocks_successfully() {
         let mut mock_server = MockRpcServer::new();
-        mock_server.get_block_range_response = Ok(vec![
+        mock_server.get_block_range_response = Ok(vec![vec![
             Ok(EncodedBlock {
                 data: vec![1, 2, 3],
+                number: 1,
             }),
             Ok(EncodedBlock {
                 data: vec![4, 5, 6],
+                number: 2,
             }),
-        ]);
+        ]]);
 
         let mut rpc_client = get_mock_server_and_client(mock_server).await;
         let mut stream = rpc_client.get_block_range(1, 0, 2).await.unwrap();
@@ -180,12 +182,13 @@ pub mod tests {
         // Error from the db
         {
             let mut mock_server = MockRpcServer::new();
-            mock_server.get_block_range_response = Ok(vec![
+            mock_server.get_block_range_response = Ok(vec![vec![
                 Ok(EncodedBlock {
                     data: vec![1, 2, 3],
+                    number: 1,
                 }),
                 Err(tonic::Status::internal("Internal error")),
-            ]);
+            ]]);
 
             let mut rpc_client = get_mock_server_and_client(mock_server).await;
             let mut stream = rpc_client.get_block_range(1, 0, 2).await.unwrap();

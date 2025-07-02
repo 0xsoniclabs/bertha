@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub use fetch::fetch;
 pub use import::import;
 pub use init::init;
 pub use list::list;
@@ -12,6 +13,7 @@ pub use start::start;
 pub use verify::verify;
 pub use view::view;
 
+mod fetch;
 mod import;
 mod init;
 mod list;

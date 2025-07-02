@@ -14,12 +14,18 @@ async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             verify,
         } => cmd::import(snapshot_file, verify),
         Command::List { chain_id } => cmd::list(chain_id, std::io::stdout()),
+        Command::Fetch {
+            url,
+            chain_id,
+            from,
+            to,
+        } => cmd::fetch(url, chain_id, from, to, std::io::stdout()).await,
+        Command::Purge { chain_id, from, to } => cmd::purge(chain_id, from, to),
         Command::Verify {
             chain_id,
             block_number,
             block_hash,
         } => cmd::verify(chain_id, block_number, block_hash, std::io::stdout()),
-        Command::Purge { chain_id, from, to } => cmd::purge(chain_id, from, to),
         Command::Clean => todo!(),
         Command::View {
             chain_id,

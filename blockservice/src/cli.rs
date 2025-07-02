@@ -24,6 +24,13 @@ pub enum Command {
         #[arg(long, default_value_t = false)]
         verify: bool,
     },
+    /// Fetch blocks from a remote block service and store them in the local database.
+    Fetch {
+        url: String,
+        chain_id: u64,
+        from: Option<u64>,
+        to: Option<u64>,
+    },
     /// List all locally stored block ranges for all chains or only for the specific chain if
     /// specified.
     List { chain_id: Option<u64> },
@@ -73,6 +80,7 @@ Usage: blockservice <COMMAND>
 Commands:
   init    Initialize a new block database in the current directory or at the specified path
   import  Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  fetch   Fetch blocks from a remote block service and store them in the local database
   list    List all locally stored block ranges for all chains or only for the specific chain if specified
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
@@ -111,6 +119,7 @@ Usage: blockservice <COMMAND>
 Commands:
   init    Initialize a new block database in the current directory or at the specified path
   import  Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  fetch   Fetch blocks from a remote block service and store them in the local database
   list    List all locally stored block ranges for all chains or only for the specific chain if specified
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`

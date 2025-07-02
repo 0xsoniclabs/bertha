@@ -106,9 +106,9 @@ pub trait BlockDb {
         }
     }
 
-    /// Adds a block number to the ranges of block numbers stored in the database for the specified
-    /// chain-ID. If this is the first block for the chain ID, the chain ID is added to the list
-    /// of chain IDs.
+    // /// Adds a block number to the ranges of block numbers stored in the database for the
+    // specified /// chain-ID. If this is the first block for the chain ID, the chain ID is
+    // added to the list /// of chain IDs.
     fn add_block_number_to_ranges(
         &mut self,
         chain_id: u64,

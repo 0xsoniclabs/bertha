@@ -67,6 +67,7 @@ where
         match encoded_block {
             Ok(Some(block)) => Ok(tonic::Response::new(proto_rpc::EncodedBlock {
                 data: block,
+                number,
             })),
             Ok(None) => Err(tonic::Status::not_found(format!(
                 "Block {number} not found for chain {chain_id}"
@@ -109,6 +110,7 @@ where
                     }
                     let encoded_block = proto_rpc::EncodedBlock {
                         data: block.into_vec(),
+                        number,
                     };
                     if tx.send(Ok(encoded_block)).await.is_err() {
                         break;
@@ -208,8 +210,9 @@ mod tests {
             });
 
             let res = server.get_block(req).await.unwrap();
-            let EncodedBlock { data } = res.into_inner();
+            let EncodedBlock { data, number } = res.into_inner();
             assert_eq!(data, vec![1, 2, 3, 4]);
+            assert_eq!(number, 2);
         }
     }
 
