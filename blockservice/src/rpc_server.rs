@@ -14,8 +14,6 @@ pub struct RpcServer<Db: BlockDb + Send + Sync + 'static> {
     db: Arc<Db>,
 }
 
-pub const DEFAULT_SERVER_PORT: u16 = 50051;
-
 impl<Db> RpcServer<Db>
 where
     Db: BlockDb + Send + Sync + 'static,

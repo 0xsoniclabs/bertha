@@ -6,7 +6,7 @@ mod cli;
 
 use blockservice::cmd;
 
-fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
         Command::Init { path } => cmd::init(path),
         Command::Import {
@@ -25,11 +25,12 @@ fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             chain_id,
             block_number,
         } => cmd::view(chain_id, block_number, std::io::stdout()),
-        Command::Start => todo!(),
+        Command::Start { port } => cmd::start(port).await,
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args = Args::parse();
-    execute(args).unwrap();
+    execute(args).await.unwrap();
 }

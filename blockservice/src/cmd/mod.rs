@@ -8,6 +8,7 @@ pub use import::import;
 pub use init::init;
 pub use list::list;
 pub use purge::purge;
+pub use start::start;
 pub use verify::verify;
 pub use view::view;
 
@@ -15,6 +16,7 @@ mod import;
 mod init;
 mod list;
 mod purge;
+mod start;
 mod verify;
 mod view;
 
