@@ -79,7 +79,7 @@ impl proto_rpc::block_rpc_server::BlockRpc for MockRpcServer {
 /// This is useful for testing commands where the client is constructed from an HTTP URI.
 pub struct DestructibleServer {
     start_channel: tokio::sync::oneshot::Sender<()>,
-    end_channel: tokio::sync::oneshot::Sender<()>,
+    end_channel: tokio::sync::oneshot::Receiver<()>,
 }
 
 impl DestructibleServer {
@@ -98,7 +98,7 @@ impl DestructibleServer {
                     // Notify that the server has started
                     start_rc.close();
                     // Wait for the shutdown signal
-                    end_rc.await.unwrap();
+                    end_tx.closed().await;
                 })
                 .await
                 .unwrap();
@@ -106,19 +106,19 @@ impl DestructibleServer {
 
         DestructibleServer {
             start_channel: start_tx,
-            end_channel: end_tx,
+            end_channel: end_rc,
         }
     }
 
     /// A function to wait for the server to start.
     pub async fn wait_for_start(&mut self) {
         // Wait for the server to start
-        poll_fn(|cx| self.start_channel.poll_closed(cx)).await;
+        self.start_channel.closed().await;
     }
 
     /// Shutdown and consumes the server
-    pub fn shutdown(self) {
-        self.end_channel.send(()).unwrap();
+    pub fn shutdown(mut self) {
+        self.end_channel.close();
     }
 }
 
