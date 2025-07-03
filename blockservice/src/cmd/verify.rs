@@ -97,7 +97,7 @@ mod tests {
     use super::*;
     use crate::{
         cmd::{ChangeWorkingDir, init},
-        proto,
+        grpc::proto,
     };
 
     #[test]

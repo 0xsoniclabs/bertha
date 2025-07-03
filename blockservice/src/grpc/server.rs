@@ -6,7 +6,14 @@ use std::{
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{codec::CompressionEncoding, transport::Server};
 
-use crate::{blockdb::BlockDb, proto_rpc};
+use crate::{
+    blockdb::BlockDb,
+    grpc::proto_rpc::{
+        BlockRange, BlockRangeRequest, BlockRequest, ChainRange, EncodedBlock, EncodedChainRanges,
+        ListRequest,
+        block_rpc_server::{BlockRpc, BlockRpcServer},
+    },
+};
 
 /// A gRPC server that provides access to block data stored in a database.
 #[derive(Debug)]
@@ -31,29 +38,25 @@ where
         println!("Listening on {addr}...");
 
         Server::builder()
-            .add_service(
-                proto_rpc::block_rpc_server::BlockRpcServer::new(self)
-                    .send_compressed(CompressionEncoding::Gzip),
-            )
+            .add_service(BlockRpcServer::new(self).send_compressed(CompressionEncoding::Gzip))
             .serve(addr)
             .await?;
-
         Ok(())
     }
 }
 
 #[tonic::async_trait]
-impl<Db> proto_rpc::block_rpc_server::BlockRpc for RpcServer<Db>
+impl<Db> BlockRpc for RpcServer<Db>
 where
     Db: BlockDb + Send + Sync + 'static,
 {
     /// Returns a block by its chain ID and number.
     async fn get_block(
         &self,
-        request: tonic::Request<proto_rpc::BlockRequest>,
-    ) -> Result<tonic::Response<proto_rpc::EncodedBlock>, tonic::Status> {
+        request: tonic::Request<BlockRequest>,
+    ) -> Result<tonic::Response<EncodedBlock>, tonic::Status> {
         let remote_addr = request.remote_addr();
-        let proto_rpc::BlockRequest { chain_id, number } = request.into_inner();
+        let BlockRequest { chain_id, number } = request.into_inner();
 
         match remote_addr {
             Some(addr) => {
@@ -65,9 +68,7 @@ where
         let encoded_block = self.db.get_raw(chain_id, number);
 
         match encoded_block {
-            Ok(Some(block)) => Ok(tonic::Response::new(proto_rpc::EncodedBlock {
-                data: block,
-            })),
+            Ok(Some(block)) => Ok(tonic::Response::new(EncodedBlock { data: block })),
             Ok(None) => Err(tonic::Status::not_found(format!(
                 "Block {number} not found for chain {chain_id}"
             ))),
@@ -75,17 +76,17 @@ where
         }
     }
 
-    type GetBlockRangeStream = ReceiverStream<Result<proto_rpc::EncodedBlock, tonic::Status>>;
+    type GetBlockRangeStream = ReceiverStream<Result<EncodedBlock, tonic::Status>>;
 
     /// Returns a stream of blocks in the specified range for a given chain ID.
     async fn get_block_range(
         &self,
-        request: tonic::Request<proto_rpc::BlockRangeRequest>,
+        request: tonic::Request<BlockRangeRequest>,
     ) -> Result<tonic::Response<Self::GetBlockRangeStream>, tonic::Status> {
         let (tx, rx) = tokio::sync::mpsc::channel(1000);
 
         let remote_addr = request.remote_addr();
-        let proto_rpc::BlockRangeRequest { chain_id, from, to } = request.into_inner();
+        let BlockRangeRequest { chain_id, from, to } = request.into_inner();
 
         if from > to {
             return Err(tonic::Status::invalid_argument(
@@ -107,7 +108,7 @@ where
                     if number > to {
                         break;
                     }
-                    let encoded_block = proto_rpc::EncodedBlock {
+                    let encoded_block = EncodedBlock {
                         data: block.into_vec(),
                     };
                     if tx.send(Ok(encoded_block)).await.is_err() {
@@ -128,8 +129,8 @@ where
 
     async fn list(
         &self,
-        request: tonic::Request<proto_rpc::ListRequest>,
-    ) -> Result<tonic::Response<proto_rpc::EncodedChainRanges>, tonic::Status> {
+        request: tonic::Request<ListRequest>,
+    ) -> Result<tonic::Response<EncodedChainRanges>, tonic::Status> {
         let remote_addr = request.remote_addr();
         let chain_id = request.into_inner().chain_id;
 
@@ -149,23 +150,21 @@ where
                 chain_ids
                     .into_iter()
                     .map(|chain_id| {
-                        self.db.get_ranges_of_chain_id(chain_id).map(|ranges| {
-                            proto_rpc::ChainRange {
+                        self.db
+                            .get_ranges_of_chain_id(chain_id)
+                            .map(|ranges| ChainRange {
                                 chain_id,
                                 block_ranges: ranges
                                     .into_iter()
-                                    .map(|(from, to)| proto_rpc::BlockRange { from, to })
+                                    .map(|(from, to)| BlockRange { from, to })
                                     .collect(),
-                            }
-                        })
+                            })
                     })
                     .collect()
             });
 
         match ranges {
-            Ok(chain_ranges) => Ok(tonic::Response::new(proto_rpc::EncodedChainRanges {
-                chain_ranges,
-            })),
+            Ok(chain_ranges) => Ok(tonic::Response::new(EncodedChainRanges { chain_ranges })),
             Err(e) => Err(tonic::Status::internal(e.to_string())),
         }
     }
@@ -184,12 +183,13 @@ mod tests {
     use crate::{
         Error,
         blockdb::MockBlockDb,
-        proto_rpc::{
-            BlockRange, BlockRangeRequest, BlockRequest, ChainRange, EncodedBlock, ListRequest,
-            block_rpc_server::BlockRpc,
+        grpc::{
+            client::RpcClient,
+            proto_rpc::{
+                BlockRangeRequest, BlockRequest, EncodedBlock, block_rpc_server::BlockRpc,
+            },
+            test_utils::SERVER_STARTUP_TIMER,
         },
-        rpc_client::RpcClient,
-        rpc_test_utils::SERVER_STARTUP_TIMER,
     };
 
     #[tokio::test]
@@ -347,7 +347,7 @@ mod tests {
             .returning(|_, _| Ok(Some(vec![1, 2, 3])));
 
         let server = RpcServer::new(db);
-        let job = tokio::spawn(async move {
+        let job = tokio::spawn(async {
             let _ = server.serve(8081).await;
         });
 
