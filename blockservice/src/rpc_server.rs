@@ -54,7 +54,6 @@ where
     ) -> Result<tonic::Response<proto_rpc::EncodedBlock>, tonic::Status> {
         let remote_addr = request.remote_addr();
         let proto_rpc::BlockRequest { chain_id, number } = request.into_inner();
-        let encoded_block = self.db.get_raw(chain_id, number);
 
         match remote_addr {
             Some(addr) => {
@@ -62,6 +61,8 @@ where
             }
             None => println!("Received request for block {number} on chain {chain_id}"),
         }
+
+        let encoded_block = self.db.get_raw(chain_id, number);
 
         match encoded_block {
             Ok(Some(block)) => Ok(tonic::Response::new(proto_rpc::EncodedBlock {
@@ -124,6 +125,50 @@ where
 
         Ok(tonic::Response::new(ReceiverStream::new(rx)))
     }
+
+    async fn list(
+        &self,
+        request: tonic::Request<proto_rpc::ListRequest>,
+    ) -> Result<tonic::Response<proto_rpc::EncodedChainRanges>, tonic::Status> {
+        let remote_addr = request.remote_addr();
+        let chain_id = request.into_inner().chain_id;
+
+        match (remote_addr, chain_id) {
+            (Some(addr), Some(chain_id)) => {
+                println!("Received list request for chain ID {chain_id} from {addr}");
+            }
+            (Some(addr), None) => println!("Received list request for all chain IDs from {addr}"),
+            (None, Some(chain_id)) => println!("Received list request for chain ID {chain_id}"),
+            (None, None) => println!("Received list request for all chains IDs"),
+        }
+
+        let ranges = chain_id
+            .map(|id| Ok(vec![id]))
+            .unwrap_or_else(|| self.db.get_chain_ids())
+            .and_then(|chain_ids| {
+                chain_ids
+                    .into_iter()
+                    .map(|chain_id| {
+                        self.db.get_ranges_of_chain_id(chain_id).map(|ranges| {
+                            proto_rpc::ChainRange {
+                                chain_id,
+                                block_ranges: ranges
+                                    .into_iter()
+                                    .map(|(from, to)| proto_rpc::BlockRange { from, to })
+                                    .collect(),
+                            }
+                        })
+                    })
+                    .collect()
+            });
+
+        match ranges {
+            Ok(chain_ranges) => Ok(tonic::Response::new(proto_rpc::EncodedChainRanges {
+                chain_ranges,
+            })),
+            Err(e) => Err(tonic::Status::internal(e.to_string())),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -139,7 +184,10 @@ mod tests {
     use crate::{
         Error,
         blockdb::MockBlockDb,
-        proto_rpc::{BlockRangeRequest, BlockRequest, EncodedBlock, block_rpc_server::BlockRpc},
+        proto_rpc::{
+            BlockRange, BlockRangeRequest, BlockRequest, ChainRange, EncodedBlock, ListRequest,
+            block_rpc_server::BlockRpc,
+        },
         rpc_client::RpcClient,
         rpc_test_utils::SERVER_STARTUP_TIMER,
     };
@@ -323,5 +371,97 @@ mod tests {
         let res = server.serve(80).await;
         assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("transport error"));
+    }
+
+    #[tokio::test]
+    async fn list_returns_ranges_for_chains() {
+        // single chain ID
+        {
+            let mut db = MockBlockDb::new();
+            db.expect_get_ranges_of_chain_id()
+                .with(eq(1))
+                .returning(|_| Ok(vec![(1, 2), (3, 4)]));
+            let server = RpcServer::new(db);
+
+            let req = Request::new(ListRequest { chain_id: Some(1) });
+            let res = server.list(req).await.unwrap();
+            let chain_ranges = res.into_inner().chain_ranges;
+            assert_eq!(
+                chain_ranges,
+                vec![ChainRange {
+                    chain_id: 1,
+                    block_ranges: vec![
+                        BlockRange { from: 1, to: 2 },
+                        BlockRange { from: 3, to: 4 }
+                    ]
+                }]
+            );
+        }
+        // non-existing chain ID
+        {
+            let mut db = MockBlockDb::new();
+            db.expect_get_ranges_of_chain_id()
+                .with(eq(1))
+                .returning(|_| Ok(vec![]));
+            let server = RpcServer::new(db);
+
+            let req = Request::new(ListRequest { chain_id: Some(1) });
+            let res = server.list(req).await.unwrap();
+            let chain_ranges = res.into_inner().chain_ranges;
+            assert_eq!(
+                chain_ranges,
+                vec![ChainRange {
+                    chain_id: 1,
+                    block_ranges: Vec::new()
+                }]
+            );
+        }
+        // all chain ID
+        {
+            let mut db = MockBlockDb::new();
+            db.expect_get_chain_ids().returning(|| Ok(vec![1, 2]));
+            db.expect_get_ranges_of_chain_id()
+                .with(eq(1))
+                .returning(|_| Ok(vec![(1, 2), (3, 4)]));
+            db.expect_get_ranges_of_chain_id()
+                .with(eq(2))
+                .returning(|_| Ok(vec![(5, 6)]));
+            let server = RpcServer::new(db);
+
+            let req = Request::new(ListRequest { chain_id: None });
+            let res = server.list(req).await.unwrap();
+            let chain_ranges = res.into_inner().chain_ranges;
+            assert_eq!(
+                chain_ranges,
+                vec![
+                    ChainRange {
+                        chain_id: 1,
+                        block_ranges: vec![
+                            BlockRange { from: 1, to: 2 },
+                            BlockRange { from: 3, to: 4 }
+                        ]
+                    },
+                    ChainRange {
+                        chain_id: 2,
+                        block_ranges: vec![BlockRange { from: 5, to: 6 }]
+                    }
+                ]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn list_forwards_errors() {
+        let mut db = MockBlockDb::new();
+        db.expect_get_chain_ids()
+            .returning(|| Err(Error::StorageLayer("DB error".to_owned())));
+        let server = RpcServer::new(db);
+        let req = Request::new(ListRequest { chain_id: None });
+
+        let res = server.list(req).await;
+        assert!(res.is_err());
+        let error = res.unwrap_err();
+        assert_eq!(error.code(), tonic::Code::Internal);
+        assert!(error.message().contains("DB error"));
     }
 }

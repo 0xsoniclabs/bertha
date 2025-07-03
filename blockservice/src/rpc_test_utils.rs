@@ -15,8 +15,8 @@ pub const SERVER_STARTUP_TIMER: u64 = 100; // milliseconds
 /// This server can be used to simulate responses for the BlockRpc trait
 pub struct MockRpcServer {
     pub get_block_response: Result<Option<EncodedBlock>, tonic::Status>,
-    pub get_block_range_response: Vec<Result<EncodedBlock, tonic::Status>>,
-    pub error: Option<tonic::Status>,
+    pub get_block_range_response: Result<Vec<Result<EncodedBlock, tonic::Status>>, tonic::Status>,
+    pub list_response: Result<proto_rpc::EncodedChainRanges, tonic::Status>,
 }
 
 impl Default for MockRpcServer {
@@ -30,8 +30,10 @@ impl MockRpcServer {
     pub fn new() -> Self {
         MockRpcServer {
             get_block_response: Ok(None),
-            get_block_range_response: vec![],
-            error: None,
+            get_block_range_response: Ok(vec![]),
+            list_response: Ok(proto_rpc::EncodedChainRanges {
+                chain_ranges: vec![],
+            }),
         }
     }
 }
@@ -44,10 +46,6 @@ impl proto_rpc::block_rpc_server::BlockRpc for MockRpcServer {
         &self,
         _request: tonic::Request<proto_rpc::BlockRequest>,
     ) -> Result<tonic::Response<proto_rpc::EncodedBlock>, tonic::Status> {
-        if let Some(error) = &self.error {
-            return Err(error.clone());
-        }
-
         match &self.get_block_response {
             Ok(Some(block)) => Ok(tonic::Response::new(block.clone())),
             Ok(None) => Err(tonic::Status::not_found("")),
@@ -63,12 +61,20 @@ impl proto_rpc::block_rpc_server::BlockRpc for MockRpcServer {
         &self,
         _request: tonic::Request<proto_rpc::BlockRangeRequest>,
     ) -> Result<tonic::Response<Self::GetBlockRangeStream>, tonic::Status> {
-        if let Some(error) = &self.error {
-            return Err(error.clone());
+        match &self.get_block_range_response {
+            Ok(blocks) => Ok(tonic::Response::new(futures::stream::iter(blocks.clone()))),
+            Err(e) => Err(tonic::Status::internal(e.to_string())),
         }
-        Ok(tonic::Response::new(futures::stream::iter(
-            self.get_block_range_response.clone(),
-        )))
+    }
+
+    async fn list(
+        &self,
+        _request: tonic::Request<proto_rpc::ListRequest>,
+    ) -> Result<tonic::Response<proto_rpc::EncodedChainRanges>, tonic::Status> {
+        match &self.list_response {
+            Ok(chain_ranges) => Ok(tonic::Response::new(chain_ranges.clone())),
+            Err(e) => Err(tonic::Status::internal(e.to_string())),
+        }
     }
 }
 
