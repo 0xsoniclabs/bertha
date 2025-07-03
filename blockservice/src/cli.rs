@@ -620,9 +620,9 @@ Options:
 
     #[test]
     fn call_with_start_subcommand_with_invalid_port_prints_parse_error() {
-        let args = ["blockservice", "start", "additional"];
+        let args = ["blockservice", "start", "invalid"];
         let expected = "\
-error: invalid value 'additional' for '[PORT]': invalid digit found in string
+error: invalid value 'invalid' for '[PORT]': invalid digit found in string
 
 For more information, try '--help'.
 ";
