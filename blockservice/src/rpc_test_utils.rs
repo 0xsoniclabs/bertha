@@ -16,6 +16,7 @@ pub const SERVER_STARTUP_TIMER: u64 = 100; // milliseconds
 pub struct MockRpcServer {
     pub get_block_response: Result<Option<EncodedBlock>, tonic::Status>,
     pub get_block_range_response: Vec<Result<EncodedBlock, tonic::Status>>,
+    pub error: Option<tonic::Status>,
 }
 
 impl Default for MockRpcServer {
@@ -30,6 +31,7 @@ impl MockRpcServer {
         MockRpcServer {
             get_block_response: Ok(None),
             get_block_range_response: vec![],
+            error: None,
         }
     }
 }
@@ -42,6 +44,10 @@ impl proto_rpc::block_rpc_server::BlockRpc for MockRpcServer {
         &self,
         _request: tonic::Request<proto_rpc::BlockRequest>,
     ) -> Result<tonic::Response<proto_rpc::EncodedBlock>, tonic::Status> {
+        if let Some(error) = &self.error {
+            return Err(error.clone());
+        }
+
         match &self.get_block_response {
             Ok(Some(block)) => Ok(tonic::Response::new(block.clone())),
             Ok(None) => Err(tonic::Status::not_found("")),
@@ -57,6 +63,9 @@ impl proto_rpc::block_rpc_server::BlockRpc for MockRpcServer {
         &self,
         _request: tonic::Request<proto_rpc::BlockRangeRequest>,
     ) -> Result<tonic::Response<Self::GetBlockRangeStream>, tonic::Status> {
+        if let Some(error) = &self.error {
+            return Err(error.clone());
+        }
         Ok(tonic::Response::new(futures::stream::iter(
             self.get_block_range_response.clone(),
         )))

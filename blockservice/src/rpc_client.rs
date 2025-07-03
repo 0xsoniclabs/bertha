@@ -1,5 +1,3 @@
-use std::error::Error;
-
 use tonic::{Request, Streaming, transport::Channel};
 
 use crate::proto_rpc::{
@@ -118,15 +116,29 @@ pub mod tests {
 
     #[tokio::test]
     async fn get_block_propagates_error() {
-        let mut mock_rpc_server = MockRpcServer::new();
-        mock_rpc_server.get_block_response = Err(tonic::Status::internal("Internal error"));
+        // Error from the server
+        {
+            let mut mock_rpc_server = MockRpcServer::new();
+            mock_rpc_server.error = Some(tonic::Status::internal("Internal error"));
+            let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
+            let result = rpc_client.get_block(1, 1).await;
+            assert!(result.is_err(), "Expected error for not found block");
+            let err = result.unwrap_err();
+            assert_eq!(err.code(), tonic::Code::Internal);
+            assert!(err.message().contains("Internal error"));
+        }
+        // Error from the db
+        {
+            let mut mock_rpc_server = MockRpcServer::new();
+            mock_rpc_server.get_block_response = Err(tonic::Status::internal("Internal error"));
 
-        let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
-        let result = rpc_client.get_block(1, 1).await;
-        assert!(result.is_err(), "Expected error for internal server error");
-        let err = result.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::Internal);
-        assert!(err.message().contains("Internal error"));
+            let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
+            let result = rpc_client.get_block(1, 1).await;
+            assert!(result.is_err(), "Expected error for internal server error");
+            let err = result.unwrap_err();
+            assert_eq!(err.code(), tonic::Code::Internal);
+            assert!(err.message().contains("Internal error"));
+        }
     }
 
     #[tokio::test]
