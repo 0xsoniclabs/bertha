@@ -13,7 +13,7 @@ pub struct RpcClient {
 
 impl RpcClient {
     /// Creates a new [RpcClient] by connecting to the specified URL.
-    pub async fn try_new(url: String) -> Result<Self, Box<dyn Error>> {
+    pub async fn try_new(url: String) -> Result<Self, tonic::transport::Error> {
         let client = BlockRpcClient::connect(url).await?;
         Ok(Self { client })
     }
@@ -29,7 +29,7 @@ impl RpcClient {
         &mut self,
         chain_id: u64,
         number: u64,
-    ) -> Result<EncodedBlock, Box<dyn Error>> {
+    ) -> Result<EncodedBlock, tonic::Status> {
         let request = Request::new(BlockRequest { chain_id, number });
         let response = self.client.get_block(request).await?;
         Ok(response.into_inner())
@@ -41,7 +41,7 @@ impl RpcClient {
         chain_id: u64,
         from: u64,
         to: u64,
-    ) -> Result<Streaming<EncodedBlock>, Box<dyn Error>> {
+    ) -> Result<Streaming<EncodedBlock>, tonic::Status> {
         let range = BlockRangeRequest { chain_id, from, to };
 
         let stream = self
@@ -112,6 +112,7 @@ pub mod tests {
             let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
             let result = rpc_client.get_block(1, 1).await;
             assert!(result.is_err(), "Expected error for non-existent block");
+            assert_eq!(result.unwrap_err().code(), tonic::Code::NotFound);
         }
     }
 
@@ -123,6 +124,9 @@ pub mod tests {
         let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
         let result = rpc_client.get_block(1, 1).await;
         assert!(result.is_err(), "Expected error for internal server error");
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Internal);
+        assert!(err.message().contains("Internal error"));
     }
 
     #[tokio::test]
