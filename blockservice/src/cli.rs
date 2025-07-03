@@ -44,6 +44,8 @@ pub enum Command {
     },
     /// Delete all blocks for chains not referenced in the config file.
     Clean,
+    /// Print the block as JSON.
+    View { chain_id: u64, block_number: u64 },
     /// Start the block server.
     Start,
 }
@@ -72,6 +74,7 @@ Commands:
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
   clean   Delete all blocks for chains not referenced in the config file
+  view    Print the block as JSON
   start   Start the block server
   help    Print this message or the help of the given subcommand(s)
 
@@ -109,6 +112,7 @@ Commands:
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
   clean   Delete all blocks for chains not referenced in the config file
+  view    Print the block as JSON
   start   Start the block server
   help    Print this message or the help of the given subcommand(s)
 
@@ -158,9 +162,9 @@ Options:
 
     #[test]
     fn call_with_init_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockservice", "init", "/path/to/database", "invalid"];
+        let args = ["blockservice", "init", "/path/to/database", "additional"];
         let expected = "\
-error: unexpected argument 'invalid' found
+error: unexpected argument 'additional' found
 
 Usage: blockservice init [PATH]
 
@@ -216,9 +220,14 @@ Options:
 
     #[test]
     fn call_with_import_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockservice", "import", "/path/to/snapshot.g", "invalid"];
+        let args = [
+            "blockservice",
+            "import",
+            "/path/to/snapshot.g",
+            "additional",
+        ];
         let expected = "\
-error: unexpected argument 'invalid' found
+error: unexpected argument 'additional' found
 
 Usage: blockservice import [OPTIONS] <SNAPSHOT_FILE>
 
@@ -278,9 +287,9 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_list_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockservice", "list", "146", "invalid"];
+        let args = ["blockservice", "list", "146", "additional"];
         let expected = "\
-error: unexpected argument 'invalid' found
+error: unexpected argument 'additional' found
 
 Usage: blockservice list [CHAIN_ID]
 
@@ -363,10 +372,10 @@ For more information, try '--help'.
             "146",
             "123456",
             "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-            "invalid",
+            "additional",
         ];
         let expected = "\
-error: unexpected argument 'invalid' found
+error: unexpected argument 'additional' found
 
 Usage: blockservice verify <CHAIN_ID> [BLOCK_NUMBER] [BLOCK_HASH]
 
@@ -457,9 +466,9 @@ For more information, try '--help'.
 
     #[test]
     fn call_with_purge_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockservice", "purge", "146", "1000", "2000", "invalid"];
+        let args = ["blockservice", "purge", "146", "1000", "2000", "additional"];
         let expected = "\
-error: unexpected argument 'invalid' found
+error: unexpected argument 'additional' found
 
 Usage: blockservice purge <CHAIN_ID> [FROM] [TO]
 
@@ -493,11 +502,87 @@ Options:
 
     #[test]
     fn call_with_clean_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockservice", "clean", "invalid"];
+        let args = ["blockservice", "clean", "additional"];
         let expected = "\
-error: unexpected argument 'invalid' found
+error: unexpected argument 'additional' found
 
 Usage: blockservice clean
+
+For more information, try '--help'.
+";
+        parse_and_compare(&args, Err(expected));
+    }
+
+    #[test]
+    fn call_with_view_subcommand_without_argument_prints_parse_error() {
+        let args = ["blockservice", "view"];
+        let expected = "\
+error: the following required arguments were not provided:
+  <CHAIN_ID>
+  <BLOCK_NUMBER>
+
+Usage: blockservice view <CHAIN_ID> <BLOCK_NUMBER>
+
+For more information, try '--help'.
+";
+        parse_and_compare(&args, Err(expected));
+    }
+
+    #[test]
+    fn call_with_view_subcommand_with_chain_id_and_block_number_parses_successfully() {
+        let chain_id = 146;
+        let block_number = 123456;
+        let args = [
+            "blockservice",
+            "view",
+            &chain_id.to_string(),
+            &block_number.to_string(),
+        ];
+        let expected = Args {
+            command: Command::View {
+                chain_id,
+                block_number,
+            },
+        };
+        parse_and_compare(&args, Ok(expected));
+    }
+
+    #[test]
+    fn call_with_view_subcommand_with_help_argument_prints_subcommand_help() {
+        let args = ["blockservice", "view", "--help"];
+        let expected = "\
+Print the block as JSON
+
+Usage: blockservice view <CHAIN_ID> <BLOCK_NUMBER>
+
+Arguments:
+  <CHAIN_ID>
+  <BLOCK_NUMBER>
+
+Options:
+  -h, --help  Print help
+";
+        parse_and_compare(&args, Err(expected));
+    }
+
+    #[test]
+    fn call_with_view_subcommand_with_invalid_argument_prints_parse_error() {
+        let args = ["blockservice", "view", "invalid"];
+        let expected = "\
+error: invalid value 'invalid' for '<CHAIN_ID>': invalid digit found in string
+
+For more information, try '--help'.
+";
+        parse_and_compare(&args, Err(expected));
+    }
+
+    #[test]
+    fn call_with_view_subcommand_with_additional_argument_prints_parse_error() {
+        let args = ["blockservice", "view", "1", "0", "additional"];
+        let expected = "\
+error: unexpected argument 'additional' found
+
+Usage: blockservice view <CHAIN_ID> <BLOCK_NUMBER>
 
 For more information, try '--help'.
 ";
@@ -529,9 +614,9 @@ Options:
 
     #[test]
     fn call_with_start_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockservice", "start", "invalid"];
+        let args = ["blockservice", "start", "additional"];
         let expected = "\
-error: unexpected argument 'invalid' found
+error: unexpected argument 'additional' found
 
 Usage: blockservice start
 

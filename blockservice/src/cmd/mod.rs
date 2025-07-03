@@ -9,12 +9,14 @@ pub use init::init;
 pub use list::list;
 pub use purge::purge;
 pub use verify::verify;
+pub use view::view;
 
 mod import;
 mod init;
 mod list;
 mod purge;
 mod verify;
+mod view;
 
 #[cfg(test)]
 static WORKING_DIR_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());

@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 bertha-types = { path = "../bertha-types" }
 genesis-parser = { path = "../genesis-parser" }
+serde_json = "1.0.140"
 prost = "0.13.5"
 rocksdb = { version = "0.23.0", default-features = false, features = [
     "lz4",

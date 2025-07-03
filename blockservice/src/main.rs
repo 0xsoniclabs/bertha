@@ -21,6 +21,10 @@ fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         } => cmd::verify(chain_id, block_number, block_hash, std::io::stdout()),
         Command::Purge { chain_id, from, to } => cmd::purge(chain_id, from, to),
         Command::Clean => todo!(),
+        Command::View {
+            chain_id,
+            block_number,
+        } => cmd::view(chain_id, block_number, std::io::stdout()),
         Command::Start => todo!(),
     }
 }
