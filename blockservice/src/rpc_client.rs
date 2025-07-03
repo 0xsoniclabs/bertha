@@ -165,23 +165,38 @@ pub mod tests {
 
     #[tokio::test]
     async fn get_block_range_propagates_error() {
-        let mut mock_server = MockRpcServer::new();
-        mock_server.get_block_range_response = vec![
-            Ok(EncodedBlock {
-                data: vec![1, 2, 3],
-            }),
-            Err(tonic::Status::internal("Internal error")),
-        ];
+        // Error from the server
+        {
+            let mut mock_server = MockRpcServer::new();
+            mock_server.error = Some(tonic::Status::internal("Internal error"));
 
-        let mut rpc_client = get_mock_server_and_client(mock_server).await;
-        let mut stream = rpc_client.get_block_range(1, 0, 2).await.unwrap();
-        assert!(stream.next().await.unwrap().unwrap().data == vec![1, 2, 3]);
-        let error = stream.next().await.unwrap().unwrap_err();
-        assert_eq!(error.code(), tonic::Code::Internal);
-        assert_eq!(error.message(), "Internal error");
-        assert!(
-            stream.next().await.is_none(),
-            "Stream should end after error"
-        );
+            let mut rpc_client = get_mock_server_and_client(mock_server).await;
+            let result = rpc_client.get_block_range(1, 0, 2).await;
+            assert!(result.is_err(), "Expected error for internal server error");
+            let err = result.unwrap_err();
+            assert_eq!(err.code(), tonic::Code::Internal);
+            assert!(err.message().contains("Internal error"));
+        }
+        // Error from the db
+        {
+            let mut mock_server = MockRpcServer::new();
+            mock_server.get_block_range_response = vec![
+                Ok(EncodedBlock {
+                    data: vec![1, 2, 3],
+                }),
+                Err(tonic::Status::internal("Internal error")),
+            ];
+
+            let mut rpc_client = get_mock_server_and_client(mock_server).await;
+            let mut stream = rpc_client.get_block_range(1, 0, 2).await.unwrap();
+            assert!(stream.next().await.unwrap().unwrap().data == vec![1, 2, 3]);
+            let error = stream.next().await.unwrap().unwrap_err();
+            assert_eq!(error.code(), tonic::Code::Internal);
+            assert_eq!(error.message(), "Internal error");
+            assert!(
+                stream.next().await.is_none(),
+                "Stream should end after error"
+            );
+        }
     }
 }
