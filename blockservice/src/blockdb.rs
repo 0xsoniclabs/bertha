@@ -358,10 +358,7 @@ impl RocksBlockDb {
     /// be opened for writing.
     /// Returns an error if the database does not exist.
     pub fn open_for_reading(path: impl AsRef<Path>) -> Result<Self, Error> {
-        let mut db_opts = Self::make_options();
-        // Opening a secondary instance requires set_max_open_files to be set to -1 (the default).
-        // See https://github.com/facebook/rocksdb/blob/2dcfc5475276a524be692ab08afdc831def81066/include/rocksdb/db.h
-        db_opts.set_max_open_files(-1);
+        let db_opts = Self::make_options();
         let secondary_path = tempfile::tempdir().map_err(|e| Error::StorageLayer(e.to_string()))?;
         Ok(Self {
             db: rocksdb::DB::open_as_secondary(&db_opts, path.as_ref(), secondary_path.path())
