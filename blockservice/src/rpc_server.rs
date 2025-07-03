@@ -301,7 +301,6 @@ mod tests {
         let server = RpcServer::new(db);
         let job = tokio::spawn(async move {
             let _ = server.serve(8081).await;
-            ()
         });
 
         // Wait for the server to start
