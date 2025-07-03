@@ -629,6 +629,19 @@ For more information, try '--help'.
         parse_and_compare(&args, Err(expected));
     }
 
+    #[test]
+    fn call_with_start_subcommand_with_additional_argument_prints_parse_error() {
+        let args = ["blockservice", "start", "8080", "additional"];
+        let expected = "\
+error: unexpected argument 'additional' found
+
+Usage: blockservice start [PORT]
+
+For more information, try '--help'.
+";
+        parse_and_compare(&args, Err(expected));
+    }
+
     fn trim_whitespace_at_end_of_lines(s: &str) -> String {
         s.split("\n")
             .map(str::trim_end)
