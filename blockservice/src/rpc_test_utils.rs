@@ -1,4 +1,4 @@
-use std::{future::poll_fn, vec::IntoIter};
+use std::vec::IntoIter;
 
 use hyper_util::rt::TokioIo;
 use tonic::transport::{Endpoint, Server, Uri};
@@ -14,8 +14,8 @@ pub const SERVER_STARTUP_TIMER: u64 = 100; // milliseconds
 /// A mock implementation of the BlockRpc service for testing purposes.
 /// This server can be used to simulate responses for the BlockRpc trait
 pub struct MockRpcServer {
-    block_response: Result<Option<EncodedBlock>, tonic::Status>,
-    block_range: Vec<Result<EncodedBlock, tonic::Status>>,
+    pub get_block_response: Result<Option<EncodedBlock>, tonic::Status>,
+    pub get_block_range_response: Vec<Result<EncodedBlock, tonic::Status>>,
 }
 
 impl Default for MockRpcServer {
@@ -28,21 +28,9 @@ impl MockRpcServer {
     /// Construct a new MockRpcServer with default values.
     pub fn new() -> Self {
         MockRpcServer {
-            block_response: Ok(None),
-            block_range: vec![],
+            get_block_response: Ok(None),
+            get_block_range_response: vec![],
         }
-    }
-
-    /// Set the response for the `get_block` method.
-    pub fn set_get_block_response(&mut self, block: Result<Option<EncodedBlock>, tonic::Status>) {
-        self.block_response = block;
-    }
-
-    pub fn set_get_block_range_response(
-        &mut self,
-        block_range: Vec<Result<EncodedBlock, tonic::Status>>,
-    ) {
-        self.block_range = block_range;
     }
 }
 
@@ -54,7 +42,7 @@ impl proto_rpc::block_rpc_server::BlockRpc for MockRpcServer {
         &self,
         _request: tonic::Request<proto_rpc::BlockRequest>,
     ) -> Result<tonic::Response<proto_rpc::EncodedBlock>, tonic::Status> {
-        match &self.block_response {
+        match &self.get_block_response {
             Ok(Some(block)) => Ok(tonic::Response::new(block.clone())),
             Ok(None) => Err(tonic::Status::not_found("")),
             Err(e) => Err(tonic::Status::internal(e.to_string())),
@@ -70,7 +58,7 @@ impl proto_rpc::block_rpc_server::BlockRpc for MockRpcServer {
         _request: tonic::Request<proto_rpc::BlockRangeRequest>,
     ) -> Result<tonic::Response<Self::GetBlockRangeStream>, tonic::Status> {
         Ok(tonic::Response::new(futures::stream::iter(
-            self.block_range.clone(),
+            self.get_block_range_response.clone(),
         )))
     }
 }
@@ -88,7 +76,7 @@ impl DestructibleServer {
     pub fn new(mock_server: MockRpcServer) -> Self {
         // Create a pair of duplex streams to simulate the server and client communication
         let (start_tx, mut start_rc) = tokio::sync::oneshot::channel();
-        let (end_tx, end_rc) = tokio::sync::oneshot::channel();
+        let (mut end_tx, end_rc) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             Server::builder()
                 .add_service(proto_rpc::block_rpc_server::BlockRpcServer::new(

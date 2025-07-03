@@ -99,7 +99,7 @@ pub mod tests {
                 data: vec![1, 2, 3, 4],
             };
             let mut mock_rpc_server = MockRpcServer::new();
-            mock_rpc_server.set_get_block_response(Ok(Some(encoded_block.clone())));
+            mock_rpc_server.get_block_response = Ok(Some(encoded_block.clone()));
 
             let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
             let block = rpc_client.get_block(1, 1).await.unwrap();
@@ -118,7 +118,7 @@ pub mod tests {
     #[tokio::test]
     async fn get_block_propagates_error() {
         let mut mock_rpc_server = MockRpcServer::new();
-        mock_rpc_server.set_get_block_response(Err(tonic::Status::internal("Internal error")));
+        mock_rpc_server.get_block_response = Err(tonic::Status::internal("Internal error"));
 
         let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
         let result = rpc_client.get_block(1, 1).await;
@@ -128,14 +128,14 @@ pub mod tests {
     #[tokio::test]
     async fn get_block_range_returns_blocks_successfully() {
         let mut mock_server = MockRpcServer::new();
-        mock_server.set_get_block_range_response(vec![
+        mock_server.get_block_range_response = vec![
             Ok(EncodedBlock {
                 data: vec![1, 2, 3],
             }),
             Ok(EncodedBlock {
                 data: vec![4, 5, 6],
             }),
-        ]);
+        ];
 
         let mut rpc_client = get_mock_server_and_client(mock_server).await;
         let mut stream = rpc_client.get_block_range(1, 0, 2).await.unwrap();
@@ -150,12 +150,12 @@ pub mod tests {
     #[tokio::test]
     async fn get_block_range_propagates_error() {
         let mut mock_server = MockRpcServer::new();
-        mock_server.set_get_block_range_response(vec![
+        mock_server.get_block_range_response = vec![
             Ok(EncodedBlock {
                 data: vec![1, 2, 3],
             }),
             Err(tonic::Status::internal("Internal error")),
-        ]);
+        ];
 
         let mut rpc_client = get_mock_server_and_client(mock_server).await;
         let mut stream = rpc_client.get_block_range(1, 0, 2).await.unwrap();
