@@ -9,6 +9,8 @@ use crate::{
     rpc_client::RpcClient,
 };
 
+pub const SERVER_STARTUP_TIMER: u64 = 100; // milliseconds
+
 /// A mock implementation of the BlockRpc service for testing purposes.
 /// This server can be used to simulate responses for the BlockRpc trait
 pub struct MockRpcServer {
