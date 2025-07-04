@@ -119,6 +119,34 @@ impl Block {
             excess_blob_gas: self.excess_blob_gas,
         }
     }
+
+    pub fn from_header_and_transactions_and_receipts(
+        header: BlockHeader,
+        transactions: Vec<Transaction>,
+        receipts: Vec<TransactionReceipt>,
+    ) -> Self {
+        Block {
+            parent_hash: header.parent_hash,
+            ommers_hash: header.ommers_hash,
+            beneficiary: header.beneficiary,
+            state_root: header.state_root,
+            difficulty: header.difficulty.to_least_significant_u64(),
+            number: header.number,
+            gas_limit: header.gas_limit,
+            timestamp: header.timestamp,
+            extra_data: header.extra_data,
+            prev_randao: header.prev_randao,
+            nonce: header.nonce,
+            transactions,
+            receipts,
+            base_fee_per_gas: header.base_fee_per_gas,
+            withdrawals_root: header.withdrawals_root,
+            blob_gas_used: header.blob_gas_used,
+            excess_blob_gas: header.excess_blob_gas,
+            parent_beacon_block_root: None,
+            requests_hash: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -212,6 +240,20 @@ mod tests {
             let block = data.block;
             let hash = data.block_hash;
             assert_eq!(block.to_header().compute_hash(), hash)
+        }
+    }
+
+    #[test]
+    fn block_to_header_and_then_from_header_and_transactions_and_receipts_is_identity() {
+        for data in generate_blocks_with_data() {
+            let block = data.block;
+            let header = block.to_header();
+            let transactions = block.transactions.clone();
+            let receipts = block.receipts.clone();
+
+            let new_block =
+                Block::from_header_and_transactions_and_receipts(header, transactions, receipts);
+            assert_eq!(new_block, block);
         }
     }
 
