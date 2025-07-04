@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/0xsoniclabs/blockdb"
 	cc "github.com/0xsoniclabs/carmen/go/common"
@@ -47,6 +48,17 @@ var (
 		Usage:   "Path to the state database directory (default: OS-defined temporary directory)",
 		Value:   "",
 	}
+
+	withArchiveFlag = &cli.BoolFlag{
+		Name:    "with-archive",
+		Aliases: []string{"a"},
+		Usage:   "Use the archive mode for the state database",
+		Value:   false,
+	}
+
+	// TODO: add flags for
+	// - keep DB after run
+	// - run block in "debug" mode, logging all steps
 )
 
 func getReplayCommand() *cli.Command {
@@ -57,6 +69,8 @@ func getReplayCommand() *cli.Command {
 		Flags: []cli.Flag{
 			jsonGenesisFlag,
 			blockDatabaseDirectoryFlag,
+			stateDbDirectoryFlag,
+			withArchiveFlag,
 		},
 	}
 }
@@ -66,6 +80,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	genesisFileName := c.String(jsonGenesisFlag.Name)
 	stateDbDirectory := c.String(stateDbDirectoryFlag.Name)
 	blockDbDirectory := c.String(blockDatabaseDirectoryFlag.Name)
+	withArchive := c.Bool(withArchiveFlag.Name)
 
 	fmt.Printf("Loading genesis file %q ...\n", genesisFileName)
 
@@ -78,6 +93,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		return fmt.Errorf("failed to create temporary state database directory: %w", err)
 	}
 	fmt.Printf("Using state database directory: %q\n", stateDbDirectory)
+	defer fmt.Printf("State database directory: %q\n", stateDbDirectory)
 	/*
 		defer func() {
 			err = errors.Join(err, os.RemoveAll(stateDbDirectory))
@@ -85,7 +101,14 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	*/
 
 	// Open State Database in new directory.
-	state, err := NewState(stateDbDirectory)
+	params := StateParameters{
+		Directory: stateDbDirectory,
+		Archive:   carmen.NoArchive,
+	}
+	if withArchive {
+		params.Archive = carmen.S5Archive
+	}
+	state, err := NewState(params)
 	if err != nil {
 		return fmt.Errorf("failed to create state: %w", err)
 	}
@@ -114,6 +137,14 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		err = errors.Join(err, database.Close())
 	}()
 
+	lastUpdate := time.Now()
+	lastTime := time.Unix(0, 0)
+	txCounter := uint64(0)
+	gasCounter := uint64(0)
+	lastTxCounter := uint64(0)
+	lastGasCounter := uint64(0)
+
+	blockHashHistory := &blockHashHistory{}
 	for block, err := range database.GetRange(chainId, 0, math.MaxUint64) {
 		if err != nil {
 			return fmt.Errorf("failed to get block: %w", err)
@@ -122,8 +153,28 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 			return ctx.Err()
 		}
 
-		if block.Number%1000 == 0 {
-			fmt.Printf("Processing block %d ...\n", block.Number)
+		if block.Number > 0 {
+			blockHashHistory.SetBlockHash(block.Number-1, common.BytesToHash(block.ParentHash))
+		}
+
+		if block.Number != 0 && block.Number%10_000 == 0 {
+			blockTime := time.Unix(int64(block.Timestamp), 0)
+			deltaBlockTime := blockTime.Sub(lastTime)
+			lastTime = blockTime
+			deltaTx := txCounter - lastTxCounter
+			deltaGas := gasCounter - lastGasCounter
+			lastTxCounter = txCounter
+			lastGasCounter = gasCounter
+			now := time.Now()
+			deltaTime := now.Sub(lastUpdate)
+			lastUpdate = now
+			fmt.Printf("Processing block %d @ %v, %.2f txs/s, %.2f MGas/s, %.2fx realtime\n",
+				block.Number,
+				blockTime,
+				float64(deltaTx)/deltaTime.Seconds(),
+				float64(deltaGas)/deltaTime.Seconds()/1000/1000,
+				deltaBlockTime.Seconds()/deltaTime.Seconds(),
+			)
 		}
 
 		gethBlock, err := ConvertToGethBlock(block)
@@ -132,27 +183,33 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		}
 
 		// Run the transactions in the block against the state database.
-		receipts, err := applyBlock(chainId, state, gethBlock)
-		if err != nil {
-			return fmt.Errorf("failed to apply block %d: %w", block.Number, err)
-		}
-
-		// Check the receipts against the expected values in the block.
-		for i, receipt := range receipts {
-			want := block.Receipts[i]
-			if receipt.Status != want.Status {
-				return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, want.Status, receipt.Status)
+		if block.Number != 0 { // The archive can not handle block 0
+			receipts, err := applyBlock(chainId, blockHashHistory, state, gethBlock)
+			if err != nil {
+				return fmt.Errorf("failed to apply block %d: %w", block.Number, err)
 			}
-			if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
-				return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
-			}
-			// TODO: check more fields if needed.
-		}
+			txCounter += uint64(len(gethBlock.Transactions()))
+			gasCounter += gethBlock.GasUsed()
 
-		// TODO:
-		// - check logs
+			// Check the receipts against the expected values in the block.
+			for i, receipt := range receipts {
+				want := block.Receipts[i]
+				if receipt.Status != want.Status {
+					return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
+						block.Number, i, want.Status, receipt.Status)
+				}
+				if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
+					return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
+						block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
+				}
+				// TODO: check more fields if needed.
+			}
+
+			// TODO:
+			// - check logs
+		} else {
+			lastTime = time.Unix(int64(block.Timestamp), 0)
+		}
 
 		// Check resulting state root.
 		stateRoot, err := state.GetStateRoot()
@@ -177,18 +234,25 @@ type State struct {
 	db carmen.StateDB
 }
 
-func NewState(dir string) (*State, error) {
+type StateParameters struct {
+	Directory string
+	Archive   carmen.ArchiveType
+}
+
+func NewState(params StateParameters) (*State, error) {
+	dir := params.Directory
 	err := os.MkdirAll(dir, 0700)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create state dir %q; %v", dir, err)
 	}
 
 	state, err := carmen.NewState(carmen.Parameters{
-		Directory: dir,
-		Variant:   "go-file",
-		Schema:    carmen.Schema(5),
-		Archive:   carmen.NoArchive,
-		LiveCache: 100 * 1024 * 1024, // 100MB
+		Directory:    dir,
+		Variant:      "go-file",
+		Schema:       carmen.Schema(5),
+		Archive:      params.Archive,
+		LiveCache:    100 * 1024 * 1024, // 100MB
+		ArchiveCache: 100 * 1024 * 1024, // 100MB
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create state: %v", err)
@@ -299,6 +363,7 @@ func applyGenesis(
 
 func applyBlock(
 	chainId uint64,
+	blockHashHistory *blockHashHistory,
 	state *State,
 	block *types.Block,
 ) (types.Receipts, error) {
@@ -311,16 +376,18 @@ func applyBlock(
 
 	processor := evmcore.NewStateProcessor(
 		chainConfig,
-		historyAdapter{},
+		historyAdapter{history: blockHashHistory},
 	)
 
 	evmBlock := &evmcore.EvmBlock{
 		EvmHeader: evmcore.EvmHeader{
-			Number:     block.Number(),
-			Time:       inter.Timestamp(block.Time() * 1e9),
-			GasLimit:   block.GasLimit(),
-			PrevRandao: block.Header().MixDigest,
-			BaseFee:    block.BaseFee(),
+			Number:      block.Number(),
+			ParentHash:  block.ParentHash(),
+			Time:        inter.Timestamp(block.Time() * 1e9),
+			GasLimit:    block.GasLimit(),
+			PrevRandao:  block.Header().MixDigest,
+			BaseFee:     block.BaseFee(),
+			BlobBaseFee: big.NewInt(1),
 		},
 		Transactions: block.Transactions(),
 	}
@@ -333,7 +400,7 @@ func applyBlock(
 			return vm.NewEVMInterpreter(evm)
 		}
 	}
-	if false {
+	if false /*block.NumberU64() == 607404*/ {
 		interpreter, err := tosca.NewInterpreter("lfvm-logging")
 		if err != nil {
 			panic(err)
@@ -361,10 +428,27 @@ func applyBlock(
 	return receipts, state.db.Check()
 }
 
-type historyAdapter struct {
+type blockHashHistory struct {
+	historicHashes [256]common.Hash
 }
 
-func (h historyAdapter) GetHeader(common.Hash, uint64) *evmcore.EvmHeader {
-	// Implement as needed.
-	panic("not implemented")
+func (b *blockHashHistory) GetBlockHash(number uint64) common.Hash {
+	return b.historicHashes[number%256]
+}
+
+func (b *blockHashHistory) SetBlockHash(number uint64, hash common.Hash) {
+	b.historicHashes[number%256] = hash
+}
+
+type historyAdapter struct {
+	history *blockHashHistory
+}
+
+func (h historyAdapter) GetHeader(_ common.Hash, number uint64) *evmcore.EvmHeader {
+	//fmt.Printf("Requesting block %d with hash %x and parent hash %x\n", number, h.history.GetBlockHash(number), h.history.GetBlockHash(number-1))
+	return &evmcore.EvmHeader{
+		Number:     big.NewInt(int64(number)),
+		Hash:       h.history.GetBlockHash(number),
+		ParentHash: h.history.GetBlockHash(number - 1),
+	}
 }
