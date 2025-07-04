@@ -12,6 +12,7 @@ import (
 
 	"github.com/0xsoniclabs/blockdb"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/linxGnu/grocksdb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -197,6 +198,7 @@ func createValidBlocks(t *testing.T, num int) []*blockdb.Block {
 		next := &blockdb.Block{
 			Number:     uint64(i),
 			ParentHash: bytes.Clone(lastHash[:]),
+			StateRoot:  types.EmptyRootHash[:],
 		}
 		blocks[i] = next
 

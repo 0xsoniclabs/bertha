@@ -14,13 +14,6 @@ import (
 )
 
 var (
-	directoryFlag = &cli.StringFlag{
-		Name:    "database-dir",
-		Aliases: []string{"db"},
-		Usage:   "Path to the block database directory",
-		Value:   "./.blockdb",
-	}
-
 	chainIdFlag = &cli.Uint64Flag{
 		Name:    "chain-id",
 		Aliases: []string{"c"},
@@ -49,7 +42,7 @@ func getVerifyCommand() *cli.Command {
 		Usage:  "Verify the block database",
 		Action: runVerify,
 		Flags: []cli.Flag{
-			directoryFlag,
+			blockDatabaseDirectoryFlag,
 			chainIdFlag,
 			startBlockFlag,
 			endBlockFlag,
@@ -59,7 +52,7 @@ func getVerifyCommand() *cli.Command {
 
 func runVerify(ctx context.Context, c *cli.Command) (err error) {
 
-	dir := c.String(directoryFlag.Name)
+	dir := c.String(blockDatabaseDirectoryFlag.Name)
 	chainId := c.Uint64(chainIdFlag.Name)
 	startBlock := c.Uint64(startBlockFlag.Name)
 	endBlock := c.Uint64(endBlockFlag.Name)
