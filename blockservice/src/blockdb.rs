@@ -5,7 +5,7 @@ use prost::Message;
 use rocksdb::WriteBatchWithTransaction;
 use tempfile::TempDir;
 
-use crate::{error::Error, proto};
+use crate::{error::Error, grpc::proto};
 
 impl From<rocksdb::Error> for Error {
     fn from(e: rocksdb::Error) -> Self {
@@ -528,7 +528,6 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::proto;
 
     #[test]
     fn blockdb_get_chain_ids_queries_key_zero() {

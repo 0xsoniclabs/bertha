@@ -4,9 +4,13 @@ use hyper_util::rt::TokioIo;
 use tonic::transport::{Endpoint, Server, Uri};
 use tower::service_fn;
 
-use crate::{
-    proto_rpc::{self, EncodedBlock, block_rpc_client::BlockRpcClient},
-    rpc_client::RpcClient,
+use crate::grpc::{
+    client::RpcClient,
+    proto_rpc::{
+        BlockRangeRequest, BlockRequest, EncodedBlock, EncodedChainRanges, ListRequest,
+        block_rpc_client::BlockRpcClient,
+        block_rpc_server::{BlockRpc, BlockRpcServer},
+    },
 };
 
 pub const SERVER_STARTUP_TIMER: u64 = 100; // milliseconds
@@ -16,7 +20,7 @@ pub const SERVER_STARTUP_TIMER: u64 = 100; // milliseconds
 pub struct MockRpcServer {
     pub get_block_response: Result<Option<EncodedBlock>, tonic::Status>,
     pub get_block_range_response: Result<Vec<Result<EncodedBlock, tonic::Status>>, tonic::Status>,
-    pub list_response: Result<proto_rpc::EncodedChainRanges, tonic::Status>,
+    pub list_response: Result<EncodedChainRanges, tonic::Status>,
 }
 
 impl Default for MockRpcServer {
@@ -31,7 +35,7 @@ impl MockRpcServer {
         MockRpcServer {
             get_block_response: Ok(None),
             get_block_range_response: Ok(vec![]),
-            list_response: Ok(proto_rpc::EncodedChainRanges {
+            list_response: Ok(EncodedChainRanges {
                 chain_ranges: vec![],
             }),
         }
@@ -39,13 +43,13 @@ impl MockRpcServer {
 }
 
 #[tonic::async_trait]
-impl proto_rpc::block_rpc_server::BlockRpc for MockRpcServer {
+impl BlockRpc for MockRpcServer {
     /// Mock implementation of the `get_block` method.
     /// Returns the block response set in the server.
     async fn get_block(
         &self,
-        _request: tonic::Request<proto_rpc::BlockRequest>,
-    ) -> Result<tonic::Response<proto_rpc::EncodedBlock>, tonic::Status> {
+        _request: tonic::Request<BlockRequest>,
+    ) -> Result<tonic::Response<EncodedBlock>, tonic::Status> {
         match &self.get_block_response {
             Ok(Some(block)) => Ok(tonic::Response::new(block.clone())),
             Ok(None) => Err(tonic::Status::not_found("")),
@@ -59,7 +63,7 @@ impl proto_rpc::block_rpc_server::BlockRpc for MockRpcServer {
     /// Returns the stream of blocks set in the server.
     async fn get_block_range(
         &self,
-        _request: tonic::Request<proto_rpc::BlockRangeRequest>,
+        _request: tonic::Request<BlockRangeRequest>,
     ) -> Result<tonic::Response<Self::GetBlockRangeStream>, tonic::Status> {
         match &self.get_block_range_response {
             Ok(blocks) => Ok(tonic::Response::new(futures::stream::iter(blocks.clone()))),
@@ -69,8 +73,8 @@ impl proto_rpc::block_rpc_server::BlockRpc for MockRpcServer {
 
     async fn list(
         &self,
-        _request: tonic::Request<proto_rpc::ListRequest>,
-    ) -> Result<tonic::Response<proto_rpc::EncodedChainRanges>, tonic::Status> {
+        _request: tonic::Request<ListRequest>,
+    ) -> Result<tonic::Response<EncodedChainRanges>, tonic::Status> {
         match &self.list_response {
             Ok(chain_ranges) => Ok(tonic::Response::new(chain_ranges.clone())),
             Err(e) => Err(tonic::Status::internal(e.to_string())),
@@ -94,9 +98,7 @@ impl DestructibleServer {
         let (mut end_tx, end_rc) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             Server::builder()
-                .add_service(proto_rpc::block_rpc_server::BlockRpcServer::new(
-                    mock_server,
-                ))
+                .add_service(BlockRpcServer::new(mock_server))
                 .serve_with_shutdown("[::1]:50051".parse().unwrap(), async move {
                     // Notify that the server has started
                     start_rc.close();
@@ -131,9 +133,7 @@ impl DestructibleServer {
 pub async fn get_mock_server_and_client(mock_server: MockRpcServer) -> RpcClient {
     let (client, server) = tokio::io::duplex(1024);
     let mock_server = Server::builder()
-        .add_service(proto_rpc::block_rpc_server::BlockRpcServer::new(
-            mock_server,
-        ))
+        .add_service(BlockRpcServer::new(mock_server))
         .serve_with_incoming(tokio_stream::once(Ok::<_, std::io::Error>(server)))
         .await;
 

@@ -1,6 +1,6 @@
 use tonic::{Request, Streaming, transport::Channel};
 
-use crate::proto_rpc::{
+use crate::grpc::proto_rpc::{
     BlockRangeRequest, BlockRequest, EncodedBlock, EncodedChainRanges, ListRequest,
     block_rpc_client::BlockRpcClient,
 };
@@ -69,9 +69,9 @@ pub mod tests {
     use tokio_stream::StreamExt;
 
     use super::*;
-    use crate::{
+    use crate::grpc::{
         proto_rpc::{BlockRange, ChainRange},
-        rpc_test_utils::{DestructibleServer, MockRpcServer, get_mock_server_and_client},
+        test_utils::{DestructibleServer, MockRpcServer, get_mock_server_and_client},
     };
 
     #[tokio::test]

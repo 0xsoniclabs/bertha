@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::{
     blockdb::{self, BLOCK_DB_NAME},
-    rpc_server::RpcServer,
+    grpc::RpcServer,
 };
 
 pub async fn start(listening_port: u16) -> Result<(), Box<dyn std::error::Error>> {
@@ -19,8 +19,7 @@ mod tests {
     use crate::{
         blockdb::{BLOCK_DB_NAME, BlockDb, RocksBlockDb},
         cmd::{ChangeWorkingDir, init, start},
-        rpc_client::RpcClient,
-        rpc_test_utils::SERVER_STARTUP_TIMER,
+        grpc::{RpcClient, test_utils::SERVER_STARTUP_TIMER},
     };
 
     #[tokio::test]
