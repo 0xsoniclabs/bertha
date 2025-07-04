@@ -32,6 +32,11 @@ impl U256 {
         bytes[32 - src_bytes.len()..].copy_from_slice(src_bytes);
         bytes
     }
+
+    /// Converts the number to a [u64] using only the least significant 8 bytes.
+    pub fn to_least_significant_u64(self) -> u64 {
+        self.0.digits()[0]
+    }
 }
 
 impl HexConvert for U256 {
@@ -277,6 +282,29 @@ mod test {
         let y = U256::from(2u8);
         let z = x - y;
         assert_eq!(z, Err(IntErrorKind::NegOverflow));
+    }
+
+    #[test]
+    fn to_least_significant_u64_converts_and_tructated_if_necessary() {
+        let cases = [
+            (U256::from(u64::MIN), u64::MIN),
+            (U256::from(u64::MIN + 1), u64::MIN + 1),
+            (U256::from(u64::MAX - 1), u64::MAX - 1),
+            (U256::from(u64::MAX), u64::MAX),
+            (U256::from(u64::MAX).add(U256::from(1u64)).unwrap(), 0),
+            (U256::from(u64::MAX).add(U256::from(2u64)).unwrap(), 1),
+            (
+                U256::from(u64::MAX).add(U256::from(u64::MAX - 1)).unwrap(),
+                u64::MAX - 2,
+            ),
+            (
+                U256::from(u64::MAX).add(U256::from(u64::MAX)).unwrap(),
+                u64::MAX - 1,
+            ),
+        ];
+        for (u256, expected) in cases {
+            assert_eq!(u256.to_least_significant_u64(), expected);
+        }
     }
 
     #[test]

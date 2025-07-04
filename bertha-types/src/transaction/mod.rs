@@ -68,7 +68,7 @@ impl Default for Transaction {
             access_list: Vec::default(),
             max_fee_per_gas: U256::default(),
             max_priority_fee_per_gas: U256::default(),
-            blob_versioned_hashes: vec![Hash::default()],
+            blob_versioned_hashes: Vec::default(),
             max_fee_per_blob_gas: U256::default(),
             authorization_list: Vec::default(),
             y_parity: U256::default(),
