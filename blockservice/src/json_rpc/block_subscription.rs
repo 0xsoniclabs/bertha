@@ -1,0 +1,122 @@
+/// Returns a stream of new blocks as they are added to the blockchain.
+use bertha_types::Block;
+use tokio::sync::mpsc::{self, Sender};
+use tokio_stream::{Stream, wrappers::ReceiverStream};
+
+use crate::json_rpc::{Error, Source};
+
+#[allow(dead_code)]
+pub fn subscribe_to_blocks(
+    start_block: u64,
+    source: impl Source + 'static,
+) -> impl Stream<Item = Result<Block, Error>> {
+    const CHANNEL_SIZE: usize = 100;
+    let (sender, receiver) = mpsc::channel(CHANNEL_SIZE);
+    tokio::spawn(block_subscription_task(start_block, source, sender));
+    ReceiverStream::new(receiver)
+}
+
+async fn block_subscription_task(
+    start_block: u64,
+    source: impl Source,
+    sender: Sender<Result<Block, Error>>,
+) {
+    tokio::select! {
+        _ = sender.closed() => (),
+        r = async {
+            let mut block_number = start_block;
+
+            loop {
+                let (block_header, transactions) = loop {
+                    match source.get_block_header_with_transactions(block_number).await {
+                        Ok(block_header_with_transactions) => break block_header_with_transactions,
+                        Err(Error::DataDoesNotExist) => continue, // next block does not yet exist
+                        Err(err) => return Err(err),
+                    }
+                };
+
+                let receipts = loop {
+                    match source.get_block_receipt(block_number).await {
+                        Ok(receipts) => break receipts,
+                        Err(Error::DataDoesNotExist) => continue, // receipts do not yet exist
+                        Err(err) => return Err(err),
+                    }
+                };
+
+                let block = Block::from_header_and_transactions_and_receipts(
+                    block_header,
+                    transactions,
+                    receipts,
+                );
+
+                // if receiver dropped
+                if sender.send(Ok(block)).await.is_err() {
+                    break;
+                }
+                block_number += 1;
+            }
+            Ok(())
+        } => {
+            if let Err(err) = r {
+                // try to send the error; if this fails there is nothing we can do
+                let _ = sender.send(Err(err)).await;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bertha_types::{BlockHeader, TransactionReceipt};
+    use tokio_stream::StreamExt;
+
+    use super::*;
+    use crate::json_rpc::source::MockSource;
+
+    #[tokio::test]
+    async fn subscribe_to_blocks_sends_blocks_over_channel() {
+        let start_block = 2;
+
+        let mut mock_source = MockSource::new();
+        mock_source
+            .expect_get_block_header_with_transactions()
+            //.withf(|identifier| ...) <- we can not constrain the which blocks are requested because the background task is running as a separate task and may produce more blocks than we consume.
+            .returning({
+                let mut block_number = start_block;
+                move |requested_block_number| {
+                    assert_eq!(requested_block_number, block_number);
+                    let curr_block_number = block_number;
+                    block_number += 1;
+                    Box::pin(async move {
+                        let block_header_with_receipt = (
+                            BlockHeader {
+                                number: curr_block_number,
+                                ..BlockHeader::default()
+                            },
+                            Vec::new()
+                        );
+                        Ok(block_header_with_receipt)
+                    })
+                }
+            });
+        mock_source
+            .expect_get_block_receipt()
+            //.withf(|identifier| ...) <- we can not constrain the which receipts are requested because the background task is running as a separate task and may produce more receipts than we consume.
+            .returning({
+                let mut block_number = start_block;
+                move |requested_block_number| {
+                    assert_eq!(requested_block_number, block_number);
+                    block_number += 1;
+                    Box::pin(async {
+                        Ok(vec![TransactionReceipt::default()])
+                    })
+                }
+            });
+
+        let mut stream = subscribe_to_blocks(start_block, mock_source);
+        for i in start_block..=4 {
+            let received_block = stream.next().await.unwrap();
+            assert_eq!(received_block.unwrap().number, i);
+        }
+    }
+}
