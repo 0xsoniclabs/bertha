@@ -61,6 +61,11 @@ var (
 	// - run block in "debug" mode, logging all steps
 )
 
+// TODO: fix known issues:
+// Block 11553992
+//   - Account: 10a46836f542ba043f0f3fb63387d3c1c17ec5bf
+//   - Balance: 16239559479980437104
+
 func getReplayCommand() *cli.Command {
 	return &cli.Command{
 		Name:   "replay",
