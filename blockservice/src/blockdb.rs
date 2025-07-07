@@ -358,6 +358,10 @@ impl RocksBlockDb {
     /// be opened for writing.
     /// Returns an error if the database does not exist.
     pub fn open_for_reading(path: impl AsRef<Path>) -> Result<Self, Error> {
+        // NOTE: The RocksDB documentation states that the `max_open_files` option "should" be set
+        // to -1 for secondary instances. It is unclear whether this is simply a performance
+        // recommendation or a functional requirement. We currently do not adhere to this advice to
+        // avoid running into the rlimit (see comment in make_options).
         let db_opts = Self::make_options();
         let secondary_path = tempfile::tempdir().map_err(|e| Error::StorageLayer(e.to_string()))?;
         Ok(Self {
