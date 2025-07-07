@@ -9,7 +9,7 @@ use tonic::{codec::CompressionEncoding, transport::Server};
 use crate::{
     blockdb::BlockDb,
     grpc::proto_rpc::{
-        BlockRange, BlockRangeRequest, BlockRequest, ChainRange, EncodedBlock, EncodedChainRanges,
+        BlockRange, BlockRangeRequest, BlockRequest, ChainRange, ChainRanges, EncodedBlock,
         ListRequest,
         block_rpc_server::{BlockRpc, BlockRpcServer},
     },
@@ -130,7 +130,7 @@ where
     async fn list(
         &self,
         request: tonic::Request<ListRequest>,
-    ) -> Result<tonic::Response<EncodedChainRanges>, tonic::Status> {
+    ) -> Result<tonic::Response<ChainRanges>, tonic::Status> {
         let remote_addr = request.remote_addr();
         let chain_id = request.into_inner().chain_id;
 
@@ -164,7 +164,7 @@ where
             });
 
         match ranges {
-            Ok(chain_ranges) => Ok(tonic::Response::new(EncodedChainRanges { chain_ranges })),
+            Ok(chain_ranges) => Ok(tonic::Response::new(ChainRanges { chain_ranges })),
             Err(e) => Err(tonic::Status::internal(e.to_string())),
         }
     }

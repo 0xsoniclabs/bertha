@@ -7,7 +7,7 @@ use tower::service_fn;
 use crate::grpc::{
     client::RpcClient,
     proto_rpc::{
-        BlockRangeRequest, BlockRequest, EncodedBlock, EncodedChainRanges, ListRequest,
+        BlockRangeRequest, BlockRequest, ChainRanges, EncodedBlock, ListRequest,
         block_rpc_client::BlockRpcClient,
         block_rpc_server::{BlockRpc, BlockRpcServer},
     },
@@ -20,7 +20,7 @@ pub const SERVER_STARTUP_TIMER: u64 = 100; // milliseconds
 pub struct MockRpcServer {
     pub get_block_response: Result<Option<EncodedBlock>, tonic::Status>,
     pub get_block_range_response: Result<Vec<Result<EncodedBlock, tonic::Status>>, tonic::Status>,
-    pub list_response: Result<EncodedChainRanges, tonic::Status>,
+    pub list_response: Result<ChainRanges, tonic::Status>,
 }
 
 impl Default for MockRpcServer {
@@ -35,7 +35,7 @@ impl MockRpcServer {
         MockRpcServer {
             get_block_response: Ok(None),
             get_block_range_response: Ok(vec![]),
-            list_response: Ok(EncodedChainRanges {
+            list_response: Ok(ChainRanges {
                 chain_ranges: vec![],
             }),
         }
@@ -74,7 +74,7 @@ impl BlockRpc for MockRpcServer {
     async fn list(
         &self,
         _request: tonic::Request<ListRequest>,
-    ) -> Result<tonic::Response<EncodedChainRanges>, tonic::Status> {
+    ) -> Result<tonic::Response<ChainRanges>, tonic::Status> {
         match &self.list_response {
             Ok(chain_ranges) => Ok(tonic::Response::new(chain_ranges.clone())),
             Err(e) => Err(tonic::Status::internal(e.to_string())),
