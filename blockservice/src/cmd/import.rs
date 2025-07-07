@@ -7,7 +7,7 @@ use prost::Message;
 
 use crate::{
     blockdb::{BLOCK_DB_NAME, BlockDb, RocksBlockDb},
-    grpc::proto,
+    proto,
 };
 
 pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::error::Error>> {

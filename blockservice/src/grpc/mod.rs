@@ -1,5 +1,4 @@
 mod client;
-pub mod proto;
 pub mod proto_rpc;
 mod server;
 #[cfg(test)]

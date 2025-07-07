@@ -5,7 +5,7 @@ use prost::Message;
 use rocksdb::WriteBatchWithTransaction;
 use tempfile::TempDir;
 
-use crate::{error::Error, grpc::proto};
+use crate::{error::Error, proto};
 
 impl From<rocksdb::Error> for Error {
     fn from(e: rocksdb::Error) -> Self {
