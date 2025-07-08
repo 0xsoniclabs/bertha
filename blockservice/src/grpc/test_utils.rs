@@ -1,6 +1,7 @@
 use std::vec::IntoIter;
 
 use hyper_util::rt::TokioIo;
+use mockall::mock;
 use tonic::transport::{Endpoint, Server, Uri};
 use tower::service_fn;
 
@@ -15,72 +16,31 @@ use crate::grpc::{
 
 pub const SERVER_STARTUP_TIMER: u64 = 100; // milliseconds
 
-/// A mock implementation of the BlockRpc service for testing purposes.
-/// This server can be used to simulate responses for the BlockRpc trait
-pub struct MockRpcServer {
-    pub get_block_response: Result<Option<EncodedBlock>, tonic::Status>,
-    pub get_block_range_response: Result<Vec<Result<EncodedBlock, tonic::Status>>, tonic::Status>,
-    pub list_response: Result<ChainRanges, tonic::Status>,
-}
-
-impl Default for MockRpcServer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl MockRpcServer {
-    /// Construct a new MockRpcServer with default values.
-    pub fn new() -> Self {
-        MockRpcServer {
-            get_block_response: Ok(None),
-            get_block_range_response: Ok(vec![]),
-            list_response: Ok(ChainRanges {
-                chain_ranges: vec![],
-            }),
-        }
-    }
-}
+mock!(
+    pub RpcServer {}
 
 #[tonic::async_trait]
-impl BlockRpc for MockRpcServer {
-    /// Mock implementation of the `get_block` method.
-    /// Returns the block response set in the server.
+    impl BlockRpc for RpcServer {
     async fn get_block(
         &self,
-        _request: tonic::Request<BlockRequest>,
-    ) -> Result<tonic::Response<EncodedBlock>, tonic::Status> {
-        match &self.get_block_response {
-            Ok(Some(block)) => Ok(tonic::Response::new(block.clone())),
-            Ok(None) => Err(tonic::Status::not_found("")),
-            Err(e) => Err(tonic::Status::internal(e.to_string())),
-        }
-    }
+            request: tonic::Request<BlockRequest>,
+        ) -> Result<tonic::Response<EncodedBlock>, tonic::Status>;
 
+        // NOTE: mock! cannot find this name, so we ignore it and manually add it to get_block_range
     type GetBlockRangeStream = futures::stream::Iter<IntoIter<Result<EncodedBlock, tonic::Status>>>;
 
-    /// Mock implementation of the `get_block_range` method.
-    /// Returns the stream of blocks set in the server.
+        #[allow(clippy::type_complexity)]
     async fn get_block_range(
         &self,
-        _request: tonic::Request<BlockRangeRequest>,
-    ) -> Result<tonic::Response<Self::GetBlockRangeStream>, tonic::Status> {
-        match &self.get_block_range_response {
-            Ok(blocks) => Ok(tonic::Response::new(futures::stream::iter(blocks.clone()))),
-            Err(e) => Err(tonic::Status::internal(e.to_string())),
-        }
-    }
+            request: tonic::Request<BlockRangeRequest>,
+        ) -> Result<tonic::Response<futures::stream::Iter<IntoIter<Result<EncodedBlock, tonic::Status>>>>, tonic::Status>;
 
     async fn list(
         &self,
-        _request: tonic::Request<ListRequest>,
-    ) -> Result<tonic::Response<ChainRanges>, tonic::Status> {
-        match &self.list_response {
-            Ok(chain_ranges) => Ok(tonic::Response::new(chain_ranges.clone())),
-            Err(e) => Err(tonic::Status::internal(e.to_string())),
-        }
+            request: tonic::Request<ListRequest>,
+        ) -> Result<tonic::Response<ChainRanges>, tonic::Status>;
     }
-}
+);
 
 /// A mock server that can be stopped and polled for readiness.
 /// This is useful for testing commands where the client is constructed from an HTTP URI.
