@@ -15,6 +15,7 @@ use crate::{
     },
 };
 
+const SERVER_RESPONSE_BUFFER_SIZE: usize = 1000;
 /// A gRPC server that provides access to block data stored in a database.
 #[derive(Debug)]
 pub struct RpcServer<Db: BlockDb + Send + Sync + 'static> {
@@ -83,7 +84,7 @@ where
         &self,
         request: tonic::Request<BlockRangeRequest>,
     ) -> Result<tonic::Response<Self::GetBlockRangeStream>, tonic::Status> {
-        let (tx, rx) = tokio::sync::mpsc::channel(1000);
+        let (tx, rx) = tokio::sync::mpsc::channel(SERVER_RESPONSE_BUFFER_SIZE);
 
         let remote_addr = request.remote_addr();
         let BlockRangeRequest { chain_id, from, to } = request.into_inner();
@@ -102,27 +103,29 @@ where
         }
 
         let db = self.db.clone();
-        for result in db.iterate_raw(chain_id, from) {
-            match result {
-                Ok((number, block)) => {
-                    if number > to {
+        tokio::spawn(async move {
+            for result in db.iterate_raw(chain_id, from) {
+                match result {
+                    Ok((number, block)) => {
+                        if number > to {
+                            break;
+                        }
+                        let encoded_block = EncodedBlock {
+                            data: block.into_vec(),
+                        };
+                        if tx.send(Ok(encoded_block)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        // try to send the error
+                        // because we always stop afterwards, we can ignore the result
+                        let _ = tx.send(Err(tonic::Status::internal(e.to_string()))).await;
                         break;
                     }
-                    let encoded_block = EncodedBlock {
-                        data: block.into_vec(),
-                    };
-                    if tx.send(Ok(encoded_block)).await.is_err() {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    // try to send the error
-                    // because we always stop afterwards, we can ignore the result
-                    let _ = tx.send(Err(tonic::Status::internal(e.to_string()))).await;
-                    break;
                 }
             }
-        }
+        });
 
         Ok(tonic::Response::new(ReceiverStream::new(rx)))
     }
@@ -252,20 +255,17 @@ mod tests {
     #[tokio::test]
     async fn get_block_range_returns_stream_of_blocks() {
         let mut db = MockBlockDb::new();
-        let data = vec![
-            (1, 3, vec![3]),
-            (1, 7, vec![7]),
-            (1, 8, vec![8]),
-            (1, 9, vec![9]),
-            (1, 10, vec![10]),
-        ];
-        db.expect_iterate_raw().with(eq(1), eq(3)).returning({
+        let mut data = vec![];
+        for i in 1..=SERVER_RESPONSE_BUFFER_SIZE + 10 {
+            data.push((i as u64, vec![i as u8]));
+        }
+        db.expect_iterate_raw().with(eq(1), eq(1)).returning({
             let data = data.clone();
             move |_, _| {
                 Box::new(
                     data.clone()
                         .into_iter()
-                        .map(|(_, number, block)| Ok((number, block.into_boxed_slice()))),
+                        .map(|(number, block)| Ok((number, block.into_boxed_slice()))),
                 )
             }
         });
@@ -274,8 +274,8 @@ mod tests {
 
         let request = Request::new(BlockRangeRequest {
             chain_id: 1,
-            from: 3,
-            to: 9,
+            from: 1,
+            to: (SERVER_RESPONSE_BUFFER_SIZE + 10) as u64,
         });
         let response = server.get_block_range(request).await;
         assert!(response.is_ok());
@@ -287,11 +287,11 @@ mod tests {
             .await
             .expect("The stream should not yield an error");
 
-        assert_eq!(results.len(), 4);
+        assert_eq!(results.len(), SERVER_RESPONSE_BUFFER_SIZE + 10);
         let results: Vec<_> = results.into_iter().map(|block| block.data).collect();
 
-        let expected: Vec<_> = data.into_iter().map(|v| v.2).collect();
-        assert_eq!(results, expected[0..4]); // last element not included
+        let expected: Vec<_> = data.into_iter().map(|v| v.1).collect();
+        assert_eq!(results, expected[..(SERVER_RESPONSE_BUFFER_SIZE + 10)]); // last element not included
     }
 
     #[tokio::test]
