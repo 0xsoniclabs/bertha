@@ -34,7 +34,7 @@ mod tests {
         }
 
         let job = tokio::spawn(async {
-            let _ = start(8080).await;
+            start(8080).await.unwrap();
         });
 
         // Wait for the server to start
