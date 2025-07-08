@@ -1,3 +1,5 @@
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+
 use clap::Parser;
 
 use crate::cli::{Args, Command};
@@ -26,7 +28,9 @@ async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             block_number,
         } => cmd::view(chain_id, block_number, std::io::stdout()),
         Command::Start { port } => {
-            let listener = tokio::net::TcpListener::bind(format!("[::1]:{port}")).await?;
+            // This allows both IPv4 and IPv6 connections
+            let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
+            let listener = tokio::net::TcpListener::bind(addr).await?;
             cmd::start(listener).await
         }
     }

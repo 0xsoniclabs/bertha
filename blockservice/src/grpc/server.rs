@@ -341,14 +341,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn serve_starts_server_on_specified_port() {
+    async fn serve_starts_server_on_specified_listener() {
         let mut db = MockBlockDb::new();
         db.expect_get_raw()
             .with(eq(1), eq(1))
             .returning(|_, _| Ok(Some(vec![1, 2, 3])));
 
         let server = RpcServer::new(db);
-        let listener = tokio::net::TcpListener::bind("[::1]:8081").await.unwrap();
+        let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let job = tokio::spawn(async move {
             let _ = server.serve(listener).await;
