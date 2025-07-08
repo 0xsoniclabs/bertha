@@ -68,17 +68,14 @@ pub mod tests {
     use super::*;
     use crate::grpc::{
         proto_rpc::{BlockRange, ChainRange},
-        test_utils::{DestructibleServer, MockRpcServer, get_mock_server_and_client},
+        test_utils::{MockRpcServer, TestServer, get_mock_server_and_client},
     };
 
     #[tokio::test]
     async fn try_new_connects_successfully() {
-        let url = "http://[::1]:50051".to_string();
-        let mut server = DestructibleServer::new(MockRpcServer::new());
-        server.wait_for_start().await;
-        let rpc_client = RpcClient::try_new(url).await;
+        let server = TestServer::new(MockRpcServer::new()).await;
+        let rpc_client = RpcClient::try_new(server.address.clone()).await;
         assert!(rpc_client.is_ok(), "Failed to connect to RPC server");
-        server.shutdown();
     }
 
     #[tokio::test]
