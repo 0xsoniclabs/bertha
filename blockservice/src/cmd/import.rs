@@ -24,7 +24,10 @@ pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::e
         .and_then(|b| b.as_ref().map(|b| b.number + 1).ok())
         .unwrap_or_default();
 
-    // To keep things simple, we only skip a range if it starts at block 0.
+    println!("Genesis file contains {total_blocks} blocks for chain ID {chain_id}");
+
+    // Determine until which block we have to import blocks, and which range we already have in the
+    // DB. To keep things simple, we only skip a range if it starts at block 0.
     // We do this because if we would skip also ranges after that, we would have to parse the blocks
     // anyway because there is no way to seek in RLP. Also parent hash validation would require
     // loading blocks from the db.
@@ -39,6 +42,13 @@ pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::e
     }
 
     let import_blocks = total_blocks - smallest_import_block_number;
+
+    if import_blocks != total_blocks {
+        println!(
+            "Skipping {} blocks that are already in the database",
+            total_blocks - import_blocks
+        );
+    }
 
     let mut uncompressed_bytes_written = 0;
     let mut block_count = 0;
@@ -130,7 +140,7 @@ mod tests {
     use crate::cmd::{ChangeWorkingDir, init};
 
     #[test]
-    fn inserts_all_blocks_from_snapshot_and_verifies_them_file_into_db() {
+    fn inserts_all_blocks_from_snapshot_file_into_db_and_verifies_them() {
         let tmpdir = tempfile::tempdir().unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
         let num_blocks = 5;
@@ -213,6 +223,7 @@ mod tests {
             let genesis_file = tmpdir.path().join("genesis.g");
 
             let extra_blocks = [Block {
+                number: 0,
                 parent_hash: [1; 32],
                 ..Block::default_sonic()
             }];
