@@ -35,9 +35,6 @@ where
         self,
         listener: tokio::net::TcpListener,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // This allows both IPv4 and IPv6 connections
-        // let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
-
         println!("Listening on {}...", listener.local_addr()?);
 
         Server::builder()
