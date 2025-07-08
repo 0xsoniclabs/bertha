@@ -4,7 +4,7 @@ package rpc;
 service BlockRpc {
   rpc GetBlock (BlockRequest) returns (EncodedBlock);
   rpc GetBlockRange (BlockRangeRequest) returns (stream EncodedBlock);
-  rpc List (ListRequest) returns (EncodedChainRanges);
+  rpc List (ListRequest) returns (ChainRanges);
 }
 
 message BlockRequest {
@@ -26,7 +26,7 @@ message ListRequest {
   optional uint64 chainId = 1;
 }
 
-message EncodedChainRanges {
+message ChainRanges {
   repeated ChainRange chainRanges = 1;
 }
 

@@ -1,7 +1,7 @@
 use tonic::{Request, Streaming, transport::Channel};
 
 use crate::grpc::proto_rpc::{
-    BlockRangeRequest, BlockRequest, EncodedBlock, EncodedChainRanges, ListRequest,
+    BlockRangeRequest, BlockRequest, ChainRanges, EncodedBlock, ListRequest,
     block_rpc_client::BlockRpcClient,
 };
 
@@ -53,10 +53,7 @@ impl RpcClient {
     }
 
     /// Queries the available block ranges of all chains or a specific chain.
-    pub async fn list(
-        &mut self,
-        chain_id: Option<u64>,
-    ) -> Result<EncodedChainRanges, tonic::Status> {
+    pub async fn list(&mut self, chain_id: Option<u64>) -> Result<ChainRanges, tonic::Status> {
         let request = Request::new(ListRequest { chain_id });
         let response = self.client.list(request).await?;
         Ok(response.into_inner())
@@ -204,7 +201,7 @@ pub mod tests {
     async fn list_returns_chain_ranges_successfully() {
         // ranges exist
         {
-            let encoded_chain_ranges = EncodedChainRanges {
+            let encoded_chain_ranges = ChainRanges {
                 chain_ranges: vec![ChainRange {
                     chain_id: 1,
                     block_ranges: vec![BlockRange { from: 0, to: 10 }],
@@ -225,7 +222,7 @@ pub mod tests {
             let block = rpc_client.list(Some(1)).await.unwrap();
             assert_eq!(
                 block,
-                EncodedChainRanges {
+                ChainRanges {
                     chain_ranges: Vec::new()
                 },
                 "Chain ranges should be empty"
