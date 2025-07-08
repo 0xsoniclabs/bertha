@@ -142,6 +142,8 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		err = errors.Join(err, database.Close())
 	}()
 
+	corrections := getCorrections()
+
 	lastUpdate := time.Now()
 	lastTime := time.Unix(0, 0)
 	txCounter := uint64(0)
@@ -189,7 +191,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 		// Run the transactions in the block against the state database.
 		if block.Number != 0 { // The archive can not handle block 0
-			receipts, err := applyBlock(chainId, blockHashHistory, state, gethBlock)
+			receipts, err := applyBlock(chainId, blockHashHistory, state, gethBlock, corrections)
 			if err != nil {
 				return fmt.Errorf("failed to apply block %d: %w", block.Number, err)
 			}
@@ -371,6 +373,7 @@ func applyBlock(
 	blockHashHistory *blockHashHistory,
 	state *State,
 	block *types.Block,
+	corrections Corrections,
 ) (types.Receipts, error) {
 
 	chainConfig := opera.CreateTransientEvmChainConfig(
@@ -427,6 +430,17 @@ func applyBlock(
 
 	if len(skipped) > 0 {
 		return nil, fmt.Errorf("found block with skipped txs: %d", len(skipped))
+	}
+
+	if fixes := corrections[block.NumberU64()]; len(fixes) > 0 {
+		state.db.BeginTransaction()
+		fmt.Printf("Applying corrections for block %d: %d accounts\n", block.NumberU64(), len(fixes))
+		for addr, acc := range fixes {
+			fmt.Printf("  - %s: balance %s\n", addr.Hex(), acc.Balance.ToBig().String())
+			address := common.HexToAddress(addr.Hex())
+			state.SetBalance(address, acc.Balance.ToBig())
+		}
+		state.db.EndTransaction()
 	}
 
 	state.db.EndBlock(block.NumberU64())
