@@ -25,7 +25,10 @@ async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             chain_id,
             block_number,
         } => cmd::view(chain_id, block_number, std::io::stdout()),
-        Command::Start { port } => cmd::start(port).await,
+        Command::Start { port } => {
+            let listener = tokio::net::TcpListener::bind(format!("[::1]:{port}")).await?;
+            cmd::start(listener).await
+        }
     }
 }
 
