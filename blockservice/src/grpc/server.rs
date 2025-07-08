@@ -7,7 +7,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{codec::CompressionEncoding, transport::Server};
 
 use crate::{
-    blockdb::BlockDb,
+    db::BlockDb,
     grpc::proto_rpc::{
         BlockRange, BlockRangeRequest, BlockRequest, ChainRange, ChainRanges, EncodedBlock,
         ListRequest,
@@ -182,7 +182,7 @@ mod tests {
     use super::*;
     use crate::{
         Error,
-        blockdb::MockBlockDb,
+        db::MockBlockDb,
         grpc::{
             client::RpcClient,
             proto_rpc::{

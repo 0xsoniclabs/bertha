@@ -2,7 +2,7 @@ use std::path::Path;
 
 use bertha_types::{Hash, HexConvert};
 
-use crate::blockdb::{BLOCK_DB_NAME, BlockDb, RocksBlockDb};
+use crate::db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb};
 
 pub fn verify(
     chain_id: u64,
@@ -97,7 +97,7 @@ mod tests {
     use super::*;
     use crate::{
         cmd::{ChangeWorkingDir, init},
-        grpc::proto,
+        db::proto,
     };
 
     #[test]

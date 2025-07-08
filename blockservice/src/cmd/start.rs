@@ -1,13 +1,13 @@
 use std::path::Path;
 
 use crate::{
-    blockdb::{self, BLOCK_DB_NAME},
+    db::{BLOCK_DB_NAME, RocksBlockDb},
     grpc::RpcServer,
 };
 
 pub async fn start(listening_port: u16) -> Result<(), Box<dyn std::error::Error>> {
     let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize()?;
-    let db = blockdb::RocksBlockDb::open_for_reading(db_path)?;
+    let db = RocksBlockDb::open_for_reading(db_path)?;
     let server = RpcServer::new(db);
     server.serve(listening_port).await
 }
@@ -17,8 +17,8 @@ mod tests {
     use std::path::Path;
 
     use crate::{
-        blockdb::{BLOCK_DB_NAME, BlockDb, RocksBlockDb},
         cmd::{ChangeWorkingDir, init, start},
+        db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb},
         grpc::{RpcClient, test_utils::SERVER_STARTUP_TIMER},
     };
 
