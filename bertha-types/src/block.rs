@@ -149,6 +149,11 @@ impl Block {
     }
 }
 
+/// The JSON representation of a [Block].
+///
+/// While fields are named after the Ethereum JSON RPC types, the combination of fields does not
+/// directly correspond to any existing RPC payload: There is no method for obtaining the block
+/// header, transactions and receipts within a single response.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct JsonBlock {
