@@ -5,10 +5,7 @@ use genesis_parser::Genesis;
 use indicatif::{ProgressBar, ProgressState, ProgressStyle};
 use prost::Message;
 
-use crate::{
-    blockdb::{BLOCK_DB_NAME, BlockDb, RocksBlockDb},
-    proto,
-};
+use crate::db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb, proto};
 
 pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::error::Error>> {
     let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize()?;

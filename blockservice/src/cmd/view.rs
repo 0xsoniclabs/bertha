@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::blockdb::{BLOCK_DB_NAME, BlockDb, RocksBlockDb};
+use crate::db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb};
 
 pub fn view(
     chain_id: u64,
