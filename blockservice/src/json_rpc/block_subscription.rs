@@ -88,14 +88,14 @@ mod tests {
                     let curr_block_number = block_number;
                     block_number += 1;
                     Box::pin(async move {
-                        let block_header_with_receipt = (
+                        let block_header_with_transactions = (
                             BlockHeader {
                                 number: curr_block_number,
                                 ..BlockHeader::default()
                             },
                             Vec::new()
                         );
-                        Ok(block_header_with_receipt)
+                        Ok(block_header_with_transactions)
                     })
                 }
             });
@@ -117,6 +117,95 @@ mod tests {
         for i in start_block..=4 {
             let received_block = stream.next().await.unwrap();
             assert_eq!(received_block.unwrap().number, i);
+        }
+    }
+
+    #[tokio::test]
+    async fn subscribe_to_blocks_retires_when_block_header_and_receipt_do_not_exist_yet() {
+        let mut mock_source = MockSource::new();
+        mock_source
+            .expect_get_block_header_with_transactions()
+            .returning({
+                let mut return_error = true;
+                move |_| {
+                    if return_error {
+                        return_error = false;
+                        Box::pin(async { Err(Error::DataDoesNotExist) })
+                    } else {
+                        Box::pin(async { Ok((BlockHeader::default(), Vec::new())) })
+                    }
+                }
+            });
+        mock_source.expect_get_block_receipt().returning({
+            let mut return_error = true;
+            move |_| {
+                if return_error {
+                    return_error = false;
+                    Box::pin(async { Err(Error::DataDoesNotExist) })
+                } else {
+                    Box::pin(async { Ok(vec![TransactionReceipt::default()]) })
+                }
+            }
+        });
+
+        let mut stream = subscribe_to_blocks(0, mock_source);
+        let received_block = stream.next().await.unwrap();
+        assert!(received_block.is_ok());
+    }
+
+    #[tokio::test]
+    async fn subscribe_to_blocks_propagates_errors() {
+        // get_block_header_with_transactions returns error
+        {
+            let mut mock_source = MockSource::new();
+            mock_source
+                .expect_get_block_header_with_transactions()
+                .returning({
+                    move |_| {
+                        Box::pin(async move {
+                            Err(Error::Serde(serde::de::Error::custom("some error")))
+                        })
+                    }
+                });
+            let mut stream = subscribe_to_blocks(0, mock_source);
+            let received_block = stream.next().await.unwrap();
+            assert!(received_block.is_err());
+            assert!(
+                received_block
+                    .unwrap_err()
+                    .to_string()
+                    .contains("some error"),
+            );
+        }
+
+        // get_block_receipt returns error
+        {
+            let mut mock_source = MockSource::new();
+            mock_source
+                .expect_get_block_header_with_transactions()
+                .returning({
+                    move |_| Box::pin(async move { Ok((BlockHeader::default(), Vec::new())) })
+                });
+            mock_source
+                .expect_get_block_receipt()
+                //.withf(|identifier| ...) <- we can not constrain the which receipts are requested because the background task is running as a separate task and may produce more receipts than we consume.
+                .returning({
+                    move |_| {
+                        Box::pin(async {
+                            Err(Error::Serde(serde::de::Error::custom("some error")))
+                        })
+                    }
+                });
+
+            let mut stream = subscribe_to_blocks(0, mock_source);
+            let received_block = stream.next().await.unwrap();
+            assert!(received_block.is_err());
+            assert!(
+                received_block
+                    .unwrap_err()
+                    .to_string()
+                    .contains("some error"),
+            );
         }
     }
 }
