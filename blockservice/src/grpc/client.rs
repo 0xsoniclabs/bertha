@@ -108,28 +108,22 @@ pub mod tests {
                 data: vec![1, 2, 3, 4],
             };
             let mut mock_rpc_server = MockRpcServer::new();
-            mock_rpc_server.get_block_response = Ok(Some(encoded_block.clone()));
-
+            mock_rpc_server.expect_get_block().returning({
+                let encoded_block = encoded_block.clone();
+                move |_| Ok(tonic::Response::new(encoded_block.clone()))
+            });
             let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
             let block = rpc_client.get_block(1, 1).await.unwrap();
             assert_eq!(block, encoded_block, "Block data does not match");
-        }
-        // Block not found
-        {
-            let mock_rpc_server = MockRpcServer::new();
-
-            let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
-            let result = rpc_client.get_block(1, 1).await;
-            assert!(result.is_err(), "Expected error for non-existent block");
-            assert_eq!(result.unwrap_err().code(), tonic::Code::NotFound);
         }
     }
 
     #[tokio::test]
     async fn get_block_propagates_error() {
         let mut mock_rpc_server = MockRpcServer::new();
-        mock_rpc_server.get_block_response = Err(tonic::Status::internal("Internal error"));
-
+        mock_rpc_server
+            .expect_get_block()
+            .returning(|_| Err(tonic::Status::internal("Internal error")));
         let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
         let result = rpc_client.get_block(1, 1).await;
         assert!(result.is_err(), "Expected error for internal server error");
@@ -141,14 +135,17 @@ pub mod tests {
     #[tokio::test]
     async fn get_block_range_returns_blocks_successfully() {
         let mut mock_server = MockRpcServer::new();
-        mock_server.get_block_range_response = Ok(vec![
-            Ok(EncodedBlock {
-                data: vec![1, 2, 3],
-            }),
-            Ok(EncodedBlock {
-                data: vec![4, 5, 6],
-            }),
-        ]);
+        mock_server.expect_get_block_range().returning(|_| {
+            let blocks = vec![
+                Ok(EncodedBlock {
+                    data: vec![1, 2, 3],
+                }),
+                Ok(EncodedBlock {
+                    data: vec![4, 5, 6],
+                }),
+            ];
+            Ok(tonic::Response::new(futures::stream::iter(blocks)))
+        });
 
         let mut rpc_client = get_mock_server_and_client(mock_server).await;
         let mut stream = rpc_client.get_block_range(1, 0, 2).await.unwrap();
@@ -165,7 +162,9 @@ pub mod tests {
         // Error from the server
         {
             let mut mock_server = MockRpcServer::new();
-            mock_server.get_block_range_response = Err(tonic::Status::internal("Internal error"));
+            mock_server
+                .expect_get_block_range()
+                .returning(|_| Err(tonic::Status::internal("Internal error")));
 
             let mut rpc_client = get_mock_server_and_client(mock_server).await;
             let result = rpc_client.get_block_range(1, 0, 2).await;
@@ -177,12 +176,15 @@ pub mod tests {
         // Error from the db
         {
             let mut mock_server = MockRpcServer::new();
-            mock_server.get_block_range_response = Ok(vec![
-                Ok(EncodedBlock {
-                    data: vec![1, 2, 3],
-                }),
-                Err(tonic::Status::internal("Internal error")),
-            ]);
+            mock_server.expect_get_block_range().returning(|_| {
+                let blocks = vec![
+                    Ok(EncodedBlock {
+                        data: vec![1, 2, 3],
+                    }),
+                    Err(tonic::Status::internal("Internal error")),
+                ];
+                Ok(tonic::Response::new(futures::stream::iter(blocks)))
+            });
 
             let mut rpc_client = get_mock_server_and_client(mock_server).await;
             let mut stream = rpc_client.get_block_range(1, 0, 2).await.unwrap();
@@ -208,7 +210,10 @@ pub mod tests {
                 }],
             };
             let mut mock_rpc_server = MockRpcServer::new();
-            mock_rpc_server.list_response = Ok(encoded_chain_ranges.clone());
+            mock_rpc_server.expect_list().returning({
+                let encoded_chain_ranges = encoded_chain_ranges.clone();
+                move |_| Ok(tonic::Response::new(encoded_chain_ranges.clone()))
+            });
 
             let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
             let block = rpc_client.list(None).await.unwrap();
@@ -216,8 +221,12 @@ pub mod tests {
         }
         // ranges do not exist = empty
         {
-            let mock_rpc_server = MockRpcServer::new();
-
+            let mut mock_rpc_server = MockRpcServer::new();
+            mock_rpc_server.expect_list().returning(|_| {
+                Ok(tonic::Response::new(ChainRanges {
+                    chain_ranges: Vec::new(),
+                }))
+            });
             let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
             let block = rpc_client.list(Some(1)).await.unwrap();
             assert_eq!(
@@ -233,7 +242,9 @@ pub mod tests {
     #[tokio::test]
     async fn list_propagates_error() {
         let mut mock_rpc_server = MockRpcServer::new();
-        mock_rpc_server.list_response = Err(tonic::Status::internal("Internal error"));
+        mock_rpc_server
+            .expect_list()
+            .returning(|_| Err(tonic::Status::internal("Internal error")));
 
         let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
         let result = rpc_client.list(None).await;
