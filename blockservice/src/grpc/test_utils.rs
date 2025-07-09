@@ -121,15 +121,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_server_correctly_handles_start_and_shutdown() {
-        let url;
+        let server = TestServer::new(MockRpcServer::new()).await;
+        let url = server.address.clone();
         {
-            let server = TestServer::new(MockRpcServer::new()).await;
-            url = server.address.clone();
-            {
-                let client = BlockRpcClient::connect(url.clone()).await;
-                assert!(client.is_ok(), "Client should connect to the server");
-            }
+            let res = BlockRpcClient::connect(url.clone()).await;
+            assert!(res.is_ok(), "Client should connect to the server");
         }
+        drop(server);
+
         // Ensure the server has shut down
         tokio::task::yield_now().await;
         {
