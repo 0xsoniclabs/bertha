@@ -119,8 +119,11 @@ pub async fn get_mock_server_and_client(mock_server: MockRpcServer) -> RpcClient
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_server_correctly_handles_start_and_shutdown() {
+    // NOTE: This test requires to be run with the `current_thread` runtime flavor to be sure that
+    // tokio::task::yield_now() gives execution back to the server task, allowing it to shut down
+    // properly.
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_server_does_not_leak_server_after_drop() {
         let server = TestServer::new(MockRpcServer::new()).await;
         let url = server.address.clone();
         {
