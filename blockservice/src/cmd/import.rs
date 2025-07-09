@@ -195,7 +195,7 @@ mod tests {
         // modify the blocks which are part of the genesis file but are not inserted into the db
         // because they are already stored
         for block in genesis_blocks.iter_mut().take(db_blocks_num) {
-            block.gas_limit = 1; // change gas limit to ensure different hash
+            block.gas_limit = 1; // modify block so we can check that the existing blocks are not being overwritten
         }
         let genesis_file = tmpdir.path().join("genesis.g");
         let genesis_data =
