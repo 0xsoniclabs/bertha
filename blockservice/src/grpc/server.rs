@@ -280,7 +280,7 @@ mod tests {
         let request = Request::new(BlockRangeRequest {
             chain_id: 1,
             from: 1,
-            to: (SERVER_RESPONSE_BUFFER_SIZE + 10) as u64,
+            to: request_count as u64,
         });
         let response = server.get_block_range(request).await;
         assert!(response.is_ok());
@@ -292,11 +292,11 @@ mod tests {
             .await
             .expect("The stream should not yield an error");
 
-        assert_eq!(results.len(), SERVER_RESPONSE_BUFFER_SIZE + 10);
+        assert_eq!(results.len(), request_count);
         let results: Vec<_> = results.into_iter().map(|block| block.data).collect();
 
         let expected: Vec<_> = data.into_iter().map(|v| v.1).collect();
-        assert_eq!(results, expected[..(SERVER_RESPONSE_BUFFER_SIZE + 10)]); // last element not included
+        assert_eq!(results, expected[..request_count]); // last element not included
     }
 
     #[tokio::test]
