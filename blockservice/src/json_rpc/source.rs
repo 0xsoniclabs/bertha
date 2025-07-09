@@ -19,14 +19,14 @@ struct BlockHeaderWithTransactions {
 /// An abstraction which provides means to request blockchain data.
 #[cfg_attr(test, mockall::automock)]
 pub trait Source: Send + Sync {
-    /// Returns the block with the specified block identifier.
+    /// Returns the block header and transactions for the specified block number.
     fn get_block_header_with_transactions(
         &self,
         block_number: u64,
     ) -> impl std::future::Future<Output = Result<(BlockHeader, Vec<Transaction>), Error>>
     + std::marker::Send;
 
-    /// Returns the receipt for the block with the specified block identifier.
+    /// Returns the receipts for the block with the specified block number.
     fn get_block_receipt(
         &self,
         block_number: u64,
@@ -42,7 +42,6 @@ pub struct NetworkSource {
 }
 
 impl NetworkSource {
-    #[allow(dead_code)]
     pub fn try_new(server: impl AsRef<str>) -> Result<Self, Error> {
         Ok(Self {
             http_client: HttpClientBuilder::new().build(server)?,
@@ -70,7 +69,7 @@ impl Source for NetworkSource {
         let BlockHeaderWithTransactions {
             block_header,
             transactions,
-        } = result.ok_or(Error::DataDoesNotExist)?;
+        } = result.ok_or(Error::NotFound)?;
         Ok((block_header, transactions))
     }
 
@@ -80,7 +79,7 @@ impl Source for NetworkSource {
             .http_client
             .request("eth_getBlockReceipts", rpc_params![block_number.to_hex()])
             .await?;
-        receipts.ok_or(Error::DataDoesNotExist)
+        receipts.ok_or(Error::NotFound)
     }
 }
 
@@ -88,6 +87,7 @@ impl Source for NetworkSource {
 mod tests {
     use bertha_types::TransactionType;
     use serde::{Deserialize, Serialize};
+    use serde_json::json;
     use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers};
 
     use super::*;
@@ -129,14 +129,14 @@ mod tests {
                 ResponseTemplate::new(200).set_body_json(RpcResponse {
                     jsonrpc: "2.0".to_string(),
                     id: req.id,
-                    result: serde_json::to_value(&result).unwrap(),
+                    result: json!(&result),
                 })
             })
             .expect(1) // expect the request to be made once
     }
 
     #[test]
-    fn new_with_invalid_url_returns_error() {
+    fn try_new_with_invalid_url_returns_error() {
         let network = NetworkSource::try_new("invalid_url");
         assert!(network.is_err());
     }
@@ -156,10 +156,7 @@ mod tests {
             .register(build_mock_server_request_handler(
                 "eth_getBlockByNumber",
                 0,
-                vec![
-                    serde_json::to_value(block_number.to_hex()).unwrap(),
-                    serde_json::to_value(true).unwrap(),
-                ],
+                vec![json!(block_number.to_hex()), json!(true)],
                 block_header_with_transactions.clone(),
             ))
             .await;
@@ -197,7 +194,7 @@ mod tests {
             .register(build_mock_server_request_handler(
                 "eth_getBlockReceipts",
                 0,
-                vec![serde_json::to_value(block_number.to_hex()).unwrap()],
+                vec![json!(block_number.to_hex())],
                 block_receipt.clone(),
             ))
             .await;

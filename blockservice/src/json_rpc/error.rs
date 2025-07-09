@@ -4,6 +4,6 @@ pub enum Error {
     Rpc(#[from] jsonrpsee::core::client::Error),
     #[error("(de-)serialization failed: {0}")]
     Serde(#[from] serde_json::Error),
-    #[error("The queried data does not exist")]
-    DataDoesNotExist,
+    #[error("the queried data was not found")]
+    NotFound,
 }

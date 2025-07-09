@@ -1,11 +1,10 @@
-/// Returns a stream of new blocks as they are added to the blockchain.
 use bertha_types::Block;
 use tokio::sync::mpsc::{self, Sender};
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 
 use crate::json_rpc::{Error, Source};
 
-#[allow(dead_code)]
+/// Returns a stream of new blocks as they are added to the blockchain.
 pub fn subscribe_to_blocks(
     start_block: u64,
     source: impl Source + 'static,
@@ -30,7 +29,7 @@ async fn block_subscription_task(
                 let (block_header, transactions) = loop {
                     match source.get_block_header_with_transactions(block_number).await {
                         Ok(block_header_with_transactions) => break block_header_with_transactions,
-                        Err(Error::DataDoesNotExist) => continue, // next block does not yet exist
+                        Err(Error::NotFound) => continue, // next block does not yet exist
                         Err(err) => return Err(err),
                     }
                 };
@@ -38,7 +37,7 @@ async fn block_subscription_task(
                 let receipts = loop {
                     match source.get_block_receipt(block_number).await {
                         Ok(receipts) => break receipts,
-                        Err(Error::DataDoesNotExist) => continue, // receipts do not yet exist
+                        Err(Error::NotFound) => continue, // receipts do not yet exist
                         Err(err) => return Err(err),
                     }
                 };
@@ -80,7 +79,7 @@ mod tests {
         let mut mock_source = MockSource::new();
         mock_source
             .expect_get_block_header_with_transactions()
-            //.withf(|identifier| ...) <- we can not constrain the which blocks are requested because the background task is running as a separate task and may produce more blocks than we consume.
+            //.withf(|block_number| ...) <- we can not constrain which blocks are requested because the background task is running as a separate task and may produce more blocks than we consume.
             .returning({
                 let mut block_number = start_block;
                 move |requested_block_number| {
@@ -101,7 +100,7 @@ mod tests {
             });
         mock_source
             .expect_get_block_receipt()
-            //.withf(|identifier| ...) <- we can not constrain the which receipts are requested because the background task is running as a separate task and may produce more receipts than we consume.
+            //.withf(|block_number| ...) <- we can not constrain which blocks are requested because the background task is running as a separate task and may produce more blocks than we consume.
             .returning({
                 let mut block_number = start_block;
                 move |requested_block_number| {
@@ -121,7 +120,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_to_blocks_retires_when_block_header_and_receipt_do_not_exist_yet() {
+    async fn subscribe_to_blocks_retries_when_block_header_and_receipt_do_not_exist_yet() {
         let mut mock_source = MockSource::new();
         mock_source
             .expect_get_block_header_with_transactions()
@@ -130,7 +129,7 @@ mod tests {
                 move |_| {
                     if return_error {
                         return_error = false;
-                        Box::pin(async { Err(Error::DataDoesNotExist) })
+                        Box::pin(async { Err(Error::NotFound) })
                     } else {
                         Box::pin(async { Ok((BlockHeader::default(), Vec::new())) })
                     }
@@ -141,7 +140,7 @@ mod tests {
             move |_| {
                 if return_error {
                     return_error = false;
-                    Box::pin(async { Err(Error::DataDoesNotExist) })
+                    Box::pin(async { Err(Error::NotFound) })
                 } else {
                     Box::pin(async { Ok(vec![TransactionReceipt::default()]) })
                 }
@@ -186,16 +185,11 @@ mod tests {
                 .returning({
                     move |_| Box::pin(async move { Ok((BlockHeader::default(), Vec::new())) })
                 });
-            mock_source
-                .expect_get_block_receipt()
-                //.withf(|identifier| ...) <- we can not constrain the which receipts are requested because the background task is running as a separate task and may produce more receipts than we consume.
-                .returning({
-                    move |_| {
-                        Box::pin(async {
-                            Err(Error::Serde(serde::de::Error::custom("some error")))
-                        })
-                    }
-                });
+            mock_source.expect_get_block_receipt().returning({
+                move |_| {
+                    Box::pin(async { Err(Error::Serde(serde::de::Error::custom("some error"))) })
+                }
+            });
 
             let mut stream = subscribe_to_blocks(0, mock_source);
             let received_block = stream.next().await.unwrap();
@@ -210,7 +204,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn block_subscription_task_shutsdown_if_receiver_dropped() {
+    async fn block_subscription_task_shuts_down_if_receiver_dropped() {
         let mut mock_source = MockSource::new();
         mock_source
             .expect_get_block_header_with_transactions()
