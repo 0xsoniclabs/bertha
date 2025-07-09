@@ -3,7 +3,7 @@ use std::path::Path;
 use rocksdb::WriteBatchWithTransaction;
 use tempfile::TempDir;
 
-use crate::{Error, db::BlockDb};
+use crate::{BlockRange, Error, db::BlockDb, utils::ranges::RangesExt};
 
 impl From<rocksdb::Error> for Error {
     fn from(e: rocksdb::Error) -> Self {
@@ -136,6 +136,21 @@ impl RocksBlockDb {
             })
             .map(|result| result.map(|(_, block_number, value)| (block_number, value)))
     }
+
+    pub fn new_batch() -> BlockBatch {
+        BlockBatch {
+            batch: WriteBatchWithTransaction::default(),
+            block_ranges: Vec::new(),
+        }
+    }
+
+    pub fn write_batch(&self, chain_id: u64, block_batch: BlockBatch) -> Result<(), Error> {
+        self.db.write(block_batch.batch)?;
+        for block_range in block_batch.block_ranges {
+            self.add_range_to_ranges(chain_id, block_range)?;
+        }
+        Ok(())
+    }
 }
 
 impl BlockDb for RocksBlockDb {
@@ -221,6 +236,26 @@ impl BlockDb for RocksBlockDb {
         self.db.write(batch)?;
 
         self.remove_range_from_ranges(chain_id, &(from_block..=to_block))
+    }
+}
+
+pub struct BlockBatch {
+    batch: WriteBatchWithTransaction<false>,
+    block_ranges: Vec<BlockRange>,
+}
+
+impl BlockBatch {
+    pub fn put_raw(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
+        self.batch
+            .put(RocksBlockDb::make_key(chain_id, block_number), data);
+
+        self.block_ranges.add_range(block_number..=block_number);
+
+        Ok(())
+    }
+
+    pub fn count(&self) -> usize {
+        self.batch.len()
     }
 }
 
@@ -619,5 +654,38 @@ mod tests {
                 Some(format!("block {i}").as_bytes().to_vec())
             );
         }
+    }
+
+    #[test]
+    fn rocksblockdb_batched_writes_write_all_elements_and_update_metadata() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let chain_id = 1;
+        let block_numbers = [1, 2, 4];
+        let ranges = [1..=2, 4..=4];
+
+        let mut batch = RocksBlockDb::new_batch();
+        for (i, &block_number) in block_numbers.iter().enumerate() {
+            assert!(batch.count() == i);
+            batch
+                .put_raw(
+                    chain_id,
+                    block_number,
+                    format!("block {block_number}").as_bytes(),
+                )
+                .unwrap();
+            assert!(batch.count() == i + 1);
+        }
+        assert_eq!(batch.block_ranges, ranges);
+
+        db.write_batch(chain_id, batch).unwrap();
+
+        for block_number in block_numbers {
+            assert_eq!(
+                db.get_raw(chain_id, block_number).unwrap(),
+                Some(format!("block {block_number}").as_bytes().to_vec())
+            );
+        }
+        assert_eq!(db.get_ranges_of_chain_id(chain_id).unwrap(), ranges);
     }
 }
