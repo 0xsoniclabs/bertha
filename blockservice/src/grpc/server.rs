@@ -15,7 +15,9 @@ use crate::{
     },
 };
 
+// TODO: Benchmark this to determine optimal size (#78)
 const SERVER_RESPONSE_BUFFER_SIZE: usize = 1000;
+
 /// A gRPC server that provides access to block data stored in a database.
 #[derive(Debug)]
 pub struct RpcServer<Db: BlockDb + Send + Sync + 'static> {
@@ -255,8 +257,11 @@ mod tests {
     #[tokio::test]
     async fn get_block_range_returns_stream_of_blocks() {
         let mut db = MockBlockDb::new();
+        // Request more than the buffer size to check that the channel works
+        // properly (is filled/consumed asynchronously and does not block)
+        let request_count = SERVER_RESPONSE_BUFFER_SIZE + 10;
         let mut data = vec![];
-        for i in 1..=SERVER_RESPONSE_BUFFER_SIZE + 10 {
+        for i in 1..=request_count {
             data.push((i as u64, vec![i as u8]));
         }
         db.expect_iterate_raw().with(eq(1), eq(1)).returning({
