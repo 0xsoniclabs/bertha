@@ -351,7 +351,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let job = tokio::spawn(async move {
-            let _ = server.serve(listener).await;
+            start(listener).await.unwrap();
         });
 
         let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
