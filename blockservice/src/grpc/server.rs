@@ -1,7 +1,4 @@
-use std::{
-    net::{IpAddr, Ipv6Addr, SocketAddr},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{codec::CompressionEncoding, transport::Server};
@@ -34,15 +31,15 @@ where
     }
 
     /// Starts the gRPC server on the specified port.
-    pub async fn serve(self, port: u16) -> Result<(), Box<dyn std::error::Error>> {
-        // This allows both IPv4 and IPv6 connections
-        let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
-
-        println!("Listening on {addr}...");
+    pub async fn serve(
+        self,
+        listener: tokio::net::TcpListener,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        println!("Listening on {}...", listener.local_addr()?);
 
         Server::builder()
             .add_service(BlockRpcServer::new(self).send_compressed(CompressionEncoding::Gzip))
-            .serve(addr)
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
             .await?;
         Ok(())
     }
@@ -193,7 +190,6 @@ mod tests {
             proto_rpc::{
                 BlockRangeRequest, BlockRequest, EncodedBlock, block_rpc_server::BlockRpc,
             },
-            test_utils::SERVER_STARTUP_TIMER,
         },
     };
 
@@ -345,37 +341,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn serve_starts_server_on_specified_port() {
+    async fn serve_starts_server_on_specified_listener() {
         let mut db = MockBlockDb::new();
         db.expect_get_raw()
             .with(eq(1), eq(1))
             .returning(|_, _| Ok(Some(vec![1, 2, 3])));
 
         let server = RpcServer::new(db);
-        let job = tokio::spawn(async {
-            let _ = server.serve(8081).await;
+        let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let job = tokio::spawn(async move {
+            server.serve(listener).await.expect("Server should start");
         });
 
-        // Wait for the server to start
-        tokio::time::sleep(tokio::time::Duration::from_millis(SERVER_STARTUP_TIMER)).await;
-
-        let client = RpcClient::try_new("http://[::1]:8081".parse().unwrap()).await;
+        let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
         assert!(client.is_ok());
         let mut client = client.unwrap();
         let res = client.get_block(1, 1).await.expect("Block should be found");
         assert_eq!(res.data, vec![1, 2, 3]);
         job.abort(); // Stop the server
-    }
-
-    #[tokio::test]
-    async fn serve_returns_error_if_binding_to_port_fails() {
-        let db = MockBlockDb::new();
-        let server = RpcServer::new(db);
-
-        // Reserved port leads to Transport error
-        let res = server.serve(80).await;
-        assert!(res.is_err());
-        assert!(res.unwrap_err().to_string().contains("transport error"));
     }
 
     #[tokio::test]
