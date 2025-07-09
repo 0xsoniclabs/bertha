@@ -27,7 +27,7 @@ mock!(
             request: tonic::Request<BlockRequest>,
         ) -> Result<tonic::Response<EncodedBlock>, tonic::Status>;
 
-        // NOTE: [GetBlockRangeStream] is defined in [BlockRpc] and used as the return type of the `get_block_range` function. However, the mock! macro is unable to find it because of some namespace issues. Because of this, we ignore this field and manually set the return type of `get_block_range` to the same value.
+        // NOTE: [GetBlockRangeStream] is an associated type of [BlockRpc] and used as the return type of the `get_block_range` function. For some reason, the mock! macro appears to be unable to find this type. Because of this, we simply manually expand the return type of `get_block_range`.
         type GetBlockRangeStream = futures::stream::Iter<IntoIter<Result<EncodedBlock, tonic::Status>>>;
 
         #[allow(clippy::type_complexity)]
