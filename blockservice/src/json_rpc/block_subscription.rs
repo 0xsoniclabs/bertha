@@ -208,4 +208,24 @@ mod tests {
             );
         }
     }
+
+    #[tokio::test]
+    async fn block_subscription_task_shutsdown_if_receiver_dropped() {
+        let mut mock_source = MockSource::new();
+        mock_source
+            .expect_get_block_header_with_transactions()
+            .returning({
+                move |_| Box::pin(async move { Ok((BlockHeader::default(), Vec::new())) })
+            });
+        mock_source
+            .expect_get_block_receipt()
+            .returning(move |_| Box::pin(async { Ok(vec![TransactionReceipt::default()]) }));
+        let (sender, receiver) = mpsc::channel(1);
+        let task = tokio::spawn(block_subscription_task(0, mock_source, sender));
+        tokio::task::yield_now().await;
+        assert!(!task.is_finished());
+        drop(receiver);
+        tokio::task::yield_now().await;
+        assert!(task.is_finished());
+    }
 }
