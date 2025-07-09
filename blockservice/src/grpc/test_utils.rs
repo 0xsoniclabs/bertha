@@ -19,7 +19,7 @@ pub const SERVER_STARTUP_TIMER: u64 = 100; // milliseconds
 mock!(
     pub RpcServer {}
 
-#[tonic::async_trait]
+    #[tonic::async_trait]
     impl BlockRpc for RpcServer {
     async fn get_block(
         &self,
