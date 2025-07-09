@@ -80,7 +80,7 @@ pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::e
                     format!("Invalid metadata, block {} does not exist", block.number)
                 })?;
             }
-            // Note: blocks are in reverse order
+            // Note: blocks in genesis/ g-file are in reverse order
             if let Some(prev_parent_hash) = prev_parent_hash {
                 let block_hash = block.to_header().compute_hash();
                 if block_hash != prev_parent_hash {
@@ -214,76 +214,74 @@ mod tests {
     }
 
     #[test]
-    fn fails_if_parent_hash_mismatches() {
-        // block 0 has non-zero parent hash
-        {
-            let tmpdir = tempfile::tempdir().unwrap();
-            let _cwd = ChangeWorkingDir::new(tmpdir.path());
-            init(None::<&Path>).unwrap();
-            let genesis_file = tmpdir.path().join("genesis.g");
+    fn fails_if_parent_hash_of_block_0_is_not_0_hash() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+        init(None::<&Path>).unwrap();
+        let genesis_file = tmpdir.path().join("genesis.g");
 
-            let extra_blocks = [Block {
-                number: 0,
-                parent_hash: [1; 32],
-                ..Block::default_sonic()
-            }];
-            let genesis_data =
-                genesis_parser::test_utils::generate_test_genesis(1, 0, &extra_blocks);
-            std::fs::write(&genesis_file, genesis_data).unwrap();
+        let extra_blocks = [Block {
+            number: 0,
+            parent_hash: [1; 32],
+            ..Block::default_sonic()
+        }];
+        let genesis_data = genesis_parser::test_utils::generate_test_genesis(1, 0, &extra_blocks);
+        std::fs::write(&genesis_file, genesis_data).unwrap();
 
-            assert!(
+        assert!(
                 import(genesis_file.to_str().unwrap(), true)
                     .unwrap_err()
                     .to_string()
                     .contains("Block zero must have parent hash 0x0000000000000000000000000000000000000000000000000000000000000000")
             );
-        }
-        // hash(block_0) != block_1.parent_hash
-        {
-            let tmpdir = tempfile::tempdir().unwrap();
-            let _cwd = ChangeWorkingDir::new(tmpdir.path());
-            init(None::<&Path>).unwrap();
-            let genesis_file = tmpdir.path().join("genesis.g");
-            let extra_blocks = [Block::default_sonic()];
-            let genesis_data =
-                genesis_parser::test_utils::generate_test_genesis(1, 1, &extra_blocks);
-            std::fs::write(&genesis_file, genesis_data).unwrap();
+    }
 
-            assert!(
-                import(genesis_file.to_str().unwrap(), true)
-                    .unwrap_err()
-                    .to_string()
-                    .contains("Parent hash mismatch for block 1")
-            );
-        }
+    #[test]
+    fn fails_if_parent_hash_mismatches() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+        init(None::<&Path>).unwrap();
+        let genesis_file = tmpdir.path().join("genesis.g");
+        let extra_blocks = [Block::default_sonic()];
+        let genesis_data = genesis_parser::test_utils::generate_test_genesis(1, 1, &extra_blocks);
+        std::fs::write(&genesis_file, genesis_data).unwrap();
+
+        assert!(
+            import(genesis_file.to_str().unwrap(), true)
+                .unwrap_err()
+                .to_string()
+                .contains("Parent hash mismatch for block 1")
+        );
+    }
+
+    #[test]
+    fn fails_if_parent_hash_of_block_in_db_mismatches() {
         // hash(block_0 in snapshot) == block_1.parent_hash
         // && hash(block_0 in db) != block_1.parent_hash
-        {
-            let chain_id = 1;
-            let tmpdir = tempfile::tempdir().unwrap();
-            let _cwd = ChangeWorkingDir::new(tmpdir.path());
-            init(None::<&Path>).unwrap();
-            let genesis_file = tmpdir.path().join("genesis.g");
-            let genesis_data = genesis_parser::test_utils::generate_test_genesis(chain_id, 2, &[]);
-            std::fs::write(&genesis_file, genesis_data).unwrap();
-            let mut db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
-            db.put(
-                chain_id,
-                Block {
-                    state_root: [1; 32], // different state root to ensure different hash
-                    ..Block::default_sonic()
-                },
-            )
-            .unwrap();
-            drop(db);
+        let chain_id = 1;
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+        init(None::<&Path>).unwrap();
+        let genesis_file = tmpdir.path().join("genesis.g");
+        let genesis_data = genesis_parser::test_utils::generate_test_genesis(chain_id, 2, &[]);
+        std::fs::write(&genesis_file, genesis_data).unwrap();
+        let mut db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        db.put(
+            chain_id,
+            Block {
+                state_root: [1; 32], // different state root to ensure different hash
+                ..Block::default_sonic()
+            },
+        )
+        .unwrap();
+        drop(db);
 
-            assert!(
-                import(genesis_file.to_str().unwrap(), true)
-                    .unwrap_err()
-                    .to_string()
-                    .contains("Parent hash mismatch for block 1")
-            );
-        }
+        assert!(
+            import(genesis_file.to_str().unwrap(), true)
+                .unwrap_err()
+                .to_string()
+                .contains("Parent hash mismatch for block 1")
+        );
     }
 
     #[test]
