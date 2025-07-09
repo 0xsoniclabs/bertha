@@ -27,7 +27,7 @@ mock!(
             request: tonic::Request<BlockRequest>,
         ) -> Result<tonic::Response<EncodedBlock>, tonic::Status>;
 
-        // NOTE: mock! cannot find this name, so we ignore it and manually add it to get_block_range
+        // NOTE: [GetBlockRangeStream] is defined in [BlockRpc] and used as the return type of the `get_block_range` function. However, the mock! macro is unable to find it because of some namespace issues. Because of this, we ignore this field and manually set the return type of `get_block_range` to the same value.
         type GetBlockRangeStream = futures::stream::Iter<IntoIter<Result<EncodedBlock, tonic::Status>>>;
 
         #[allow(clippy::type_complexity)]
@@ -50,6 +50,7 @@ pub struct TestServer {
 }
 
 impl TestServer {
+    /// Start a new [TestServer] with the provided mock server on a random available port.
     pub async fn new(mock_server: MockRpcServer) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -76,6 +77,7 @@ impl TestServer {
 }
 
 impl Drop for TestServer {
+    /// Drop the [TestServer] and close the end channel to signal shutdown.
     fn drop(&mut self) {
         self.end_channel.close();
     }
@@ -94,7 +96,7 @@ pub async fn get_mock_server_and_client(mock_server: MockRpcServer) -> RpcClient
     assert!(mock_server.is_ok(), "Server failed to start");
 
     let mut client = Some(client);
-    let channel = Endpoint::try_from("http://[::1]:50051")
+    let channel = Endpoint::try_from("http://[::]:50051")
         .unwrap()
         .connect_with_connector(service_fn(move |_: Uri| {
             let client = client.take();
@@ -124,15 +126,15 @@ mod tests {
             let server = TestServer::new(MockRpcServer::new()).await;
             url = server.address.clone();
             {
-                let res = BlockRpcClient::connect(url.clone()).await;
-                assert!(res.is_ok(), "Client should connect to the server");
+                let client = BlockRpcClient::connect(url.clone()).await;
+                assert!(client.is_ok(), "Client should connect to the server");
             }
         }
         // Ensure the server has shut down
         tokio::task::yield_now().await;
         {
-            let res = BlockRpcClient::connect(url.clone()).await;
-            assert!(res.is_err(), "Client should not connect after shutdown");
+            let client = BlockRpcClient::connect(url.clone()).await;
+            assert!(client.is_err(), "Client should not connect after shutdown");
         }
     }
 }
