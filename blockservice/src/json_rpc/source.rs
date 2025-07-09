@@ -8,14 +8,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::json_rpc::Error;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BlockHeaderWithTransactions {
-    #[serde(flatten)]
-    block_header: BlockHeader,
-    transactions: Vec<Transaction>,
-}
-
 /// An abstraction which provides means to request blockchain data.
 #[cfg_attr(test, mockall::automock)]
 pub trait Source: Send + Sync {
@@ -83,6 +75,14 @@ impl Source for NetworkSource {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BlockHeaderWithTransactions {
+    #[serde(flatten)]
+    block_header: BlockHeader,
+    transactions: Vec<Transaction>,
+}
+
 #[cfg(test)]
 mod tests {
     use bertha_types::TransactionType;
@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_block_by_identifier_requests_and_deserializes_block_header() {
+    async fn get_block_header_with_transactions_requests_and_deserializes_block_header() {
         let mock_server = MockServer::start().await;
         let network_source = NetworkSource::try_new(mock_server.uri()).unwrap();
 
