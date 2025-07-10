@@ -7,17 +7,18 @@ require github.com/linxGnu/grocksdb v1.8.12
 require (
 	github.com/0xsoniclabs/carmen/go v0.0.0-20250703193937-7a9222d96372
 	github.com/0xsoniclabs/sonic v0.0.0-20250704082701-11240d3f00bb
+	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
 	github.com/ethereum/go-ethereum v1.16.0
 	github.com/holiman/uint256 v1.3.2
 	github.com/schollz/progressbar/v3 v3.18.0
 	github.com/urfave/cli/v3 v3.3.8
+	go.uber.org/mock v0.4.0
 	google.golang.org/protobuf v1.36.6
 )
 
 require (
 	github.com/0xsoniclabs/tosca v0.0.0-20250624065842-ec138d34756c // indirect
 	github.com/DataDog/zstd v1.5.6 // indirect
-	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/VictoriaMetrics/fastcache v1.12.2 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -70,7 +71,6 @@ require (
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	go.uber.org/mock v0.4.0 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/exp v0.0.0-20241204233417-43b7b7cde48d // indirect
 	golang.org/x/sync v0.12.0 // indirect
