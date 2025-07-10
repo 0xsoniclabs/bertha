@@ -19,7 +19,7 @@ pub trait Source: Send + Sync {
     + std::marker::Send;
 
     /// Returns the receipts for the block with the specified block number.
-    fn get_block_receipt(
+    fn get_block_receipts(
         &self,
         block_number: u64,
     ) -> impl std::future::Future<Output = Result<Vec<TransactionReceipt>, Error>> + std::marker::Send;
@@ -65,7 +65,10 @@ impl Source for NetworkSource {
         Ok((block_header, transactions))
     }
 
-    async fn get_block_receipt(&self, block_number: u64) -> Result<Vec<TransactionReceipt>, Error> {
+    async fn get_block_receipts(
+        &self,
+        block_number: u64,
+    ) -> Result<Vec<TransactionReceipt>, Error> {
         // see: https://docs.chainstack.com/reference/ethereum-getblockreceipts
         let receipts: Option<Vec<TransactionReceipt>> = self
             .http_client
@@ -177,12 +180,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_block_receipt_requests_and_deserializes_receipts() {
+    async fn get_block_receipts_requests_and_deserializes_receipts() {
         let mock_server = MockServer::start().await;
 
         let network_source = NetworkSource::try_new(mock_server.uri()).unwrap();
 
-        let block_receipt = vec![TransactionReceipt {
+        let block_receipts = vec![TransactionReceipt {
             cumulative_gas_used: u64::default(),
             logs: Vec::default(),
             status: u64::default(),
@@ -195,13 +198,13 @@ mod tests {
                 "eth_getBlockReceipts",
                 0,
                 vec![json!(block_number.to_hex())],
-                block_receipt.clone(),
+                block_receipts.clone(),
             ))
             .await;
 
-        let received_block_receipt = network_source.get_block_receipt(block_number).await;
-        assert!(received_block_receipt.is_ok());
-        assert_eq!(received_block_receipt.unwrap(), block_receipt);
+        let received_block_receipts = network_source.get_block_receipts(block_number).await;
+        assert!(received_block_receipts.is_ok());
+        assert_eq!(received_block_receipts.unwrap(), block_receipts);
     }
 
     #[test]

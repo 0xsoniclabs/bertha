@@ -35,7 +35,7 @@ async fn block_subscription_task(
                 };
 
                 let receipts = loop {
-                    match source.get_block_receipt(block_number).await {
+                    match source.get_block_receipts(block_number).await {
                         Ok(receipts) => break receipts,
                         Err(Error::NotFound) => continue, // receipts do not yet exist
                         Err(err) => return Err(err),
@@ -99,7 +99,7 @@ mod tests {
                 }
             });
         mock_source
-            .expect_get_block_receipt()
+            .expect_get_block_receipts()
             //.withf(|block_number| ...) <- we can not constrain which blocks are requested because the background task is running as a separate task and may produce more blocks than we consume.
             .returning({
                 let mut block_number = start_block;
@@ -135,7 +135,7 @@ mod tests {
                     }
                 }
             });
-        mock_source.expect_get_block_receipt().returning({
+        mock_source.expect_get_block_receipts().returning({
             let mut return_error = true;
             move |_| {
                 if return_error {
@@ -185,7 +185,7 @@ mod tests {
                 .returning({
                     move |_| Box::pin(async move { Ok((BlockHeader::default(), Vec::new())) })
                 });
-            mock_source.expect_get_block_receipt().returning({
+            mock_source.expect_get_block_receipts().returning({
                 move |_| {
                     Box::pin(async { Err(Error::Serde(serde::de::Error::custom("some error"))) })
                 }
@@ -212,7 +212,7 @@ mod tests {
                 move |_| Box::pin(async move { Ok((BlockHeader::default(), Vec::new())) })
             });
         mock_source
-            .expect_get_block_receipt()
+            .expect_get_block_receipts()
             .returning(move |_| Box::pin(async { Ok(vec![TransactionReceipt::default()]) }));
         let (sender, receiver) = mpsc::channel(1);
         let task = tokio::spawn(block_subscription_task(0, mock_source, sender));
