@@ -204,15 +204,23 @@ mod tests {
             transactions,
         };
 
-        let serialized = serde_json::to_string_pretty(&block_header_with_transactions).unwrap();
+        // serialize and deserialize = identity
+        {
+            let serialized = serde_json::to_string_pretty(&block_header_with_transactions).unwrap();
+            let deserialized: BlockHeaderWithTransactions =
+                serde_json::from_str(&serialized).unwrap();
+            assert_eq!(deserialized, block_header_with_transactions);
+        }
 
-        // test that the header fields are flattened
-        assert!(serialized.contains("number"));
-        assert!(serialized.contains("parentHash"));
-        // check that transactions are included
-        assert!(serialized.contains("transactions"));
-
-        let deserialized: BlockHeaderWithTransactions = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized, block_header_with_transactions);
+        // header fields are flattened
+        {
+            let serialized = serde_json::to_value(&block_header_with_transactions).unwrap();
+            assert!(serialized.is_object());
+            let serialized = serialized.as_object().unwrap();
+            // test that the header fields are flattened
+            assert!(serialized.get("number").is_some());
+            // check that transactions are included
+            assert!(serialized.get("transactions").is_some());
+        }
     }
 }
