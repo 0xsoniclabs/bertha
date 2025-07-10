@@ -29,7 +29,7 @@ async fn block_subscription_task(
 
             loop {
                 let mut timeout = Duration::from_millis(10);
-                let (block_header, transactions) = loop {
+                let block_header_with_transactions = loop {
                     match source.get_block_header_with_transactions(block_number).await {
                         Ok(block_header_with_transactions) => break block_header_with_transactions,
                         Err(Error::NotFound) => {
@@ -56,8 +56,8 @@ async fn block_subscription_task(
                 };
 
                 let block = Block::from_header_and_transactions_and_receipts(
-                    block_header,
-                    transactions,
+                    block_header_with_transactions.block_header,
+                    block_header_with_transactions.transactions,
                     receipts,
                 );
 
@@ -83,7 +83,7 @@ mod tests {
     use tokio_stream::StreamExt;
 
     use super::*;
-    use crate::json_rpc::source::MockSource;
+    use crate::json_rpc::source::{BlockHeaderWithTransactions, MockSource};
 
     #[tokio::test]
     async fn subscribe_to_blocks_sends_blocks_over_channel() {
@@ -100,14 +100,13 @@ mod tests {
                     let curr_block_number = block_number;
                     block_number += 1;
                     Box::pin(async move {
-                        let block_header_with_transactions = (
-                            BlockHeader {
+                        Ok(BlockHeaderWithTransactions{
+                            block_header: BlockHeader {
                                 number: curr_block_number,
                                 ..BlockHeader::default()
                             },
-                            Vec::new()
-                        );
-                        Ok(block_header_with_transactions)
+                            transactions: Vec::new()
+                        })
                     })
                 }
             });
@@ -144,7 +143,7 @@ mod tests {
                         return_error = false;
                         Box::pin(async { Err(Error::NotFound) })
                     } else {
-                        Box::pin(async { Ok((BlockHeader::default(), Vec::new())) })
+                        Box::pin(async { Ok(BlockHeaderWithTransactions::default()) })
                     }
                 }
             });
@@ -195,9 +194,7 @@ mod tests {
             let mut mock_source = MockSource::new();
             mock_source
                 .expect_get_block_header_with_transactions()
-                .returning({
-                    move |_| Box::pin(async move { Ok((BlockHeader::default(), Vec::new())) })
-                });
+                .returning(|_| Box::pin(async { Ok(BlockHeaderWithTransactions::default()) }));
             mock_source.expect_get_block_receipts().returning({
                 move |_| {
                     Box::pin(async { Err(Error::Serde(serde::de::Error::custom("some error"))) })
@@ -221,9 +218,7 @@ mod tests {
         let mut mock_source = MockSource::new();
         mock_source
             .expect_get_block_header_with_transactions()
-            .returning({
-                move |_| Box::pin(async move { Ok((BlockHeader::default(), Vec::new())) })
-            });
+            .returning(|_| Box::pin(async { Ok(BlockHeaderWithTransactions::default()) }));
         mock_source
             .expect_get_block_receipts()
             .returning(move |_| Box::pin(async { Ok(vec![TransactionReceipt::default()]) }));

@@ -15,8 +15,7 @@ pub trait Source: Send + Sync {
     fn get_block_header_with_transactions(
         &self,
         block_number: u64,
-    ) -> impl std::future::Future<Output = Result<(BlockHeader, Vec<Transaction>), Error>>
-    + std::marker::Send;
+    ) -> impl std::future::Future<Output = Result<BlockHeaderWithTransactions, Error>> + std::marker::Send;
 
     /// Returns the receipts for the block with the specified block number.
     fn get_block_receipts(
@@ -45,7 +44,7 @@ impl Source for NetworkSource {
     async fn get_block_header_with_transactions(
         &self,
         block_number: u64,
-    ) -> Result<(BlockHeader, Vec<Transaction>), Error> {
+    ) -> Result<BlockHeaderWithTransactions, Error> {
         // see: https://docs.chainstack.com/reference/fantom-getblockbynumber
         // see: https://docs.chainstack.com/reference/fantom-getblockbyhash
         let result: Option<_> = self
@@ -58,11 +57,7 @@ impl Source for NetworkSource {
                 ],
             )
             .await?;
-        let BlockHeaderWithTransactions {
-            block_header,
-            transactions,
-        } = result.ok_or(Error::NotFound)?;
-        Ok((block_header, transactions))
+        result.ok_or(Error::NotFound)
     }
 
     async fn get_block_receipts(
@@ -78,12 +73,12 @@ impl Source for NetworkSource {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct BlockHeaderWithTransactions {
+pub struct BlockHeaderWithTransactions {
     #[serde(flatten)]
-    block_header: BlockHeader,
-    transactions: Vec<Transaction>,
+    pub block_header: BlockHeader,
+    pub transactions: Vec<Transaction>,
 }
 
 #[cfg(test)]
@@ -169,14 +164,7 @@ mod tests {
             .await;
         assert!(received_block.is_ok());
         let received_block = received_block.unwrap();
-        assert_eq!(
-            received_block.0,
-            block_header_with_transactions.block_header
-        );
-        assert_eq!(
-            received_block.1,
-            block_header_with_transactions.transactions
-        );
+        assert_eq!(received_block, block_header_with_transactions);
     }
 
     #[tokio::test]
