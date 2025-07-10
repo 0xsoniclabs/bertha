@@ -92,7 +92,7 @@ mod tests {
         let mut mock_source = MockSource::new();
         mock_source
             .expect_get_block_header_with_transactions()
-            //.withf(|block_number| ...) <- we can not constrain which blocks are requested because the background task is running as a separate task and may produce more blocks than we consume.
+            //.withf(|number| ...) <- we can not constrain which blocks are requested because the subscription is running as a separate task and may produce more blocks than we consume in this test.
             .returning({
                 let mut block_number = start_block;
                 move |requested_block_number| {
@@ -112,7 +112,7 @@ mod tests {
             });
         mock_source
             .expect_get_block_receipts()
-            //.withf(|block_number| ...) <- we can not constrain which blocks are requested because the background task is running as a separate task and may produce more blocks than we consume.
+            //.withf(|number| ...) <- we can not constrain which blocks are requested because the subscription is running as a separate task and may produce more blocks than we consume in this test.
             .returning({
                 let mut block_number = start_block;
                 move |requested_block_number| {
