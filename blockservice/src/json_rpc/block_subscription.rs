@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bertha_types::Block;
 use tokio::sync::mpsc::{self, Sender};
 use tokio_stream::{Stream, wrappers::ReceiverStream};
@@ -26,10 +28,16 @@ async fn block_subscription_task(
             let mut block_number = start_block;
 
             loop {
+                let mut timeout = Duration::from_millis(10);
                 let (block_header, transactions) = loop {
                     match source.get_block_header_with_transactions(block_number).await {
                         Ok(block_header_with_transactions) => break block_header_with_transactions,
-                        Err(Error::NotFound) => continue, // next block does not yet exist
+                        Err(Error::NotFound) => {
+                            // next block does not yet exist
+                            tokio::time::sleep(timeout).await;
+                            timeout *= 2;
+                            continue
+                        }
                         Err(err) => return Err(err),
                     }
                 };
@@ -37,7 +45,12 @@ async fn block_subscription_task(
                 let receipts = loop {
                     match source.get_block_receipts(block_number).await {
                         Ok(receipts) => break receipts,
-                        Err(Error::NotFound) => continue, // receipts do not yet exist
+                        Err(Error::NotFound) => {
+                            // next block does not yet exist
+                            tokio::time::sleep(timeout).await;
+                            timeout *= 2;
+                            continue
+                        }
                         Err(err) => return Err(err),
                     }
                 };
