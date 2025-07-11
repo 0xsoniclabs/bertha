@@ -191,10 +191,7 @@ mod tests {
         },
         db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb, proto},
         grpc::{
-            proto_rpc::{
-                BlockRange, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock,
-                to_block_range_vec,
-            },
+            proto_rpc::{BlockRange, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock},
             test_utils::{MockRpcServer, TestServer},
         },
     };
@@ -915,5 +912,10 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Helper function to convert an iterator of `(u64, u64)` tuples into a `Vec<BlockRange>`.
+    pub fn to_block_range_vec(ranges: impl IntoIterator<Item = (u64, u64)>) -> Vec<BlockRange> {
+        ranges.into_iter().map(BlockRange::from).collect()
     }
 }

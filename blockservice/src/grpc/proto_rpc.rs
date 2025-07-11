@@ -9,9 +9,3 @@ impl From<(u64, u64)> for BlockRange {
         }
     }
 }
-
-/// Helper function to convert an iterator of `(u64, u64)` tuples into a `Vec<BlockRange>`.
-#[cfg(test)]
-pub fn to_block_range_vec(ranges: impl IntoIterator<Item = (u64, u64)>) -> Vec<BlockRange> {
-    ranges.into_iter().map(BlockRange::from).collect()
-}
