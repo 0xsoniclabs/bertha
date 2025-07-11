@@ -27,7 +27,15 @@ pub async fn fetch(
         .map(|r| r.block_ranges)
         .ok_or_else(|| format!("No ranges found for chain ID {chain_id}"))?;
 
-    // Note: the chain id remote ranges are guaranteed to be non-empty
+    if chain_id_remote_ranges.is_empty() {
+        return Err(
+            format!("chain id {chain_id} found, but server returned empty chain range").into(),
+        );
+    }
+    if !chain_id_remote_ranges.is_sorted_by(|a, b| a.from <= b.from && a.to <= b.to) {
+        return Err(format!("remote ranges for chain ID {chain_id} are not sorted").into());
+    }
+
     let from = from.unwrap_or_default();
     let to = to.unwrap_or(chain_id_remote_ranges.last().unwrap().to);
 
@@ -83,19 +91,35 @@ pub async fn fetch(
         let mut expected_block = from;
         let mut block_range_stream_response = client.get_block_range(chain_id, from, to).await?;
         loop {
-            let response = block_stream_response.message().await?;
+            let response = block_range_stream_response.message().await?;
             if response.is_none() {
                 break; // No more blocks
             }
             let encoded_block = response.unwrap();
-
-            uncompressed_bytes_written += encoded_block.data.len();
+            if encoded_block.number != expected_block {
+                return Err(format!(
+                    "expected to receive block number {}, got {}",
+                    expected_block, encoded_block.number
+                )
+                .into());
+            }
             db.put_raw(chain_id, encoded_block.number, &encoded_block.data)?;
-            count += 1;
+            uncompressed_bytes_written += encoded_block.data.len();
+            expected_block += 1;
             progress_bar.inc(1);
         }
-        progress_bar.finish();
+        if expected_block - 1 != to {
+            return Err(format!(
+                "received fewer blocks than expected: expected {}, got {}",
+                to - from + 1,
+                expected_block - from
+            )
+            .into());
+        }
+        count += (to - from + 1) as usize;
     }
+        progress_bar.finish();
+
     writeln!(
         writer,
         "Fetched and wrote {} blocks, total uncompressed size: {} MiB",
@@ -398,8 +422,63 @@ mod tests {
             std::io::sink(),
         )
         .await;
-        let err = result.expect_err("fetch should fail with no remote chain IDs");
-        assert!(err.to_string().contains("No ranges found for chain ID 1"));
+    #[tokio::test]
+    async fn fails_on_invalid_remote_chain_ranges() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+        init(None::<&Path>).unwrap();
+        // Empty chain ranges for chain ID 1
+        {
+            let mut mock_server = MockRpcServer::new();
+            mock_server.expect_list().returning(|_| {
+                Ok(tonic::Response::new(ChainRanges {
+                    chain_ranges: vec![ChainRange {
+                        chain_id: 1,
+                        block_ranges: vec![],
+                    }],
+                }))
+            });
+            let test_server = TestServer::new(mock_server).await;
+            let result = fetch(
+                test_server.address.clone(),
+                1, // Chain ID that exists but has no ranges
+                None,
+                None,
+                std::io::sink(),
+            )
+            .await;
+            let err = result.expect_err("Fetch should fail with empty chain ranges");
+            assert_eq!(
+                err.to_string(),
+                "chain id 1 found, but server returned empty chain range"
+            );
+        }
+        // Non-sorted chain ranges for chain ID 1
+        {
+            let mut mock_server = MockRpcServer::new();
+            mock_server.expect_list().returning(|_| {
+                Ok(tonic::Response::new(ChainRanges {
+                    chain_ranges: vec![ChainRange {
+                        chain_id: 1,
+                        block_ranges: to_block_range_vec([(10, 20), (0, 5)]), // Not sorted
+                    }],
+                }))
+            });
+            let test_server = TestServer::new(mock_server).await;
+            let result = fetch(
+                test_server.address.clone(),
+                1, // Chain ID that exists but has unsorted ranges
+                None,
+                None,
+                std::io::sink(),
+            )
+            .await;
+            let err = result.expect_err("Fetch should fail with unsorted chain ranges");
+            assert_eq!(
+                err.to_string(),
+                "remote ranges for chain ID 1 are not sorted"
+            );
+        }
     }
 
     #[tokio::test]
@@ -434,7 +513,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_with_missing_range_on_remote_server() {
+    async fn fails_if_requested_range_does_not_exist_on_remote_server() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
         init(None::<&Path>).unwrap();
@@ -443,25 +522,213 @@ mod tests {
             Ok(tonic::Response::new(ChainRanges {
                 chain_ranges: vec![ChainRange {
                     chain_id: 1,
-                    block_ranges: vec![BlockRange { from: 0, to: 10 }],
+                    block_ranges: vec![BlockRange { from: 5, to: 10 }],
                 }],
             }))
         });
 
-        let destructible_server = TestServer::new(mock_server).await;
+        let test_server = TestServer::new(mock_server).await;
+        // Range is completely after the remote ranges
+        {
         let result = fetch(
-            destructible_server.address.clone(),
+                test_server.address.clone(),
             1,
             Some(11), // Range that does not exist on the remote server
             Some(15),
             std::io::sink(),
         )
         .await;
-        let err = result.expect_err("fetch should fail with missing range on remote server");
+            let err = result.expect_err("Fetch should fail with missing range on remote server");
+            assert_eq!(
+                err.to_string(),
+                "range 11 to 15 for chain ID 1 is not available on remote server"
+            );
+        }
+        // Range is completely before the remote ranges
+        {
+            let result = fetch(
+                test_server.address.clone(),
+                1,
+                Some(0),
+                Some(4), // Range that exists locally but not on the remote server
+                std::io::sink(),
+            )
+            .await;
+            let err = result.expect_err("Fetch should fail with missing range on remote server");
+            assert_eq!(
+                err.to_string(),
+                "range 0 to 4 for chain ID 1 is not available on remote server"
+            );
+        }
+        // Range partially overlaps with the remote ranges but is not fully covered
+        {
+            let result = fetch(
+                test_server.address.clone(),
+                1,
+                Some(5),
+                Some(15), // Range that partially overlaps with the remote ranges
+                std::io::sink(),
+            )
+            .await;
+            let err = result.expect_err("Fetch should fail with missing range on remote server");
+            assert_eq!(
+                err.to_string(),
+                "range 5 to 15 for chain ID 1 is not available on remote server"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn fails_if_get_block_range_returns_unexpected_block_range() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+        init(None::<&Path>).unwrap();
+        // Less block than expected
+        {
+            let mut mock_server = MockRpcServer::new();
+            mock_server.expect_list().returning(|_| {
+                Ok(tonic::Response::new(ChainRanges {
+                    chain_ranges: vec![ChainRange {
+                        chain_id: 1,
+                        block_ranges: vec![BlockRange { from: 0, to: 10 }],
+                    }],
+                }))
+            });
+
+            // Simulate a response that returns fewer blocks than requested
+            mock_server.expect_get_block_range().returning(|_| {
+                let response = vec![
+                    Ok(EncodedBlock {
+                        number: 0,
+                        data: proto::Block::from(bertha_types::Block {
+                            number: 0,
+                            ..bertha_types::Block::default_sonic()
+                        })
+                        .encode_to_vec(),
+                    }),
+                    Ok(EncodedBlock {
+                        number: 1,
+                        data: proto::Block::from(bertha_types::Block {
+                            number: 1,
+                            ..bertha_types::Block::default_sonic()
+                        })
+                        .encode_to_vec(),
+                    }),
+                ]; // Only two blocks instead of three
+                Ok(tonic::Response::new(futures::stream::iter(response)))
+            });
+
+            let test_server = TestServer::new(mock_server).await;
+            let result = fetch(
+                test_server.address.clone(),
+                1,
+                Some(0),
+                Some(2), // Requesting three blocks, but only two will be returned
+                std::io::sink(),
+            )
+            .await;
+            let err = result.expect_err("Fetch should fail");
+            assert_eq!(
+                err.to_string(),
+                "received fewer blocks than expected: expected 3, got 2",
+            );
+        }
+        purge(1, None, None).unwrap(); // Clear the database for the next test
+        // More blocks than expected
+        {
+            let mut mock_server = MockRpcServer::new();
+            mock_server.expect_list().returning(|_| {
+                Ok(tonic::Response::new(ChainRanges {
+                    chain_ranges: vec![ChainRange {
+                        chain_id: 1,
+                        block_ranges: vec![BlockRange { from: 0, to: 10 }],
+                    }],
+                }))
+            });
+
+            // Simulate a response that returns more blocks than requested
+            mock_server.expect_get_block_range().returning(|_| {
+                let response = (0..=4)
+                    .map(|i| {
+                        Ok(EncodedBlock {
+                            number: i,
+                            data: proto::Block::from(bertha_types::Block {
+                                number: i,
+                                ..bertha_types::Block::default_sonic()
+                            })
+                            .encode_to_vec(),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                Ok(tonic::Response::new(futures::stream::iter(response)))
+            });
+
+            let test_server = TestServer::new(mock_server).await;
+            let result = fetch(
+                test_server.address.clone(),
+                1,
+                Some(0),
+                Some(2), // Requesting three blocks, but five will be returned
+                std::io::sink(),
+            )
+            .await;
+            let err = result.expect_err("Fetch should fail");
+            assert_eq!(
+                err.to_string(),
+                "received fewer blocks than expected: expected 3, got 5"
+            );
+        }
+        purge(1, None, None).unwrap(); // Clear the database for the next test
+        // Block number mismatch
+        {
+            let mut mock_server = MockRpcServer::new();
+            mock_server.expect_list().returning(|_| {
+                Ok(tonic::Response::new(ChainRanges {
+                    chain_ranges: vec![ChainRange {
+                        chain_id: 1,
+                        block_ranges: vec![BlockRange { from: 0, to: 10 }],
+                    }],
+                }))
+            });
+
+            // Simulate a response that returns blocks with unexpected numbers
+            mock_server.expect_get_block_range().returning(|_| {
+                let response = vec![
+                    Ok(EncodedBlock {
+                        number: 0,
+                        data: proto::Block::from(bertha_types::Block {
+                            number: 0,
+                            ..bertha_types::Block::default_sonic()
+                        })
+                        .encode_to_vec(),
+                    }),
+                    Ok(EncodedBlock {
+                        number: 2, // Should be 1
+                        data: proto::Block::from(bertha_types::Block {
+                            number: 2,
+                            ..bertha_types::Block::default_sonic()
+                        })
+                        .encode_to_vec(),
+                    }),
+                ];
+                Ok(tonic::Response::new(futures::stream::iter(response)))
+            });
+
+            let test_server = TestServer::new(mock_server).await;
+            let result = fetch(
+                test_server.address.clone(),
+                1,
+                Some(0),
+                Some(2), // Requesting three blocks, but second block will have wrong number
+                std::io::sink(),
+            )
+            .await;
+            let err = result.expect_err("Fetch should fail");
         assert!(
             err.to_string()
-                .contains("Range 11 to 15 for chain ID 1 is not covered by remote ranges")
+                    .contains("expected to receive block number 1, got 2")
         );
+        }
     }
 
     #[tokio::test]
