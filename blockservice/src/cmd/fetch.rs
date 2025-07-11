@@ -292,43 +292,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_on_db_error() {
-        // Non-existing db
+    async fn fails_on_non_existing_db() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+        let server = TestServer::new(MockRpcServer::new()).await;
+        let result = fetch(server.address.clone(), 1, None, None, std::io::sink()).await;
+        let err = result.expect_err("Fetch should fail with non-existing DB");
+        assert!(err.to_string().contains("No such file or directory"));
+    }
+
+    #[tokio::test]
+    async fn fails_on_invalid_stored_chain_ids() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+        init(None::<&Path>).unwrap();
         {
-            let tmpdir = tempfile::tempdir().unwrap();
-            let _cwd = ChangeWorkingDir::new(tmpdir.path());
-            let server = TestServer::new(MockRpcServer::new()).await;
-            let result = fetch(server.address.clone(), 1, None, None, std::io::sink()).await;
-            let err = result.expect_err("Fetch should fail with non-existing DB");
-            assert!(err.to_string().contains("No such file or directory"));
+            let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
+            let mut db = RocksBlockDb::open(db_path.clone()).unwrap();
+            db.put_metadata_raw(1, vec![0].as_slice()).unwrap(); // Invalid metadata length
         }
-        // Invalid stored chain ids
-        {
-            let tmpdir = tempfile::tempdir().unwrap();
-            let _cwd = ChangeWorkingDir::new(tmpdir.path());
-            init(None::<&Path>).unwrap();
-            {
-                let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
-                let mut db = RocksBlockDb::open(db_path.clone()).unwrap();
-                db.put_metadata_raw(1, vec![0].as_slice()).unwrap(); // Invalid metadata length
-            }
-            let mut mock_server = MockRpcServer::new();
-            mock_server.expect_list().returning(|_| {
-                Ok(tonic::Response::new(ChainRanges {
-                    chain_ranges: vec![ChainRange {
-                        chain_id: 1,
-                        block_ranges: vec![BlockRange { from: 0, to: 10 }],
-                    }],
-                }))
-            });
-            let server = TestServer::new(mock_server).await;
-            let result = fetch(server.address.clone(), 1, None, None, std::io::sink()).await;
-            let err = result.expect_err("Fetch should fail with invalid DB");
-            assert!(
-                err.to_string()
-                    .contains("error in underlying storage layer: invalid ranges for chain ID 1")
-            );
-        }
+        let mut mock_server = MockRpcServer::new();
+        mock_server.expect_list().returning(|_| {
+            Ok(tonic::Response::new(ChainRanges {
+                chain_ranges: vec![ChainRange {
+                    chain_id: 1,
+                    block_ranges: vec![BlockRange { from: 0, to: 10 }],
+                }],
+            }))
+        });
+        let server = TestServer::new(mock_server).await;
+        let result = fetch(server.address.clone(), 1, None, None, std::io::sink()).await;
+        let err = result.expect_err("Fetch should fail with invalid DB");
+        assert!(
+            err.to_string()
+                .contains("error in underlying storage layer: invalid ranges for chain ID 1")
+        );
     }
 
     #[tokio::test]
@@ -394,30 +392,27 @@ mod tests {
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
         init(None::<&Path>).unwrap();
 
-        // No chain ID 1 in the response
-        {
-            let mut mock_server = MockRpcServer::new();
-            mock_server.expect_list().returning(|_| {
-                Ok(tonic::Response::new(ChainRanges {
-                    chain_ranges: vec![ChainRange {
-                        chain_id: 2,
-                        block_ranges: vec![BlockRange { from: 0, to: 10 }],
-                    }],
-                }))
-            });
+        let mut mock_server = MockRpcServer::new();
+        mock_server.expect_list().returning(|_| {
+            Ok(tonic::Response::new(ChainRanges {
+                chain_ranges: vec![ChainRange {
+                    chain_id: 2,
+                    block_ranges: vec![BlockRange { from: 0, to: 10 }],
+                }],
+            }))
+        });
 
-            let test_server = TestServer::new(mock_server).await;
-            let result = fetch(
-                test_server.address.clone(),
-                1, // Chain ID that does not exist
-                None,
-                None,
-                std::io::sink(),
-            )
-            .await;
-            let err = result.expect_err("Fetch should fail with no remote chain IDs");
-            assert_eq!(err.to_string(), "no ranges found for chain ID 1");
-        }
+        let test_server = TestServer::new(mock_server).await;
+        let result = fetch(
+            test_server.address.clone(),
+            1, // Chain ID that does not exist
+            None,
+            None,
+            std::io::sink(),
+        )
+        .await;
+        let err = result.expect_err("Fetch should fail with no remote chain IDs");
+        assert_eq!(err.to_string(), "no ranges found for chain ID 1");
     }
 
     #[tokio::test]
