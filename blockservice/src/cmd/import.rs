@@ -1,11 +1,13 @@
-use std::{fmt::Write, fs::File, io::BufReader, path::Path};
+use std::{fs::File, io::BufReader, path::Path};
 
 use bertha_types::{Hash, HexConvert};
 use genesis_parser::Genesis;
-use indicatif::{ProgressBar, ProgressState, ProgressStyle};
 use prost::Message;
 
-use crate::db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb, proto};
+use crate::{
+    cmd::make_progress_bar,
+    db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb, proto},
+};
 
 pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::error::Error>> {
     let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize()?;
@@ -49,18 +51,7 @@ pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::e
 
     let mut uncompressed_bytes_written = 0;
     let mut block_count = 0;
-    let progress_bar = ProgressBar::new(import_blocks);
-    progress_bar.set_style(
-        ProgressStyle::with_template(
-            "[{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} (ETA {eta})",
-        )?
-        .with_key("eta", |state: &ProgressState, w: &mut dyn Write| {
-            // Since there is no way of propagating errors from this closure,
-            // we just ignore the result (worst case the ETA will not be shown).
-            let _ = write!(w, "{:.1}s", state.eta().as_secs_f64());
-        })
-        .progress_chars("#>-"),
-    );
+    let progress_bar = make_progress_bar(total_blocks)?;
 
     println!("Importing {import_blocks} blocks for chain ID {chain_id}");
 
@@ -112,7 +103,7 @@ pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::e
         uncompressed_bytes_written += protoblock.len();
         db.put_raw(chain_id, number, &protoblock)?;
         block_count += 1;
-        progress_bar.set_position(block_count);
+        progress_bar.inc(1);
     }
     let elapsed = before.elapsed();
     progress_bar.finish();

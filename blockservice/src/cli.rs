@@ -24,6 +24,19 @@ pub enum Command {
         #[arg(long, default_value_t = false)]
         verify: bool,
     },
+    /// Fetch blocks from a remote block service and store them in the local database.
+    Fetch {
+        url: String,
+        chain_id: u64,
+        #[arg(short, long)]
+        /// The first block number in the range to fetch. If not specified, fetching starts from
+        /// block 0.
+        from: Option<u64>,
+        /// The last block number in the range to fetch. If not specified, fetching ends at the
+        /// latest available block.
+        #[arg(short, long)]
+        to: Option<u64>,
+    },
     /// List all locally stored block ranges for all chains or only for the specific chain if
     /// specified.
     List { chain_id: Option<u64> },
@@ -73,6 +86,7 @@ Usage: blockservice <COMMAND>
 Commands:
   init    Initialize a new block database in the current directory or at the specified path
   import  Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  fetch   Fetch blocks from a remote block service and store them in the local database
   list    List all locally stored block ranges for all chains or only for the specific chain if specified
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
@@ -111,6 +125,7 @@ Usage: blockservice <COMMAND>
 Commands:
   init    Initialize a new block database in the current directory or at the specified path
   import  Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  fetch   Fetch blocks from a remote block service and store them in the local database
   list    List all locally stored block ranges for all chains or only for the specific chain if specified
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
@@ -640,6 +655,144 @@ Usage: blockservice start [PORT]
 For more information, try '--help'.
 ";
         parse_and_compare(&args, Err(expected));
+    }
+
+    #[test]
+    fn call_with_fetch_subcommand_with_help_argument_prints_subcommand_help() {
+        let args = ["blockservice", "fetch", "--help"];
+        let expected = "\
+        Fetch blocks from a remote block service and store them in the local database
+
+Usage: blockservice fetch [OPTIONS] <URL> <CHAIN_ID>
+
+Arguments:
+  <URL>
+  <CHAIN_ID>
+
+Options:
+  -f, --from <FROM>  The first block number in the range to fetch. If not specified, fetching starts from block 0
+  -t, --to <TO>      The last block number in the range to fetch. If not specified, fetching ends at the latest available block
+  -h, --help         Print help
+";
+        parse_and_compare(&args, Err(expected));
+    }
+
+    #[test]
+    fn call_with_fetch_subcommand_without_arguments_prints_parse_error() {
+        let args = ["blockservice", "fetch"];
+        let expected = "\
+error: the following required arguments were not provided:
+  <URL>
+  <CHAIN_ID>
+
+Usage: blockservice fetch <URL> <CHAIN_ID>
+
+For more information, try '--help'.
+";
+        parse_and_compare(&args, Err(expected));
+    }
+
+    #[test]
+    fn call_with_fetch_subcommand_without_chain_id_prints_parse_error() {
+        let args = ["blockservice", "fetch", "http://example.com"];
+        let expected = "\
+error: the following required arguments were not provided:
+  <CHAIN_ID>
+
+Usage: blockservice fetch <URL> <CHAIN_ID>
+
+For more information, try '--help'.
+";
+        parse_and_compare(&args, Err(expected));
+    }
+
+    #[test]
+    fn call_with_fetch_subcommand_with_invalid_chain_id_prints_parse_error() {
+        let args = ["blockservice", "fetch", "http://example.com", "invalid"];
+        let expected = "\
+error: invalid value 'invalid' for '<CHAIN_ID>': invalid digit found in string
+
+For more information, try '--help'.
+";
+        parse_and_compare(&args, Err(expected));
+    }
+
+    #[test]
+    fn call_with_fetch_subcommand_with_all_arguments_parses_successfully() {
+        let url = "http://example.com";
+        let chain_id = 146;
+        let from = 1000;
+        let to = 2000;
+        // No `from` or `to` arguments
+        let args = ["blockservice", "fetch", url, &chain_id.to_string()];
+        let expected = Args {
+            command: Command::Fetch {
+                url: url.to_string(),
+                chain_id,
+                from: None,
+                to: None,
+            },
+        };
+        parse_and_compare(&args, Ok(expected));
+
+        // With `from` argument
+        let args = [
+            "blockservice",
+            "fetch",
+            url,
+            &chain_id.to_string(),
+            "--from",
+            &from.to_string(),
+        ];
+        let expected = Args {
+            command: Command::Fetch {
+                url: url.to_string(),
+                chain_id,
+                from: Some(from),
+                to: None,
+            },
+        };
+        parse_and_compare(&args, Ok(expected));
+
+        // With `to` argument
+        let args = [
+            "blockservice",
+            "fetch",
+            url,
+            &chain_id.to_string(),
+            "--to",
+            &to.to_string(),
+        ];
+        let expected = Args {
+            command: Command::Fetch {
+                url: url.to_string(),
+                chain_id,
+                from: None,
+                to: Some(to),
+            },
+        };
+        parse_and_compare(&args, Ok(expected));
+
+        // With both `from` and `to` arguments
+        let args = [
+            "blockservice",
+            "fetch",
+            url,
+            &chain_id.to_string(),
+            "--from",
+            &from.to_string(),
+            "--to",
+            &to.to_string(),
+        ];
+        let expected = Args {
+            command: Command::Fetch {
+                url: url.to_string(),
+                chain_id,
+                from: Some(from),
+                to: Some(to),
+            },
+        };
+        parse_and_compare(&args, Ok(expected));
     }
 
     fn trim_whitespace_at_end_of_lines(s: &str) -> String {

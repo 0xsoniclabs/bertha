@@ -103,6 +103,7 @@ pub mod tests {
         {
             let encoded_block = EncodedBlock {
                 data: vec![1, 2, 3, 4],
+                number: 1,
             };
             let mut mock_rpc_server = MockRpcServer::new();
             mock_rpc_server.expect_get_block().returning({
@@ -136,9 +137,11 @@ pub mod tests {
             let blocks = vec![
                 Ok(EncodedBlock {
                     data: vec![1, 2, 3],
+                    number: 1,
                 }),
                 Ok(EncodedBlock {
                     data: vec![4, 5, 6],
+                    number: 2,
                 }),
             ];
             Ok(tonic::Response::new(futures::stream::iter(blocks)))
@@ -177,6 +180,7 @@ pub mod tests {
                 let blocks = vec![
                     Ok(EncodedBlock {
                         data: vec![1, 2, 3],
+                        number: 1,
                     }),
                     Err(tonic::Status::internal("Internal error")),
                 ];

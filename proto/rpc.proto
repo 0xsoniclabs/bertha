@@ -20,6 +20,7 @@ message BlockRangeRequest {
 
 message EncodedBlock {
   bytes data = 1;
+  uint64 number = 2;
 }
 
 message ListRequest {
