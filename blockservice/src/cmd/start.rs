@@ -1,13 +1,11 @@
 use std::path::Path;
 
-use crate::{
-    db::{BLOCK_DB_NAME, RocksBlockDb},
-    grpc::RpcServer,
-};
+use crate::{grpc::RpcServer, workspace::open_workspace};
 
 pub async fn start(listener: tokio::net::TcpListener) -> Result<(), Box<dyn std::error::Error>> {
-    let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize()?;
-    let db = RocksBlockDb::open_for_reading(db_path)?;
+    let workspace_path = Path::new("./").canonicalize()?;
+    let db = open_workspace(workspace_path, true)?;
+
     let server = RpcServer::new(db);
     server.serve(listener).await
 }
@@ -18,8 +16,9 @@ mod tests {
 
     use crate::{
         cmd::{ChangeWorkingDir, init, start},
-        db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb},
+        db::{BlockDb, RocksBlockDb},
         grpc::RpcClient,
+        workspace::BLOCK_DB_NAME,
     };
 
     #[tokio::test]
@@ -49,16 +48,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_if_db_does_not_exist() {
+    async fn fails_if_workspace_does_not_exist() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
+
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
-        let res = start(listener).await;
-        assert!(res.is_err());
-        assert!(
-            res.unwrap_err()
-                .to_string()
-                .contains("No such file or directory")
-        );
+        let result = start(listener).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains(&format!(
+            "no database found at {} - did you forget to run init?",
+            tmpdir.path().display()
+        )));
     }
 }

@@ -2,8 +2,9 @@ use std::{path::Path, vec};
 
 use crate::{
     cmd::make_progress_bar,
-    db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb},
+    db::BlockDb,
     grpc::{RpcClient, proto_rpc::BlockRange},
+    workspace::open_workspace,
 };
 
 /// Fetch a range of blocks for a specific chain ID from a remote server and store them in the local
@@ -17,10 +18,11 @@ pub async fn fetch(
     to: Option<u64>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let workspace_path = Path::new("./").canonicalize()?;
+    let mut db = open_workspace(workspace_path, false)?;
+
     let mut client = RpcClient::try_new(url).await?;
     let mut uncompressed_bytes_written = 0;
-    let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize()?;
-    let mut db = RocksBlockDb::open(db_path)?;
 
     // Get remote chain ranges
     let remote_ranges = client.list(Some(chain_id)).await?;
@@ -189,11 +191,12 @@ mod tests {
             fetch::{fetch, range_difference},
             init, purge,
         },
-        db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb, proto},
+        db::{BlockDb, RocksBlockDb, proto},
         grpc::{
             proto_rpc::{BlockRange, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock},
             test_utils::{MockRpcServer, TestServer},
         },
+        workspace::BLOCK_DB_NAME,
     };
 
     #[test]
@@ -280,22 +283,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn fails_if_workspace_does_not_exist() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+
+        let server = TestServer::new(MockRpcServer::new()).await;
+        let result = fetch(server.address.clone(), 1, None, None, std::io::sink()).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains(&format!(
+            "no database found at {} - did you forget to run init?",
+            tmpdir.path().display()
+        )));
+    }
+
+    #[tokio::test]
     async fn fails_for_invalid_server_url() {
         let url = "invalid-url".to_string();
         let result = fetch(url, 1, None, None, std::io::sink()).await;
         let err = result.expect_err("Fetch should fail with invalid url");
 
         assert_eq!(err.to_string(), "transport error");
-    }
-
-    #[tokio::test]
-    async fn fails_on_non_existing_db() {
-        let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        let server = TestServer::new(MockRpcServer::new()).await;
-        let result = fetch(server.address.clone(), 1, None, None, std::io::sink()).await;
-        let err = result.expect_err("Fetch should fail with non-existing DB");
-        assert!(err.to_string().contains("No such file or directory"));
     }
 
     #[tokio::test]

@@ -2,7 +2,7 @@ use std::path::Path;
 
 use bertha_types::{Hash, HexConvert};
 
-use crate::db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb};
+use crate::{db::BlockDb, workspace::open_workspace};
 
 pub fn verify(
     chain_id: u64,
@@ -10,8 +10,8 @@ pub fn verify(
     block_hash: Option<Hash>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize()?;
-    let db = RocksBlockDb::open_for_reading(db_path)?;
+    let workspace_path = Path::new("./").canonicalize()?;
+    let db = open_workspace(workspace_path, true)?;
 
     let mut errors = 0;
 
@@ -97,8 +97,22 @@ mod tests {
     use super::*;
     use crate::{
         cmd::{ChangeWorkingDir, init},
-        db::proto,
+        db::{RocksBlockDb, proto},
+        workspace::BLOCK_DB_NAME,
     };
+
+    #[test]
+    fn fails_if_workspace_does_not_exist() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+
+        let result = verify(0, None, None, std::io::sink());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains(&format!(
+            "no database found at {} - did you forget to run init?",
+            tmpdir.path().display()
+        )));
+    }
 
     #[test]
     fn fails_if_no_read_permissions() {
@@ -115,22 +129,6 @@ mod tests {
         let result = verify(0, None, None, std::io::sink());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Failed to open"));
-    }
-
-    #[test]
-    fn fails_if_db_does_not_exist() {
-        let tmpdir = tempfile::tempdir().unwrap();
-
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-
-        let result = verify(0, None, None, std::io::sink());
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("No such file or directory")
-        );
     }
 
     #[test]

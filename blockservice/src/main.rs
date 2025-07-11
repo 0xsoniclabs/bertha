@@ -45,5 +45,9 @@ async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    execute(args).await.unwrap();
+    let result = execute(args).await;
+    if result.is_err() {
+        eprintln!("Error: {}", result.unwrap_err());
+        std::process::exit(1);
+    }
 }

@@ -1,14 +1,14 @@
 use std::path::Path;
 
-use crate::db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb};
+use crate::{db::BlockDb, workspace::open_workspace};
 
 pub fn purge(
     chain_id: u64,
     from: Option<u64>,
     to: Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize()?;
-    let mut db = RocksBlockDb::open(db_path)?;
+    let workspace_path = Path::new("./").canonicalize()?;
+    let mut db = open_workspace(workspace_path, false)?;
 
     db.delete_range(chain_id, from, to)?;
 
@@ -24,8 +24,22 @@ mod tests {
     use super::*;
     use crate::{
         cmd::{ChangeWorkingDir, init},
-        db::BLOCK_DB_NAME,
+        db::RocksBlockDb,
+        workspace::BLOCK_DB_NAME,
     };
+
+    #[test]
+    fn fails_if_workspace_does_not_exist() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+
+        let result = purge(0, None, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains(&format!(
+            "no database found at {} - did you forget to run init?",
+            tmpdir.path().display()
+        )));
+    }
 
     #[test]
     fn fails_if_no_write_permissions() {
@@ -46,22 +60,6 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("Permission denied")
-        );
-    }
-
-    #[test]
-    fn fails_if_db_does_not_exist() {
-        let tmpdir = tempfile::tempdir().unwrap();
-
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-
-        let result = purge(0, None, None);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("No such file or directory")
         );
     }
 
