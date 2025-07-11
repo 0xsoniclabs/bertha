@@ -1,8 +1,7 @@
 use tonic::{Request, Streaming, transport::Channel};
 
 use crate::grpc::proto_rpc::{
-    BlockRangeRequest, BlockRequest, ChainRanges, EncodedBlock, ListRequest,
-    block_rpc_client::BlockRpcClient,
+    BlockRangeRequest, ChainRanges, EncodedBlock, ListRequest, block_rpc_client::BlockRpcClient,
 };
 
 /// A client for interacting with the Block RPC service.
@@ -21,17 +20,6 @@ impl RpcClient {
     /// Creates a new [RpcClient] with the provided [BlockRpcClient].
     pub(crate) fn new(client: BlockRpcClient<Channel>) -> Self {
         Self { client }
-    }
-
-    /// Query a block by its chain ID and number.
-    pub async fn get_block(
-        &mut self,
-        chain_id: u64,
-        number: u64,
-    ) -> Result<EncodedBlock, tonic::Status> {
-        let request = Request::new(BlockRequest { chain_id, number });
-        let response = self.client.get_block(request).await?;
-        Ok(response.into_inner())
     }
 
     /// Query a range of blocks by chain ID, from block number to block number.
@@ -95,39 +83,6 @@ pub mod tests {
                 "Expected error for non-existing server"
             );
         }
-    }
-
-    #[tokio::test]
-    async fn get_block_returns_block_successfully() {
-        // Block exist
-        {
-            let encoded_block = EncodedBlock {
-                data: vec![1, 2, 3, 4],
-                number: 1,
-            };
-            let mut mock_rpc_server = MockRpcServer::new();
-            mock_rpc_server.expect_get_block().returning({
-                let encoded_block = encoded_block.clone();
-                move |_| Ok(tonic::Response::new(encoded_block.clone()))
-            });
-            let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
-            let block = rpc_client.get_block(1, 1).await.unwrap();
-            assert_eq!(block, encoded_block, "Block data does not match");
-        }
-    }
-
-    #[tokio::test]
-    async fn get_block_propagates_error() {
-        let mut mock_rpc_server = MockRpcServer::new();
-        mock_rpc_server
-            .expect_get_block()
-            .returning(|_| Err(tonic::Status::internal("Internal error")));
-        let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
-        let result = rpc_client.get_block(1, 1).await;
-        assert!(result.is_err(), "Expected error for internal server error");
-        let err = result.unwrap_err();
-        assert_eq!(err.code(), tonic::Code::Internal);
-        assert!(err.message().contains("Internal error"));
     }
 
     #[tokio::test]

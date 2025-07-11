@@ -9,7 +9,7 @@ use tower::service_fn;
 use crate::grpc::{
     client::RpcClient,
     proto_rpc::{
-        BlockRangeRequest, BlockRequest, ChainRanges, EncodedBlock, ListRequest,
+        BlockRangeRequest, ChainRanges, EncodedBlock, ListRequest,
         block_rpc_client::BlockRpcClient,
         block_rpc_server::{BlockRpc, BlockRpcServer},
     },
@@ -22,10 +22,6 @@ mock!(
 
     #[tonic::async_trait]
     impl BlockRpc for RpcServer {
-        async fn get_block(
-            &self,
-            request: tonic::Request<BlockRequest>,
-        ) -> Result<tonic::Response<EncodedBlock>, tonic::Status>;
 
         // NOTE: [GetBlockRangeStream] is an associated type of [BlockRpc] and used as the return type of the `get_block_range` function. For some reason, the mock! macro appears to be unable to find this type. Because of this, we simply manually expand the return type of `get_block_range`.
         type GetBlockRangeStream = futures::stream::Iter<IntoIter<Result<EncodedBlock, tonic::Status>>>;
