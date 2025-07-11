@@ -217,7 +217,7 @@ func (b *blockHashHistory) SetBlockHash(number uint64, hash common.Hash) {
 	b.historicHashes[number%256] = hash
 }
 
-// --- bloch hash history adapter ---
+// --- block hash history adapter ---
 
 // historyAdapter implements the evmcore.DummyChain interface, allowing it to
 // be used with the EVM state processor to serve historic block hashes.
