@@ -26,7 +26,8 @@ import (
 // level methods for managing instances in the context of the replay tool.
 type State struct {
 	// TODO: replace with Carmen facade
-	db carmen.StateDB
+	db               carmen.StateDB
+	blockHashHistory *blockHashHistory
 }
 
 // StateParameters is a configuration struct for creating a new State instance.
@@ -63,7 +64,7 @@ func NewState(params StateParameters) (*State, error) {
 		return nil, fmt.Errorf("failed to create state: %v", err)
 	}
 	db := carmen.CreateCustomStateDBUsing(state, 0)
-	return &State{db: db}, nil
+	return &State{db: db, blockHashHistory: &blockHashHistory{}}, nil
 }
 
 // Close closes the state database and releases any resources associated with it.
@@ -109,7 +110,6 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 func (s *State) ApplyBlock(
 	chainId uint64,
 	block *types.Block,
-	blockHashHistory *blockHashHistory,
 	corrections Corrections,
 ) (types.Receipts, error) {
 
@@ -123,7 +123,7 @@ func (s *State) ApplyBlock(
 
 	processor := evmcore.NewStateProcessor(
 		chainConfig,
-		historyAdapter{history: blockHashHistory},
+		historyAdapter{history: s.blockHashHistory},
 	)
 
 	evmBlock := &evmcore.EvmBlock{
@@ -143,6 +143,8 @@ func (s *State) ApplyBlock(
 
 	vmConfig := opera.GetVmConfig(opera.Rules{})
 	gasLimit := block.GasLimit()
+
+	s.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())
 
 	s.db.BeginBlock()
 	var usedGas uint64

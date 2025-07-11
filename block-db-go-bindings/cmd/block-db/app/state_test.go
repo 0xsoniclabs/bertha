@@ -131,7 +131,7 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 	block, err := ConvertToGethBlock(&blockdb.Block{})
 	require.NoError(t, err)
 
-	receipts, err := state.ApplyBlock(1, block, nil, nil)
+	receipts, err := state.ApplyBlock(1, block, nil)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 }
@@ -155,7 +155,7 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = state.ApplyBlock(1, block, nil, nil)
+	_, err = state.ApplyBlock(1, block, nil)
 	require.ErrorContains(t, err, "skipped txs")
 }
 
@@ -179,7 +179,7 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 		},
 	}
 
-	receipts, err := state.ApplyBlock(1, block, nil, corrections)
+	receipts, err := state.ApplyBlock(1, block, corrections)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 
