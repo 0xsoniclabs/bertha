@@ -1,30 +1,87 @@
-use std::path::Path;
+use std::{collections::HashMap, ops::Deref, path::Path, sync::Arc};
 
-use crate::{app_dir::open_app_dir, grpc::RpcServer};
+use tokio_stream::{StreamExt, StreamMap};
 
-pub async fn start(listener: tokio::net::TcpListener) -> Result<(), Box<dyn std::error::Error>> {
+use crate::{
+    app_dir::open_app_dir,
+    db::BlockDb,
+    grpc::RpcServer,
+    json_rpc::{NetworkSource, subscribe_to_blocks},
+};
+
+pub async fn start(
+    listener: tokio::net::TcpListener,
+    config: HashMap<u64, String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let app_dir = Path::new("./").canonicalize()?;
-    let db = open_app_dir(app_dir, true)?;
+    let db = open_app_dir(app_dir, false)?;
+    // Put the db in an Arc to share it between multiple tasks
+    let db = Arc::new(db);
+
+    // Spawn task to sync blocks from the JSON-RPC servers.
+    tokio::spawn({
+        let db = Arc::clone(&db);
+        async move {
+            if let Err(err) = sync(&config, db.deref()).await {
+                println!("error in block sync task: {err}");
+            }
+        }
+    });
 
     let server = RpcServer::new(db);
     server.serve(listener).await
 }
 
+async fn sync(
+    json_rpc_config: &HashMap<u64, String>,
+    db: &impl BlockDb,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut streams = StreamMap::new();
+    for (&chain_id, server) in json_rpc_config {
+        let start_block = db
+            .iterate_reverse(chain_id, u64::MAX)
+            .next()
+            .transpose()?
+            .map(|block| block.number + 1)
+            .unwrap_or_default();
+
+        let source = NetworkSource::try_new(server)?;
+        let block_stream = subscribe_to_blocks(start_block, source);
+        streams.insert(chain_id, block_stream);
+    }
+
+    while let Some((chain_id, block)) = streams.next().await {
+        match block {
+            Ok(block) => db.put(chain_id, block)?,
+            Err(err) => println!("[chain ID {chain_id}] error fetching next block: {err}"),
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{path::Path, time::Duration};
 
-    use tokio_stream::StreamExt;
+    use bertha_types::{Block, BlockHeader, HexConvert, TransactionReceipt};
+    use prost::Message;
+    use wiremock::MockServer;
 
+    use super::*;
     use crate::{
         app_dir::BLOCK_DB_NAME,
         cmd::{ChangeWorkingDir, init, start},
-        db::{BlockDb, RocksBlockDb},
+        db::{BlockDb, RocksBlockDb, proto},
         grpc::RpcClient,
+        json_rpc::{
+            BlockHeaderWithTransactions,
+            test_utils::build_mock_server_request_handler_for_infinitely_many_requests,
+        },
     };
 
     #[tokio::test]
-    async fn starts_server_successfully() {
+    async fn start_starts_server_successfully() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
         init(None::<&Path>).unwrap();
@@ -34,11 +91,12 @@ mod tests {
             db.put_raw(1, 1, vec![1, 2, 3].as_slice()).unwrap();
         }
 
+        let config = HashMap::new();
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
         let job = tokio::spawn(async move {
-            start(listener).await.unwrap();
+            start(listener, config).await.unwrap();
         });
 
         let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
@@ -60,13 +118,152 @@ mod tests {
     async fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
-
+        let config = HashMap::new();
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
-        let result = start(listener).await;
+        let result = start(listener, config).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no database found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
+    }
+
+    #[tokio::test]
+    async fn sync_fetches_blocks_and_stores_them_in_db() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+
+        init(None::<&Path>).unwrap();
+        let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
+        let db = Arc::new(RocksBlockDb::open(&db_path).unwrap());
+
+        let mock_server = MockServer::start().await;
+
+        let block_number: u64 = 0;
+        let block_receipts = vec![TransactionReceipt::default()];
+        let block_header_with_transactions = BlockHeaderWithTransactions {
+            block_header: BlockHeader::default(),
+            transactions: Vec::new(),
+        };
+
+        mock_server
+            .register(
+                build_mock_server_request_handler_for_infinitely_many_requests(
+                    "eth_getBlockByNumber",
+                    vec![
+                        serde_json::to_value(block_number.to_hex()).unwrap(),
+                        serde_json::to_value(true).unwrap(),
+                    ],
+                    block_header_with_transactions.clone(),
+                ),
+            )
+            .await;
+        mock_server
+            .register(
+                build_mock_server_request_handler_for_infinitely_many_requests(
+                    "eth_getBlockReceipts",
+                    vec![serde_json::to_value(block_number.to_hex()).unwrap()],
+                    block_receipts.clone(),
+                ),
+            )
+            .await;
+
+        let json_rpc_config = [(1, mock_server.uri()), (2, mock_server.uri())]
+            .into_iter()
+            .collect();
+
+        let task = tokio::spawn({
+            let db = Arc::clone(&db);
+            async move {
+                sync(&json_rpc_config, db.deref()).await.unwrap();
+            }
+        });
+        // wait for the sync task to fetch the header, transactions and receipts for the first block
+        while mock_server.received_requests().await.unwrap().len() < 4 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        // check that block 0 for chain 1 and 2 is in the db
+        let block = db.get(1, 0);
+        assert!(block.is_ok_and(|b| b.is_some()));
+        let block = db.get(2, 0);
+        assert!(block.is_ok_and(|b| b.is_some()));
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn start_starts_sync_and_gets_access_to_new_blocks() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+
+        init(None::<&Path>).unwrap();
+
+        let mock_server = MockServer::start().await;
+
+        let chain_id = 1;
+        let block_number: u64 = 0;
+        let block_header = BlockHeader::default();
+        let transactions = Vec::new();
+        let block_receipts = vec![TransactionReceipt::default()];
+        let block_header_with_transactions = BlockHeaderWithTransactions {
+            block_header: block_header.clone(),
+            transactions: transactions.clone(),
+        };
+
+        mock_server
+            .register(
+                build_mock_server_request_handler_for_infinitely_many_requests(
+                    "eth_getBlockByNumber",
+                    vec![
+                        serde_json::to_value(block_number.to_hex()).unwrap(),
+                        serde_json::to_value(true).unwrap(),
+                    ],
+                    block_header_with_transactions.clone(),
+                ),
+            )
+            .await;
+        mock_server
+            .register(
+                build_mock_server_request_handler_for_infinitely_many_requests(
+                    "eth_getBlockReceipts",
+                    vec![serde_json::to_value(block_number.to_hex()).unwrap()],
+                    block_receipts.clone(),
+                ),
+            )
+            .await;
+
+        let config = HashMap::from([(chain_id, mock_server.uri())]);
+        let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            start(listener, config).await.unwrap();
+        });
+        // wait for the sync task to fetch the header, transactions and receipts for the first block
+        while mock_server.received_requests().await.unwrap().len() < 2 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
+        assert!(client.is_ok());
+        let mut client = client.unwrap();
+        let mut res = client
+            .get_block_range(chain_id, block_number, block_number)
+            .await
+            .unwrap();
+        let block = res
+            .next()
+            .await
+            .expect("stream should not be empty")
+            .expect("block should be valid");
+        let block = Block::try_from(proto::Block::decode(block.data.as_slice()).unwrap()).unwrap();
+        assert_eq!(
+            block,
+            Block::from_header_and_transactions_and_receipts(
+                block_header,
+                transactions,
+                block_receipts
+            )
+        );
+        task.abort();
     }
 }
