@@ -45,15 +45,12 @@ mod tests {
         let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
         assert!(client.is_ok());
         let mut client = client.unwrap();
-        let mut res = client
-            .get_block_range(1, 1, 1)
-            .await
-            .expect("Block should be found");
+        let mut res = client.get_block_range(1, 1, 1).await.unwrap();
         assert_eq!(
             res.next()
                 .await
-                .expect("Block should not be null")
-                .expect("Block should be valid")
+                .expect("stream should not be empty")
+                .expect("not an error")
                 .data,
             vec![1, 2, 3]
         );
