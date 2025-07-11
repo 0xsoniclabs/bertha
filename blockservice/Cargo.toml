@@ -5,31 +5,51 @@ edition = "2024"
 publish = false
 
 [dependencies]
+# bertha
 bertha-types = { path = "../bertha-types" }
 genesis-parser = { path = "../genesis-parser" }
+
+# serialization
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 prost = "0.13.5"
+
+# db
 rocksdb = { version = "0.23.0", default-features = false, features = [
     "lz4",
     "bindgen-runtime",
 ] }
-tempfile = "3.20.0"
-thiserror = "2.0.12"
+
+# rpc
 tonic = { version = "0.13.1", features = ["gzip"] }
 jsonrpsee = { version = "0.25.1", features = ["http-client"] }
+
+# async
 tokio = { version = "1.45.1", features = ["rt-multi-thread"] }
-clap = { version = "4.5.40", features = ["derive"] }
-indicatif = "0.17.11"
 tokio-stream = "0.1.17"
 
+# cli
+clap = { version = "4.5.40", features = ["derive"] }
+indicatif = "0.18.0"
+
+# error handling
+thiserror = "2.0.12"
+
+# utils
+tempfile = "3.20.0"
+
 [dev-dependencies]
-rand = "0.9.1"
+# mocking
 mockall = "0.13.1"
 wiremock = "0.6.3"
+
+# async utils
 hyper-util = "0.1.14"
 futures = "0.3.31"
 tower = "0.5.2"
+
+# utils
+rand = "0.9.1"
 
 [build-dependencies]
 tonic-build = "*"

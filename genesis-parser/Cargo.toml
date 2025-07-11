@@ -5,9 +5,16 @@ edition = "2024"
 publish = false
 
 [dependencies]
+# bertha
 bertha-types = { path = "../bertha-types" }
+
+# serialization
 alloy-rlp = { version = "0.3.12", features = ["derive"] }
+
+# compression
 flate2 = "1.1.1"
+
+# error handling
 thiserror = "2.0.12"
 
 [dev-dependencies]
