@@ -35,8 +35,11 @@ pub async fn fetch(
         return Err("Invalid range: 'from' must be less than or equal to 'to'".into());
     }
 
-    let local_ranges = db.get_ranges_of_chain_id(chain_id)?;
-    let ranges_to_fetch = range_difference((from, to), local_ranges.as_slice());
+    let local_ranges = db
+        .get_ranges_of_chain_id(chain_id)
+        .map(|ranges| ranges.into_iter().map(BlockRange::from).collect::<Vec<_>>())?;
+    let ranges_to_fetch = range_difference(BlockRange { from, to }, local_ranges.as_slice());
+
     if ranges_to_fetch.is_empty() {
         writeln!(
             writer,
@@ -44,34 +47,41 @@ pub async fn fetch(
         )?;
         return Ok(());
     }
+
+    // Check if the ranges to fetch are covered by the remote ranges by checking if each range is
+    // contained within a remote range
     for range in &ranges_to_fetch {
-        chain_id_remote_ranges
-            .binary_search_by(|b| {
-                if range.1 < b.from {
-                    std::cmp::Ordering::Greater
-                } else if range.0 > b.to {
-                    std::cmp::Ordering::Less
-                } else {
+        if chain_id_remote_ranges
+            .binary_search_by(|remote_range| {
+                if range.from >= remote_range.from && range.to <= remote_range.to {
                     std::cmp::Ordering::Equal
+                } else if range.to < remote_range.from {
+                    std::cmp::Ordering::Greater
+                } else {
+                    std::cmp::Ordering::Less
                 }
             })
-            .map_err(|_| {
-                format!(
-                    "Range {} to {} for chain ID {chain_id} is not covered by remote ranges",
-                    range.0, range.1
+            .is_err()
+        {
+            return Err(format!(
+                "range {} to {} for chain ID {chain_id} is not available on remote server",
+                range.from, range.to
                 )
-            })?;
+            .into());
+        }
     }
 
     let mut count = 0;
-    let progress_bar =
-        make_progress_bar(ranges_to_fetch.iter().map(|r| r.1 - r.0 + 1).sum::<u64>())?;
+    let progress_bar = make_progress_bar(
+        ranges_to_fetch
+            .iter()
+            .map(|r| r.to - r.from + 1)
+            .sum::<u64>(),
+    )?;
 
-    for (start, end) in ranges_to_fetch {
-        // NOTE: We could spawn a task for each range to fetch blocks concurrently,
-        // but for simplicity and to avoid overwhelming the server, we fetch them sequentially.
-        let mut block_stream_response = client.get_block_range(chain_id, start, end).await?;
-        // TODO:log each range being fetched to be able to write tests
+    for BlockRange { from, to } in ranges_to_fetch {
+        let mut expected_block = from;
+        let mut block_range_stream_response = client.get_block_range(chain_id, from, to).await?;
         loop {
             let response = block_stream_response.message().await?;
             if response.is_none() {
@@ -96,7 +106,7 @@ pub async fn fetch(
 }
 
 /// Compute the difference between a minuend range and a set of subtrahend ranges.
-fn range_difference(minuend: (u64, u64), subtrahend: &[(u64, u64)]) -> Vec<(u64, u64)> {
+fn range_difference(minuend: BlockRange, subtrahend: &[BlockRange]) -> Vec<BlockRange> {
     let mut segments = vec![minuend];
     for range in subtrahend {
         segments = remove_range(&segments, *range);
@@ -105,21 +115,30 @@ fn range_difference(minuend: (u64, u64), subtrahend: &[(u64, u64)]) -> Vec<(u64,
 }
 
 /// Remove the subtrahend range from the minuend segments.
-fn remove_range(minuend: &Vec<(u64, u64)>, subtrahend: (u64, u64)) -> Vec<(u64, u64)> {
+fn remove_range(minuend: &[BlockRange], subtrahend: BlockRange) -> Vec<BlockRange> {
     let mut new_segments = vec![];
     for segment in minuend {
-        match (segment.1.cmp(&subtrahend.0), segment.0.cmp(&subtrahend.1)) {
+        match (
+            segment.to.cmp(&subtrahend.from),
+            segment.from.cmp(&subtrahend.to),
+        ) {
             // The segment is completely before or after the range
             (std::cmp::Ordering::Less, _) | (_, std::cmp::Ordering::Greater) => {
                 new_segments.push(*segment);
             }
             // The segment overlaps with the range
             (_, _) => {
-                if subtrahend.0 > segment.0 {
-                    new_segments.push((segment.0, subtrahend.0 - 1));
+                if subtrahend.from > segment.from {
+                    new_segments.push(BlockRange {
+                        from: segment.from,
+                        to: subtrahend.from - 1,
+                    });
                 }
-                if subtrahend.1 < segment.1 {
-                    new_segments.push((subtrahend.1 + 1, segment.1));
+                if subtrahend.to < segment.to {
+                    new_segments.push(BlockRange {
+                        from: subtrahend.to + 1,
+                        to: segment.to,
+                    });
                 }
             }
         }
@@ -144,62 +163,93 @@ mod tests {
         },
         db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb, proto},
         grpc::{
-            proto_rpc::{BlockRange, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock},
+            proto_rpc::{
+                BlockRange, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock,
+                to_block_range_vec,
+            },
             test_utils::{MockRpcServer, TestServer},
         },
     };
 
     #[test]
     fn range_difference_computes_correct_difference() {
+        struct TestCase {
+            r: BlockRange,      // requested
+            l: Vec<BlockRange>, // locally available ranges
+            e: Vec<BlockRange>, // expected difference
+        }
+
         let cases = vec![
             // No local ranges, should return the whole range
-            (vec![], (0, 30), vec![(0, 30)]),
-            // Local ranges contiguous cover the whole range, should return empty
-            (vec![(0, 30)], (0, 30), vec![]),
+            TestCase {
+                r: BlockRange { from: 0, to: 30 },
+                l: vec![],
+                e: to_block_range_vec([(0, 30)]),
+            },
+            // Whole range already available locally, should return empty
+            TestCase {
+                r: BlockRange { from: 0, to: 30 },
+                l: to_block_range_vec([(0, 30)]),
+                e: vec![],
+            },
             // Local ranges do not cover the whole range, should return the missing parts
-            (
-                vec![(0, 5), (7, 10), (15, 20), (22, 28), (30, 30)],
-                (0, 30),
-                vec![(6, 6), (11, 14), (21, 21), (29, 29)],
-            ),
+            TestCase {
+                r: BlockRange { from: 0, to: 30 },
+                l: to_block_range_vec([(0, 5), (7, 10), (15, 20), (22, 28), (30, 30)]),
+                e: to_block_range_vec([(6, 6), (11, 14), (21, 21), (29, 29)]),
+            },
             // Missing end of the range
-            (
-                vec![(0, 5), (7, 10), (15, 20)],
-                (0, 30),
-                vec![(6, 6), (11, 14), (21, 30)],
-            ),
+            TestCase {
+                r: BlockRange { from: 0, to: 30 },
+                l: to_block_range_vec([(0, 20)]),
+                e: to_block_range_vec([(21, 30)]),
+            },
             // Missing start of the range
-            (
-                vec![(5, 10), (15, 20), (27, 30)],
-                (0, 30),
-                vec![(0, 4), (11, 14), (21, 26)],
-            ),
-            // Missing both ends of the range
-            (
-                vec![(5, 10), (15, 20), (27, 30)],
-                (0, 30),
-                vec![(0, 4), (11, 14), (21, 26)],
-            ),
-            // Difference is equal to a unit-size range (non-existing)
-            (vec![(5, 5), (7, 10), (15, 20)], (5, 10), vec![(6, 6)]),
-            // Difference is equal to a unit-size range (existing)
-            (vec![(5, 5), (7, 10), (15, 20)], (15, 15), vec![]),
+            TestCase {
+                r: BlockRange { from: 0, to: 30 },
+                l: to_block_range_vec([(11, 30)]),
+                e: to_block_range_vec([(0, 10)]),
+            },
+            // Missing both ends of the range (duplicate of above for completeness)
+            TestCase {
+                r: BlockRange { from: 0, to: 30 },
+                l: to_block_range_vec([(11, 20)]),
+                e: to_block_range_vec([(0, 10), (21, 30)]),
+            },
+            // Difference is equal to a single block (not locally available)
+            TestCase {
+                r: BlockRange { from: 5, to: 10 },
+                l: to_block_range_vec([(5, 5), (7, 10), (15, 20)]),
+                e: to_block_range_vec([(6, 6)]),
+            },
+            // Requested range is a single block (locally available)
+            TestCase {
+                r: BlockRange { from: 15, to: 15 },
+                l: to_block_range_vec([(5, 5), (7, 10), (15, 20)]),
+                e: vec![],
+            },
+            // Requested range is a single block (not locally available)
+            TestCase {
+                r: BlockRange { from: 15, to: 15 },
+                l: to_block_range_vec([(5, 5), (7, 10), (16, 20)]),
+                e: to_block_range_vec([(15, 15)]),
+            },
         ];
 
         let mut rng = SmallRng::seed_from_u64(123);
-        for (local_ranges, requested_range, expected_difference) in cases {
-            let intersection = range_difference(requested_range, &local_ranges);
+        for TestCase { r, l, e } in cases {
+            let diff = range_difference(r, &l);
             assert_eq!(
-                intersection, expected_difference,
-                "Failed for local_ranges: {local_ranges:?}, requested_range: {requested_range:?}"
+                diff, e,
+                "Failed for requested_range: {r:?}, local_ranges: {l:?}"
             );
-            // Randomize the order of local ranges
-            let mut randomized_local_ranges = local_ranges.clone();
+            // Randomize the order of local ranges to ensure that we don't rely on them being sorted
+            let mut randomized_local_ranges = l.clone();
             randomized_local_ranges.shuffle(&mut rng);
-            let intersection = range_difference(requested_range, &randomized_local_ranges);
+            let diff = range_difference(r, &randomized_local_ranges);
             assert_eq!(
-                intersection, expected_difference,
-                "Failed for randomized local_ranges: {randomized_local_ranges:?}, requested_range: {requested_range:?}"
+                diff, e,
+                "Failed for requested_range: {r:?}, shuffled local_ranges: {randomized_local_ranges:?}"
             );
         }
     }
@@ -416,13 +466,21 @@ mod tests {
 
     #[tokio::test]
     async fn retrieves_block_range_correctly() {
+        #[derive(Debug, Clone)]
+        struct TestCase {
+            from: Option<u64>,                         // From block number to fetch
+            to: Option<u64>,                           // To block number to fetch
+            expected_ranges_to_fetch: Vec<BlockRange>, // Expected ranges to fetch from the server
+            expected_output: &'static str,             // Expected output to be written
+        }
+
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
         init(None::<&Path>).unwrap();
         let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
 
         let max_block_number: u64 = 40;
-        let local_blocks_ranges = vec![
+        let local_blocks_ranges = to_block_range_vec([
             (1, 2),
             (6, 9),
             (15, 19),
@@ -430,10 +488,10 @@ mod tests {
             (32, 32),
             (37, 37),
             (39, max_block_number),
-        ];
+        ]);
         let mut local_blocks = vec![];
         for local_block_ranges in &local_blocks_ranges {
-            for i in local_block_ranges.0..=local_block_ranges.1 {
+            for i in local_block_ranges.from..=local_block_ranges.to {
                 let b = bertha_types::Block {
                     number: i,
                     ..bertha_types::Block::default_sonic()
@@ -453,8 +511,8 @@ mod tests {
         };
 
         let remote_blocks_ranges_cases = vec![
-            vec![(0, max_block_number)], // All blocks in one range
-            vec![
+            to_block_range_vec([(0, 40)]), // All blocks in one range
+            to_block_range_vec([
                 (0, 0),
                 (3, 5),
                 (10, 14),
@@ -462,17 +520,14 @@ mod tests {
                 (30, 31),
                 (33, 36),
                 (38, 38),
-            ], // Server has all blocks that are missing in client
+            ]), // Server has all blocks that are missing in client
         ];
 
-        // The cases to test the fetch function
-        // (from, to, expected ranges to fetch from the server, expected logging output)
         let fetch_cases = vec![
-            // From and to are both None
-            (
-                None,
-                None,
-                vec![
+            TestCase {
+                from: None,
+                to: None,
+                expected_ranges_to_fetch: to_block_range_vec([
                     (0, 0),
                     (3, 5),
                     (10, 14),
@@ -480,44 +535,46 @@ mod tests {
                     (30, 31),
                     (33, 36),
                     (38, 38),
-                ],
-                "Fetched and wrote 21 blocks, total uncompressed size: 0 MiB\n",
-            ),
-            // from is None
-            (
-                None,
-                Some(23),
-                vec![(0, 0), (3, 5), (10, 14), (20, 23)],
-                "Fetched and wrote 13 blocks, total uncompressed size: 0 MiB\n",
-            ),
-            // To is None
-            (
-                Some(1),
-                None,
-                vec![(3, 5), (10, 14), (20, 24), (30, 31), (33, 36), (38, 38)],
-                "Fetched and wrote 20 blocks, total uncompressed size: 0 MiB\n",
-            ),
-            // From and to are both Some (Non-contiguous ranges)
-            (
-                Some(3),
-                Some(23),
-                vec![(3, 5), (10, 14), (20, 23)],
-                "Fetched and wrote 12 blocks, total uncompressed size: 0 MiB\n",
-            ),
-            // From and to are both Some (Contiguous ranges)
-            (
-                Some(20),
-                Some(24),
-                vec![(20, 24)],
-                "Fetched and wrote 5 blocks, total uncompressed size: 0 MiB\n",
-            ),
-            // From and to are both Some (locally available)
-            (
-                Some(15),
-                Some(19),
-                vec![],
-                "No blocks to fetch for chain ID 1 in range 15 to 19\n",
-            ),
+                ]),
+                expected_output: "Fetched and wrote 21 blocks, total uncompressed size: 0 MiB\n",
+            },
+            TestCase {
+                from: None,
+                to: Some(23),
+                expected_ranges_to_fetch: to_block_range_vec([(0, 0), (3, 5), (10, 14), (20, 23)]),
+                expected_output: "Fetched and wrote 13 blocks, total uncompressed size: 0 MiB\n",
+            },
+            TestCase {
+                from: Some(1),
+                to: None,
+                expected_ranges_to_fetch: to_block_range_vec([
+                    (3, 5),
+                    (10, 14),
+                    (20, 24),
+                    (30, 31),
+                    (33, 36),
+                    (38, 38),
+                ]),
+                expected_output: "Fetched and wrote 20 blocks, total uncompressed size: 0 MiB\n",
+            },
+            TestCase {
+                from: Some(3),
+                to: Some(23),
+                expected_ranges_to_fetch: to_block_range_vec([(3, 5), (10, 14), (20, 23)]),
+                expected_output: "Fetched and wrote 12 blocks, total uncompressed size: 0 MiB\n",
+            },
+            TestCase {
+                from: Some(20),
+                to: Some(24),
+                expected_ranges_to_fetch: to_block_range_vec([(20, 24)]),
+                expected_output: "Fetched and wrote 5 blocks, total uncompressed size: 0 MiB\n",
+            },
+            TestCase {
+                from: Some(15),
+                to: Some(19),
+                expected_ranges_to_fetch: vec![],
+                expected_output: "No blocks to fetch for chain ID 1 in range 15 to 19: All blocks are already available locally\n",
+            },
         ];
 
         for remote_block_range in remote_blocks_ranges_cases {
@@ -525,16 +582,16 @@ mod tests {
             let list_response = ChainRanges {
                 chain_ranges: vec![ChainRange {
                     chain_id: 1,
-                    block_ranges: remote_block_range
-                        .iter()
-                        .map(|(from, to)| BlockRange {
-                            from: *from,
-                            to: *to,
-                        })
-                        .collect(),
+                    block_ranges: remote_block_range,
                 }],
             };
-            for (from, to, expected_ranges_to_fetch, expected_output) in fetch_cases.clone() {
+            for TestCase {
+                from,
+                to,
+                expected_ranges_to_fetch,
+                expected_output,
+            } in fetch_cases.clone()
+            {
                 init_db();
                 let mut mock_server = MockRpcServer::new();
                 mock_server.expect_list().returning({
@@ -542,9 +599,9 @@ mod tests {
                     move |_| Ok(tonic::Response::new(list_response.clone()))
                 });
                 let mut sequence = mockall::Sequence::new();
-                for (start, end) in &expected_ranges_to_fetch {
+                for BlockRange { from, to } in &expected_ranges_to_fetch {
                     let mut range_response: Vec<Result<EncodedBlock, tonic::Status>> = vec![];
-                    for i in *start..=*end {
+                    for i in *from..=*to {
                         range_response.push(Ok(EncodedBlock {
                             number: i,
                             data: proto::Block::from(bertha_types::Block {
@@ -559,11 +616,11 @@ mod tests {
                         .times(1)
                         .in_sequence(&mut sequence)
                         .withf({
-                            let start = *start;
-                            let end = *end;
+                            let from = *from;
+                            let to = *to;
                             move |request: &tonic::Request<BlockRangeRequest>| {
                                 let req = request.get_ref();
-                                req.chain_id == 1 && req.from == start && req.to == end
+                                req.chain_id == 1 && req.from == from && req.to == to
                             }
                         })
                         .return_once(move |_| {
@@ -580,8 +637,8 @@ mod tests {
                 // Check that the output is as expected
                 assert_eq!(String::from_utf8(buf).unwrap(), expected_output);
                 // Check that the data were written to the database
-                for (start, end) in expected_ranges_to_fetch {
-                    for i in start..=end {
+                for BlockRange { from, to } in expected_ranges_to_fetch {
+                    for i in from..=to {
                         let db = RocksBlockDb::open_for_reading(db_path.clone()).unwrap();
                         let block = db.get(1, i).unwrap();
                         assert!(block.is_some(), "Block {i} not found in the database");
