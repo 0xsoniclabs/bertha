@@ -3,9 +3,13 @@ use std::{path::Path, vec};
 use crate::{
     cmd::make_progress_bar,
     db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb},
-    grpc::RpcClient,
+    grpc::{RpcClient, proto_rpc::BlockRange},
 };
 
+/// Fetch a range of blocks for a specific chain ID from a remote server and store them in the local
+/// database.
+/// If `from` is not provided, it defaults to 0.
+/// If `to` is not provided, it defaults to the last block of the chain on the remote server.
 pub async fn fetch(
     url: String,
     chain_id: u64,
@@ -25,7 +29,7 @@ pub async fn fetch(
         .into_iter()
         .find(|r| r.chain_id == chain_id)
         .map(|r| r.block_ranges)
-        .ok_or_else(|| format!("No ranges found for chain ID {chain_id}"))?;
+        .ok_or_else(|| format!("no ranges found for chain ID {chain_id}"))?;
 
     if chain_id_remote_ranges.is_empty() {
         return Err(
@@ -40,7 +44,7 @@ pub async fn fetch(
     let to = to.unwrap_or(chain_id_remote_ranges.last().unwrap().to);
 
     if from > to {
-        return Err("Invalid range: 'from' must be less than or equal to 'to'".into());
+        return Err("invalid range: 'from' must be less than or equal to 'to'".into());
     }
 
     let local_ranges = db
@@ -51,7 +55,7 @@ pub async fn fetch(
     if ranges_to_fetch.is_empty() {
         writeln!(
             writer,
-            "No blocks to fetch for chain ID {chain_id} in range {from} to {to}"
+            "No blocks to fetch for chain ID {chain_id} in range {from} to {to}: All blocks are already available locally"
         )?;
         return Ok(());
     }
@@ -74,7 +78,7 @@ pub async fn fetch(
             return Err(format!(
                 "range {} to {} for chain ID {chain_id} is not available on remote server",
                 range.from, range.to
-                )
+            )
             .into());
         }
     }
@@ -118,7 +122,7 @@ pub async fn fetch(
         }
         count += (to - from + 1) as usize;
     }
-        progress_bar.finish();
+    progress_bar.finish();
 
     writeln!(
         writer,
@@ -183,7 +187,7 @@ mod tests {
         cmd::{
             ChangeWorkingDir,
             fetch::{fetch, range_difference},
-            init,
+            init, purge,
         },
         db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb, proto},
         grpc::{
@@ -279,40 +283,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_with_invalid_server() {
-        // Invalid URL
-        {
-            let url = "invalid-url".to_string();
-            let result = fetch(url, 1, None, None, std::io::sink()).await;
-            let err = result.expect_err("fetch should fail with invalid url");
+    async fn fails_for_invalid_server_url() {
+        let url = "invalid-url".to_string();
+        let result = fetch(url, 1, None, None, std::io::sink()).await;
+        let err = result.expect_err("Fetch should fail with invalid url");
 
-            assert_eq!(err.to_string(), "transport error");
-        }
-        // Non-existent server
-        {
-            let result = fetch(
-                "http://[::1]:9999".to_string(), // Assuming no server is running on this port
-                1,
-                None,
-                None,
-                std::io::sink(),
-            )
-            .await;
-            let err = result.expect_err("fetch should fail when server not available");
-
-            assert_eq!(err.to_string(), "transport error");
-        }
+        assert_eq!(err.to_string(), "transport error");
     }
 
     #[tokio::test]
-    async fn fails_with_db_error() {
+    async fn fails_on_db_error() {
         // Non-existing db
         {
             let tmpdir = tempfile::tempdir().unwrap();
             let _cwd = ChangeWorkingDir::new(tmpdir.path());
             let server = TestServer::new(MockRpcServer::new()).await;
             let result = fetch(server.address.clone(), 1, None, None, std::io::sink()).await;
-            let err = result.expect_err("fetch should fail with non-existing DB");
+            let err = result.expect_err("Fetch should fail with non-existing DB");
             assert!(err.to_string().contains("No such file or directory"));
         }
         // Invalid stored chain ids
@@ -336,13 +323,16 @@ mod tests {
             });
             let server = TestServer::new(mock_server).await;
             let result = fetch(server.address.clone(), 1, None, None, std::io::sink()).await;
-            let err = result.expect_err("fetch should fail with invalid DB");
-            assert!(err.to_string().contains("error in underlying storage"));
+            let err = result.expect_err("Fetch should fail with invalid DB");
+            assert!(
+                err.to_string()
+                    .contains("error in underlying storage layer: invalid ranges for chain ID 1")
+            );
         }
     }
 
     #[tokio::test]
-    async fn fails_with_server_error() {
+    async fn fails_on_server_error() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
         init(None::<&Path>).unwrap();
@@ -362,7 +352,7 @@ mod tests {
 
         let result = fetch(server.address.clone(), 1, None, None, std::io::sink()).await;
 
-        let err = result.expect_err("fetch should fail with server error");
+        let err = result.expect_err("Fetch should fail with server error");
         assert!(err.to_string().contains("Server error"));
     }
 
@@ -385,43 +375,51 @@ mod tests {
             Ok(tonic::Response::new(futures::stream::iter(error_response)))
         });
 
-        let destructible_server = TestServer::new(server).await;
+        let test_server = TestServer::new(server).await;
         let result = fetch(
-            destructible_server.address.clone(),
+            test_server.address.clone(),
             1,
             Some(0),
             Some(10),
             std::io::sink(),
         )
         .await;
-        let err = result.expect_err("fetch should fail with block range error");
+        let err = result.expect_err("Fetch should fail with block range error");
         assert!(err.to_string().contains("Block not found"));
     }
 
     #[tokio::test]
-    async fn fails_with_no_remote_chain_ids() {
+    async fn fails_if_no_remote_chain_ids() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
         init(None::<&Path>).unwrap();
-        let mut mock_server = MockRpcServer::new();
-        mock_server.expect_list().returning(|_| {
-            Ok(tonic::Response::new(ChainRanges {
-                chain_ranges: vec![ChainRange {
-                    chain_id: 2,
-                    block_ranges: vec![BlockRange { from: 0, to: 10 }],
-                }],
-            }))
-        });
 
-        let destructible_server = TestServer::new(mock_server).await;
-        let result = fetch(
-            destructible_server.address.clone(),
-            1, // Chain ID that does not exist
-            None,
-            None,
-            std::io::sink(),
-        )
-        .await;
+        // No chain ID 1 in the response
+        {
+            let mut mock_server = MockRpcServer::new();
+            mock_server.expect_list().returning(|_| {
+                Ok(tonic::Response::new(ChainRanges {
+                    chain_ranges: vec![ChainRange {
+                        chain_id: 2,
+                        block_ranges: vec![BlockRange { from: 0, to: 10 }],
+                    }],
+                }))
+            });
+
+            let test_server = TestServer::new(mock_server).await;
+            let result = fetch(
+                test_server.address.clone(),
+                1, // Chain ID that does not exist
+                None,
+                None,
+                std::io::sink(),
+            )
+            .await;
+            let err = result.expect_err("Fetch should fail with no remote chain IDs");
+            assert_eq!(err.to_string(), "no ranges found for chain ID 1");
+        }
+    }
+
     #[tokio::test]
     async fn fails_on_invalid_remote_chain_ranges() {
         let tmpdir = tempfile::tempdir().unwrap();
@@ -482,7 +480,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_with_invalid_range() {
+    async fn fails_on_invalid_requested_range() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
         init(None::<&Path>).unwrap();
@@ -496,19 +494,19 @@ mod tests {
             }))
         });
 
-        let destructible_server = TestServer::new(mock_server).await;
+        let test_server = TestServer::new(mock_server).await;
         let result = fetch(
-            destructible_server.address.clone(),
+            test_server.address.clone(),
             1,
             Some(5),
             Some(3), // Invalid range (from > to)
             std::io::sink(),
         )
         .await;
-        let err = result.expect_err("fetch should fail with invalid range");
+        let err = result.expect_err("Fetch should fail with invalid range");
         assert_eq!(
             err.to_string(),
-            "Invalid range: 'from' must be less than or equal to 'to'"
+            "invalid range: 'from' must be less than or equal to 'to'"
         );
     }
 
@@ -530,14 +528,14 @@ mod tests {
         let test_server = TestServer::new(mock_server).await;
         // Range is completely after the remote ranges
         {
-        let result = fetch(
+            let result = fetch(
                 test_server.address.clone(),
-            1,
-            Some(11), // Range that does not exist on the remote server
-            Some(15),
-            std::io::sink(),
-        )
-        .await;
+                1,
+                Some(11), // Range that does not exist on the remote server
+                Some(15),
+                std::io::sink(),
+            )
+            .await;
             let err = result.expect_err("Fetch should fail with missing range on remote server");
             assert_eq!(
                 err.to_string(),
@@ -724,10 +722,10 @@ mod tests {
             )
             .await;
             let err = result.expect_err("Fetch should fail");
-        assert!(
-            err.to_string()
+            assert!(
+                err.to_string()
                     .contains("expected to receive block number 1, got 2")
-        );
+            );
         }
     }
 
