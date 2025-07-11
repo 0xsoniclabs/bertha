@@ -51,7 +51,7 @@ pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::e
 
     let mut uncompressed_bytes_written = 0;
     let mut block_count = 0;
-    let progress_bar = make_progress_bar(1)?;
+    let progress_bar = make_progress_bar(total_blocks)?;
 
     println!("Importing {import_blocks} blocks for chain ID {chain_id}");
 
