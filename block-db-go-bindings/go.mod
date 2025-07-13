@@ -5,13 +5,14 @@ go 1.24.2
 require github.com/linxGnu/grocksdb v1.8.12
 
 require (
-	github.com/0xsoniclabs/carmen/go v0.0.0-20250708122828-bc69cb8f68d5
-	github.com/0xsoniclabs/sonic v0.0.0-20250710140101-72f58896fd10
+	github.com/0xsoniclabs/carmen/go v0.0.0-20250708101910-3666ec34654c
+	github.com/0xsoniclabs/sonic v0.0.0-20250709155827-c73b438ee13f
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
 	github.com/ethereum/go-ethereum v1.16.0
 	github.com/holiman/uint256 v1.3.2
 	github.com/schollz/progressbar/v3 v3.18.0
 	github.com/urfave/cli/v3 v3.3.8
+	go.uber.org/mock v0.4.0
 	google.golang.org/protobuf v1.36.6
 )
 
@@ -72,7 +73,6 @@ require (
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	go.uber.org/mock v0.4.0 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/exp v0.0.0-20241204233417-43b7b7cde48d // indirect
 	golang.org/x/sync v0.12.0 // indirect
