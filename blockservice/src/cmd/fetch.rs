@@ -196,7 +196,7 @@ mod tests {
             proto_rpc::{BlockRange, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock},
             test_utils::{MockRpcServer, TestServer},
         },
-        workspace::BLOCK_DB_NAME,
+        workspace::{BLOCK_DB_NAME, create_workspace},
     };
 
     #[test]
@@ -298,6 +298,10 @@ mod tests {
 
     #[tokio::test]
     async fn fails_for_invalid_server_url() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        create_workspace(tmpdir.path()).unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+
         let url = "invalid-url".to_string();
         let result = fetch(url, 1, None, None, std::io::sink()).await;
         let err = result.expect_err("Fetch should fail with invalid url");
