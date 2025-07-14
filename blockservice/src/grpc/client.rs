@@ -13,7 +13,9 @@ pub struct RpcClient {
 impl RpcClient {
     /// Creates a new [RpcClient] by connecting to the specified URL.
     pub async fn try_new(url: String) -> Result<Self, tonic::transport::Error> {
-        let client = BlockRpcClient::connect(url).await?;
+        let client = BlockRpcClient::connect(url)
+            .await?
+            .accept_compressed(tonic::codec::CompressionEncoding::Zstd);
         Ok(Self { client })
     }
 

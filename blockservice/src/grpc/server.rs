@@ -38,7 +38,7 @@ where
         println!("Listening on {}...", listener.local_addr()?);
 
         Server::builder()
-            .add_service(BlockRpcServer::new(self).send_compressed(CompressionEncoding::Gzip))
+            .add_service(BlockRpcServer::new(self).send_compressed(CompressionEncoding::Zstd))
             .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
             .await?;
         Ok(())

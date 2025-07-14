@@ -16,7 +16,7 @@ rocksdb = { version = "0.23.0", default-features = false, features = [
 ] }
 tempfile = "3.20.0"
 thiserror = "2.0.12"
-tonic = { version = "0.13.1", features = ["gzip"] }
+tonic = { version = "0.13.1", features = ["gzip", "zstd"] }
 jsonrpsee = { version = "0.25.1", features = ["http-client"] }
 tokio = { version = "1.45.1", features = ["rt-multi-thread"] }
 clap = { version = "4.5.40", features = ["derive"] }
