@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["bertha-types", "blockservice", "genesis-parser"]
-
+[profile.release]
+debug = true
 [workspace.lints.rust]
 macro_use_extern_crate = "warn"
 unused_unsafe = "warn"

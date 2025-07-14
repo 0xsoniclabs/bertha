@@ -13,7 +13,7 @@ use crate::{
 };
 
 // TODO: Benchmark this to determine optimal size (#78)
-const SERVER_RESPONSE_BUFFER_SIZE: usize = 1000;
+const SERVER_RESPONSE_BUFFER_SIZE: usize = 10000;
 
 /// A gRPC server that provides access to block data stored in a database.
 #[derive(Debug)]
@@ -38,7 +38,7 @@ where
         println!("Listening on {}...", listener.local_addr()?);
 
         Server::builder()
-            .add_service(BlockRpcServer::new(self).send_compressed(CompressionEncoding::Zstd))
+            .add_service(BlockRpcServer::new(self))
             .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
             .await?;
         Ok(())
