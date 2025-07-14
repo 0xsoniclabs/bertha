@@ -91,10 +91,10 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 	s.db.BeginTransaction()
 	for address, account := range genesis.Accounts {
 		if len(account.Code) != 0 {
-			s.setCode(address, account.Code)
+			s.db.SetCode(cc.Address(address), account.Code)
 		}
 		s.setBalance(address, account.Balance.ToBig())
-		s.setNonce(address, account.Nonce)
+		s.db.SetNonce(cc.Address(address), account.Nonce)
 		for key, value := range account.Storage {
 			s.db.SetState(cc.Address(address), cc.Key(key), cc.Value(value))
 		}
@@ -191,14 +191,6 @@ func (s *State) setBalance(address common.Address, balance *big.Int) {
 		diff, _ := amount.NewFromBigInt(new(big.Int).Sub(cur, balance))
 		s.db.SubBalance(addr, diff)
 	}
-}
-
-func (s *State) setNonce(address common.Address, nonce uint64) {
-	s.db.SetNonce(cc.Address(address), nonce)
-}
-
-func (s *State) setCode(address common.Address, code []byte) {
-	s.db.SetCode(cc.Address(address), code)
 }
 
 // --- block hash history tracking ---
