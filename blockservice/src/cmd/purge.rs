@@ -8,7 +8,7 @@ pub fn purge(
     to: Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let workspace_path = Path::new("./").canonicalize()?;
-    let mut db = open_workspace(workspace_path, false)?;
+    let (_cfg, mut db) = open_workspace(workspace_path, false)?;
 
     db.delete_range(chain_id, from, to)?;
 
@@ -36,7 +36,7 @@ mod tests {
         let result = purge(0, None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
-            "no database found at {} - did you forget to run init?",
+            "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
     }

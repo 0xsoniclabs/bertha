@@ -6,13 +6,14 @@ use prost::Message;
 
 use crate::{
     cmd::make_progress_bar,
+    config::ChainConfig,
     db::{BlockDb, proto},
     workspace::open_workspace,
 };
 
 pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::error::Error>> {
     let workspace_path = Path::new("./").canonicalize()?;
-    let mut db = open_workspace(workspace_path, false)?;
+    let (mut cfg, mut db) = open_workspace(workspace_path, false)?;
 
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
@@ -25,6 +26,14 @@ pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::e
         .unwrap_or_default();
 
     println!("Genesis file contains {total_blocks} blocks for chain ID {chain_id}");
+
+    if !cfg.has_chain(chain_id) {
+        println!("Creating new entry for chain ID {chain_id} in the configuration");
+        cfg.add_chain(ChainConfig {
+            id: chain_id,
+            ..ChainConfig::default()
+        })?;
+    }
 
     // Determine until which block we have to import blocks, and which range we already have in the
     // DB. To keep things simple, we only skip a range if it starts at block 0.
@@ -348,7 +357,7 @@ mod tests {
         let result = import("somepath", true);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
-            "no database found at {} - did you forget to run init?",
+            "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
     }

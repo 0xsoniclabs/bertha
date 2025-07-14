@@ -4,7 +4,7 @@ use crate::{grpc::RpcServer, workspace::open_workspace};
 
 pub async fn start(listener: tokio::net::TcpListener) -> Result<(), Box<dyn std::error::Error>> {
     let workspace_path = Path::new("./").canonicalize()?;
-    let db = open_workspace(workspace_path, true)?;
+    let (_cfg, db) = open_workspace(workspace_path, true)?;
 
     let server = RpcServer::new(db);
     server.serve(listener).await
@@ -56,7 +56,7 @@ mod tests {
         let result = start(listener).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
-            "no database found at {} - did you forget to run init?",
+            "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
     }

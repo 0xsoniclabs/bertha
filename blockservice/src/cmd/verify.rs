@@ -11,7 +11,7 @@ pub fn verify(
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let workspace_path = Path::new("./").canonicalize()?;
-    let db = open_workspace(workspace_path, true)?;
+    let (_cfg, db) = open_workspace(workspace_path, true)?;
 
     let mut errors = 0;
 
@@ -109,7 +109,7 @@ mod tests {
         let result = verify(0, None, None, std::io::sink());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
-            "no database found at {} - did you forget to run init?",
+            "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
     }

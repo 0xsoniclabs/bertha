@@ -19,7 +19,7 @@ pub async fn fetch(
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let workspace_path = Path::new("./").canonicalize()?;
-    let mut db = open_workspace(workspace_path, false)?;
+    let (_cfg, mut db) = open_workspace(workspace_path, false)?;
 
     let mut client = RpcClient::try_new(url).await?;
     let mut uncompressed_bytes_written = 0;
@@ -291,7 +291,7 @@ mod tests {
         let result = fetch(server.address.clone(), 1, None, None, std::io::sink()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
-            "no database found at {} - did you forget to run init?",
+            "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
     }

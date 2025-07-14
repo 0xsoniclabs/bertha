@@ -8,7 +8,7 @@ pub fn view(
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let workspace_path = Path::new("./").canonicalize()?;
-    let db = open_workspace(workspace_path, true)?;
+    let (_cfg, db) = open_workspace(workspace_path, true)?;
 
     let block = db.get(chain_id, block_number)?;
     match block {
@@ -45,7 +45,7 @@ mod tests {
         let result = view(1, 0, std::io::sink());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
-            "no database found at {} - did you forget to run init?",
+            "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
     }

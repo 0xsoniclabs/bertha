@@ -1,9 +1,10 @@
 mod cli;
 pub mod cmd;
+mod config;
 mod db;
 mod error;
 pub mod grpc;
-mod workspace;
+pub mod workspace;
 pub use error::Error;
 #[cfg(test)]
 mod json_rpc;

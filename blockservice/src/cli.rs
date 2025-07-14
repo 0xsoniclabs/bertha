@@ -60,10 +60,7 @@ pub enum Command {
     /// Print the block as JSON.
     View { chain_id: u64, block_number: u64 },
     /// Start the block server.
-    Start {
-        #[arg(default_value_t = 8080)]
-        port: u16,
-    },
+    Start {},
 }
 
 #[cfg(test)]
@@ -611,7 +608,7 @@ For more information, try '--help'.
     fn call_with_start_subcommand_without_argument_parses_successfully() {
         let args = ["blockservice", "start"];
         let expected = Args {
-            command: Command::Start { port: 8080 },
+            command: Command::Start {},
         };
         parse_and_compare(&args, Ok(expected));
     }
@@ -622,10 +619,7 @@ For more information, try '--help'.
         let expected = "\
 Start the block server
 
-Usage: blockservice start [PORT]
-
-Arguments:
-  [PORT]  [default: 8080]
+Usage: blockservice start
 
 Options:
   -h, --help  Print help
@@ -634,23 +628,12 @@ Options:
     }
 
     #[test]
-    fn call_with_start_subcommand_with_invalid_port_prints_parse_error() {
-        let args = ["blockservice", "start", "invalid"];
-        let expected = "\
-error: invalid value 'invalid' for '[PORT]': invalid digit found in string
-
-For more information, try '--help'.
-";
-        parse_and_compare(&args, Err(expected));
-    }
-
-    #[test]
     fn call_with_start_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockservice", "start", "8080", "additional"];
+        let args = ["blockservice", "start", "additional"];
         let expected = "\
 error: unexpected argument 'additional' found
 
-Usage: blockservice start [PORT]
+Usage: blockservice start
 
 For more information, try '--help'.
 ";
