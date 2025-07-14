@@ -1,0 +1,7 @@
+## The port on which the block service will listen for incoming fetch requests
+port = 8080
+
+# [[chains]]
+# id = 133337
+# name = "Example chain"
+# description = "An example blockchain"

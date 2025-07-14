@@ -1,6 +1,7 @@
 mod app_dir;
 mod cli;
 pub mod cmd;
+pub mod config;
 mod db;
 mod error;
 pub mod grpc;
