@@ -106,30 +106,46 @@ where
 
         let db = self.db.clone();
         tokio::spawn(async move {
-            for result in db.iterate_raw(chain_id, from) {
-                match result {
-                    Ok((number, block)) => {
-                        if number > to {
+            let (db_p, mut db_r) = tokio::sync::mpsc::channel(1000);
+            let db_thread = tokio::spawn(async move {
+                for result in db.iterate_raw(chain_id, from) {
+                    match result {
+                        Ok((number, block)) => {
+                            if number > to {
+                                break;
+                            }
+                            let encoded_block = EncodedBlock {
+                                data: block.into_vec(),
+                                number,
+                            };
+                            if db_p.send(Ok(encoded_block)).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            // try to send the error
+                            // because we always stop afterwards, we can ignore the result
+                            let _ = db_p.send(Err(tonic::Status::internal(e.to_string()))).await;
                             break;
                         }
-                        let encoded_block = EncodedBlock {
-                            data: block.into_vec(),
-                            number,
-                        };
-                        if tx.send(Ok(encoded_block)).await.is_err() {
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        // try to send the error
-                        // because we always stop afterwards, we can ignore the result
-                        let _ = tx.send(Err(tonic::Status::internal(e.to_string()))).await;
-                        break;
                     }
                 }
+            });
+
+            while let Some(result) = db_r.recv().await {
+                if tx.send(result).await.is_err() {
+                    break; // Stop sending if the receiver is closed
+                }
+            }
+
+            if !db_thread.is_finished() {
+                let _ = tx
+                    .send(Err(tonic::Status::internal(
+                        "Database thread returned before sending all results",
+                    )))
+                    .await;
             }
         });
-
         Ok(tonic::Response::new(ReceiverStream::new(rx)))
     }
 
