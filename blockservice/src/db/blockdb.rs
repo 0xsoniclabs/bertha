@@ -60,6 +60,11 @@ pub trait BlockDb {
         self.put_metadata_raw(chain_id, &data)
     }
 
+    /// Deletes the ranges of blocks for the specified chain-ID.
+    fn delete_ranges_of_chain_id(&mut self, chain_id: u64) -> Result<(), Error> {
+        self.delete_metadata(chain_id)
+    }
+
     /// Adds a chain ID to the list of chain IDs stored in the database.
     fn add_chain_id_to_chain_ids(&mut self, chain_id: u64) -> Result<(), Error> {
         // assumption:
@@ -159,8 +164,6 @@ pub trait BlockDb {
         // - ranges are non-overlapping
         // - ranges are sorted
 
-        self.remove_chain_id_from_chain_ids(chain_id)?;
-
         let mut ranges = self.get_ranges_of_chain_id(chain_id)?;
         if ranges.is_empty() {
             return Ok(());
@@ -202,7 +205,12 @@ pub trait BlockDb {
                 break;
             }
         }
-        self.put_ranges_of_chain_id(chain_id, &ranges)
+        if ranges.is_empty() {
+            self.delete_ranges_of_chain_id(chain_id)?;
+            self.remove_chain_id_from_chain_ids(chain_id)
+        } else {
+            self.put_ranges_of_chain_id(chain_id, &ranges)
+        }
     }
 
     /// Retrieves a block for the specified chain-ID and block number.
@@ -280,6 +288,9 @@ pub trait BlockDb {
 
     /// Stores the raw metadata for the specified key.
     fn put_metadata_raw(&mut self, key: u64, data: &[u64]) -> Result<(), Error>;
+
+    /// Deletes the metadata for the specified key.
+    fn delete_metadata(&mut self, key: u64) -> Result<(), Error>;
 
     /// Retrieves the raw protobuf-encoded data for the specified chain-ID and block number.
     /// Returns [None] if the block does not exist.
@@ -390,6 +401,16 @@ mod tests {
     }
 
     #[test]
+    fn blockdb_delete_ranges_of_chain_id_removes_all_ranges_for_chain_id() {
+        let chain_id: u64 = 1;
+        let ranges = [(0, 1), (2, 3), (4, 5)];
+        let mut db = StubDb::new();
+        db.0.insert(chain_id.to_be_bytes().to_vec(), make_range_value(ranges));
+        db.delete_ranges_of_chain_id(chain_id).unwrap();
+        assert_eq!(db.0.get(chain_id.to_be_bytes().as_slice()), None);
+    }
+
+    #[test]
     fn blockdb_add_chain_id_to_chain_ids_adds_chain_id_if_not_exists_and_keep_list_sorted() {
         let mut db = StubDb::new();
         db.0.insert(0u64.to_be_bytes().to_vec(), make_meta_value([1u64, 3u64]));
@@ -478,30 +499,36 @@ mod tests {
 
         let cases = [
             // remove start of existing range
-            ((3, 3), vec![(4, 4), (9, 10), (12, 13)]),
+            ((3, 3), Some(vec![(4, 4), (9, 10), (12, 13)])),
             // remove end of existing range
-            ((4, 4), vec![(3, 3), (9, 10), (12, 13)]),
+            ((4, 4), Some(vec![(3, 3), (9, 10), (12, 13)])),
             // remove full existing range
-            ((3, 4), vec![(9, 10), (12, 13)]),
+            ((3, 4), Some(vec![(9, 10), (12, 13)])),
             // remove range that spans parts of multiple existing ranges
-            ((4, 9), vec![(3, 3), (10, 10), (12, 13)]),
-            // remove range that spans multiple existing ranges
-            ((3, 13), vec![]),
+            ((4, 9), Some(vec![(3, 3), (10, 10), (12, 13)])),
+            // remove range that spans all existing ranges
+            ((3, 13), None),
             // remove non-existing range before first existing ranges
-            ((0, 1), vec![(3, 4), (9, 10), (12, 13)]),
+            ((0, 1), Some(vec![(3, 4), (9, 10), (12, 13)])),
             // remove non-existing range after first existing range
-            ((6, 6), vec![(3, 4), (9, 10), (12, 13)]),
+            ((6, 6), Some(vec![(3, 4), (9, 10), (12, 13)])),
         ];
         for (del_range, expected_ranges) in cases {
+            // set the chain id
+            db.0.insert(0u64.to_be_bytes().to_vec(), chain_id.to_be_bytes().to_vec()); // reset value
+            // set the initial ranges
             db.0.insert(
                 chain_id.to_be_bytes().to_vec(),
                 make_range_value(init_ranges),
-            ); // reset value
+            );
             db.remove_range_from_ranges(chain_id, del_range.0, del_range.1)
                 .unwrap();
+            if expected_ranges.is_some() {
+                assert!(db.get_chain_ids().unwrap().contains(&chain_id));
+            }
             assert_eq!(
                 db.0.get(chain_id.to_be_bytes().as_slice()),
-                Some(&make_range_value(expected_ranges))
+                expected_ranges.map(make_range_value).as_ref()
             );
         }
     }
@@ -638,6 +665,11 @@ mod tests {
             let key = key.to_be_bytes().to_vec();
             let value = data.iter().flat_map(|v| v.to_be_bytes()).collect();
             self.0.insert(key, value);
+            Ok(())
+        }
+
+        fn delete_metadata(&mut self, key: u64) -> Result<(), Error> {
+            self.0.remove(key.to_be_bytes().as_slice());
             Ok(())
         }
 

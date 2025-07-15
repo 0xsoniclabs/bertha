@@ -170,6 +170,12 @@ impl BlockDb for RocksBlockDb {
             .map_err(|e| Error::StorageLayer(e.to_string()))
     }
 
+    fn delete_metadata(&mut self, key: u64) -> Result<(), Error> {
+        self.db
+            .delete(key.to_be_bytes())
+            .map_err(|e| Error::StorageLayer(e.to_string()))
+    }
+
     fn get_raw(&self, chain_id: u64, block_number: u64) -> Result<Option<Vec<u8>>, Error> {
         self.db
             .get(Self::make_key(chain_id, block_number))
@@ -443,10 +449,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(db.db.get(0u64.to_be_bytes().as_slice()), Ok(Some(vec![])));
-        assert_eq!(
-            db.db.get(chain_id.to_be_bytes().as_slice()),
-            Ok(Some(vec![]))
-        );
+        assert_eq!(db.db.get(chain_id.to_be_bytes().as_slice()), Ok(None));
     }
 
     #[test]
