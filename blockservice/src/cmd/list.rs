@@ -82,7 +82,7 @@ mod tests {
 
         // block ranges for chain id
         let db_path = tmpdir.path().join(BLOCK_DB_NAME);
-        let mut db = RocksBlockDb::open(db_path.clone()).unwrap();
+        let db = RocksBlockDb::open(db_path.clone()).unwrap();
         db.put_ranges_of_chain_id(1, &[(2, 4), (6, 8)]).unwrap();
         drop(db);
 
@@ -96,7 +96,7 @@ mod tests {
 
         // block ranges for multiple chain ids
         let db_path = tmpdir.path().join(BLOCK_DB_NAME);
-        let mut db = RocksBlockDb::open(db_path.clone()).unwrap();
+        let db = RocksBlockDb::open(db_path.clone()).unwrap();
         db.put_ranges_of_chain_id(3, &[(3, 5)]).unwrap();
         db.put_chain_ids(&[1, 3]).unwrap();
         drop(db);

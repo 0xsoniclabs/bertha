@@ -75,7 +75,7 @@ mod tests {
 
         let chain_id = 1;
         let block = Block::default();
-        let mut db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
         db.put(chain_id, block.clone()).unwrap();
 
         let mut buf = Vec::new();

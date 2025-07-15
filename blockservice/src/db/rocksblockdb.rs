@@ -159,7 +159,7 @@ impl BlockDb for RocksBlockDb {
             .transpose()
     }
 
-    fn put_metadata_raw(&mut self, key: u64, data: &[u64]) -> Result<(), Error> {
+    fn put_metadata_raw(&self, key: u64, data: &[u64]) -> Result<(), Error> {
         self.db
             .put(
                 key.to_be_bytes(),
@@ -170,7 +170,7 @@ impl BlockDb for RocksBlockDb {
             .map_err(|e| Error::StorageLayer(e.to_string()))
     }
 
-    fn delete_metadata(&mut self, key: u64) -> Result<(), Error> {
+    fn delete_metadata(&self, key: u64) -> Result<(), Error> {
         self.db
             .delete(key.to_be_bytes())
             .map_err(|e| Error::StorageLayer(e.to_string()))
@@ -182,7 +182,7 @@ impl BlockDb for RocksBlockDb {
             .map_err(|e| Error::StorageLayer(e.to_string()))
     }
 
-    fn put_raw(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
+    fn put_raw(&self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
         self.db
             .put(Self::make_key(chain_id, block_number), data)
             .map_err(|e| Error::StorageLayer(e.to_string()))?;
@@ -206,7 +206,7 @@ impl BlockDb for RocksBlockDb {
     }
 
     fn delete_range(
-        &mut self,
+        &self,
         chain_id: u64,
         from_block: Option<u64>,
         to_block: Option<u64>,
@@ -405,7 +405,7 @@ mod tests {
     #[test]
     fn rocksblockdb_put_metadata_raw_write_raw_metadata() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
         let key = 1u64;
         let data = [1u64; 2];
 
@@ -419,7 +419,7 @@ mod tests {
     #[test]
     fn blockrocksdb_put_raw_adds_range_and_chain_id() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
         let chain_id = 146;
         let block_number = 123;
@@ -438,7 +438,7 @@ mod tests {
     #[test]
     fn blockrocksdb_delete_range_removes_range_and_chain_id() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
         let chain_id = 146;
         let block_number = 123;
@@ -455,7 +455,7 @@ mod tests {
     #[test]
     fn rocksblockdb_put_raw_writes_raw_data() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
         let chain_id = 1;
         let block_number = 42;
         let data = b"test data";
@@ -472,7 +472,7 @@ mod tests {
         {
             RocksBlockDb::create(tmpdir.path()).unwrap();
         }
-        let mut db = RocksBlockDb::open_for_reading(tmpdir.path()).unwrap();
+        let db = RocksBlockDb::open_for_reading(tmpdir.path()).unwrap();
         let result = db.put_raw(1, 42, b"test data");
         assert!(result.is_err());
         assert_eq!(
@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn rocksblockdb_iterate_raw_returns_blocks_for_single_chain_in_order() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
         db.put_raw(1, 0, b"block1-0").unwrap();
         db.put_raw(7, 2, b"block7-2").unwrap();
@@ -542,7 +542,7 @@ mod tests {
         let chain_id = 1;
 
         let tmpdir = tempfile::tempdir().unwrap();
-        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
         db.put_raw(chain_id, 0, b"block1-0").unwrap();
         let mut invalid_key = [0; 17];
@@ -563,7 +563,7 @@ mod tests {
     #[test]
     fn rocksblockdb_delete_range_deletes_blocks_in_range() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
         let chain_id = 1;
 
         // Insert blocks 1 to 5
@@ -586,7 +586,7 @@ mod tests {
     #[test]
     fn rocksblockdb_delete_range_succeeds_if_no_blocks_in_range() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
         // delete range when no blocks exist
         assert!(db.delete_range(1, Some(1), Some(5)).is_ok());
@@ -595,7 +595,7 @@ mod tests {
     #[test]
     fn rocksblockdb_delete_range_returns_error_if_start_greater_than_end() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let mut db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
         let chain_id = 1;
 
         // Insert blocks 1 to 5

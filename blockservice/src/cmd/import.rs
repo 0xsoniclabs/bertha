@@ -12,7 +12,7 @@ use crate::{
 
 pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::error::Error>> {
     let app_dir = Path::new("./").canonicalize()?;
-    let mut db = open_app_dir(app_dir, false)?;
+    let db = open_app_dir(app_dir, false)?;
 
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
@@ -179,7 +179,7 @@ mod tests {
         let mut genesis_blocks = all_blocks.clone();
 
         init(None::<&Path>).unwrap();
-        let mut db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
         for block in db_blocks {
             db.put(chain_id, block.clone()).unwrap();
         }
@@ -258,7 +258,7 @@ mod tests {
         let genesis_file = tmpdir.path().join("genesis.g");
         let genesis_data = genesis_parser::test_utils::generate_test_genesis(chain_id, 2, &[]);
         std::fs::write(&genesis_file, genesis_data).unwrap();
-        let mut db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
         db.put(
             chain_id,
             Block {
@@ -286,7 +286,7 @@ mod tests {
 
         let chain_id = 146;
 
-        let mut db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
         db.put_ranges_of_chain_id(chain_id, &[(0, 1)]).unwrap(); // this data does not exist
         drop(db);
 
