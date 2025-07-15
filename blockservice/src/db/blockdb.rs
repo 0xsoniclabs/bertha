@@ -1,7 +1,7 @@
 use bertha_types::Block;
 use prost::Message;
 
-use crate::{db::proto, error::Error};
+use crate::{BlockRange, db::proto, error::Error, utils::ranges::RangesExt};
 
 /// A database that allows to store and and query [Block]s for multiple different blockchains.
 /// Blocks are encoded as protobuf messages before being stored in the database.
@@ -30,7 +30,7 @@ pub trait BlockDb {
 
     /// Retrieves the stored ranges of blocks for the specified chain-ID.
     /// The start and end of each range are inclusive.
-    fn get_ranges_of_chain_id(&self, chain_id: u64) -> Result<Vec<(u64, u64)>, Error> {
+    fn get_ranges_of_chain_id(&self, chain_id: u64) -> Result<Vec<BlockRange>, Error> {
         let data = self.get_metadata_raw(chain_id)?.unwrap_or_default();
         if data.len() % 2 != 0 {
             return Err(Error::StorageLayer(format!(
@@ -42,16 +42,16 @@ pub trait BlockDb {
         Ok(data
             .chunks_exact(2)
             // slices are guaranteed to be of length 2 so the index access will not fail
-            .map(|chunk| (chunk[0], chunk[1]))
+            .map(|chunk| chunk[0]..=chunk[1])
             .collect())
     }
 
     /// Stores the ranges of blocks for the specified chain-ID.
     /// The start and end of each range are inclusive.
-    fn put_ranges_of_chain_id(&self, chain_id: u64, ranges: &[(u64, u64)]) -> Result<(), Error> {
+    fn put_ranges_of_chain_id(&self, chain_id: u64, ranges: &[BlockRange]) -> Result<(), Error> {
         let data: Vec<u64> = ranges
             .iter()
-            .flat_map(|&(start, end)| [start, end])
+            .flat_map(|range| [*range.start(), *range.end()])
             .collect();
         self.put_metadata_raw(chain_id, &data)
     }
@@ -98,105 +98,28 @@ pub trait BlockDb {
     /// chain-ID. If this is the first block for the chain ID, the chain ID is added to the list
     /// of chain IDs.
     fn add_block_number_to_ranges(&self, chain_id: u64, block_number: u64) -> Result<(), Error> {
-        // assumption:
-        // - ranges are valid (start <= end)
-        // - ranges are non-overlapping
-        // - ranges are sorted
-
         self.add_chain_id_to_chain_ids(chain_id)?;
-
         let mut ranges = self.get_ranges_of_chain_id(chain_id)?;
+        ranges.add_range(block_number..=block_number);
+        self.put_ranges_of_chain_id(chain_id, &ranges)
+    }
 
-        // iterate over index to allow insertion
-        for i in 0..ranges.len() {
-            let (start, end) = ranges[i];
-            // the block number is before the current range and not adjacent to it
-            if block_number + 1 < start {
-                ranges.insert(i, (block_number, block_number));
-                return self.put_ranges_of_chain_id(chain_id, &ranges);
-            }
-            // the block number is adjacent to the start of the current range
-            else if block_number + 1 == start {
-                ranges[i].0 = block_number; // extend the start of the range to include the block number
-                // no need to check for merge with previous range, because this would have been
-                // handled by extending the end of the previous range
-                return self.put_ranges_of_chain_id(chain_id, &ranges);
-            }
-            // the block number is within the current range
-            else if start <= block_number && block_number <= end {
-                return Ok(());
-            }
-            // the block number is adjacent to the end of the current range
-            else if block_number == end + 1 {
-                ranges[i].1 = block_number; // extend the end of the range to include the block number
-                // check if we can merge with next range
-                if i + 1 < ranges.len() && ranges[i + 1].0 == block_number + 1 {
-                    ranges[i].1 = ranges[i + 1].1; // extend the end of the current range to include the next range
-                    ranges.remove(i + 1); // remove the next range
-                }
-                return self.put_ranges_of_chain_id(chain_id, &ranges);
-            }
-        }
-        // block number is greater than all existing ranges
-        ranges.push((block_number, block_number)); // add new range for block number
+    /// Adds a block range to the ranges of block numbers stored in the database for the specified
+    /// chain-ID. If this is the first block range for the chain ID, the chain ID is added to the
+    /// list of chain IDs.
+    fn add_range_to_ranges(&mut self, chain_id: u64, new: BlockRange) -> Result<(), Error> {
+        self.add_chain_id_to_chain_ids(chain_id)?;
+        let mut ranges = self.get_ranges_of_chain_id(chain_id)?;
+        ranges.add_range(new);
         self.put_ranges_of_chain_id(chain_id, &ranges)
     }
 
     /// Removes a range of block numbers from the ranges of blocks stored in the database for the
     /// specified chain-ID. If this is the last remaining block for the chain ID, the chain ID is
     /// removed from the list of chain IDs.
-    fn remove_range_from_ranges(
-        &self,
-        chain_id: u64,
-        del_start: u64,
-        del_end: u64,
-    ) -> Result<(), Error> {
-        // assumption:
-        // - ranges are valid (start <= end)
-        // - ranges are non-overlapping
-        // - ranges are sorted
-
+    fn remove_range_from_ranges(&self, chain_id: u64, del: &BlockRange) -> Result<(), Error> {
         let mut ranges = self.get_ranges_of_chain_id(chain_id)?;
-        if ranges.is_empty() {
-            return Ok(());
-        }
-
-        let mut i = 0;
-        while i < ranges.len() {
-            let (start, end) = ranges[i];
-            // The deletion range is before all following ranges
-            if del_end < start {
-                break;
-            }
-            // No overlap
-            else if end < del_start || del_end < start {
-                i += 1;
-                continue;
-            }
-            // Full overlap: remove the range
-            else if del_start <= start && end <= del_end {
-                ranges.remove(i);
-                continue;
-            }
-            // Overlap at end of existing range: trim right
-            else if start < del_start && end <= del_end {
-                ranges[i].1 = del_start - 1;
-                i += 1;
-                continue;
-            }
-            // Overlap at start of existing range: trim left
-            else if del_start <= start && del_end < end {
-                ranges[i].0 = del_end + 1;
-                break;
-            }
-            // Middle overlap: split into two ranges
-            else if start < del_start && del_end < end {
-                let right = (del_end + 1, end);
-                ranges[i].1 = del_start - 1;
-                ranges.insert(i + 1, right);
-                break;
-            }
-        }
+        ranges.subtract_range(del);
         if ranges.is_empty() {
             self.delete_ranges_of_chain_id(chain_id)?;
             self.remove_chain_id_from_chain_ids(chain_id)
@@ -359,10 +282,12 @@ mod tests {
 
     #[test]
     fn blockdb_get_ranges_of_chain_id_converts_tuples() {
-        let ranges = [(0, 1), (2, 3), (4, 5)];
+        let ranges = [0..=1, 2..=3, 4..=5];
         let db = StubDb::new();
-        db.0.borrow_mut()
-            .insert(1u64.to_be_bytes().to_vec(), make_range_value(ranges));
+        db.0.borrow_mut().insert(
+            1u64.to_be_bytes().to_vec(),
+            make_range_value(ranges.clone()),
+        );
         assert_eq!(db.get_ranges_of_chain_id(1).unwrap(), ranges);
     }
 
@@ -385,7 +310,7 @@ mod tests {
     #[test]
     fn blockdb_put_ranges_of_chain_id_converts_tuples() {
         let chain_id: u64 = 1;
-        let ranges = [(0, 1), (2, 3), (4, 5)];
+        let ranges = [0..=1, 2..=3, 4..=5];
         let db = StubDb::new();
         db.put_ranges_of_chain_id(chain_id, &ranges).unwrap();
         assert_eq!(
@@ -397,7 +322,7 @@ mod tests {
     #[test]
     fn blockdb_delete_ranges_of_chain_id_removes_all_ranges_for_chain_id() {
         let chain_id: u64 = 1;
-        let ranges = [(0, 1), (2, 3), (4, 5)];
+        let ranges = [0..=1, 2..=3, 4..=5];
         let db = StubDb::new();
         db.0.borrow_mut()
             .insert(chain_id.to_be_bytes().to_vec(), make_range_value(ranges));
@@ -452,33 +377,21 @@ mod tests {
     }
 
     #[test]
-    fn blockdb_add_block_number_to_ranges_adds_block_number_if_not_exists_and_keeps_ranges_disjunct_and_sorted()
-     {
+    fn blockdb_add_block_number_to_ranges_adds_block_number_if_not_exists() {
         let chain_id: u64 = 1;
-        let init_ranges = [(3, 4), (9, 10), (12, 13)];
         let db = StubDb::new();
 
+        // The corner cases of adding a block number to the ranges are tested in the
+        // [crate::utils::ranges], here we only test that the changes are also written.
         let cases = [
-            // add non-existing block number before existing ranges
-            (0, vec![(0, 0), (3, 4), (9, 10), (12, 13)]),
-            // add non-existing block number between existing ranges
-            (6, vec![(3, 4), (6, 6), (9, 10), (12, 13)]),
-            // add non-existing block number after existing ranges
-            (15, vec![(3, 4), (9, 10), (12, 13), (15, 15)]),
-            // add non-existing block number adjacent to start of existing range
-            (2, vec![(2, 4), (9, 10), (12, 13)]),
-            // add non-existing block number adjacent to end of existing range
-            (5, vec![(3, 5), (9, 10), (12, 13)]),
-            // add non-existing block number adjacent to end of one range and start of another
-            (11, vec![(3, 4), (9, 13)]),
+            // add non-existing block number
+            (vec![0..=1], 3, vec![0..=1, 3..=3]),
             // add existing block number
-            (3, vec![(3, 4), (9, 10), (12, 13)]),
+            (vec![0..=1], 0, vec![0..=1]),
         ];
-        for (new_key, expected_ranges) in cases {
-            db.0.borrow_mut().insert(
-                chain_id.to_be_bytes().to_vec(),
-                make_range_value(init_ranges),
-            ); // reset value
+        for (ranges, new_key, expected_ranges) in cases {
+            db.0.borrow_mut()
+                .insert(chain_id.to_be_bytes().to_vec(), make_range_value(ranges)); // reset value
             db.add_block_number_to_ranges(chain_id, new_key).unwrap();
             assert_eq!(
                 db.0.borrow().get(chain_id.to_be_bytes().as_slice()),
@@ -490,36 +403,25 @@ mod tests {
     #[test]
     fn blockdb_remove_range_from_ranges_removes_range_if_exists() {
         let chain_id: u64 = 1;
-        let init_ranges = [(3, 4), (9, 10), (12, 13)];
         let db = StubDb::new();
 
+        // The corner cases of removing a block number from the ranges are tested in the
+        // [crate::utils::ranges], here we only test that the changes are also written.
         let cases = [
-            // remove start of existing range
-            ((3, 3), Some(vec![(4, 4), (9, 10), (12, 13)])),
-            // remove end of existing range
-            ((4, 4), Some(vec![(3, 3), (9, 10), (12, 13)])),
-            // remove full existing range
-            ((3, 4), Some(vec![(9, 10), (12, 13)])),
-            // remove range that spans parts of multiple existing ranges
-            ((4, 9), Some(vec![(3, 3), (10, 10), (12, 13)])),
-            // remove range that spans all existing ranges
-            ((3, 13), None),
-            // remove non-existing range before first existing ranges
-            ((0, 1), Some(vec![(3, 4), (9, 10), (12, 13)])),
-            // remove non-existing range after first existing range
-            ((6, 6), Some(vec![(3, 4), (9, 10), (12, 13)])),
+            // remove an existing range
+            (vec![0..=1], 1..=1, Some(vec![0..=0])),
+            // remove the last existing range
+            (vec![0..=1], 0..=1, None),
+            (vec![], 0..=1, None),
         ];
-        for (del_range, expected_ranges) in cases {
+        for (ranges, del_range, expected_ranges) in cases {
             // set the chain id
             db.0.borrow_mut()
                 .insert(0u64.to_be_bytes().to_vec(), chain_id.to_be_bytes().to_vec()); // reset value
             // set the initial ranges
-            db.0.borrow_mut().insert(
-                chain_id.to_be_bytes().to_vec(),
-                make_range_value(init_ranges),
-            );
-            db.remove_range_from_ranges(chain_id, del_range.0, del_range.1)
-                .unwrap();
+            db.0.borrow_mut()
+                .insert(chain_id.to_be_bytes().to_vec(), make_range_value(ranges)); // reset value
+            db.remove_range_from_ranges(chain_id, &del_range).unwrap();
             if expected_ranges.is_some() {
                 assert!(db.get_chain_ids().unwrap().contains(&chain_id));
             }

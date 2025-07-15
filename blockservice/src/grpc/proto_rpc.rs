@@ -1,11 +1,19 @@
 #![allow(warnings)]
 tonic::include_proto!("rpc");
 
-impl From<(u64, u64)> for BlockRange {
-    fn from(range: (u64, u64)) -> Self {
+use std::ops::RangeInclusive;
+
+impl From<crate::BlockRange> for BlockRange {
+    fn from(range: crate::BlockRange) -> Self {
         BlockRange {
-            from: range.0,
-            to: range.1,
+            from: *range.start(),
+            to: *range.end(),
         }
+    }
+}
+
+impl From<BlockRange> for crate::BlockRange {
+    fn from(range: BlockRange) -> Self {
+        range.from..=range.to
     }
 }

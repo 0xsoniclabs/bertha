@@ -36,8 +36,8 @@ pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::e
     let ranges = db.get_ranges_of_chain_id(chain_id)?;
     let mut smallest_import_block_number = 0; // this is the smallest block number we have to import
     if let Some(range) = ranges.first() {
-        if range.0 == 0 {
-            smallest_import_block_number = range.1 + 1;
+        if *range.start() == 0 {
+            smallest_import_block_number = *range.end() + 1;
         }
     }
 
@@ -287,7 +287,7 @@ mod tests {
         let chain_id = 146;
 
         let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
-        db.put_ranges_of_chain_id(chain_id, &[(0, 1)]).unwrap(); // this data does not exist
+        db.put_ranges_of_chain_id(chain_id, &[0..=1]).unwrap(); // this data does not exist
         drop(db);
 
         let genesis_file = tmpdir.path().join("genesis.g");

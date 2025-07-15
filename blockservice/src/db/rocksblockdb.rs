@@ -220,7 +220,7 @@ impl BlockDb for RocksBlockDb {
         batch.delete_range(from, to);
         self.db.write(batch)?;
 
-        self.remove_range_from_ranges(chain_id, from_block, to_block)
+        self.remove_range_from_ranges(chain_id, &(from_block..=to_block))
     }
 }
 
@@ -431,7 +431,7 @@ mod tests {
         );
         assert_eq!(
             db.db.get(chain_id.to_be_bytes().as_slice()),
-            Ok(Some(make_range_value([(block_number, block_number)])))
+            Ok(Some(make_range_value([block_number..=block_number])))
         );
     }
 
@@ -443,7 +443,7 @@ mod tests {
         let chain_id = 146;
         let block_number = 123;
         db.put_chain_ids(&[chain_id]).unwrap();
-        db.put_ranges_of_chain_id(chain_id, &[(block_number, block_number)])
+        db.put_ranges_of_chain_id(chain_id, &[block_number..=block_number])
             .unwrap();
         db.delete_range(chain_id, Some(block_number), Some(block_number))
             .unwrap();
