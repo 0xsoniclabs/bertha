@@ -28,7 +28,6 @@ async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             block_number,
             block_hash,
         } => cmd::verify(chain_id, block_number, block_hash, std::io::stdout()),
-        Command::Clean => todo!(),
         Command::View {
             chain_id,
             block_number,
