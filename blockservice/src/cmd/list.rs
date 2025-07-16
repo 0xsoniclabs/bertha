@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::{app_dir::open_app_dir, db::BlockDb, grpc::RpcClient};
+use crate::{app_dir::open_app_dir, config::ChainConfig, db::BlockDb, grpc::RpcClient};
 
 pub async fn list(
     app_dir: impl AsRef<Path>,
@@ -8,6 +8,8 @@ pub async fn list(
     url: Option<String>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let (cfg, db) = open_app_dir(app_dir, true)?;
+
     let chain_ranges = if let Some(url) = url {
         let mut client = RpcClient::try_new(url).await?;
         let remote_ranges = client.list(chain_id).await?;
@@ -26,11 +28,16 @@ pub async fn list(
             })
             .collect()
     } else {
-        let (_cfg, db) = open_app_dir(app_dir, true)?;
-
-        let chain_ids = match chain_id {
-            Some(chain_id) => vec![chain_id],
-            None => db.get_chain_ids()?,
+        let chain_ids = if let Some(chain_id) = chain_id {
+            vec![chain_id]
+        } else {
+            let mut chain_ids = [db.get_chain_ids()?, cfg.get_chain_ids()]
+                .concat()
+                .into_iter()
+                .collect::<Vec<_>>();
+            chain_ids.sort();
+            chain_ids.dedup();
+            chain_ids
         };
         chain_ids
             .into_iter()
@@ -41,20 +48,24 @@ pub async fn list(
             .collect::<Result<Vec<_>, _>>()?
     };
 
-    if chain_ranges.is_empty() {
-        writeln!(writer, "no blocks in database")?;
-    }
     for (chain_id, ranges) in chain_ranges {
+        let chain_cfg = cfg
+            .get_chain_config(chain_id)
+            .unwrap_or(ChainConfig::new(chain_id));
+
+        writeln!(writer, "{}", chain_cfg.pretty_name())?;
+
         if ranges.is_empty() {
-            writeln!(writer, "[chain ID {chain_id}] no blocks")?;
+            writeln!(writer, "└── no blocks")?;
         }
-        for range in ranges {
-            writeln!(
-                writer,
-                "[chain ID {chain_id}] {} - {}",
-                range.start(),
-                range.end()
-            )?;
+        for (i, range) in ranges.iter().enumerate() {
+            let (start, end) = (range.start(), range.end());
+            let symbol = if i == ranges.len() - 1 {
+                "└──"
+            } else {
+                "├──"
+            };
+            writeln!(writer, "{symbol} {start} - {end}")?;
         }
     }
 
@@ -68,6 +79,8 @@ mod tests {
     use super::*;
     use crate::{
         app_dir::{BLOCK_DB_NAME, init_app_dir},
+        config::ChainConfig,
+        db::RocksBlockDb,
         grpc::{
             proto_rpc::{BlockRange, ChainRange, ChainRanges},
             test_utils::{MockRpcServer, TestServer},
@@ -108,6 +121,7 @@ mod tests {
     #[tokio::test]
     async fn fails_for_invalid_server_url() {
         let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         let url = "invalid-url".to_string();
 
         let result = list(tmpdir.path(), None, Some(url), std::io::sink()).await;
@@ -118,6 +132,7 @@ mod tests {
     #[tokio::test]
     async fn fails_on_server_error() {
         let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
 
         let mut mock_server = MockRpcServer::new();
         mock_server
@@ -142,11 +157,26 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
 
+        let chain_cfg = ChainConfig {
+            id: 1,
+            name: "Test Chain".to_string(),
+            description: "A test chain".to_string(),
+        };
+        let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
+        cfg.add_chain(chain_cfg.clone()).unwrap();
+
         // no blocks for chain id
         let mut buf = Vec::new();
         let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
         assert!(result.is_ok());
-        assert_eq!(String::from_utf8(buf).unwrap(), "[chain ID 1] no blocks\n");
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            indoc::indoc! {"
+                [1] Test Chain: A test chain
+                └── no blocks
+               ",
+            }
+        );
 
         // block ranges for chain id
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
@@ -156,9 +186,15 @@ mod tests {
         let mut buf = Vec::new();
         let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
         assert!(result.is_ok());
+
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "[chain ID 1] 2 - 4\n[chain ID 1] 6 - 8\n"
+            indoc::indoc! {"
+                [1] Test Chain: A test chain
+                ├── 2 - 4
+                └── 6 - 8
+                "
+            }
         );
 
         // block ranges for multiple chain ids
@@ -172,13 +208,59 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "[chain ID 1] 2 - 4\n[chain ID 1] 6 - 8\n[chain ID 3] 3 - 5\n"
+            indoc::indoc! {"
+                [1] Test Chain: A test chain
+                ├── 2 - 4
+                └── 6 - 8
+                [3] (no name): (no description)
+                └── 3 - 5
+                ",
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn prints_message_for_all_chains_in_db_and_config_file() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+
+        // Add chain 32 to config file only
+        let chain_cfg = ChainConfig {
+            id: 32,
+            name: "Test Chain".to_string(),
+            description: "A test chain".to_string(),
+        };
+        let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
+        cfg.add_chain(chain_cfg.clone()).unwrap();
+
+        // Add ranges for chain 7 w/o adding to config file
+        let db_path = tmpdir.path().join(BLOCK_DB_NAME);
+        let db = RocksBlockDb::open(db_path.clone()).unwrap();
+        db.put_ranges_of_chain_id(7, &[2..=4, 6..=8]).unwrap();
+        db.put_chain_ids(&[7]).unwrap();
+        drop(db);
+
+        let mut buf = Vec::new();
+        let result = list(tmpdir.path(), None, None, &mut buf).await;
+        assert!(result.is_ok());
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            indoc::indoc! {"
+                [7] (no name): (no description)
+                ├── 2 - 4
+                └── 6 - 8
+                [32] Test Chain: A test chain
+                └── no blocks
+                ",
+            }
         );
     }
 
     #[tokio::test]
     async fn prints_message_for_each_remote_range() {
         let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+
         {
             // no blocks for chain id
             let list_response = ChainRanges {
@@ -203,7 +285,14 @@ mod tests {
             )
             .await;
             assert!(result.is_ok());
-            assert_eq!(String::from_utf8(buf).unwrap(), "[chain ID 1] no blocks\n");
+            assert_eq!(
+                String::from_utf8(buf).unwrap(),
+                indoc::indoc! {"
+                    [1] (no name): (no description)
+                    └── no blocks
+                    "
+                }
+            );
         }
         {
             // block ranges for chain id
@@ -228,7 +317,12 @@ mod tests {
             assert!(result.is_ok());
             assert_eq!(
                 String::from_utf8(buf).unwrap(),
-                "[chain ID 1] 2 - 4\n[chain ID 1] 6 - 8\n"
+                indoc::indoc! {"
+                    [1] (no name): (no description)
+                    ├── 2 - 4
+                    └── 6 - 8
+                    "
+                }
             );
         }
         {
@@ -260,7 +354,14 @@ mod tests {
             assert!(result.is_ok());
             assert_eq!(
                 String::from_utf8(buf).unwrap(),
-                "[chain ID 1] 2 - 4\n[chain ID 1] 6 - 8\n[chain ID 3] 3 - 5\n"
+                indoc::indoc! {"
+                    [1] (no name): (no description)
+                    ├── 2 - 4
+                    └── 6 - 8
+                    [3] (no name): (no description)
+                    └── 3 - 5
+                    "
+                }
             );
         }
     }

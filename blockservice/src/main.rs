@@ -1,9 +1,11 @@
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv6Addr, SocketAddr},
+    path::Path,
 };
 
 use blockservice::{
+    app_dir::open_app_dir,
     cli::{Args, Command},
     cmd,
 };
@@ -43,13 +45,19 @@ async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             chain_id,
             block_number,
         } => cmd::view(args.dir, chain_id, block_number, std::io::stdout()),
-        Command::Start { port } => {
-            // TODO read config
-            let config = HashMap::new();
-            // This allows both IPv4 and IPv6 connections
+        Command::Start => {
+            let port = {
+                let app_dir = Path::new("./").canonicalize()?;
+                let (cfg, _db) = open_app_dir(app_dir, true)?;
+                cfg.get_port()
+            };
+
+            // TODO Get JSON-RPC servers from config
+            let json_rpc_config = HashMap::new();
+
             let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
             let listener = tokio::net::TcpListener::bind(addr).await?;
-            cmd::start(args.dir, listener, config).await
+            cmd::start(args.dir, listener, json_rpc_config).await
         }
     }
 }

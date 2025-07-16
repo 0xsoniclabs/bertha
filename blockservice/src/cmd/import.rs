@@ -7,6 +7,7 @@ use prost::Message;
 use crate::{
     app_dir::open_app_dir,
     cmd::make_progress_bar,
+    config::ChainConfig,
     db::{BlockBatch, BlockDb, proto},
 };
 
@@ -17,7 +18,7 @@ pub fn import(
     snapshot_path: impl AsRef<Path>,
     verify: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (_cfg, db) = open_app_dir(app_dir, false)?;
+    let (mut cfg, db) = open_app_dir(app_dir, false)?;
 
     let file = File::open(snapshot_path)?;
     let mut reader = BufReader::new(file);
@@ -30,6 +31,11 @@ pub fn import(
         .unwrap_or_default();
 
     println!("Genesis file contains {total_blocks} blocks for chain ID {chain_id}");
+
+    if cfg.get_chain_config(chain_id).is_none() {
+        println!("Creating new entry for chain ID {chain_id} in the configuration");
+        cfg.add_chain(ChainConfig::new(chain_id))?;
+    }
 
     // Determine until which block we have to import blocks, and which range we already have in the
     // DB. To keep things simple, we only skip a range if it starts at block 0.
