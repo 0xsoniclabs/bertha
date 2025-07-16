@@ -121,7 +121,7 @@ mod tests {
 
     #[test]
     fn add_range_to_ranges_adds_new_part_of_range_and_maintains_invariants() {
-        let mut rng = rand::rng();
+        let mut rng = SmallRng::seed_from_u64(123);
         // test cases in the form of (existing ranges, new range, expected ranges)
         let cases = [
             // add range to empty ranges
@@ -166,40 +166,17 @@ mod tests {
         ];
         for (mut ranges, new_range, expected) in cases {
             ranges.add_range(new_range.clone());
-            assert_eq!(ranges, expected);
-            // valid
-            assert!(ranges.iter().all(|range| range.start() <= range.end()));
-            // non overlapping
-            assert!(ranges.windows(2).all(|w| w[0].end() < w[1].start()));
-            // sorted
-            assert!(ranges.is_sorted_by_key(|r| (r.start(), r.end())));
+            assert_eq_expected_and_postconditions(&ranges, &expected);
 
-            ranges.shuffle(&mut rng);
-            if !ranges.is_empty() {
-                let range = ranges[0].clone();
-                if range.start() < range.end() {
-                    // add overlapping ranges
-                    ranges.push(*range.start()..=*range.end() - 1);
-                    ranges.push(*range.start() + 1..=*range.end());
-                } else {
-                    // duplicate range
-                    ranges.push(range);
-                }
-            }
+            shuffle_and_make_overlapping(&mut ranges, &mut rng);
             ranges.add_range(new_range);
-            assert_eq!(ranges, expected);
-            // valid
-            assert!(ranges.iter().all(|range| range.start() <= range.end()));
-            // non overlapping
-            assert!(ranges.windows(2).all(|w| w[0].end() < w[1].start()));
-            // sorted
-            assert!(ranges.is_sorted_by_key(|r| (r.start(), r.end())));
+            assert_eq_expected_and_postconditions(&ranges, &expected);
         }
     }
 
     #[test]
     fn delete_range_from_ranges_removes_range_and_maintains_invariants() {
-        let mut rng = rand::rng();
+        let mut rng = SmallRng::seed_from_u64(123);
         // test cases in the form of (existing ranges, range to delete, expected ranges)
         let cases = [
             // remove non-existing range from empty ranges
@@ -229,34 +206,11 @@ mod tests {
         ];
         for (mut ranges, del_range, expected) in cases {
             ranges.subtract_range(&del_range);
-            assert_eq!(ranges, expected);
-            // valid
-            assert!(ranges.iter().all(|range| range.start() <= range.end()));
-            // non overlapping
-            assert!(ranges.windows(2).all(|w| w[0].end() < w[1].start()));
-            // sorted
-            assert!(ranges.is_sorted_by_key(|r| (r.start(), r.end())));
+            assert_eq_expected_and_postconditions(&ranges, &expected);
 
-            ranges.shuffle(&mut rng);
-            if !ranges.is_empty() {
-                let range = ranges[0].clone();
-                if range.start() < range.end() {
-                    // add overlapping ranges
-                    ranges.push(*range.start()..=*range.end() - 1);
-                    ranges.push(*range.start() + 1..=*range.end());
-                } else {
-                    // duplicate range
-                    ranges.push(range);
-                }
-            }
+            shuffle_and_make_overlapping(&mut ranges, &mut rng);
             ranges.subtract_range(&del_range);
-            assert_eq!(ranges, expected);
-            // valid
-            assert!(ranges.iter().all(|range| range.start() <= range.end()));
-            // non overlapping
-            assert!(ranges.windows(2).all(|w| w[0].end() < w[1].start()));
-            // sorted
-            assert!(ranges.is_sorted_by_key(|r| (r.start(), r.end())));
+            assert_eq_expected_and_postconditions(&ranges, &expected);
         }
     }
 
@@ -289,21 +243,45 @@ mod tests {
         ];
 
         let mut rng = SmallRng::seed_from_u64(123);
-        for (range, del, expected) in cases {
+        for (range, mut del, expected) in cases {
             let diff = subtract_ranges(range.clone(), &del);
-            assert_eq!(
-                diff, expected,
-                "Failed for requested_range: {range:?}, local_ranges: {del:?}"
-            );
-            // Randomize the order of local ranges to ensure that we don't rely on them being
-            // sorted
-            let mut randomized_local_ranges = del.clone();
-            randomized_local_ranges.shuffle(&mut rng);
-            let diff = subtract_ranges(range.clone(), &randomized_local_ranges);
-            assert_eq!(
-                diff, expected,
-                "Failed for requested_range: {range:?}, shuffled local_ranges: {randomized_local_ranges:?}"
-            );
+            assert_eq_expected_and_postconditions(&diff, &expected);
+
+            shuffle_and_make_overlapping(&mut del, &mut rng);
+            let diff = subtract_ranges(range.clone(), &del);
+            assert_eq_expected_and_postconditions(&diff, &expected);
+        }
+    }
+
+    #[track_caller]
+    fn assert_eq_expected_and_postconditions(ranges: &[BlockRange], expected: &[BlockRange]) {
+        assert_eq!(ranges, expected, "ranges do not match expected ranges");
+        assert!(
+            ranges.iter().all(|range| range.start() <= range.end()),
+            "ranges are not valid"
+        );
+        assert!(
+            ranges.windows(2).all(|w| w[0].end() < w[1].start()),
+            "ranges are not non-overlapping"
+        );
+        assert!(
+            ranges.is_sorted_by_key(|r| (r.start(), r.end())),
+            "ranges are not sorted"
+        );
+    }
+
+    fn shuffle_and_make_overlapping(ranges: &mut Vec<BlockRange>, rng: &mut SmallRng) {
+        ranges.shuffle(rng);
+        if !ranges.is_empty() {
+            let range = ranges[0].clone();
+            if range.start() < range.end() {
+                // add overlapping ranges
+                ranges.push(*range.start()..=*range.end() - 1);
+                ranges.push(*range.start() + 1..=*range.end());
+            } else {
+                // duplicate range
+                ranges.push(range);
+            }
         }
     }
 }
