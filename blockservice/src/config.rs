@@ -383,7 +383,7 @@ mod tests {
 
         let chain_no_name = ChainConfig {
             id: 42,
-            name: "".to_string(),
+            name: String::new(),
             description: "Unnamed chain".to_string(),
         };
         assert_eq!(chain_no_name.pretty_name(), "[42] (no name): Unnamed chain");
@@ -391,7 +391,7 @@ mod tests {
         let chain_no_description = ChainConfig {
             id: 1,
             name: "Test Chain".to_string(),
-            description: "".to_string(),
+            description: String::new(),
         };
         assert_eq!(
             chain_no_description.pretty_name(),
