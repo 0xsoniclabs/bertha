@@ -3,8 +3,13 @@
 This package provides a binary providing various Go based utilities for 
 performing operations on Block Databases.
 
-This project is in an early stage. Right now, only one operation is supported:
-the verification of blocks in a given database. To do so, run the following
+This project is in an early stage. Right now, only two operations are supported:
+- the verification of the hashes of blocks in a given database
+- the verification of the state root hashes in blocks in a given database
+
+
+## Block Hash Verification
+To verify the hashes of the blocks in the database, run the following
 command:
 ```
 go run ./cmd/block-db verify -db <path-to-database>
@@ -22,6 +27,17 @@ For more details and additional options see the command help.
 ```
 go run ./cmd/block-db
 ```
+
+## State Root Verification
+
+To verify all state roots listed in blocks, and thus the ability to reproduce
+the history of the chain from the content of the blocks, run the following
+command:
+```
+go run ./cmd/block-db replay -db <path-to-database> --json-genesis <json-genesis-file>
+```
+The `sonic.json` genesis file can be obtained from the Sonic Genesis File [web
+page](https://genesis.soniclabs.com/).
 
 ## Testing ##
 
