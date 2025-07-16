@@ -5,14 +5,14 @@ use genesis_parser::Genesis;
 use prost::Message;
 
 use crate::{
+    app_dir::open_app_dir,
     cmd::make_progress_bar,
     db::{BlockDb, proto},
-    workspace::open_workspace,
 };
 
 pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let workspace_path = Path::new("./").canonicalize()?;
-    let mut db = open_workspace(workspace_path, false)?;
+    let app_dir = Path::new("./").canonicalize()?;
+    let mut db = open_app_dir(app_dir, false)?;
 
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
@@ -127,9 +127,9 @@ mod tests {
 
     use super::*;
     use crate::{
+        app_dir::{BLOCK_DB_NAME, init_app_dir},
         cmd::{ChangeWorkingDir, init},
         db::RocksBlockDb,
-        workspace::{BLOCK_DB_NAME, create_workspace},
     };
 
     #[test]
@@ -341,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn fails_if_workspace_does_not_exist() {
+    fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
@@ -358,7 +358,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
 
         // Create a read-only database
-        create_workspace(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         let db_path = tmpdir.path().join(BLOCK_DB_NAME);
         std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o555)).unwrap();
 

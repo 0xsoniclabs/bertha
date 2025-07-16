@@ -2,7 +2,7 @@ use std::path::Path;
 
 use bertha_types::{Hash, HexConvert};
 
-use crate::{db::BlockDb, workspace::open_workspace};
+use crate::{app_dir::open_app_dir, db::BlockDb};
 
 pub fn verify(
     chain_id: u64,
@@ -10,8 +10,8 @@ pub fn verify(
     block_hash: Option<Hash>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let workspace_path = Path::new("./").canonicalize()?;
-    let db = open_workspace(workspace_path, true)?;
+    let app_dir = Path::new("./").canonicalize()?;
+    let db = open_app_dir(app_dir, true)?;
 
     let mut errors = 0;
 
@@ -96,13 +96,13 @@ mod tests {
 
     use super::*;
     use crate::{
+        app_dir::BLOCK_DB_NAME,
         cmd::{ChangeWorkingDir, init},
         db::{RocksBlockDb, proto},
-        workspace::BLOCK_DB_NAME,
     };
 
     #[test]
-    fn fails_if_workspace_does_not_exist() {
+    fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
 

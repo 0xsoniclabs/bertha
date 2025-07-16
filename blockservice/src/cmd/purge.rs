@@ -1,14 +1,14 @@
 use std::path::Path;
 
-use crate::{db::BlockDb, workspace::open_workspace};
+use crate::{app_dir::open_app_dir, db::BlockDb};
 
 pub fn purge(
     chain_id: u64,
     from: Option<u64>,
     to: Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let workspace_path = Path::new("./").canonicalize()?;
-    let mut db = open_workspace(workspace_path, false)?;
+    let app_dir = Path::new("./").canonicalize()?;
+    let mut db = open_app_dir(app_dir, false)?;
 
     db.delete_range(chain_id, from, to)?;
 
@@ -23,13 +23,13 @@ mod tests {
 
     use super::*;
     use crate::{
+        app_dir::BLOCK_DB_NAME,
         cmd::{ChangeWorkingDir, init},
         db::RocksBlockDb,
-        workspace::BLOCK_DB_NAME,
     };
 
     #[test]
-    fn fails_if_workspace_does_not_exist() {
+    fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
 

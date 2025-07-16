@@ -1,11 +1,11 @@
 use prost::DecodeError;
 
-use crate::workspace::WorkspaceError;
+use crate::app_dir::AppDirError;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
-    #[error("workspace error: {0}")]
-    Workspace(#[from] WorkspaceError),
+    #[error("application directory error: {0}")]
+    AppDir(#[from] AppDirError),
     #[error("error in underlying storage layer: {0}")]
     StorageLayer(String),
     #[error("error during protobuf decoding: {0}")]

@@ -1,10 +1,10 @@
 use std::{path::Path, vec};
 
 use crate::{
+    app_dir::open_app_dir,
     cmd::make_progress_bar,
     db::BlockDb,
     grpc::{RpcClient, proto_rpc::BlockRange},
-    workspace::open_workspace,
 };
 
 /// Fetch a range of blocks for a specific chain ID from a remote server and store them in the local
@@ -18,8 +18,8 @@ pub async fn fetch(
     to: Option<u64>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let workspace_path = Path::new("./").canonicalize()?;
-    let mut db = open_workspace(workspace_path, false)?;
+    let app_dir = Path::new("./").canonicalize()?;
+    let mut db = open_app_dir(app_dir, false)?;
 
     let mut client = RpcClient::try_new(url).await?;
     let mut uncompressed_bytes_written = 0;
@@ -186,6 +186,7 @@ mod tests {
 
     use super::*;
     use crate::{
+        app_dir::{BLOCK_DB_NAME, init_app_dir},
         cmd::{
             ChangeWorkingDir,
             fetch::{fetch, range_difference},
@@ -196,7 +197,6 @@ mod tests {
             proto_rpc::{BlockRange, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock},
             test_utils::{MockRpcServer, TestServer},
         },
-        workspace::{BLOCK_DB_NAME, create_workspace},
     };
 
     #[test]
@@ -283,7 +283,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_if_workspace_does_not_exist() {
+    async fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
@@ -299,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn fails_for_invalid_server_url() {
         let tmpdir = tempfile::tempdir().unwrap();
-        create_workspace(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
         let url = "invalid-url".to_string();

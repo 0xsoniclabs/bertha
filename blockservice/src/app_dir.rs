@@ -5,36 +5,35 @@ use crate::{Error, db::RocksBlockDb};
 pub const BLOCK_DB_NAME: &str = ".blockdb";
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
-pub enum WorkspaceError {
+pub enum AppDirError {
     #[error("no {0} found at {1} - did you forget to run init?")]
     NotFound(&'static str, PathBuf),
-    #[error("failed to create workspace at {0}: {1}")]
+    #[error("failed to initialize application directory at {0}: {1}")]
     CreateFailed(PathBuf, String),
 }
 
-/// Creates a new blockservice workspace at the given path.
+/// Initializes a new blockservice application directory at the given path, creating a block
+/// database.
 ///
-/// A workspace currently only contains the block database.
-///
-/// If both the workspace already exists, an error is returned.
-pub fn create_workspace(path: impl AsRef<Path>) -> Result<(), Error> {
+/// If an application directory is already initialized at the path, an error is returned.
+pub fn init_app_dir(path: impl AsRef<Path>) -> Result<(), Error> {
     let path = path.as_ref().to_path_buf().canonicalize().map_err(|e| {
-        Error::Workspace(WorkspaceError::CreateFailed(
+        Error::AppDir(AppDirError::CreateFailed(
             path.as_ref().to_path_buf(),
             e.to_string(),
         ))
     })?;
 
-    // Check if workspace already exists
-    if open_workspace(&path, true).is_ok() {
-        return Err(Error::Workspace(WorkspaceError::CreateFailed(
+    // Check if application directory already exists
+    if open_app_dir(&path, true).is_ok() {
+        return Err(Error::AppDir(AppDirError::CreateFailed(
             path,
             "already exists".to_owned(),
         )));
     }
 
     println!(
-        "Initializing new blockservice workspace at: {}",
+        "Initializing new blockservice directory at: {}",
         path.display()
     );
 
@@ -46,17 +45,17 @@ pub fn create_workspace(path: impl AsRef<Path>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Opens a blockservice workspace at the given path, returning its database.
+/// Opens a blockservice application directory at the given path, returning its database.
 ///
 /// The block database can be opened in read-only mode if `readonly_db` is set to `true`.
 ///
 /// Returns an error if the the database does not exist.
-pub fn open_workspace(path: impl AsRef<Path>, readonly_db: bool) -> Result<RocksBlockDb, Error> {
+pub fn open_app_dir(path: impl AsRef<Path>, readonly_db: bool) -> Result<RocksBlockDb, Error> {
     let path = path.as_ref().to_path_buf().canonicalize()?;
 
     let db_path = path.join(BLOCK_DB_NAME);
     if !db_path.exists() {
-        return Err(Error::Workspace(WorkspaceError::NotFound("database", path)));
+        return Err(Error::AppDir(AppDirError::NotFound("database", path)));
     }
 
     let db = if readonly_db {
@@ -76,20 +75,20 @@ mod tests {
     use crate::db::BlockDb;
 
     #[test]
-    fn create_workspace_creates_db() {
+    fn init_app_dir_creates_db() {
         let tmpdir = tempfile::tempdir().unwrap();
-        create_workspace(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         assert!(tmpdir.path().join(BLOCK_DB_NAME).exists());
     }
 
     #[test]
-    fn create_workspace_fails_if_directory_does_not_exist() {
+    fn init_app_dir_fails_if_directory_does_not_exist() {
         let path = PathBuf::from("/non/existent/path");
-        let result = create_workspace(&path);
+        let result = init_app_dir(&path);
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
-            Error::Workspace(WorkspaceError::CreateFailed(
+            Error::AppDir(AppDirError::CreateFailed(
                 path,
                 "No such file or directory (os error 2)".to_owned()
             ))
@@ -97,15 +96,15 @@ mod tests {
     }
 
     #[test]
-    fn create_workspace_fails_if_already_exists() {
+    fn init_app_dir_fails_if_already_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
-        create_workspace(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
 
-        let result = create_workspace(tmpdir.path());
+        let result = init_app_dir(tmpdir.path());
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
-            Error::Workspace(WorkspaceError::CreateFailed(
+            Error::AppDir(AppDirError::CreateFailed(
                 tmpdir.path().to_path_buf(),
                 "already exists".to_owned()
             ))
@@ -113,11 +112,11 @@ mod tests {
     }
 
     #[test]
-    fn create_workspace_fails_if_no_write_permissions() {
+    fn init_app_dir_fails_if_no_write_permissions() {
         let tmpdir = tempfile::tempdir().unwrap();
         std::fs::set_permissions(tmpdir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
 
-        let result = create_workspace(tmpdir.path());
+        let result = init_app_dir(tmpdir.path());
         assert!(result.is_err());
         assert!(
             result
@@ -128,24 +127,24 @@ mod tests {
     }
 
     #[test]
-    fn open_workspaces_returns_db() {
+    fn open_app_dir_returns_db() {
         let tmpdir = tempfile::tempdir().unwrap();
         {
-            // Manually create workspace
+            // Manually initialize app dir
             let mut db = RocksBlockDb::create(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
             db.put_raw(123, 456, vec![1, 2, 3].as_slice()).unwrap();
         }
 
-        let db = open_workspace(tmpdir.path(), false).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
         let res = db.get_raw(123, 456).unwrap();
         assert_eq!(res, Some(vec![1, 2, 3]));
     }
 
     #[test]
-    fn open_workspace_fails_if_directory_does_not_exist() {
+    fn open_app_dir_fails_if_directory_does_not_exist() {
         let path = PathBuf::from("/non/existent/path");
 
-        let result = open_workspace(&path, false);
+        let result = open_app_dir(&path, false);
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
@@ -154,14 +153,14 @@ mod tests {
     }
 
     #[test]
-    fn open_workspace_fails_db_does_not_exist() {
+    fn open_app_dir_fails_db_does_not_exist() {
         let tmpdir = tempfile::tempdir().unwrap();
 
-        let result = open_workspace(tmpdir.path(), false);
+        let result = open_app_dir(tmpdir.path(), false);
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
-            Error::Workspace(WorkspaceError::NotFound(
+            Error::AppDir(AppDirError::NotFound(
                 "database",
                 tmpdir.path().to_path_buf()
             ))

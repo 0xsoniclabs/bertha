@@ -1,10 +1,10 @@
 use std::path::Path;
 
-use crate::{grpc::RpcServer, workspace::open_workspace};
+use crate::{app_dir::open_app_dir, grpc::RpcServer};
 
 pub async fn start(listener: tokio::net::TcpListener) -> Result<(), Box<dyn std::error::Error>> {
-    let workspace_path = Path::new("./").canonicalize()?;
-    let db = open_workspace(workspace_path, true)?;
+    let app_dir = Path::new("./").canonicalize()?;
+    let db = open_app_dir(app_dir, true)?;
 
     let server = RpcServer::new(db);
     server.serve(listener).await
@@ -15,10 +15,10 @@ mod tests {
     use std::path::Path;
 
     use crate::{
+        app_dir::BLOCK_DB_NAME,
         cmd::{ChangeWorkingDir, init, start},
         db::{BlockDb, RocksBlockDb},
         grpc::RpcClient,
-        workspace::BLOCK_DB_NAME,
     };
 
     #[tokio::test]
@@ -48,7 +48,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_if_workspace_does_not_exist() {
+    async fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
