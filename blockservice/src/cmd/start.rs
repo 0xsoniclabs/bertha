@@ -28,7 +28,7 @@ mod tests {
         init(None::<&Path>).unwrap();
         {
             let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
-            let mut db = RocksBlockDb::open(db_path).unwrap();
+            let db = RocksBlockDb::open(db_path).unwrap();
             db.put_raw(1, 1, vec![1, 2, 3].as_slice()).unwrap();
         }
 

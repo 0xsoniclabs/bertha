@@ -24,7 +24,7 @@ pub trait BlockDb {
     }
 
     /// Stores the IDs of all chains in the database.
-    fn put_chain_ids(&mut self, chain_ids: &[u64]) -> Result<(), Error> {
+    fn put_chain_ids(&self, chain_ids: &[u64]) -> Result<(), Error> {
         self.put_metadata_raw(Self::CHAIN_IDS_KEY, chain_ids)
     }
 
@@ -48,11 +48,7 @@ pub trait BlockDb {
 
     /// Stores the ranges of blocks for the specified chain-ID.
     /// The start and end of each range are inclusive.
-    fn put_ranges_of_chain_id(
-        &mut self,
-        chain_id: u64,
-        ranges: &[(u64, u64)],
-    ) -> Result<(), Error> {
+    fn put_ranges_of_chain_id(&self, chain_id: u64, ranges: &[(u64, u64)]) -> Result<(), Error> {
         let data: Vec<u64> = ranges
             .iter()
             .flat_map(|&(start, end)| [start, end])
@@ -61,12 +57,12 @@ pub trait BlockDb {
     }
 
     /// Deletes the ranges of blocks for the specified chain-ID.
-    fn delete_ranges_of_chain_id(&mut self, chain_id: u64) -> Result<(), Error> {
+    fn delete_ranges_of_chain_id(&self, chain_id: u64) -> Result<(), Error> {
         self.delete_metadata(chain_id)
     }
 
     /// Adds a chain ID to the list of chain IDs stored in the database.
-    fn add_chain_id_to_chain_ids(&mut self, chain_id: u64) -> Result<(), Error> {
+    fn add_chain_id_to_chain_ids(&self, chain_id: u64) -> Result<(), Error> {
         // assumption:
         // - ids are sorted
         // - ids are not duplicated
@@ -83,7 +79,7 @@ pub trait BlockDb {
     }
 
     /// Removes a chain ID from the list of chain IDs stored in the database.
-    fn remove_chain_id_from_chain_ids(&mut self, chain_id: u64) -> Result<(), Error> {
+    fn remove_chain_id_from_chain_ids(&self, chain_id: u64) -> Result<(), Error> {
         // assumption:
         // - ids are sorted
         // - ids are not duplicated
@@ -101,11 +97,7 @@ pub trait BlockDb {
     /// Adds a block number to the ranges of block numbers stored in the database for the specified
     /// chain-ID. If this is the first block for the chain ID, the chain ID is added to the list
     /// of chain IDs.
-    fn add_block_number_to_ranges(
-        &mut self,
-        chain_id: u64,
-        block_number: u64,
-    ) -> Result<(), Error> {
+    fn add_block_number_to_ranges(&self, chain_id: u64, block_number: u64) -> Result<(), Error> {
         // assumption:
         // - ranges are valid (start <= end)
         // - ranges are non-overlapping
@@ -154,7 +146,7 @@ pub trait BlockDb {
     /// specified chain-ID. If this is the last remaining block for the chain ID, the chain ID is
     /// removed from the list of chain IDs.
     fn remove_range_from_ranges(
-        &mut self,
+        &self,
         chain_id: u64,
         del_start: u64,
         del_end: u64,
@@ -226,7 +218,7 @@ pub trait BlockDb {
 
     /// Stores a block for the specified chain-ID.
     /// The block number is obtained from the block itself.
-    fn put(&mut self, chain_id: u64, block: Block) -> Result<(), Error> {
+    fn put(&self, chain_id: u64, block: Block) -> Result<(), Error> {
         let number = block.number;
         let data = proto::Block::from(block).encode_to_vec();
         self.put_raw(chain_id, number, &data)
@@ -277,7 +269,7 @@ pub trait BlockDb {
     /// Deletes all blocks for the specified chain-ID in the range from `from_block` (defaults to 0;
     /// inclusive) to `to_block` (defaults to u64::MAX; inclusive).
     fn delete_range(
-        &mut self,
+        &self,
         chain_id: u64,
         from_block: Option<u64>,
         to_block: Option<u64>,
@@ -287,17 +279,17 @@ pub trait BlockDb {
     fn get_metadata_raw(&self, key: u64) -> Result<Option<Vec<u64>>, Error>;
 
     /// Stores the raw metadata for the specified key.
-    fn put_metadata_raw(&mut self, key: u64, data: &[u64]) -> Result<(), Error>;
+    fn put_metadata_raw(&self, key: u64, data: &[u64]) -> Result<(), Error>;
 
     /// Deletes the metadata for the specified key.
-    fn delete_metadata(&mut self, key: u64) -> Result<(), Error>;
+    fn delete_metadata(&self, key: u64) -> Result<(), Error>;
 
     /// Retrieves the raw protobuf-encoded data for the specified chain-ID and block number.
     /// Returns [None] if the block does not exist.
     fn get_raw(&self, chain_id: u64, block_number: u64) -> Result<Option<Vec<u8>>, Error>;
 
     /// Stores the raw protobuf-encoded data for the specified chain-ID and block number.
-    fn put_raw(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error>;
+    fn put_raw(&self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error>;
 
     /// Iterates over raw protobuf-encoded blocks for the specified chain-ID starting from the given
     /// block number.
@@ -320,15 +312,16 @@ pub trait BlockDb {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::{cell::RefCell, collections::BTreeMap};
 
     use super::*;
     use crate::db::test_utils::{make_meta_value, make_range_value};
 
     #[test]
     fn blockdb_get_chain_ids_queries_key_zero() {
-        let mut db = StubDb::new();
-        db.0.insert(0u64.to_be_bytes().to_vec(), make_meta_value([1u64, 2u64]));
+        let db = StubDb::new();
+        db.0.borrow_mut()
+            .insert(0u64.to_be_bytes().to_vec(), make_meta_value([1u64, 2u64]));
         assert_eq!(db.get_chain_ids(), Ok(vec![1, 2]),);
     }
 
@@ -340,8 +333,8 @@ mod tests {
 
     #[test]
     fn blockdb_get_chain_ids_returns_error_if_data_length_is_invalid() {
-        let mut db = StubDb::new();
-        db.0.insert(
+        let db = StubDb::new();
+        db.0.borrow_mut().insert(
             0u64.to_be_bytes().to_vec(),
             vec![0], // not a multiple of 8 bytes
         );
@@ -355,11 +348,11 @@ mod tests {
 
     #[test]
     fn blockdb_put_chain_ids_writes_chain_ids_to_key_zero() {
-        let mut db = StubDb::new();
+        let db = StubDb::new();
         let ids = [0, 1];
         db.put_chain_ids(&ids).unwrap();
         assert_eq!(
-            db.0.get(0u64.to_be_bytes().as_slice()),
+            db.0.borrow().get(0u64.to_be_bytes().as_slice()),
             Some(&make_meta_value(ids))
         );
     }
@@ -367,15 +360,16 @@ mod tests {
     #[test]
     fn blockdb_get_ranges_of_chain_id_converts_tuples() {
         let ranges = [(0, 1), (2, 3), (4, 5)];
-        let mut db = StubDb::new();
-        db.0.insert(1u64.to_be_bytes().to_vec(), make_range_value(ranges));
+        let db = StubDb::new();
+        db.0.borrow_mut()
+            .insert(1u64.to_be_bytes().to_vec(), make_range_value(ranges));
         assert_eq!(db.get_ranges_of_chain_id(1).unwrap(), ranges);
     }
 
     #[test]
     fn blockdb_get_ranges_of_chain_id_returns_error_if_data_length_is_invalid() {
-        let mut db = StubDb::new();
-        db.0.insert(
+        let db = StubDb::new();
+        db.0.borrow_mut().insert(
             1u64.to_be_bytes().to_vec(),
             // not a multiple of 2 8 bytes chunks
             [0].into_iter().flat_map(u64::to_be_bytes).collect(),
@@ -392,10 +386,10 @@ mod tests {
     fn blockdb_put_ranges_of_chain_id_converts_tuples() {
         let chain_id: u64 = 1;
         let ranges = [(0, 1), (2, 3), (4, 5)];
-        let mut db = StubDb::new();
+        let db = StubDb::new();
         db.put_ranges_of_chain_id(chain_id, &ranges).unwrap();
         assert_eq!(
-            db.0.get(chain_id.to_be_bytes().as_slice()),
+            db.0.borrow().get(chain_id.to_be_bytes().as_slice()),
             Some(&make_range_value(ranges))
         );
     }
@@ -404,22 +398,24 @@ mod tests {
     fn blockdb_delete_ranges_of_chain_id_removes_all_ranges_for_chain_id() {
         let chain_id: u64 = 1;
         let ranges = [(0, 1), (2, 3), (4, 5)];
-        let mut db = StubDb::new();
-        db.0.insert(chain_id.to_be_bytes().to_vec(), make_range_value(ranges));
+        let db = StubDb::new();
+        db.0.borrow_mut()
+            .insert(chain_id.to_be_bytes().to_vec(), make_range_value(ranges));
         db.delete_ranges_of_chain_id(chain_id).unwrap();
-        assert_eq!(db.0.get(chain_id.to_be_bytes().as_slice()), None);
+        assert_eq!(db.0.borrow().get(chain_id.to_be_bytes().as_slice()), None);
     }
 
     #[test]
     fn blockdb_add_chain_id_to_chain_ids_adds_chain_id_if_not_exists_and_keep_list_sorted() {
-        let mut db = StubDb::new();
-        db.0.insert(0u64.to_be_bytes().to_vec(), make_meta_value([1u64, 3u64]));
+        let db = StubDb::new();
+        db.0.borrow_mut()
+            .insert(0u64.to_be_bytes().to_vec(), make_meta_value([1u64, 3u64]));
 
         // add non existing key
         let chain_id: u64 = 2;
         db.add_chain_id_to_chain_ids(chain_id).unwrap();
         assert_eq!(
-            db.0.get(0u64.to_be_bytes().as_slice()),
+            db.0.borrow().get(0u64.to_be_bytes().as_slice()),
             Some(&make_meta_value([1, 2, 3]))
         );
 
@@ -427,15 +423,15 @@ mod tests {
         let chain_id: u64 = 1;
         db.add_chain_id_to_chain_ids(chain_id).unwrap();
         assert_eq!(
-            db.0.get(0u64.to_be_bytes().as_slice()),
+            db.0.borrow().get(0u64.to_be_bytes().as_slice()),
             Some(&make_meta_value([1, 2, 3]))
         );
     }
 
     #[test]
     fn blockdb_remove_chain_id_from_chain_ids_removes_chain_id_if_exists() {
-        let mut db = StubDb::new();
-        db.0.insert(
+        let db = StubDb::new();
+        db.0.borrow_mut().insert(
             0u64.to_be_bytes().to_vec(),
             make_meta_value([1u64, 2u64, 3u64]),
         );
@@ -443,14 +439,14 @@ mod tests {
         // remove non-existing key
         db.remove_chain_id_from_chain_ids(4).unwrap();
         assert_eq!(
-            db.0.get(0u64.to_be_bytes().as_slice()),
+            db.0.borrow().get(0u64.to_be_bytes().as_slice()),
             Some(&make_meta_value([1, 2, 3]))
         );
 
         // remove existing key
         db.remove_chain_id_from_chain_ids(2).unwrap();
         assert_eq!(
-            db.0.get(0u64.to_be_bytes().as_slice()),
+            db.0.borrow().get(0u64.to_be_bytes().as_slice()),
             Some(&make_meta_value([1, 3]))
         );
     }
@@ -460,7 +456,7 @@ mod tests {
      {
         let chain_id: u64 = 1;
         let init_ranges = [(3, 4), (9, 10), (12, 13)];
-        let mut db = StubDb::new();
+        let db = StubDb::new();
 
         let cases = [
             // add non-existing block number before existing ranges
@@ -479,13 +475,13 @@ mod tests {
             (3, vec![(3, 4), (9, 10), (12, 13)]),
         ];
         for (new_key, expected_ranges) in cases {
-            db.0.insert(
+            db.0.borrow_mut().insert(
                 chain_id.to_be_bytes().to_vec(),
                 make_range_value(init_ranges),
             ); // reset value
             db.add_block_number_to_ranges(chain_id, new_key).unwrap();
             assert_eq!(
-                db.0.get(chain_id.to_be_bytes().as_slice()),
+                db.0.borrow().get(chain_id.to_be_bytes().as_slice()),
                 Some(&make_range_value(expected_ranges))
             );
         }
@@ -495,7 +491,7 @@ mod tests {
     fn blockdb_remove_range_from_ranges_removes_range_if_exists() {
         let chain_id: u64 = 1;
         let init_ranges = [(3, 4), (9, 10), (12, 13)];
-        let mut db = StubDb::new();
+        let db = StubDb::new();
 
         let cases = [
             // remove start of existing range
@@ -515,9 +511,10 @@ mod tests {
         ];
         for (del_range, expected_ranges) in cases {
             // set the chain id
-            db.0.insert(0u64.to_be_bytes().to_vec(), chain_id.to_be_bytes().to_vec()); // reset value
+            db.0.borrow_mut()
+                .insert(0u64.to_be_bytes().to_vec(), chain_id.to_be_bytes().to_vec()); // reset value
             // set the initial ranges
-            db.0.insert(
+            db.0.borrow_mut().insert(
                 chain_id.to_be_bytes().to_vec(),
                 make_range_value(init_ranges),
             );
@@ -527,7 +524,7 @@ mod tests {
                 assert!(db.get_chain_ids().unwrap().contains(&chain_id));
             }
             assert_eq!(
-                db.0.get(chain_id.to_be_bytes().as_slice()),
+                db.0.borrow().get(chain_id.to_be_bytes().as_slice()),
                 expected_ranges.map(make_range_value).as_ref()
             );
         }
@@ -538,8 +535,8 @@ mod tests {
         let block = Block::default();
 
         let chain_id = 1;
-        let mut db = StubDb::new();
-        db.0.insert(
+        let db = StubDb::new();
+        db.0.borrow_mut().insert(
             make_data_key(chain_id, block.number),
             proto::Block::from(block.clone()).encode_to_vec(),
         );
@@ -551,8 +548,8 @@ mod tests {
     fn blockdb_get_returns_error_for_invalid_protobuf() {
         let chain_id = 1;
         let block_number = 0;
-        let mut db = StubDb::new();
-        db.0.insert(
+        let db = StubDb::new();
+        db.0.borrow_mut().insert(
             make_data_key(chain_id, block_number),
             vec![0, 1, 2, 3], // invalid protobuf data
         );
@@ -563,13 +560,14 @@ mod tests {
 
     #[test]
     fn blockdb_put_converts_to_protobuf() {
-        let mut db = StubDb::new();
+        let db = StubDb::new();
         let chain_id: u64 = 1;
         let block = Block::default();
         db.put(chain_id, block.clone()).unwrap();
         assert_eq!(
             proto::Block::decode(
-                db.0.get(&make_data_key(chain_id, block.number))
+                db.0.borrow()
+                    .get(&make_data_key(chain_id, block.number))
                     .unwrap()
                     .as_slice()
             )
@@ -581,7 +579,7 @@ mod tests {
     #[test]
     fn blockdb_iterate_converts_from_protobuf() {
         let chain_id = 1;
-        let mut db = StubDb::new();
+        let db = StubDb::new();
         let block = Block {
             number: 123,
             ..Block::default()
@@ -608,8 +606,8 @@ mod tests {
     fn blockdb_iterate_returns_error_for_invalid_protobuf() {
         let chain_id = 1;
         let block_number = 0;
-        let mut db = StubDb::new();
-        db.0.insert(
+        let db = StubDb::new();
+        db.0.borrow_mut().insert(
             make_data_key(chain_id, block_number),
             vec![0, 1, 2, 3], // invalid protobuf data
         );
@@ -633,17 +631,18 @@ mod tests {
         assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
     }
 
-    struct StubDb(BTreeMap<Vec<u8>, Vec<u8>>);
+    struct StubDb(RefCell<BTreeMap<Vec<u8>, Vec<u8>>>);
 
     impl StubDb {
         fn new() -> Self {
-            Self(BTreeMap::new())
+            Self(RefCell::new(BTreeMap::new()))
         }
     }
 
     impl BlockDb for StubDb {
         fn get_metadata_raw(&self, key: u64) -> Result<Option<Vec<u64>>, Error> {
-            let Some(value) = self.0.get(key.to_be_bytes().as_slice()) else {
+            let value = self.0.borrow().get(key.to_be_bytes().as_slice()).cloned();
+            let Some(value) = value else {
                 return Ok(None);
             };
 
@@ -661,27 +660,27 @@ mod tests {
             ))
         }
 
-        fn put_metadata_raw(&mut self, key: u64, data: &[u64]) -> Result<(), Error> {
+        fn put_metadata_raw(&self, key: u64, data: &[u64]) -> Result<(), Error> {
             let key = key.to_be_bytes().to_vec();
             let value = data.iter().flat_map(|v| v.to_be_bytes()).collect();
-            self.0.insert(key, value);
+            self.0.borrow_mut().insert(key, value);
             Ok(())
         }
 
-        fn delete_metadata(&mut self, key: u64) -> Result<(), Error> {
-            self.0.remove(key.to_be_bytes().as_slice());
+        fn delete_metadata(&self, key: u64) -> Result<(), Error> {
+            self.0.borrow_mut().remove(key.to_be_bytes().as_slice());
             Ok(())
         }
 
         fn get_raw(&self, chain_id: u64, block_number: u64) -> Result<Option<Vec<u8>>, Error> {
             let key = make_data_key(chain_id, block_number);
-            Ok(self.0.get(&key).cloned())
+            Ok(self.0.borrow().get(&key).cloned())
         }
 
-        fn put_raw(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
+        fn put_raw(&self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
             let key = make_data_key(chain_id, block_number);
             let value = data.to_vec();
-            self.0.insert(key, value);
+            self.0.borrow_mut().insert(key, value);
             Ok(())
         }
 
@@ -691,14 +690,20 @@ mod tests {
             from: u64,
         ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
             let key = make_data_key(chain_id, from);
-            self.0.range(key..).map(|(k, v)| {
-                let key = u64::from_be_bytes(
-                    k[8..16]
-                        .try_into()
-                        .map_err(|_| Error::StorageLayer("invalid key length".to_owned()))?,
-                );
-                Ok((key, v.clone().into_boxed_slice()))
-            })
+            self.0
+                .borrow()
+                .range(key..)
+                .map(|(k, v)| {
+                    let key = u64::from_be_bytes(
+                        k[8..16]
+                            .try_into()
+                            .map_err(|_| Error::StorageLayer("invalid key length".to_owned()))?,
+                    );
+                    Ok((key, v.clone().into_boxed_slice()))
+                })
+                // this is needed to be able to release the lock
+                .collect::<Vec<_>>()
+                .into_iter()
         }
 
         fn iterate_reverse_raw(
@@ -708,6 +713,7 @@ mod tests {
         ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
             let key = make_data_key(chain_id, from);
             self.0
+                .borrow()
                 .range(key..)
                 .map(|(k, v)| {
                     let key = u64::from_be_bytes(
@@ -718,10 +724,13 @@ mod tests {
                     Ok((key, v.clone().into_boxed_slice()))
                 })
                 .rev()
+                // this is needed to be able to release the lock
+                .collect::<Vec<_>>()
+                .into_iter()
         }
 
         fn delete_range(
-            &mut self,
+            &self,
             _chain_id: u64,
             _from_block: Option<u64>,
             _to_block: Option<u64>,

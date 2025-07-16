@@ -8,7 +8,7 @@ pub fn purge(
     to: Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let app_dir = Path::new("./").canonicalize()?;
-    let mut db = open_app_dir(app_dir, false)?;
+    let db = open_app_dir(app_dir, false)?;
 
     db.delete_range(chain_id, from, to)?;
 
@@ -84,7 +84,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
         init(None::<&Path>).unwrap();
-        let mut db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
 
         let chain_id = 146;
         let mut block = Block::default();

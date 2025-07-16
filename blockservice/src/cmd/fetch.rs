@@ -19,7 +19,7 @@ pub async fn fetch(
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let app_dir = Path::new("./").canonicalize()?;
-    let mut db = open_app_dir(app_dir, false)?;
+    let db = open_app_dir(app_dir, false)?;
 
     let mut client = RpcClient::try_new(url).await?;
     let mut uncompressed_bytes_written = 0;
@@ -316,7 +316,7 @@ mod tests {
         init(None::<&Path>).unwrap();
         {
             let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
-            let mut db = RocksBlockDb::open(db_path.clone()).unwrap();
+            let db = RocksBlockDb::open(db_path.clone()).unwrap();
             db.put_metadata_raw(1, vec![0].as_slice()).unwrap(); // Invalid metadata length
         }
         let mut mock_server = MockRpcServer::new();
@@ -769,7 +769,7 @@ mod tests {
         }
         let init_db = || {
             // Initialize the database
-            let mut db = RocksBlockDb::open(db_path.clone()).unwrap();
+            let db = RocksBlockDb::open(db_path.clone()).unwrap();
             db.delete_range(1, None, None).unwrap(); // Clear the database
             assert!(db.get_ranges_of_chain_id(1).unwrap().is_empty()); // make sure the database is empty
             // Insert the local blocks into the database

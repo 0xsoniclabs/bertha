@@ -131,7 +131,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         {
             // Manually initialize app dir
-            let mut db = RocksBlockDb::create(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+            let db = RocksBlockDb::create(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
             db.put_raw(123, 456, vec![1, 2, 3].as_slice()).unwrap();
         }
 
