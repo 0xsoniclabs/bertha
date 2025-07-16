@@ -16,7 +16,7 @@ pub async fn fetch(
     to: Option<u64>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let db = open_app_dir(app_dir, false)?;
+    let (_cfg, db) = open_app_dir(app_dir, false)?;
 
     let mut client = RpcClient::try_new(url).await?;
 
@@ -171,7 +171,7 @@ mod tests {
         .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
-            "no database found at {} - did you forget to run init?",
+            "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
     }
@@ -193,7 +193,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
         {
-            let db = open_app_dir(tmpdir.path(), false).unwrap();
+            let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
             db.put_metadata_raw(1, vec![0].as_slice()).unwrap(); // Invalid metadata length
         }
         let mut mock_server = MockRpcServer::new();
@@ -664,7 +664,7 @@ mod tests {
         }
         let init_db = || {
             // Initialize the database
-            let db = open_app_dir(tmpdir.path(), false).unwrap();
+            let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
             db.delete_range(1, None, None).unwrap(); // Clear the database
             assert!(db.get_ranges_of_chain_id(1).unwrap().is_empty()); // make sure the database is empty
             // Insert the local blocks into the database
@@ -794,7 +794,7 @@ mod tests {
                 // Check that the data were written to the database
                 for proto_rpc::BlockRange { from, to } in expected_ranges_to_fetch {
                     for i in from..=to {
-                        let db = open_app_dir(tmpdir.path(), true).unwrap();
+                        let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
                         let block = db.get(1, i).unwrap();
                         assert!(block.is_some(), "Block {i} not found in the database");
                         let block = block.unwrap();
