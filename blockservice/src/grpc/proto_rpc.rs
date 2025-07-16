@@ -1,8 +1,6 @@
 #![allow(warnings)]
 tonic::include_proto!("rpc");
 
-use std::ops::RangeInclusive;
-
 impl From<crate::BlockRange> for BlockRange {
     fn from(range: crate::BlockRange) -> Self {
         BlockRange {

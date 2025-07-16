@@ -1,6 +1,8 @@
-use std::{ops::RangeInclusive, path::Path};
+use std::path::Path;
 
-use crate::{app_dir::open_app_dir, cmd::make_progress_bar, db::BlockDb, grpc::RpcClient, utils};
+use crate::{
+    BlockRange, app_dir::open_app_dir, cmd::make_progress_bar, db::BlockDb, grpc::RpcClient, utils,
+};
 
 /// Fetch a range of blocks for a specific chain ID from a remote server and store them in the local
 /// database.
@@ -28,7 +30,7 @@ pub async fn fetch(
         .map(|r| {
             r.block_ranges
                 .into_iter()
-                .map(RangeInclusive::from)
+                .map(BlockRange::from)
                 .collect::<Vec<_>>()
         })
         .ok_or_else(|| format!("no ranges found for chain ID {chain_id}"))?;

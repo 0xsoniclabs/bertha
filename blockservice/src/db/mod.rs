@@ -9,13 +9,13 @@ pub use rocksblockdb::RocksBlockDb;
 
 #[cfg(test)]
 mod test_utils {
-    use std::ops::RangeInclusive;
+    use crate::BlockRange;
 
     pub fn make_meta_value(value: impl IntoIterator<Item = u64>) -> Vec<u8> {
         value.into_iter().flat_map(u64::to_be_bytes).collect()
     }
 
-    pub fn make_range_value(ranges: impl IntoIterator<Item = RangeInclusive<u64>>) -> Vec<u8> {
+    pub fn make_range_value(ranges: impl IntoIterator<Item = BlockRange>) -> Vec<u8> {
         make_meta_value(
             ranges
                 .into_iter()
