@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func TestReplay_InSmallValidDb_DoesNotReportIssues(t *testing.T) {
+func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 	require := require.New(t)
 
 	chainId := uint64(123)
@@ -97,6 +97,71 @@ func TestRunReplayLoop_CanProcessEmptyBlocks(t *testing.T) {
 		counter++
 	}))
 	require.Equal(t, len(blocks), counter)
+}
+
+func TestRunReplayLoop_CanProcessNonEmptyBlocks(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	chain := NewMockChain(ctrl)
+
+	// A block history with a few transactions.
+	blocks := []*blockdb.Block{
+		{
+			Number:    0,
+			StateRoot: []byte{0x1},
+			Transactions: []*blockdb.Transaction{
+				{TransactionType: types.LegacyTxType, Nonce: 0},
+				{TransactionType: types.LegacyTxType, Nonce: 1},
+			},
+		},
+		{
+			Number:    1,
+			StateRoot: []byte{0x2},
+			Transactions: []*blockdb.Transaction{
+				{TransactionType: types.LegacyTxType, Nonce: 3},
+			},
+		},
+		{
+			Number:    2,
+			StateRoot: []byte{0x3},
+			Transactions: []*blockdb.Transaction{
+				{TransactionType: types.LegacyTxType, Nonce: 4},
+				{TransactionType: types.LegacyTxType, Nonce: 5},
+				{TransactionType: types.LegacyTxType, Nonce: 6},
+				{TransactionType: types.LegacyTxType, Nonce: 7},
+			},
+		},
+	}
+
+	// Check that the blocks are processed in order and correctly forwarded.
+	var last *gomock.Call
+	for _, block := range blocks {
+		ethBlock, err := ConvertToGethBlock(block)
+		require.NoError(t, err, "failed to convert block %d", block.Number)
+
+		call := chain.EXPECT().
+			ApplyBlock(gomock.Any(), gomock.Any()).
+			DoAndReturn(func(b *types.Block, corrections Corrections) (
+				[]*types.Receipt, common.Hash, error,
+			) {
+				require.Equal(t, ethBlock.NumberU64(), b.NumberU64())
+				// No need to check the full block conversion, since this is
+				// covered by the Converter's unit tests. However, we check
+				// enough to make sure that the correct block is passed.
+				require.Equal(t, len(ethBlock.Transactions()), len(b.Transactions()))
+				for i, tx := range ethBlock.Transactions() {
+					require.Equal(t, tx.Nonce(), b.Transactions()[i].Nonce())
+				}
+				return nil, common.BytesToHash(block.StateRoot), nil
+			})
+
+		if last != nil {
+			call.After(last)
+		}
+		last = call
+	}
+
+	iter := newIter(blocks)
+	require.NoError(t, runReplayLoop(t.Context(), iter, chain, nil, nil))
 }
 
 func TestRunReplayLoop_FailsOnFailedBlockRetrieval(t *testing.T) {
@@ -197,7 +262,7 @@ func TestRunReplayLoop_FailsOnWrongReceiptCumulatedGasUsed(t *testing.T) {
 	)
 }
 
-func TestRunReplayLoop_FailsOnWrongIncorrectStateRootHash(t *testing.T) {
+func TestRunReplayLoop_FailsOnIncorrectStateRootHash(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
 

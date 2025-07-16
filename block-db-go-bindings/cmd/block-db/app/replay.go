@@ -255,7 +255,7 @@ func runReplayLoop(
 		// - check logs
 
 		// Check resulting state root.
-		if common.Hash(block.StateRoot) != stateRoot {
+		if common.BytesToHash(block.StateRoot) != stateRoot {
 			return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
 				block.Number, block.StateRoot, stateRoot)
 		}
