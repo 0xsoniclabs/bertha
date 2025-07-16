@@ -37,9 +37,14 @@ pub enum Command {
         #[arg(short, long)]
         to: Option<u64>,
     },
-    /// List all locally stored block ranges for all chains or only for the specific chain if
-    /// specified.
-    List { chain_id: Option<u64> },
+    /// List all block ranges for all chains or only for the specific chain if specified. If url is
+    /// not set this list the locally stored block ranges, otherwise the block ranges of the remote
+    /// block service.
+    List {
+        chain_id: Option<u64>,
+        #[arg(short, long)]
+        url: Option<String>,
+    },
     /// Check that all parent hashes match the hash of the parent block starting from the specified
     /// block number with the specified block hash.
     Verify {
@@ -85,7 +90,7 @@ Commands:
   init    Initialize a new block database in the current directory or at the specified path
   import  Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
   fetch   Fetch blocks from a remote block service and store them in the local database
-  list    List all locally stored block ranges for all chains or only for the specific chain if specified
+  list    List all block ranges for all chains or only for the specific chain if specified. If url is not set this list the locally stored block ranges, otherwise the block ranges of the remote block service
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
   view    Print the block as JSON
@@ -123,7 +128,7 @@ Commands:
   init    Initialize a new block database in the current directory or at the specified path
   import  Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
   fetch   Fetch blocks from a remote block service and store them in the local database
-  list    List all locally stored block ranges for all chains or only for the specific chain if specified
+  list    List all block ranges for all chains or only for the specific chain if specified. If url is not set this list the locally stored block ranges, otherwise the block ranges of the remote block service
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
   view    Print the block as JSON
@@ -254,7 +259,10 @@ For more information, try '--help'.
     fn call_with_list_subcommand_without_argument_parses_successfully() {
         let args = ["blockservice", "list"];
         let expected = Args {
-            command: Command::List { chain_id: None },
+            command: Command::List {
+                chain_id: None,
+                url: None,
+            },
         };
         parse_and_compare(&args, Ok(expected));
     }
@@ -266,6 +274,21 @@ For more information, try '--help'.
         let expected = Args {
             command: Command::List {
                 chain_id: Some(chain_id),
+                url: None,
+            },
+        };
+        parse_and_compare(&args, Ok(expected));
+    }
+
+    #[test]
+    fn call_with_list_subcommand_with_chain_id_and_url_parses_successfully() {
+        let chain_id = 146;
+        let url = "http://example.com";
+        let args = ["blockservice", "list", &chain_id.to_string(), "--url", url];
+        let expected = Args {
+            command: Command::List {
+                chain_id: Some(chain_id),
+                url: Some(url.to_string()),
             },
         };
         parse_and_compare(&args, Ok(expected));
@@ -275,15 +298,16 @@ For more information, try '--help'.
     fn call_with_list_subcommand_with_help_argument_prints_subcommand_help() {
         let args = ["blockservice", "list", "--help"];
         let expected = "\
-List all locally stored block ranges for all chains or only for the specific chain if specified
+List all block ranges for all chains or only for the specific chain if specified. If url is not set this list the locally stored block ranges, otherwise the block ranges of the remote block service
 
-Usage: blockservice list [CHAIN_ID]
+Usage: blockservice list [OPTIONS] [CHAIN_ID]
 
 Arguments:
   [CHAIN_ID]
 
 Options:
-  -h, --help  Print help
+  -u, --url <URL>
+  -h, --help       Print help
 ";
         parse_and_compare(&args, Err(expected));
     }
@@ -305,7 +329,7 @@ For more information, try '--help'.
         let expected = "\
 error: unexpected argument 'additional' found
 
-Usage: blockservice list [CHAIN_ID]
+Usage: blockservice list [OPTIONS] [CHAIN_ID]
 
 For more information, try '--help'.
 ";
@@ -762,6 +786,7 @@ For more information, try '--help'.
             .join("\n")
     }
 
+    #[track_caller]
     fn parse_and_compare(args: &[&str], expected: Result<Args, &str>) {
         let args = Args::try_parse_from(args);
         match (args, expected) {
