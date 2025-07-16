@@ -68,6 +68,66 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 	)
 }
 
+func TestProgressLogger_ProducesLogMessagesEvery10kSteps(t *testing.T) {
+	require := require.New(t)
+
+	logger := startProgressLogger()
+
+	block0, err := ConvertToGethBlock(&blockdb.Block{
+		Number:    0,
+		Timestamp: 1000,
+	})
+	require.NoError(err)
+	block10k, err := ConvertToGethBlock(&blockdb.Block{
+		Number:    10_000,
+		Timestamp: 2000,
+	})
+	require.NoError(err)
+	block15k, err := ConvertToGethBlock(&blockdb.Block{
+		Number:    15_000,
+		Timestamp: 2000,
+	})
+	require.NoError(err)
+	block20k, err := ConvertToGethBlock(&blockdb.Block{
+		Number:    20_000,
+		Timestamp: 3500,
+	})
+	require.NoError(err)
+
+	require.Empty(logger.LogProgress(block0))
+	require.Regexp(
+		`Processing block 10000 from 1970-01-01 01:33:20 @ t= 0:00:[0-9]{2}, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime`,
+		logger.LogProgress(block10k),
+	)
+	require.Empty(logger.LogProgress(block15k))
+	require.Regexp(
+		`Processing block 20000 from 1970-01-01 01:58:20 @ t= 0:00:[0-9]{2}, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime`,
+		logger.LogProgress(block20k),
+	)
+}
+
+func TestProgressLogger_ProducesASummary(t *testing.T) {
+	require := require.New(t)
+
+	logger := startProgressLogger()
+
+	block, err := ConvertToGethBlock(&blockdb.Block{
+		Number:    0,
+		Timestamp: 1000,
+		Transactions: []*blockdb.Transaction{
+			{TransactionType: types.LegacyTxType, Nonce: 0},
+			{TransactionType: types.LegacyTxType, Nonce: 1},
+		},
+	})
+	require.NoError(err)
+
+	require.Empty(logger.LogProgress(block))
+	require.Regexp(
+		`Replay finished in .*, processed 2 txs \([0-9]+.[0-9]{2} Tx/s\), used 0.000 TGas \([0-9]+.[0-9]{2} MGas/s\), [0-9]+.[0-9]{2}x realtime`,
+		logger.GetSummary(),
+	)
+}
+
 func TestRunReplayLoop_CanProcessEmptyBlocks(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),

@@ -132,85 +132,113 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		return fmt.Errorf("failed to load corrections: %w", err)
 	}
 
-	// ---- Start Replay ----
-	start := time.Now()
-	lastUpdate := time.Now()
-	lastReportedBlockTime := time.Unix(0, 0)
-	lastProcessedBlockTime := time.Unix(0, 0)
-	txCounter := uint64(0)
-	gasCounter := uint64(0)
-	lastTxCounter := uint64(0)
-	lastGasCounter := uint64(0)
-
-	firstBlockTime := time.Time{}
-
+	// Prepare the progress logger.
+	progress := startProgressLogger()
 	defer func() {
-		duration := time.Since(start)
-		deltaBlockTime := lastProcessedBlockTime.Sub(firstBlockTime)
-		slog.Info(fmt.Sprintf(
-			"Replay finished in %v, processed %d txs (%.2f Tx/s), used %.3f TGas (%.2f MGas/s), %.2fx realtime",
-			duration,
-			txCounter,
-			float64(txCounter)/duration.Seconds(),
-			float64(gasCounter)/1e12,
-			float64(gasCounter)/duration.Seconds()/1e6,
-			deltaBlockTime.Seconds()/duration.Seconds(),
-		))
+		slog.Info(progress.GetSummary())
 	}()
 
-	chain := &stateChainAdapter{
-		chainId: chainId,
-		state:   state,
-	}
+	// ---- Start Replay ----
 
 	blocks := database.GetRange(chainId, 0, math.MaxUint64)
+	chain := &stateChainAdapter{chainId: chainId, state: state}
 	return runReplayLoop(
 		ctx, blocks, chain, corrections, func(block *types.Block) {
-			// Keep track of metrics for logging purposes.
-			lastProcessedBlockTime = time.Unix(int64(block.Time()), 0)
-			txCounter += uint64(len(block.Transactions()))
-			gasCounter += block.GasUsed()
-
-			number := block.NumberU64()
-			if number == 0 {
-				firstBlockTime = lastProcessedBlockTime
-				lastReportedBlockTime = lastProcessedBlockTime
-				return
+			if info := progress.LogProgress(block); len(info) > 0 {
+				slog.Info(info)
 			}
-
-			// Periodically log the progress of the replay.
-			if number%10_000 != 0 {
-				return
-			}
-
-			currentBlockTime := time.Unix(int64(block.Time()), 0)
-			deltaBlockTime := currentBlockTime.Sub(lastReportedBlockTime)
-			lastReportedBlockTime = currentBlockTime
-			deltaTx := txCounter - lastTxCounter
-			deltaGas := gasCounter - lastGasCounter
-			lastTxCounter = txCounter
-			lastGasCounter = gasCounter
-			now := time.Now()
-			deltaTime := now.Sub(lastUpdate)
-			lastUpdate = now
-
-			runtime := time.Since(start)
-
-			fmt.Printf(
-				"Processing block %d from %v @ t=%2d:%02d:%02d, %.2f txs/s, %.2f MGas/s, %.2fx realtime\n",
-				number,
-				currentBlockTime.Format(time.DateTime),
-				int(runtime.Hours()),
-				int(runtime.Minutes())%60,
-				int(runtime.Seconds())%60,
-				float64(deltaTx)/deltaTime.Seconds(),
-				float64(deltaGas)/deltaTime.Seconds()/1000/1000,
-				deltaBlockTime.Seconds()/deltaTime.Seconds(),
-			)
 		},
 	)
 }
 
+// --- progress logger ---
+
+// progressLogger is a UX helper utility for the replay command producing
+// the main progress log output.
+type progressLogger struct {
+	start                  time.Time
+	lastUpdate             time.Time
+	lastReportedBlockTime  time.Time
+	lastProcessedBlockTime time.Time
+	txCounter              uint64
+	gasCounter             uint64
+	lastTxCounter          uint64
+	lastGasCounter         uint64
+	firstBlockTime         time.Time
+}
+
+func startProgressLogger() *progressLogger {
+	now := time.Now()
+	return &progressLogger{
+		start:      now,
+		lastUpdate: now,
+	}
+}
+
+func (p *progressLogger) LogProgress(block *types.Block) string {
+	// Keep track of metrics for logging purposes.
+	p.lastProcessedBlockTime = time.Unix(int64(block.Time()), 0)
+	p.txCounter += uint64(len(block.Transactions()))
+	p.gasCounter += block.GasUsed()
+
+	number := block.NumberU64()
+	if number == 0 {
+		p.firstBlockTime = p.lastProcessedBlockTime
+		p.lastReportedBlockTime = p.lastProcessedBlockTime
+		return ""
+	}
+
+	// Periodically log the progress of the replay.
+	if number%10_000 != 0 {
+		return ""
+	}
+
+	currentBlockTime := time.Unix(int64(block.Time()), 0)
+	deltaBlockTime := currentBlockTime.Sub(p.lastReportedBlockTime)
+	p.lastReportedBlockTime = currentBlockTime
+	deltaTx := p.txCounter - p.lastTxCounter
+	deltaGas := p.gasCounter - p.lastGasCounter
+	p.lastTxCounter = p.txCounter
+	p.lastGasCounter = p.gasCounter
+
+	now := time.Now()
+	deltaTime := now.Sub(p.lastUpdate)
+	p.lastUpdate = now
+
+	runtime := time.Since(p.start)
+
+	return fmt.Sprintf(
+		"Processing block %d from %v @ t=%2d:%02d:%02d, %.2f txs/s, %.2f MGas/s, %.2fx realtime",
+		number,
+		currentBlockTime.Format(time.DateTime),
+		int(runtime.Hours()),
+		int(runtime.Minutes())%60,
+		int(runtime.Seconds())%60,
+		float64(deltaTx)/deltaTime.Seconds(),
+		float64(deltaGas)/deltaTime.Seconds()/1000/1000,
+		deltaBlockTime.Seconds()/deltaTime.Seconds(),
+	)
+}
+
+func (p *progressLogger) GetSummary() string {
+	duration := time.Since(p.start)
+	deltaBlockTime := p.lastProcessedBlockTime.Sub(p.firstBlockTime)
+	return fmt.Sprintf(
+		"Replay finished in %v, processed %d txs (%.2f Tx/s), used %.3f TGas (%.2f MGas/s), %.2fx realtime",
+		duration,
+		p.txCounter,
+		float64(p.txCounter)/duration.Seconds(),
+		float64(p.gasCounter)/1e12,
+		float64(p.gasCounter)/duration.Seconds()/1e6,
+		deltaBlockTime.Seconds()/duration.Seconds(),
+	)
+}
+
+// --- block replay logic ---
+
+// runReplayLoop processes the blocks from the given iterator, applying them
+// to the chain and checking the results against the expected values in the
+// blocks. This is the main business logic of the replay command.
 func runReplayLoop(
 	ctx context.Context,
 	blocks iter.Seq2[*blockdb.Block, error],
