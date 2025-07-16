@@ -1,3 +1,4 @@
+mod app_dir;
 mod cli;
 pub mod cmd;
 mod db;

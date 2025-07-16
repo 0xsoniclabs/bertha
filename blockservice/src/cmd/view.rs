@@ -1,14 +1,14 @@
 use std::path::Path;
 
-use crate::db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb};
+use crate::{app_dir::open_app_dir, db::BlockDb};
 
 pub fn view(
     chain_id: u64,
     block_number: u64,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize()?;
-    let db = RocksBlockDb::open_for_reading(db_path)?;
+    let app_dir = Path::new("./").canonicalize()?;
+    let db = open_app_dir(app_dir, true)?;
 
     let block = db.get(chain_id, block_number)?;
     match block {
@@ -31,7 +31,24 @@ mod tests {
     use bertha_types::Block;
 
     use super::*;
-    use crate::cmd::{ChangeWorkingDir, init};
+    use crate::{
+        app_dir::BLOCK_DB_NAME,
+        cmd::{ChangeWorkingDir, init},
+        db::RocksBlockDb,
+    };
+
+    #[test]
+    fn fails_if_app_dir_is_not_initialized() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+
+        let result = view(1, 0, std::io::sink());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains(&format!(
+            "no database found at {} - did you forget to run init?",
+            tmpdir.path().display()
+        )));
+    }
 
     #[test]
     fn fails_if_no_read_permissions() {
@@ -48,22 +65,6 @@ mod tests {
         let result = view(0, 1, std::io::sink());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Failed to open"));
-    }
-
-    #[test]
-    fn fails_if_db_does_not_exist() {
-        let tmpdir = tempfile::tempdir().unwrap();
-
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-
-        let result = view(1, 0, std::io::sink());
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("No such file or directory")
-        );
     }
 
     #[test]

@@ -5,13 +5,14 @@ use genesis_parser::Genesis;
 use prost::Message;
 
 use crate::{
+    app_dir::open_app_dir,
     cmd::make_progress_bar,
-    db::{BLOCK_DB_NAME, BlockDb, RocksBlockDb, proto},
+    db::{BlockDb, proto},
 };
 
 pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize()?;
-    let mut db = RocksBlockDb::open(db_path)?;
+    let app_dir = Path::new("./").canonicalize()?;
+    let mut db = open_app_dir(app_dir, false)?;
 
     let file = File::open(path)?;
     let mut reader = BufReader::new(file);
@@ -125,7 +126,11 @@ mod tests {
     use bertha_types::Block;
 
     use super::*;
-    use crate::cmd::{ChangeWorkingDir, init};
+    use crate::{
+        app_dir::{BLOCK_DB_NAME, init_app_dir},
+        cmd::{ChangeWorkingDir, init},
+        db::RocksBlockDb,
+    };
 
     #[test]
     fn inserts_all_blocks_from_snapshot_file_into_db_and_verifies_them() {
@@ -336,15 +341,28 @@ mod tests {
     }
 
     #[test]
+    fn fails_if_app_dir_is_not_initialized() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+
+        let result = import("somepath", true);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains(&format!(
+            "no database found at {} - did you forget to run init?",
+            tmpdir.path().display()
+        )));
+    }
+
+    #[test]
     fn fails_if_no_write_permissions() {
         let tmpdir = tempfile::tempdir().unwrap();
 
         // Create a read-only database
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         let db_path = tmpdir.path().join(BLOCK_DB_NAME);
         std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o555)).unwrap();
 
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
         let result = import("somepath", true);
         // We expect an error because we cannot write to the database
         assert!(result.is_err());

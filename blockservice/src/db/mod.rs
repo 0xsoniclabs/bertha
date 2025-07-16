@@ -7,9 +7,6 @@ pub use blockdb::BlockDb;
 pub use blockdb::MockBlockDb;
 pub use rocksblockdb::RocksBlockDb;
 
-/// Default blockdb name
-pub const BLOCK_DB_NAME: &str = ".blockdb";
-
 #[cfg(test)]
 mod test_utils {
     pub fn make_meta_value(value: impl IntoIterator<Item = u64>) -> Vec<u8> {
