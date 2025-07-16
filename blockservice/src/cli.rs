@@ -55,8 +55,6 @@ pub enum Command {
         from: Option<u64>,
         to: Option<u64>,
     },
-    /// Delete all blocks for chains not referenced in the config file.
-    Clean,
     /// Print the block as JSON.
     View { chain_id: u64, block_number: u64 },
     /// Start the block server.
@@ -90,7 +88,6 @@ Commands:
   list    List all locally stored block ranges for all chains or only for the specific chain if specified
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
-  clean   Delete all blocks for chains not referenced in the config file
   view    Print the block as JSON
   start   Start the block server
   help    Print this message or the help of the given subcommand(s)
@@ -129,7 +126,6 @@ Commands:
   list    List all locally stored block ranges for all chains or only for the specific chain if specified
   verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
-  clean   Delete all blocks for chains not referenced in the config file
   view    Print the block as JSON
   start   Start the block server
   help    Print this message or the help of the given subcommand(s)
@@ -489,42 +485,6 @@ For more information, try '--help'.
 error: unexpected argument 'additional' found
 
 Usage: blockservice purge <CHAIN_ID> [FROM] [TO]
-
-For more information, try '--help'.
-";
-        parse_and_compare(&args, Err(expected));
-    }
-
-    #[test]
-    fn call_with_clean_subcommand_without_argument_parses_successfully() {
-        let args = ["blockservice", "clean"];
-        let expected = Args {
-            command: Command::Clean,
-        };
-        parse_and_compare(&args, Ok(expected));
-    }
-
-    #[test]
-    fn call_with_clean_subcommand_with_help_argument_prints_subcommand_help() {
-        let args = ["blockservice", "clean", "--help"];
-        let expected = "\
-Delete all blocks for chains not referenced in the config file
-
-Usage: blockservice clean
-
-Options:
-  -h, --help  Print help
-";
-        parse_and_compare(&args, Err(expected));
-    }
-
-    #[test]
-    fn call_with_clean_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockservice", "clean", "additional"];
-        let expected = "\
-error: unexpected argument 'additional' found
-
-Usage: blockservice clean
 
 For more information, try '--help'.
 ";
