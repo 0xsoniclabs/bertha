@@ -46,8 +46,8 @@ async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 async fn main() {
     let args = Args::parse();
     let result = execute(args).await;
-    if result.is_err() {
-        eprintln!("Error: {}", result.unwrap_err());
+    if let Err(e) = result {
+        eprintln!("Error: {e}");
         std::process::exit(1);
     }
 }
