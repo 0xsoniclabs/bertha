@@ -153,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn open_app_dir_fails_db_does_not_exist() {
+    fn open_app_dir_fails_if_db_does_not_exist() {
         let tmpdir = tempfile::tempdir().unwrap();
 
         let result = open_app_dir(tmpdir.path(), false);
