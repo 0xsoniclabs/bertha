@@ -44,10 +44,10 @@ impl RangesExt for Vec<BlockRange> {
             let start = *range.start();
             let end = *range.end();
             match (
-                del_end.cmp(range.start()),
-                del_start.cmp(range.end()),
-                del_start.cmp(range.start()),
-                del_end.cmp(range.end()),
+                del_end.cmp(&start),
+                del_start.cmp(&end),
+                del_start.cmp(&start),
+                del_end.cmp(&end),
             ) {
                 // The deletion range does not overlap with the current range
                 (Ordering::Less, _, _, _) | (_, Ordering::Greater, _, _) => {
