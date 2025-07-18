@@ -82,12 +82,12 @@ impl RangesExt for Vec<BlockRange> {
         self.sort_by_key(|r| (*r.start(), *r.end()));
         let mut i = 0;
         while let Some(range) = self.get(i) {
-            let start = *range.start();
-            let end = *range.end();
-            if end < start {
+            if range.is_empty() {
                 self.remove(i);
                 continue;
             }
+            let start = *range.start();
+            let end = *range.end();
             if i + 1 < self.len() && end + 1 >= *self[i + 1].start() {
                 // Overlapping or adjacent ranges, merge them
                 self[i] = start..=cmp::max(end, *self[i + 1].end());
@@ -120,7 +120,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn add_range_to_ranges_adds_new_part_of_range_and_maintains_invariants() {
+    fn add_range_adds_new_part_of_range_and_maintains_invariants() {
         let mut rng = SmallRng::seed_from_u64(123);
         // test cases in the form of (existing ranges, new range, expected ranges)
         let cases = [
@@ -175,9 +175,9 @@ mod tests {
     }
 
     #[test]
-    fn delete_range_from_ranges_removes_range_and_maintains_invariants() {
+    fn subtract_range_removes_range_and_maintains_invariants() {
         let mut rng = SmallRng::seed_from_u64(123);
-        // test cases in the form of (existing ranges, range to delete, expected ranges)
+        // test cases in the form of (existing ranges, range to subtract, expected ranges)
         let cases = [
             // remove non-existing range from empty ranges
             (vec![], 0..=1, vec![]),
@@ -216,30 +216,24 @@ mod tests {
 
     #[test]
     fn subtract_ranges_computes_correct_difference() {
-        // test cases in the form of (existing range, ranges to delete, expected ranges)
+        // test cases in the form of (existing range, ranges to subtract, expected ranges)
         let cases = vec![
-            // No local ranges, should return the whole range
-            (0..=30, vec![], vec![0..=30]),
-            // Whole range already available locally, should return empty
-            (0..=30, vec![0..=30], vec![]),
-            // Local ranges do not cover the whole range, should return the missing parts
-            (
-                0..=30,
-                vec![0..=5, 7..=10, 15..=20, 22..=28, 30..=30],
-                vec![6..=6, 11..=14, 21..=21, 29..=29],
-            ),
-            // Missing end of the range
-            (0..=30, vec![0..=20], vec![21..=30]),
-            // Missing start of the range
-            (0..=30, vec![11..=30], vec![0..=10]),
-            // Missing both ends of the range (duplicate of above for completeness)
-            (0..=30, vec![11..=20], vec![0..=10, 21..=30]),
-            // Difference is equal to a single block (not locally available)
-            (5..=10, vec![5..=5, 7..=10, 15..=20], vec![6..=6]),
-            // Requested range is a single block (locally available)
-            (15..=15, vec![5..=5, 7..=10, 15..=20], vec![]),
-            // Requested range is a single block (not locally available)
-            (15..=15, vec![5..=5, 7..=10, 16..=20], vec![15..=15]),
+            // Remove nothing
+            (0..=1, vec![], vec![0..=1]),
+            // Remove non-existing range
+            (0..=1, vec![2..=3], vec![0..=1]),
+            // Remove range that covers the whole existing range
+            (0..=1, vec![0..=1], vec![]),
+            // Remove start of existing range
+            (0..=3, vec![0..=2], vec![3..=3]),
+            // Remove end of existing range
+            (0..=3, vec![1..=3], vec![0..=0]),
+            // Remove middle of existing range
+            (0..=3, vec![1..=2], vec![0..=0, 3..=3]),
+            // Remove everything but one block
+            (0..=3, vec![0..=1, 3..=3], vec![2..=2]),
+            // Remove multiple parts of the existing range
+            (0..=4, vec![0..=0, 2..=2, 4..=4], vec![1..=1, 3..=3]),
         ];
 
         let mut rng = SmallRng::seed_from_u64(123);
@@ -250,6 +244,29 @@ mod tests {
             shuffle_and_make_overlapping(&mut del, &mut rng);
             let diff = subtract_ranges(range.clone(), &del);
             assert_eq_expected_and_postconditions(&diff, &expected);
+        }
+    }
+
+    #[test]
+    fn canonicalize_sorts_and_merges_and_removes_empty_ranges() {
+        #[allow(clippy::reversed_empty_ranges)]
+        let cases = [
+            // no ranges
+            (vec![], vec![]),
+            // unsorted ranges
+            (vec![6..=7, 1..=2, 4..=4], vec![1..=2, 4..=4, 6..=7]),
+            // overlapping ranges
+            (vec![1..=2, 2..=3, 3..=4], vec![1..=4]),
+            // adjacent ranges
+            (vec![1..=2, 3..=4, 5..=6], vec![1..=6]),
+            // empty ranges
+            (vec![1..=0], vec![]),
+            // unsorted and overlapping and adjacent and empty ranges
+            (vec![3..=4, 1..=2, 3..=3, 6..=7, 1..=0], vec![1..=4, 6..=7]),
+        ];
+        for (mut ranges, expected) in cases {
+            ranges.canonicalize();
+            assert_eq_expected_and_postconditions(&ranges, &expected);
         }
     }
 
