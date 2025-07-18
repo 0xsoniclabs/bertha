@@ -103,10 +103,10 @@ where
             ),
             None => println!("Received request for block range {from}-{to} on chain {chain_id}",),
         }
-
+	const DB_BUFFER_SIZE: usize = 1000;
         let db = self.db.clone();
         tokio::spawn(async move {
-            let (db_p, mut db_r) = tokio::sync::mpsc::channel(1000);
+            let (db_p, mut db_r) = tokio::sync::mpsc::channel(DB_BUFFER_SIZE);
             let db_thread = tokio::spawn(async move {
                 for result in db.iterate_raw(chain_id, from) {
                     match result {
