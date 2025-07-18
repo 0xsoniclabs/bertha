@@ -110,11 +110,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         // Comments are prefixed with '##' to not be parsed by the unit test below.
-        let config_toml = DEFAULT_CONFIG_TOML
-            .lines()
-            .map(|line| line.replacen("##", "#", 1))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let config_toml = DEFAULT_CONFIG_TOML.replace("##", "#");
 
         Config {
             toml: config_toml.clone(),
@@ -168,21 +164,16 @@ mod tests {
         // The default config template contains commented out examples.
         // We remove the first '#' to enable them.
         // Actual comments need to be prefixed with '##' to avoid being parsed.
-        let config_toml = DEFAULT_CONFIG_TOML
-            .lines()
-            .map(|line| line.replacen("#", "", 1))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let config_toml = DEFAULT_CONFIG_TOML.replace("\n#", "\n");
         let config: Config = toml::from_str(&config_toml).unwrap();
         assert_eq!(config.port, 8080);
-        assert_eq!(config.chains.len(), 1);
         assert_eq!(
-            config.chains[0],
-            ChainConfig {
+            config.chains,
+            [ChainConfig {
                 id: 133337,
                 name: "Example chain".to_string(),
                 description: "An example blockchain".to_string(),
-            }
+            }]
         );
     }
 
@@ -207,7 +198,7 @@ mod tests {
     }
 
     #[test]
-    fn create_default_fails_if_file_exists() {
+    fn create_default_propagates_filesystem_errors() {
         let tmpdir = tempfile::tempdir().unwrap();
         let config_path = tmpdir.path().join("blockservice.toml");
         std::fs::File::create(&config_path).unwrap();
@@ -239,8 +230,49 @@ mod tests {
 
         let config = Config::load(&config_path).unwrap();
         assert_eq!(config.port, 42);
-        assert_eq!(config.chains.len(), 1);
-        assert_eq!(config.chains[0], chain);
+        assert_eq!(config.chains, [chain]);
+    }
+
+    #[test]
+    fn load_propagates_filesystem_errors() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let config_path = tmpdir.path().join("blockservice.toml");
+
+        let result = Config::load(&config_path);
+        assert_eq!(
+            result.unwrap_err(),
+            Error::Io("No such file or directory (os error 2)".to_owned())
+        );
+    }
+
+    #[test]
+    fn load_returns_error_for_incomplete_toml() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let config_path = tmpdir.path().join("blockservice.toml");
+        std::fs::write(&config_path, "foo = 456").unwrap();
+
+        let result = Config::load(&config_path);
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("missing field `port`")
+        );
+    }
+
+    #[test]
+    fn load_returns_error_for_invalid_toml() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let config_path = tmpdir.path().join("blockservice.toml");
+        std::fs::write(&config_path, "= 456").unwrap();
+
+        let result = Config::load(&config_path);
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("unquoted keys cannot be empty")
+        );
     }
 
     #[test]
