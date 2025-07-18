@@ -62,14 +62,9 @@ impl Config {
         ids
     }
 
-    /// Returns `true` if the config contains a chain with the given ID.
-    pub fn has_chain(&self, id: u64) -> bool {
-        self.chains.iter().any(|c| c.id == id)
-    }
-
     /// Adds a new chain configuration to the config file.
     pub fn add_chain(&mut self, chain: ChainConfig) -> Result<(), Error> {
-        if self.has_chain(chain.id) {
+        if self.get_chain_config(chain.id).is_some() {
             return Err(Error::Config(format!(
                 "chain with id {} already exists",
                 chain.id
@@ -107,15 +102,8 @@ impl Config {
 
     /// Returns the configuration for a chain with the given ID,
     /// or an empty configuration if no such chain exists.
-    pub fn get_chain_config(&self, id: u64) -> ChainConfig {
-        self.chains
-            .iter()
-            .find(|c| c.id == id)
-            .unwrap_or(&ChainConfig {
-                id,
-                ..Default::default()
-            })
-            .clone()
+    pub fn get_chain_config(&self, id: u64) -> Option<ChainConfig> {
+        self.chains.iter().find(|c| c.id == id).cloned()
     }
 }
 
@@ -138,7 +126,7 @@ impl Default for Config {
 }
 
 /// A set of configuration options for a specific blockchain.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChainConfig {
     pub id: u64,
     pub name: String,
@@ -146,6 +134,16 @@ pub struct ChainConfig {
 }
 
 impl ChainConfig {
+    /// Creates a new chain configuration for the given chain ID.
+    /// All other fields are initialized to their default values.
+    pub fn new(id: u64) -> Self {
+        ChainConfig {
+            id,
+            name: String::default(),
+            description: String::default(),
+        }
+    }
+
     pub fn pretty_name(&self) -> String {
         let name = if self.name.is_empty() {
             "(no name)"
@@ -256,38 +254,16 @@ mod tests {
 
     #[test]
     fn get_chain_ids_returns_sorted_chain_ids() {
-        let chain1 = ChainConfig {
-            id: 7,
-            ..Default::default()
-        };
-        let chain2 = ChainConfig {
-            id: 1,
-            ..Default::default()
-        };
-        let chain3 = ChainConfig {
-            id: 3,
-            ..Default::default()
-        };
         let config = Config {
-            chains: vec![chain1, chain2, chain3],
+            chains: vec![
+                ChainConfig::new(7),
+                ChainConfig::new(1),
+                ChainConfig::new(3),
+            ],
             ..Config::default()
         };
         let ids = config.get_chain_ids();
         assert_eq!(ids, vec![1, 3, 7]);
-    }
-
-    #[test]
-    fn has_chain_returns_true_if_chain_exists() {
-        let chain = ChainConfig {
-            id: 42,
-            ..Default::default()
-        };
-        let config = Config {
-            chains: vec![chain.clone()],
-            ..Config::default()
-        };
-        assert!(config.has_chain(42));
-        assert!(!config.has_chain(1337));
     }
 
     #[test]
@@ -321,7 +297,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let config_path = tmpdir.path().join("blockservice.toml");
         let mut config = Config::create_default(&config_path).unwrap();
-        let chain = ChainConfig::default();
+        let chain = ChainConfig::new(42);
         config.add_chain(chain.clone()).unwrap();
 
         let result = config.add_chain(chain.clone());
@@ -339,7 +315,7 @@ mod tests {
         config.toml += "\nchains = [42, 123]";
         std::fs::write(&config_path, &config.toml).unwrap();
 
-        let result = config.add_chain(ChainConfig::default());
+        let result = config.add_chain(ChainConfig::new(0));
         assert_eq!(
             result.unwrap_err(),
             Error::Config("expected 'chains' to be an array of tables".to_owned())
@@ -357,19 +333,11 @@ mod tests {
             chains: vec![chain.clone()],
             ..Default::default()
         };
-        let retrieved_chain = config.get_chain_config(42);
+        let retrieved_chain = config.get_chain_config(42).unwrap();
         assert_eq!(retrieved_chain, chain);
-    }
 
-    #[test]
-    fn get_chain_config_returns_default_if_chain_does_not_exist() {
-        let config = Config::default();
-        let chain = config.get_chain_config(999);
-        let expected = ChainConfig {
-            id: 999,
-            ..Default::default()
-        };
-        assert_eq!(chain, expected);
+        let non_existent_chain = config.get_chain_config(1337);
+        assert!(non_existent_chain.is_none());
     }
 
     #[test]
