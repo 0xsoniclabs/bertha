@@ -6,8 +6,7 @@ use tonic::{codec::CompressionEncoding, transport::Server};
 use crate::{
     db::BlockDb,
     grpc::proto_rpc::{
-        BlockRange, BlockRangeRequest, BlockRequest, ChainRange, ChainRanges, EncodedBlock,
-        ListRequest,
+        BlockRange, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock, ListRequest,
         block_rpc_server::{BlockRpc, BlockRpcServer},
     },
 };
@@ -50,35 +49,6 @@ impl<Db> BlockRpc for RpcServer<Db>
 where
     Db: BlockDb + Send + Sync + 'static,
 {
-    /// Returns a block by its chain ID and number.
-    async fn get_block(
-        &self,
-        request: tonic::Request<BlockRequest>,
-    ) -> Result<tonic::Response<EncodedBlock>, tonic::Status> {
-        let remote_addr = request.remote_addr();
-        let BlockRequest { chain_id, number } = request.into_inner();
-
-        match remote_addr {
-            Some(addr) => {
-                println!("Received request for block {number} on chain {chain_id} from {addr}");
-            }
-            None => println!("Received request for block {number} on chain {chain_id}"),
-        }
-
-        let encoded_block = self.db.get_raw(chain_id, number);
-
-        match encoded_block {
-            Ok(Some(block)) => Ok(tonic::Response::new(EncodedBlock {
-                data: block,
-                number,
-            })),
-            Ok(None) => Err(tonic::Status::not_found(format!(
-                "Block {number} not found for chain {chain_id}"
-            ))),
-            Err(e) => Err(tonic::Status::internal(e.to_string())),
-        }
-    }
-
     type GetBlockRangeStream = ReceiverStream<Result<EncodedBlock, tonic::Status>>;
 
     /// Returns a stream of blocks in the specified range for a given chain ID.
@@ -191,69 +161,9 @@ mod tests {
         db::MockBlockDb,
         grpc::{
             client::RpcClient,
-            proto_rpc::{
-                BlockRangeRequest, BlockRequest, EncodedBlock, block_rpc_server::BlockRpc,
-            },
+            proto_rpc::{BlockRangeRequest, block_rpc_server::BlockRpc},
         },
     };
-
-    #[tokio::test]
-    async fn get_block_returns_raw_data_for_single_block() {
-        let mut db = MockBlockDb::new();
-        db.expect_get_raw()
-            .with(eq(1), eq(2))
-            .returning(|_, _| Ok(Some(vec![1, 2, 3, 4])));
-        let server = RpcServer::new(db);
-
-        // Existing block
-        {
-            let req = Request::new(BlockRequest {
-                chain_id: 1,
-                number: 2,
-            });
-
-            let res = server.get_block(req).await.unwrap();
-            let EncodedBlock { data, number } = res.into_inner();
-            assert_eq!(data, vec![1, 2, 3, 4]);
-            assert_eq!(number, 2);
-        }
-    }
-
-    #[tokio::test]
-    async fn get_block_returns_not_found_for_non_existing_block() {
-        let mut db = MockBlockDb::new();
-        db.expect_get_raw()
-            .with(eq(1), eq(123))
-            .returning(|_, _| Ok(None));
-        let server = RpcServer::new(db);
-        let req = Request::new(BlockRequest {
-            chain_id: 1,
-            number: 123,
-        });
-
-        let res = server.get_block(req).await;
-        assert!(res.is_err());
-        assert_eq!(res.unwrap_err().code(), tonic::Code::NotFound,);
-    }
-
-    #[tokio::test]
-    async fn get_block_forwards_errors() {
-        let mut db = MockBlockDb::new();
-        db.expect_get_raw()
-            .with(eq(1), eq(456))
-            .returning(|_, _| Err(Error::StorageLayer("DB error".to_owned())));
-        let server = RpcServer::new(db);
-        let req = Request::new(BlockRequest {
-            chain_id: 1,
-            number: 456,
-        });
-
-        let res = server.get_block(req).await;
-        assert!(res.is_err());
-        let error = res.unwrap_err();
-        assert_eq!(error.code(), tonic::Code::Internal);
-        assert!(error.message().contains("DB error"));
-    }
 
     #[tokio::test]
     async fn get_block_range_returns_stream_of_blocks() {
@@ -348,9 +258,9 @@ mod tests {
     #[tokio::test]
     async fn serve_starts_server_on_specified_listener() {
         let mut db = MockBlockDb::new();
-        db.expect_get_raw()
-            .with(eq(1), eq(1))
-            .returning(|_, _| Ok(Some(vec![1, 2, 3])));
+        db.expect_iterate_raw().with(eq(1), eq(1)).returning({
+            move |_, _| Box::new(vec![Ok((1, vec![1, 2, 3].into_boxed_slice()))].into_iter())
+        });
 
         let server = RpcServer::new(db);
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
@@ -362,8 +272,15 @@ mod tests {
         let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
         assert!(client.is_ok());
         let mut client = client.unwrap();
-        let res = client.get_block(1, 1).await.expect("Block should be found");
-        assert_eq!(res.data, vec![1, 2, 3]);
+        let mut res = client.get_block_range(1, 1, 1).await.unwrap();
+        assert_eq!(
+            res.next()
+                .await
+                .expect("stream should not be empty")
+                .expect("not an error")
+                .data,
+            vec![1, 2, 3]
+        );
         job.abort(); // Stop the server
     }
 

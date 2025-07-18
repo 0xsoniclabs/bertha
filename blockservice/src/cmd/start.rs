@@ -14,6 +14,8 @@ pub async fn start(listener: tokio::net::TcpListener) -> Result<(), Box<dyn std:
 mod tests {
     use std::path::Path;
 
+    use tokio_stream::StreamExt;
+
     use crate::{
         app_dir::BLOCK_DB_NAME,
         cmd::{ChangeWorkingDir, init, start},
@@ -42,8 +44,15 @@ mod tests {
         let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
         assert!(client.is_ok());
         let mut client = client.unwrap();
-        let res = client.get_block(1, 1).await.expect("Block should be found");
-        assert_eq!(res.data, vec![1, 2, 3]);
+        let mut res = client.get_block_range(1, 1, 1).await.unwrap();
+        assert_eq!(
+            res.next()
+                .await
+                .expect("stream should not be empty")
+                .expect("not an error")
+                .data,
+            vec![1, 2, 3]
+        );
         job.abort(); // Stop the server
     }
 
