@@ -21,7 +21,7 @@ rocksdb = { version = "0.23.0", default-features = false, features = [
 ] }
 
 # rpc
-tonic = { version = "0.13.1", features = ["gzip"] }
+tonic = { version = "0.13.1", features = ["zstd"] }
 jsonrpsee = { version = "0.25.1", features = ["http-client"] }
 
 # async

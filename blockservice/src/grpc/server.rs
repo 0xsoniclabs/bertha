@@ -1,19 +1,22 @@
 use std::sync::Arc;
 
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{codec::CompressionEncoding, transport::Server};
+use tonic::transport::Server;
 
 use crate::{
     db::BlockDb,
-    grpc::proto_rpc::{
-        BlockRange, BlockRangeRequest, BlockRequest, ChainRange, ChainRanges, EncodedBlock,
-        ListRequest,
-        block_rpc_server::{BlockRpc, BlockRpcServer},
+    grpc::{
+        GRPC_COMPRESSION_ALGORITHM,
+        proto_rpc::{
+            BlockRange, BlockRangeRequest, BlockRequest, ChainRange, ChainRanges, EncodedBlock,
+            ListRequest,
+            block_rpc_server::{BlockRpc, BlockRpcServer},
+        },
     },
 };
 
 // TODO: Benchmark this to determine optimal size (#78)
-const SERVER_RESPONSE_BUFFER_SIZE: usize = 1000;
+const SERVER_RESPONSE_BUFFER_SIZE: usize = 100000;
 
 /// A gRPC server that provides access to block data stored in a database.
 #[derive(Debug)]
@@ -36,9 +39,8 @@ where
         listener: tokio::net::TcpListener,
     ) -> Result<(), Box<dyn std::error::Error>> {
         println!("Listening on {}...", listener.local_addr()?);
-
         Server::builder()
-            .add_service(BlockRpcServer::new(self).send_compressed(CompressionEncoding::Gzip))
+            .add_service(BlockRpcServer::new(self).send_compressed(GRPC_COMPRESSION_ALGORITHM))
             .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
             .await?;
         Ok(())

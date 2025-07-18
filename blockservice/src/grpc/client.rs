@@ -1,8 +1,11 @@
 use tonic::{Request, Streaming, transport::Channel};
 
-use crate::grpc::proto_rpc::{
-    BlockRangeRequest, BlockRequest, ChainRanges, EncodedBlock, ListRequest,
-    block_rpc_client::BlockRpcClient,
+use crate::grpc::{
+    GRPC_COMPRESSION_ALGORITHM,
+    proto_rpc::{
+        BlockRangeRequest, BlockRequest, ChainRanges, EncodedBlock, ListRequest,
+        block_rpc_client::BlockRpcClient,
+    },
 };
 
 /// A client for interacting with the Block RPC service.
@@ -13,7 +16,9 @@ pub struct RpcClient {
 impl RpcClient {
     /// Creates a new [RpcClient] by connecting to the specified URL.
     pub async fn try_new(url: String) -> Result<Self, tonic::transport::Error> {
-        let client = BlockRpcClient::connect(url).await?;
+        let client = BlockRpcClient::connect(url)
+            .await?
+            .accept_compressed(GRPC_COMPRESSION_ALGORITHM);
         Ok(Self { client })
     }
 
