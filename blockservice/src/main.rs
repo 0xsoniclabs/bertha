@@ -18,7 +18,7 @@ async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             snapshot_file,
             verify,
         } => cmd::import(snapshot_file, verify),
-        Command::List { chain_id } => cmd::list(chain_id, std::io::stdout()),
+        Command::List { chain_id, url } => cmd::list(chain_id, url, std::io::stdout()).await,
         Command::Fetch {
             url,
             chain_id,
