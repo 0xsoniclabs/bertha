@@ -129,6 +129,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn sync_fails_if_server_url_is_invalid() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+        init(None::<&Path>).unwrap();
+        let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
+        let db = RocksBlockDb::open(&db_path).unwrap();
+
+        let json_rpc_config = [(1, "invalid_url".to_string())].into_iter().collect();
+
+        let result = sync(&json_rpc_config, &db).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid URL"));
+    }
+
+    #[tokio::test]
+    async fn sync_forwards_db_error() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _cwd = ChangeWorkingDir::new(tmpdir.path());
+
+        init(None::<&Path>).unwrap();
+        let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
+        let db = RocksBlockDb::open_for_reading(&db_path).unwrap();
+
+        let mock_server = MockServer::start().await;
+
+        let block_number: u64 = 0;
+        let block_receipts = vec![TransactionReceipt::default()];
+        let block_header_with_transactions = BlockHeaderWithTransactions {
+            block_header: BlockHeader::default(),
+            transactions: Vec::new(),
+        };
+
+        mock_server
+            .register(
+                build_mock_server_request_handler_for_infinitely_many_requests(
+                    "eth_getBlockByNumber",
+                    vec![
+                        serde_json::to_value(block_number.to_hex()).unwrap(),
+                        serde_json::to_value(true).unwrap(),
+                    ],
+                    block_header_with_transactions.clone(),
+                ),
+            )
+            .await;
+        mock_server
+            .register(
+                build_mock_server_request_handler_for_infinitely_many_requests(
+                    "eth_getBlockReceipts",
+                    vec![serde_json::to_value(block_number.to_hex()).unwrap()],
+                    block_receipts.clone(),
+                ),
+            )
+            .await;
+
+        let json_rpc_config = [(1, mock_server.uri())].into_iter().collect();
+
+        let result = sync(&json_rpc_config, &db).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Not supported operation in secondary mode.")
+        );
+    }
+
+    #[tokio::test]
     async fn sync_fetches_blocks_and_stores_them_in_db() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());

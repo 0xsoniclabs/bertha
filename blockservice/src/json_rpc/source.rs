@@ -88,7 +88,7 @@ mod tests {
     use wiremock::MockServer;
 
     use super::*;
-    use crate::json_rpc::test_utils::build_mock_server_request_handler;
+    use crate::json_rpc::test_utils::build_mock_server_request_handler_for_single_request;
 
     #[test]
     fn try_new_with_invalid_url_returns_error() {
@@ -108,7 +108,7 @@ mod tests {
 
         let block_number = 123456;
         mock_server
-            .register(build_mock_server_request_handler(
+            .register(build_mock_server_request_handler_for_single_request(
                 "eth_getBlockByNumber",
                 0,
                 vec![json!(block_number.to_hex()), json!(true)],
@@ -139,7 +139,7 @@ mod tests {
 
         let block_number = 123456;
         mock_server
-            .register(build_mock_server_request_handler(
+            .register(build_mock_server_request_handler_for_single_request(
                 "eth_getBlockReceipts",
                 0,
                 vec![json!(block_number.to_hex())],

@@ -23,7 +23,7 @@ struct RpcResponse {
     result: serde_json::Value,
 }
 
-pub fn build_mock_server_request_handler<T>(
+pub fn build_mock_server_request_handler_for_single_request<T>(
     method: &str,
     id: usize,
     params: Vec<serde_json::Value>,
