@@ -6,7 +6,7 @@ use tonic::{codec::CompressionEncoding, transport::Server};
 use crate::{
     db::BlockDb,
     grpc::proto_rpc::{
-        BlockRange, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock, ListRequest,
+        BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock, ListRequest,
         block_rpc_server::{BlockRpc, BlockRpcServer},
     },
 };
@@ -130,10 +130,7 @@ where
                             .get_ranges_of_chain_id(chain_id)
                             .map(|ranges| ChainRange {
                                 chain_id,
-                                block_ranges: ranges
-                                    .into_iter()
-                                    .map(|(from, to)| BlockRange { from, to })
-                                    .collect(),
+                                block_ranges: ranges.into_iter().map(From::from).collect(),
                             })
                     })
                     .collect()
@@ -161,7 +158,7 @@ mod tests {
         db::MockBlockDb,
         grpc::{
             client::RpcClient,
-            proto_rpc::{BlockRangeRequest, block_rpc_server::BlockRpc},
+            proto_rpc::{self, BlockRangeRequest, block_rpc_server::BlockRpc},
         },
     };
 
@@ -291,7 +288,7 @@ mod tests {
             let mut db = MockBlockDb::new();
             db.expect_get_ranges_of_chain_id()
                 .with(eq(1))
-                .returning(|_| Ok(vec![(1, 2), (3, 4)]));
+                .returning(|_| Ok(vec![1..=2, 3..=4]));
             let server = RpcServer::new(db);
 
             let req = Request::new(ListRequest { chain_id: Some(1) });
@@ -302,8 +299,8 @@ mod tests {
                 vec![ChainRange {
                     chain_id: 1,
                     block_ranges: vec![
-                        BlockRange { from: 1, to: 2 },
-                        BlockRange { from: 3, to: 4 }
+                        proto_rpc::BlockRange { from: 1, to: 2 },
+                        proto_rpc::BlockRange { from: 3, to: 4 }
                     ]
                 }]
             );
@@ -333,10 +330,10 @@ mod tests {
             db.expect_get_chain_ids().returning(|| Ok(vec![1, 2]));
             db.expect_get_ranges_of_chain_id()
                 .with(eq(1))
-                .returning(|_| Ok(vec![(1, 2), (3, 4)]));
+                .returning(|_| Ok(vec![1..=2, 3..=4]));
             db.expect_get_ranges_of_chain_id()
                 .with(eq(2))
-                .returning(|_| Ok(vec![(5, 6)]));
+                .returning(|_| Ok(vec![5..=6]));
             let server = RpcServer::new(db);
 
             let req = Request::new(ListRequest { chain_id: None });
@@ -348,13 +345,13 @@ mod tests {
                     ChainRange {
                         chain_id: 1,
                         block_ranges: vec![
-                            BlockRange { from: 1, to: 2 },
-                            BlockRange { from: 3, to: 4 }
+                            proto_rpc::BlockRange { from: 1, to: 2 },
+                            proto_rpc::BlockRange { from: 3, to: 4 }
                         ]
                     },
                     ChainRange {
                         chain_id: 2,
-                        block_ranges: vec![BlockRange { from: 5, to: 6 }]
+                        block_ranges: vec![proto_rpc::BlockRange { from: 5, to: 6 }]
                     }
                 ]
             );

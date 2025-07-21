@@ -19,8 +19,13 @@ pub fn list(
         if ranges.is_empty() {
             writeln!(writer, "[chain ID {chain_id}] no blocks")?;
         }
-        for (start, end) in ranges {
-            writeln!(writer, "[chain ID {chain_id}] {start} - {end}")?;
+        for range in ranges {
+            writeln!(
+                writer,
+                "[chain ID {chain_id}] {} - {}",
+                range.start(),
+                range.end()
+            )?;
         }
     }
 
@@ -83,7 +88,7 @@ mod tests {
         // block ranges for chain id
         let db_path = tmpdir.path().join(BLOCK_DB_NAME);
         let db = RocksBlockDb::open(db_path.clone()).unwrap();
-        db.put_ranges_of_chain_id(1, &[(2, 4), (6, 8)]).unwrap();
+        db.put_ranges_of_chain_id(1, &[2..=4, 6..=8]).unwrap();
         drop(db);
 
         let mut buf = Vec::new();
@@ -97,7 +102,7 @@ mod tests {
         // block ranges for multiple chain ids
         let db_path = tmpdir.path().join(BLOCK_DB_NAME);
         let db = RocksBlockDb::open(db_path.clone()).unwrap();
-        db.put_ranges_of_chain_id(3, &[(3, 5)]).unwrap();
+        db.put_ranges_of_chain_id(3, &[3..=5]).unwrap();
         db.put_chain_ids(&[1, 3]).unwrap();
         drop(db);
 
