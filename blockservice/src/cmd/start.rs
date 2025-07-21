@@ -192,7 +192,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn start_starts_sync_and_gets_access_to_new_blocks() {
+    async fn start_starts_sync_and_rpc_clients_can_query_synchronized_blocks() {
         let tmpdir = tempfile::tempdir().unwrap();
         let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
