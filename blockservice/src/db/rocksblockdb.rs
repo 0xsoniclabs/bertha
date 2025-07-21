@@ -137,13 +137,8 @@ impl RocksBlockDb {
             .map(|result| result.map(|(_, block_number, value)| (block_number, value)))
     }
 
-    pub fn new_batch() -> BlockBatch {
-        BlockBatch {
-            batch: WriteBatchWithTransaction::default(),
-            block_ranges: Vec::new(),
-        }
-    }
-
+    /// Write all blocks in the batch to the database.
+    /// This also updates the metadata for the chain-ID and the block ranges.
     pub fn write_batch(&self, chain_id: u64, block_batch: BlockBatch) -> Result<(), Error> {
         self.db.write(block_batch.batch)?;
         for block_range in block_batch.block_ranges {
@@ -239,12 +234,28 @@ impl BlockDb for RocksBlockDb {
     }
 }
 
+/// A batch of blocks to be written to the database.
+/// This wrapper keeps track of the block ranges that are added to the batch, so that they can be
+/// added to the database after the batch is written.
 pub struct BlockBatch {
+    /// The buffer of blocks to be written.
+    /// The `false` parameter indicates that this batch is not transactional.
     batch: WriteBatchWithTransaction<false>,
+    /// The block ranges of the blocks in `batch`.
     block_ranges: Vec<BlockRange>,
 }
 
 impl BlockBatch {
+    /// Creates a new empty block batch.
+    pub fn new() -> Self {
+        BlockBatch {
+            batch: WriteBatchWithTransaction::default(),
+            block_ranges: Vec::new(),
+        }
+    }
+
+    /// Stores the raw protobuf-encoded data for the specified chain-ID and block number in the
+    /// batch.
     pub fn put_raw(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
         self.batch
             .put(RocksBlockDb::make_key(chain_id, block_number), data);
@@ -254,6 +265,7 @@ impl BlockBatch {
         Ok(())
     }
 
+    /// Returns the current number of blocks in the batch.
     pub fn count(&self) -> usize {
         self.batch.len()
     }
@@ -664,7 +676,7 @@ mod tests {
         let block_numbers = [1, 2, 4];
         let ranges = [1..=2, 4..=4];
 
-        let mut batch = RocksBlockDb::new_batch();
+        let mut batch = BlockBatch::new();
         for (i, &block_number) in block_numbers.iter().enumerate() {
             assert!(batch.count() == i);
             batch
