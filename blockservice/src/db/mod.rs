@@ -5,7 +5,7 @@ mod rocksblockdb;
 pub use blockdb::BlockDb;
 #[cfg(test)]
 pub use blockdb::MockBlockDb;
-pub use rocksblockdb::RocksBlockDb;
+pub use rocksblockdb::{BlockBatch, RocksBlockDb};
 
 #[cfg(test)]
 mod test_utils {

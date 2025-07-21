@@ -3,7 +3,7 @@ use std::path::Path;
 use rocksdb::WriteBatchWithTransaction;
 use tempfile::TempDir;
 
-use crate::{Error, db::BlockDb};
+use crate::{BlockRange, Error, db::BlockDb, utils::ranges::RangesExt};
 
 impl From<rocksdb::Error> for Error {
     fn from(e: rocksdb::Error) -> Self {
@@ -136,6 +136,16 @@ impl RocksBlockDb {
             })
             .map(|result| result.map(|(_, block_number, value)| (block_number, value)))
     }
+
+    /// Write all blocks in the batch to the database.
+    /// This also updates the metadata for the chain-ID and the block ranges.
+    pub fn write_batch(&self, chain_id: u64, block_batch: BlockBatch) -> Result<(), Error> {
+        self.db.write(block_batch.batch)?;
+        for block_range in block_batch.block_ranges {
+            self.add_range_to_ranges(chain_id, block_range)?;
+        }
+        Ok(())
+    }
 }
 
 impl BlockDb for RocksBlockDb {
@@ -221,6 +231,43 @@ impl BlockDb for RocksBlockDb {
         self.db.write(batch)?;
 
         self.remove_range_from_ranges(chain_id, &(from_block..=to_block))
+    }
+}
+
+/// A batch of blocks to be written to the database.
+/// This wrapper keeps track of the block ranges that are added to the batch, so that they can be
+/// added to the database after the batch is written.
+pub struct BlockBatch {
+    /// The buffer of blocks to be written.
+    /// The `false` parameter indicates that this batch is not transactional.
+    batch: WriteBatchWithTransaction<false>,
+    /// The block ranges of the blocks in `batch`.
+    block_ranges: Vec<BlockRange>,
+}
+
+impl BlockBatch {
+    /// Creates a new empty block batch.
+    pub fn new() -> Self {
+        BlockBatch {
+            batch: WriteBatchWithTransaction::default(),
+            block_ranges: Vec::new(),
+        }
+    }
+
+    /// Stores the raw protobuf-encoded data for the specified chain-ID and block number in the
+    /// batch.
+    pub fn put_raw(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
+        self.batch
+            .put(RocksBlockDb::make_key(chain_id, block_number), data);
+
+        self.block_ranges.add_range(block_number..=block_number);
+
+        Ok(())
+    }
+
+    /// Returns the current number of blocks in the batch.
+    pub fn count(&self) -> usize {
+        self.batch.len()
     }
 }
 
@@ -619,5 +666,38 @@ mod tests {
                 Some(format!("block {i}").as_bytes().to_vec())
             );
         }
+    }
+
+    #[test]
+    fn rocksblockdb_batched_writes_write_all_elements_and_update_metadata() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let chain_id = 1;
+        let block_numbers = [1, 2, 4];
+        let ranges = [1..=2, 4..=4];
+
+        let mut batch = BlockBatch::new();
+        for (i, &block_number) in block_numbers.iter().enumerate() {
+            assert!(batch.count() == i);
+            batch
+                .put_raw(
+                    chain_id,
+                    block_number,
+                    format!("block {block_number}").as_bytes(),
+                )
+                .unwrap();
+            assert!(batch.count() == i + 1);
+        }
+        assert_eq!(batch.block_ranges, ranges);
+
+        db.write_batch(chain_id, batch).unwrap();
+
+        for block_number in block_numbers {
+            assert_eq!(
+                db.get_raw(chain_id, block_number).unwrap(),
+                Some(format!("block {block_number}").as_bytes().to_vec())
+            );
+        }
+        assert_eq!(db.get_ranges_of_chain_id(chain_id).unwrap(), ranges);
     }
 }

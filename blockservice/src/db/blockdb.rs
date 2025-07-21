@@ -107,7 +107,7 @@ pub trait BlockDb {
     /// Adds a block range to the ranges of block numbers stored in the database for the specified
     /// chain-ID. If this is the first block range for the chain ID, the chain ID is added to the
     /// list of chain IDs.
-    fn add_range_to_ranges(&mut self, chain_id: u64, new: BlockRange) -> Result<(), Error> {
+    fn add_range_to_ranges(&self, chain_id: u64, new: BlockRange) -> Result<(), Error> {
         self.add_chain_id_to_chain_ids(chain_id)?;
         let mut ranges = self.get_ranges_of_chain_id(chain_id)?;
         ranges.add_range(new);

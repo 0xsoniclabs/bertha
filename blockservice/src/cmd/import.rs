@@ -7,8 +7,10 @@ use prost::Message;
 use crate::{
     app_dir::open_app_dir,
     cmd::make_progress_bar,
-    db::{BlockDb, proto},
+    db::{BlockBatch, BlockDb, proto},
 };
+
+const BATCH_SIZE: usize = 10000;
 
 pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::error::Error>> {
     let app_dir = Path::new("./").canonicalize()?;
@@ -56,6 +58,7 @@ pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::e
 
     println!("Importing {import_blocks} blocks for chain ID {chain_id}");
 
+    let mut batch = BlockBatch::new();
     let mut prev_parent_hash: Option<Hash> = None;
     let before = std::time::Instant::now();
     for result in blocks {
@@ -102,10 +105,17 @@ pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::e
         let number = block.number;
         let protoblock = proto::Block::from(block).encode_to_vec();
         uncompressed_bytes_written += protoblock.len();
-        db.put_raw(chain_id, number, &protoblock)?;
+
+        if batch.count() >= BATCH_SIZE {
+            db.write_batch(chain_id, batch)?;
+            batch = BlockBatch::new();
+        }
+        batch.put_raw(chain_id, number, &protoblock)?;
+
         block_count += 1;
         progress_bar.inc(1);
     }
+    db.write_batch(chain_id, batch)?;
     let elapsed = before.elapsed();
     progress_bar.finish();
     println!(
