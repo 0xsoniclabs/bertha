@@ -9,7 +9,8 @@ use tower::service_fn;
 use crate::grpc::{
     client::RpcClient,
     proto_rpc::{
-        BlockRangeRequest, ChainRanges, EncodedBlock, ListRequest,
+        BlockRangeRequest, ChainRanges, EncodedBlock, ListRequest, StateUpdates,
+        StateUpdatesRequest,
         block_rpc_client::BlockRpcClient,
         block_rpc_server::{BlockRpc, BlockRpcServer},
     },
@@ -36,6 +37,11 @@ mock!(
             &self,
             request: tonic::Request<ListRequest>,
         ) -> Result<tonic::Response<ChainRanges>, tonic::Status>;
+
+        async fn get_state_updates(
+            &self,
+            request: tonic::Request<StateUpdatesRequest>,
+        ) -> Result<tonic::Response<StateUpdates>, tonic::Status>;
     }
 );
 

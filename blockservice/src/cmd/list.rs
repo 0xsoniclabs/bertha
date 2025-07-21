@@ -158,9 +158,8 @@ mod tests {
         init_app_dir(tmpdir.path()).unwrap();
 
         let chain_cfg = ChainConfig {
-            id: 1,
             name: "Test Chain".to_string(),
-            description: "A test chain".to_string(),
+            ..ChainConfig::new(1)
         };
         let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
         cfg.add_chain(chain_cfg.clone()).unwrap();
@@ -172,7 +171,7 @@ mod tests {
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
-                [1] Test Chain: A test chain
+                [1] Test Chain: (no description)
                 └── no blocks
                ",
             }
@@ -190,7 +189,7 @@ mod tests {
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
-                [1] Test Chain: A test chain
+                [1] Test Chain: (no description)
                 ├── 2 - 4
                 └── 6 - 8
                 "
@@ -209,7 +208,7 @@ mod tests {
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
-                [1] Test Chain: A test chain
+                [1] Test Chain: (no description)
                 ├── 2 - 4
                 └── 6 - 8
                 [3] (no name): (no description)
@@ -226,9 +225,9 @@ mod tests {
 
         // Add chain 32 to config file only
         let chain_cfg = ChainConfig {
-            id: 32,
             name: "Test Chain".to_string(),
             description: "A test chain".to_string(),
+            ..ChainConfig::new(32)
         };
         let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
         cfg.add_chain(chain_cfg.clone()).unwrap();

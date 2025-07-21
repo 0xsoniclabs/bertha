@@ -1,0 +1,195 @@
+use std::path::Path;
+
+use crate::{app_dir::open_app_dir, grpc::RpcClient};
+
+pub async fn fetch_state_updates(
+    app_dir: impl AsRef<Path>,
+    url: String,
+    chain_id: u64,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // To not write files into arbitrary directories, we first check that we actually
+    // are in a valid application directory.
+    open_app_dir(&app_dir, true)?;
+
+    let mut client = RpcClient::try_new(url).await?;
+    let updates = client.get_state_updates(chain_id).await?;
+
+    write!(
+        writer,
+        "Received {} state updates for chain ID {}",
+        updates.updates.len(),
+        chain_id
+    )?;
+
+    for update in updates.updates {
+        match std::fs::File::create_new(app_dir.as_ref().join(&update.filename)) {
+            Ok(mut file) => {
+                use std::io::Write;
+                file.write_all(update.data.as_bytes())?;
+                write!(writer, "{}", update.filename)?;
+            }
+            Err(e) => {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    write!(writer, "{} already exists - skipping", update.filename)?;
+                } else {
+                    return Err(e.into());
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::os::unix::fs::PermissionsExt;
+
+    use super::*;
+    use crate::{
+        app_dir::init_app_dir,
+        grpc::{
+            proto_rpc,
+            test_utils::{MockRpcServer, TestServer},
+        },
+    };
+
+    fn build_mock_server() -> MockRpcServer {
+        let mut mock_server = MockRpcServer::new();
+        mock_server.expect_get_state_updates().returning({
+            move |_| {
+                Ok(tonic::Response::new(proto_rpc::StateUpdates {
+                    updates: vec![
+                        proto_rpc::StateUpdate {
+                            filename: "update1.json".to_string(),
+                            data: "foo".to_string(),
+                        },
+                        proto_rpc::StateUpdate {
+                            filename: "update2.json".to_string(),
+                            data: "bar".to_string(),
+                        },
+                    ],
+                }))
+            }
+        });
+        mock_server
+    }
+
+    #[tokio::test]
+    async fn files_to_application_directory() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+
+        let server = TestServer::new(build_mock_server()).await;
+
+        let mut log = Vec::new();
+        let result = fetch_state_updates(tmpdir.path(), server.address.clone(), 7, &mut log).await;
+
+        assert!(result.is_ok());
+        let log_str = String::from_utf8(log).unwrap();
+        assert!(log_str.contains("Received 2 state updates for chain ID 7"));
+        assert!(log_str.contains("update1.json"));
+        assert!(log_str.contains("update2.json"));
+
+        assert!(tmpdir.path().join("update1.json").exists());
+        let update1 = std::fs::read_to_string(tmpdir.path().join("update1.json")).unwrap();
+        assert_eq!(update1, "foo");
+        assert!(tmpdir.path().join("update2.json").exists());
+        let update2 = std::fs::read_to_string(tmpdir.path().join("update2.json")).unwrap();
+        assert_eq!(update2, "bar");
+    }
+
+    #[tokio::test]
+    async fn skips_existing_files() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+
+        let server = TestServer::new(build_mock_server()).await;
+
+        // Create existing file
+        let existing_file = tmpdir.path().join("update1.json");
+        std::fs::write(&existing_file, "existing data").unwrap();
+
+        let mut log = Vec::new();
+        let result = fetch_state_updates(tmpdir.path(), server.address.clone(), 7, &mut log).await;
+
+        assert!(result.is_ok());
+        let log_str = String::from_utf8(log).unwrap();
+        assert!(log_str.contains("Received 2 state updates for chain ID 7"));
+        assert!(log_str.contains("update1.json already exists - skipping"));
+        assert!(log_str.contains("update2.json"));
+
+        assert!(tmpdir.path().join("update1.json").exists());
+        let update1 = std::fs::read_to_string(tmpdir.path().join("update1.json")).unwrap();
+        assert_eq!(update1, "existing data"); // not overwritten
+    }
+
+    #[tokio::test]
+    async fn fails_if_app_dir_is_not_initialized() {
+        let tmpdir = tempfile::tempdir().unwrap();
+
+        let mut log = Vec::new();
+        let result =
+            fetch_state_updates(tmpdir.path(), "http://foo.bar".to_owned(), 7, &mut log).await;
+
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("no blockservice.toml found")
+        );
+    }
+
+    #[tokio::test]
+    async fn fails_for_invalid_server_url() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+
+        let url = "invalid-url".to_string();
+        let result = fetch_state_updates(tmpdir.path(), url, 7, std::io::sink()).await;
+        assert_eq!(result.unwrap_err().to_string(), "transport error");
+    }
+
+    #[tokio::test]
+    async fn forwards_server_errors() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+
+        let mut mock_server = MockRpcServer::new();
+        mock_server
+            .expect_get_state_updates()
+            .returning(move |_| Err(tonic::Status::internal("server error")));
+
+        let server = TestServer::new(mock_server).await;
+
+        let mut log = Vec::new();
+        let result = fetch_state_updates(tmpdir.path(), server.address.clone(), 7, &mut log).await;
+
+        assert!(result.unwrap_err().to_string().contains("server error"));
+    }
+
+    #[tokio::test]
+    async fn forwards_io_errors() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+
+        let server = TestServer::new(build_mock_server()).await;
+
+        // Make directory read-only
+        std::fs::set_permissions(tmpdir.path(), std::fs::Permissions::from_mode(0o544)).unwrap();
+
+        let mut log = Vec::new();
+        let result = fetch_state_updates(tmpdir.path(), server.address.clone(), 7, &mut log).await;
+
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Permission denied")
+        );
+
+        // Reset permissions to allow cleanup
+        std::fs::set_permissions(tmpdir.path(), std::fs::Permissions::from_mode(0o744)).unwrap();
+    }
+}

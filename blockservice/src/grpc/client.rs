@@ -3,7 +3,8 @@ use tonic::{Request, Streaming, transport::Channel};
 use crate::grpc::{
     GRPC_COMPRESSION_ALGORITHM,
     proto_rpc::{
-        BlockRangeRequest, ChainRanges, EncodedBlock, ListRequest, block_rpc_client::BlockRpcClient,
+        BlockRangeRequest, ChainRanges, EncodedBlock, ListRequest, StateUpdates,
+        StateUpdatesRequest, block_rpc_client::BlockRpcClient,
     },
 };
 
@@ -49,6 +50,15 @@ impl RpcClient {
     pub async fn list(&mut self, chain_id: Option<u64>) -> Result<ChainRanges, tonic::Status> {
         let request = Request::new(ListRequest { chain_id });
         let response = self.client.list(request).await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn get_state_updates(
+        &mut self,
+        chain_id: u64,
+    ) -> Result<StateUpdates, tonic::Status> {
+        let request = Request::new(StateUpdatesRequest { chain_id });
+        let response = self.client.get_state_updates(request).await?;
         Ok(response.into_inner())
     }
 }

@@ -7,6 +7,7 @@ service BlockRpc {
   rpc GetBlockRange (BlockRangeRequest) returns (stream EncodedBlock);
   // Retrieves the list of block ranges stored on the block service for all chains or a specific chain ID.
   rpc List (ListRequest) returns (ChainRanges);
+  rpc GetStateUpdates (StateUpdatesRequest) returns (StateUpdates);
 }
 
 // The requested range of blocks for a specific chain ID for the GetBlockRange RPC endpoint.
@@ -43,4 +44,17 @@ message ChainRange {
 message BlockRange {
   uint64 from = 1;
   uint64 to = 2;
+}
+
+message StateUpdatesRequest {
+    uint64 chainId = 1;
+}
+
+message StateUpdates {
+    repeated StateUpdate updates = 1;
+}
+
+message StateUpdate {
+    string filename = 1;
+    string data = 2;
 }

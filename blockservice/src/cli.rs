@@ -39,6 +39,8 @@ pub enum Command {
         #[arg(short, long)]
         to: Option<u64>,
     },
+    /// Fetch available state update files from a remote block service.
+    FetchStateUpdates { url: String, chain_id: u64 },
     /// List all block ranges for all chains or only for the specific chain if specified. If url is
     /// not set this lists the locally stored block ranges, otherwise the block ranges of the remote
     /// block service.
@@ -86,15 +88,16 @@ Block Service
 Usage: blockservice [OPTIONS] <COMMAND>
 
 Commands:
-  init    Initialize a new block database
-  import  Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
-  fetch   Fetch blocks from a remote block service and store them in the local database
-  list    List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
-  verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
-  purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
-  view    Print the block as JSON
-  start   Start the block server
-  help    Print this message or the help of the given subcommand(s)
+  init                 Initialize a new block database
+  import               Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  fetch                Fetch blocks from a remote block service and store them in the local database
+  fetch-state-updates  Fetch available state update files from a remote block service
+  list                 List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
+  verify               Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
+  purge                Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
+  view                 Print the block as JSON
+  start                Start the block server
+  help                 Print this message or the help of the given subcommand(s)
 
 Options:
       --dir <DIR>  The path to the blockservice directory [default: .]
@@ -125,15 +128,16 @@ Block Service
 Usage: blockservice [OPTIONS] <COMMAND>
 
 Commands:
-  init    Initialize a new block database
-  import  Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
-  fetch   Fetch blocks from a remote block service and store them in the local database
-  list    List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
-  verify  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
-  purge   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
-  view    Print the block as JSON
-  start   Start the block server
-  help    Print this message or the help of the given subcommand(s)
+  init                 Initialize a new block database
+  import               Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  fetch                Fetch blocks from a remote block service and store them in the local database
+  fetch-state-updates  Fetch available state update files from a remote block service
+  list                 List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
+  verify               Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
+  purge                Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
+  view                 Print the block as JSON
+  start                Start the block server
+  help                 Print this message or the help of the given subcommand(s)
 
 Options:
       --dir <DIR>  The path to the blockservice directory [default: .]

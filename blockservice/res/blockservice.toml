@@ -5,3 +5,4 @@ port = 8080
 # id = 133337
 # name = "Example chain"
 # description = "An example blockchain"
+# state_updates = ["./state_updates_133337.json"] # optional
