@@ -13,7 +13,7 @@ use crate::{
 };
 
 // TODO: Benchmark this to determine optimal size (#78)
-const SERVER_RESPONSE_BUFFER_SIZE: usize = 1000;
+const SERVER_RESPONSE_BUFFER_SIZE: usize = 1000000;
 
 /// A gRPC server that provides access to block data stored in a database.
 #[derive(Debug)]
