@@ -25,7 +25,9 @@ async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             from,
             to,
         } => cmd::fetch(args.dir, url, chain_id, from, to, std::io::stdout()).await,
-        Command::Purge { chain_id, from, to } => cmd::purge(args.dir, chain_id, from, to),
+        Command::Purge { chain_id, from, to } => {
+            cmd::purge(args.dir, chain_id, from, to, std::io::stdin().lock())
+        }
         Command::Verify {
             chain_id,
             block_number,

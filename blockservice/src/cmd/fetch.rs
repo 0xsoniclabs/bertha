@@ -140,6 +140,8 @@ pub async fn fetch(
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use prost::Message;
 
     use crate::{
@@ -526,7 +528,7 @@ mod tests {
                 "received fewer blocks than expected: expected 3, got 2",
             );
         }
-        purge(tmpdir.path(), 1, None, None).unwrap(); // Clear the database for the next test
+        purge(tmpdir.path(), 1, None, None, Cursor::new("y")).unwrap(); // Clear the database for the next test
         // More blocks than expected
         {
             let mut mock_server = MockRpcServer::new();
@@ -572,7 +574,7 @@ mod tests {
                 "received fewer blocks than expected: expected 3, got 5"
             );
         }
-        purge(tmpdir.path(), 1, None, None).unwrap(); // Clear the database for the next test
+        purge(tmpdir.path(), 1, None, None, Cursor::new("y")).unwrap(); // Clear the database for the next test
         // Block number mismatch
         {
             let mut mock_server = MockRpcServer::new();
