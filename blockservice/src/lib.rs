@@ -8,7 +8,6 @@ mod error;
 pub mod grpc;
 mod utils;
 pub use error::Error;
-#[cfg(test)]
 mod json_rpc;
 
 pub type BlockRange = RangeInclusive<u64>;

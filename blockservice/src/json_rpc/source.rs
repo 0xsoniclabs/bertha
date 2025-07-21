@@ -84,54 +84,11 @@ pub struct BlockHeaderWithTransactions {
 #[cfg(test)]
 mod tests {
     use bertha_types::TransactionType;
-    use serde::{Deserialize, Serialize};
     use serde_json::json;
-    use wiremock::{Mock, MockServer, Request, ResponseTemplate, matchers};
+    use wiremock::MockServer;
 
     use super::*;
-
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct RpcRequest {
-        jsonrpc: String,
-        id: usize,
-        method: String,
-        params: Vec<serde_json::Value>,
-    }
-
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    struct RpcResponse {
-        jsonrpc: String,
-        id: usize,
-        result: serde_json::Value,
-    }
-
-    fn build_mock_server_request_handler<T>(
-        method: &str,
-        id: usize,
-        params: Vec<serde_json::Value>,
-        result: T,
-    ) -> Mock
-    where
-        T: Send + Sync + Serialize + 'static,
-    {
-        Mock::given(matchers::method("POST"))
-            .and(matchers::path("/"))
-            .and(matchers::body_json(RpcRequest {
-                jsonrpc: "2.0".to_owned(),
-                id,
-                method: method.to_owned(),
-                params,
-            }))
-            .respond_with(move |req: &Request| {
-                let req = serde_json::from_slice::<RpcRequest>(&req.body).unwrap();
-                ResponseTemplate::new(200).set_body_json(RpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    id: req.id,
-                    result: json!(&result),
-                })
-            })
-            .expect(1) // expect the request to be made once
-    }
+    use crate::json_rpc::test_utils::build_mock_server_request_handler_for_single_request;
 
     #[test]
     fn try_new_with_invalid_url_returns_error() {
@@ -151,7 +108,7 @@ mod tests {
 
         let block_number = 123456;
         mock_server
-            .register(build_mock_server_request_handler(
+            .register(build_mock_server_request_handler_for_single_request(
                 "eth_getBlockByNumber",
                 0,
                 vec![json!(block_number.to_hex()), json!(true)],
@@ -182,7 +139,7 @@ mod tests {
 
         let block_number = 123456;
         mock_server
-            .register(build_mock_server_request_handler(
+            .register(build_mock_server_request_handler_for_single_request(
                 "eth_getBlockReceipts",
                 0,
                 vec![json!(block_number.to_hex())],

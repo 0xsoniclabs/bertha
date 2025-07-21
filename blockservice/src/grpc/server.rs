@@ -28,8 +28,8 @@ where
     Db: BlockDb + Send + Sync + 'static,
 {
     /// Creates a new [RpcServer] instance with the provided database.
-    pub fn new(db: Db) -> Self {
-        RpcServer { db: Arc::new(db) }
+    pub fn new(db: Arc<Db>) -> Self {
+        RpcServer { db }
     }
 
     /// Starts the gRPC server on the specified port.
@@ -186,7 +186,7 @@ mod tests {
             }
         });
 
-        let server = RpcServer::new(db);
+        let server = RpcServer::new(Arc::new(db));
 
         let request = Request::new(BlockRangeRequest {
             chain_id: 1,
@@ -214,7 +214,7 @@ mod tests {
     async fn get_block_range_returns_error_for_invalid_range() {
         // From greater than To
         let db = MockBlockDb::new();
-        let server = RpcServer::new(db);
+        let server = RpcServer::new(Arc::new(db));
         let request = Request::new(BlockRangeRequest {
             chain_id: 1,
             from: 10,
@@ -236,7 +236,7 @@ mod tests {
                 ))))
             });
 
-        let server = RpcServer::new(db);
+        let server = RpcServer::new(Arc::new(db));
         let request = Request::new(BlockRangeRequest {
             chain_id: 1,
             from: 0,
@@ -262,7 +262,7 @@ mod tests {
             move |_, _| Box::new(vec![Ok((1, vec![1, 2, 3].into_boxed_slice()))].into_iter())
         });
 
-        let server = RpcServer::new(db);
+        let server = RpcServer::new(Arc::new(db));
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let job = tokio::spawn(async move {
@@ -292,7 +292,7 @@ mod tests {
             db.expect_get_ranges_of_chain_id()
                 .with(eq(1))
                 .returning(|_| Ok(vec![1..=2, 3..=4]));
-            let server = RpcServer::new(db);
+            let server = RpcServer::new(Arc::new(db));
 
             let req = Request::new(ListRequest { chain_id: Some(1) });
             let res = server.list(req).await.unwrap();
@@ -314,7 +314,7 @@ mod tests {
             db.expect_get_ranges_of_chain_id()
                 .with(eq(1))
                 .returning(|_| Ok(vec![]));
-            let server = RpcServer::new(db);
+            let server = RpcServer::new(Arc::new(db));
 
             let req = Request::new(ListRequest { chain_id: Some(1) });
             let res = server.list(req).await.unwrap();
@@ -337,7 +337,7 @@ mod tests {
             db.expect_get_ranges_of_chain_id()
                 .with(eq(2))
                 .returning(|_| Ok(vec![5..=6]));
-            let server = RpcServer::new(db);
+            let server = RpcServer::new(Arc::new(db));
 
             let req = Request::new(ListRequest { chain_id: None });
             let res = server.list(req).await.unwrap();
@@ -366,7 +366,7 @@ mod tests {
         let mut db = MockBlockDb::new();
         db.expect_get_chain_ids()
             .returning(|| Err(Error::StorageLayer("DB error".to_owned())));
-        let server = RpcServer::new(db);
+        let server = RpcServer::new(Arc::new(db));
         let req = Request::new(ListRequest { chain_id: None });
 
         let res = server.list(req).await;
