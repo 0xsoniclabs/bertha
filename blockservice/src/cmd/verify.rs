@@ -5,12 +5,12 @@ use bertha_types::{Hash, HexConvert};
 use crate::{app_dir::open_app_dir, db::BlockDb};
 
 pub fn verify(
+    app_dir: impl AsRef<Path>,
     chain_id: u64,
     block_number: Option<u64>,
     block_hash: Option<Hash>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let app_dir = Path::new("./").canonicalize()?;
     let db = open_app_dir(app_dir, true)?;
 
     let mut errors = 0;
@@ -96,17 +96,15 @@ mod tests {
 
     use super::*;
     use crate::{
-        app_dir::BLOCK_DB_NAME,
-        cmd::{ChangeWorkingDir, init},
-        db::{RocksBlockDb, proto},
+        app_dir::{BLOCK_DB_NAME, init_app_dir},
+        db::proto,
     };
 
     #[test]
     fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
-        let result = verify(0, None, None, std::io::sink());
+        let result = verify(tmpdir.path(), 0, None, None, std::io::sink());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no database found at {} - did you forget to run init?",
@@ -119,14 +117,16 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
 
         // create database
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
 
         // remove read permissions
-        let db_path = tmpdir.path().join(BLOCK_DB_NAME);
-        std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o333)).unwrap();
+        std::fs::set_permissions(
+            tmpdir.path().join(BLOCK_DB_NAME),
+            std::fs::Permissions::from_mode(0o333),
+        )
+        .unwrap();
 
-        let result = verify(0, None, None, std::io::sink());
+        let result = verify(tmpdir.path(), 0, None, None, std::io::sink());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Failed to open"));
     }
@@ -136,9 +136,8 @@ mod tests {
         let chain_id = 146;
 
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
-        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
 
         let block = Block::default();
         db.put(chain_id, block.clone()).unwrap();
@@ -146,6 +145,7 @@ mod tests {
         // correct hash
         let mut buf = Vec::new();
         let result = verify(
+            tmpdir.path(),
             chain_id,
             Some(block.number),
             Some(block.to_header().compute_hash()),
@@ -160,7 +160,13 @@ mod tests {
         // incorrect hash
         let hash = Hash::default(); // intentionally wrong hash
         let mut buf = Vec::new();
-        let result = verify(chain_id, Some(block.number), Some(hash), &mut buf);
+        let result = verify(
+            tmpdir.path(),
+            chain_id,
+            Some(block.number),
+            Some(hash),
+            &mut buf,
+        );
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -179,11 +185,11 @@ mod tests {
         let block_number = 0;
 
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
 
         let mut buf = Vec::new();
         let result = verify(
+            tmpdir.path(),
             chain_id,
             Some(block_number),
             Some(Hash::default()),
@@ -203,16 +209,15 @@ mod tests {
         let chain_id = 146;
 
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
-        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
 
         let mut block = Block::default();
         db.put(chain_id, block.clone()).unwrap();
 
         // block number matches
         let mut buf = Vec::new();
-        let result = verify(chain_id, None, None, &mut buf);
+        let result = verify(tmpdir.path(), chain_id, None, None, &mut buf);
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -227,7 +232,7 @@ mod tests {
         db.put_raw(chain_id, block_number, &data).unwrap();
 
         let mut buf = Vec::new();
-        let result = verify(chain_id, None, None, &mut buf);
+        let result = verify(tmpdir.path(), chain_id, None, None, &mut buf);
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -243,9 +248,8 @@ mod tests {
         let chain_id = 146;
 
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
-        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
 
         let block0 = Block::default();
         db.put(chain_id, block0.clone()).unwrap();
@@ -259,7 +263,7 @@ mod tests {
         db.put(chain_id, block1.clone()).unwrap();
 
         let mut buf = Vec::new();
-        let result = verify(chain_id, None, None, &mut buf);
+        let result = verify(tmpdir.path(), chain_id, None, None, &mut buf);
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -271,7 +275,7 @@ mod tests {
         db.put(chain_id, block1.clone()).unwrap();
 
         let mut buf = Vec::new();
-        let result = verify(chain_id, None, None, &mut buf);
+        let result = verify(tmpdir.path(), chain_id, None, None, &mut buf);
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -289,9 +293,8 @@ mod tests {
         let chain_id = 146;
 
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
-        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
 
         let mut block = Block::default();
         db.put(chain_id, block.clone()).unwrap();
@@ -312,7 +315,7 @@ mod tests {
         db.put(chain_id, block.clone()).unwrap();
 
         let mut buf = Vec::new();
-        let result = verify(chain_id, None, None, &mut buf);
+        let result = verify(tmpdir.path(), chain_id, None, None, &mut buf);
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),

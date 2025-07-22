@@ -3,11 +3,11 @@ use std::path::Path;
 use crate::{app_dir::open_app_dir, db::BlockDb};
 
 pub fn purge(
+    app_dir: impl AsRef<Path>,
     chain_id: u64,
     from: Option<u64>,
     to: Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let app_dir = Path::new("./").canonicalize()?;
     let db = open_app_dir(app_dir, false)?;
 
     db.delete_range(chain_id, from, to)?;
@@ -22,18 +22,13 @@ mod tests {
     use bertha_types::Block;
 
     use super::*;
-    use crate::{
-        app_dir::BLOCK_DB_NAME,
-        cmd::{ChangeWorkingDir, init},
-        db::RocksBlockDb,
-    };
+    use crate::app_dir::{BLOCK_DB_NAME, init_app_dir};
 
     #[test]
     fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
-        let result = purge(0, None, None);
+        let result = purge(tmpdir.path(), 0, None, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no database found at {} - did you forget to run init?",
@@ -46,14 +41,16 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
 
         // create database
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
 
         // remove write permissions
-        let db_path = tmpdir.path().join(BLOCK_DB_NAME);
-        std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o555)).unwrap();
+        std::fs::set_permissions(
+            tmpdir.path().join(BLOCK_DB_NAME),
+            std::fs::Permissions::from_mode(0o555),
+        )
+        .unwrap();
 
-        let result = purge(0, None, None);
+        let result = purge(tmpdir.path(), 0, None, None);
         assert!(result.is_err());
         assert!(
             result
@@ -67,12 +64,11 @@ mod tests {
     fn can_be_called_with_chain_id_or_chain_id_and_start_or_chain_id_and_start_and_end() {
         let tmpdir = tempfile::tempdir().unwrap();
 
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
 
-        assert!(purge(0, None, None).is_ok());
-        assert!(purge(0, Some(0), None).is_ok());
-        assert!(purge(0, Some(0), Some(1)).is_ok());
+        assert!(purge(tmpdir.path(), 0, None, None).is_ok());
+        assert!(purge(tmpdir.path(), 0, Some(0), None).is_ok());
+        assert!(purge(tmpdir.path(), 0, Some(0), Some(1)).is_ok());
     }
 
     #[test]
@@ -82,9 +78,8 @@ mod tests {
         // already tested in BlockRocksDb::delete_range
 
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
-        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
 
         let chain_id = 146;
         let mut block = Block::default();
@@ -98,9 +93,9 @@ mod tests {
 
         drop(db); // close the database to ensure that the purge command can open it
 
-        purge(chain_id, Some(1), Some(3)).unwrap();
+        purge(tmpdir.path(), chain_id, Some(1), Some(3)).unwrap();
 
-        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
         assert!(db.get(chain_id, 0).unwrap().is_some());
         assert!(db.get(chain_id, 1).unwrap().is_none());
         assert!(db.get(chain_id, 2).unwrap().is_none());

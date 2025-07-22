@@ -12,11 +12,14 @@ use crate::{
 
 const BATCH_SIZE: usize = 10000;
 
-pub fn import(path: impl AsRef<Path>, verify: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let app_dir = Path::new("./").canonicalize()?;
+pub fn import(
+    app_dir: impl AsRef<Path>,
+    snapshot_path: impl AsRef<Path>,
+    verify: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let db = open_app_dir(app_dir, false)?;
 
-    let file = File::open(path)?;
+    let file = File::open(snapshot_path)?;
     let mut reader = BufReader::new(file);
     let mut genesis = Genesis::parse(&mut reader)?;
     let chain_id = genesis.chain_id();
@@ -136,11 +139,7 @@ mod tests {
     use bertha_types::Block;
 
     use super::*;
-    use crate::{
-        app_dir::{BLOCK_DB_NAME, init_app_dir},
-        cmd::{ChangeWorkingDir, init},
-        db::RocksBlockDb,
-    };
+    use crate::app_dir::{BLOCK_DB_NAME, init_app_dir};
 
     #[test]
     fn inserts_all_blocks_from_snapshot_file_into_db_and_verifies_them() {
@@ -152,12 +151,11 @@ mod tests {
             genesis_parser::test_utils::generate_test_genesis(chain_id, num_blocks, &[]);
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
 
-        import(genesis_file.to_str().unwrap(), true).unwrap();
+        import(tmpdir.path(), genesis_file.to_str().unwrap(), true).unwrap();
 
-        let db = RocksBlockDb::open_for_reading(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        let db = open_app_dir(tmpdir.path(), true).unwrap();
         for i in 0..num_blocks {
             let block = db.get(chain_id, i as u64).unwrap();
             assert!(block.is_some(), "Block {i} not found in the database");
@@ -167,7 +165,6 @@ mod tests {
     #[test]
     fn inserts_missing_blocks_from_snapshot_file_into_db() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
         let num_blocks = 5;
         let chain_id = 146;
@@ -188,8 +185,8 @@ mod tests {
         let db_blocks = &all_blocks[..db_blocks_num];
         let mut genesis_blocks = all_blocks.clone();
 
-        init(None::<&Path>).unwrap();
-        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
         for block in db_blocks {
             db.put(chain_id, block.clone()).unwrap();
         }
@@ -205,9 +202,9 @@ mod tests {
             genesis_parser::test_utils::generate_test_genesis(chain_id, 0, &genesis_blocks);
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
-        import(genesis_file.to_str().unwrap(), false).unwrap();
+        import(tmpdir.path(), genesis_file.to_str().unwrap(), false).unwrap();
 
-        let db = RocksBlockDb::open_for_reading(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        let db = open_app_dir(tmpdir.path(), true).unwrap();
         for block in all_blocks {
             let db_block = db.get(chain_id, block.number).unwrap();
             // check that the missing blocks were inserted and the existing blocks were not
@@ -219,8 +216,7 @@ mod tests {
     #[test]
     fn fails_if_parent_hash_of_block_0_is_not_0_hash() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
 
         let extra_blocks = [Block {
@@ -232,25 +228,24 @@ mod tests {
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
         assert!(
-                import(genesis_file.to_str().unwrap(), true)
-                    .unwrap_err()
-                    .to_string()
-                    .contains("Block zero must have parent hash 0x0000000000000000000000000000000000000000000000000000000000000000")
-            );
+            import(tmpdir.path(),genesis_file.to_str().unwrap(), true)
+                .unwrap_err()
+                .to_string()
+                .contains("Block zero must have parent hash 0x0000000000000000000000000000000000000000000000000000000000000000")
+        );
     }
 
     #[test]
     fn fails_if_parent_hash_mismatches() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
         let extra_blocks = [Block::default_sonic()];
         let genesis_data = genesis_parser::test_utils::generate_test_genesis(1, 1, &extra_blocks);
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
         assert!(
-            import(genesis_file.to_str().unwrap(), true)
+            import(tmpdir.path(), genesis_file.to_str().unwrap(), true)
                 .unwrap_err()
                 .to_string()
                 .contains("Parent hash mismatch for block 1")
@@ -263,12 +258,11 @@ mod tests {
         // && hash(block_0 in db) != block_1.parent_hash
         let chain_id = 1;
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
         let genesis_data = genesis_parser::test_utils::generate_test_genesis(chain_id, 2, &[]);
         std::fs::write(&genesis_file, genesis_data).unwrap();
-        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
         db.put(
             chain_id,
             Block {
@@ -280,7 +274,7 @@ mod tests {
         drop(db);
 
         assert!(
-            import(genesis_file.to_str().unwrap(), true)
+            import(tmpdir.path(), genesis_file.to_str().unwrap(), true)
                 .unwrap_err()
                 .to_string()
                 .contains("Parent hash mismatch for block 1")
@@ -291,12 +285,11 @@ mod tests {
     fn fails_when_metadata_invalid() {
         let tmpdir = tempfile::tempdir().unwrap();
 
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
 
         let chain_id = 146;
 
-        let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
         db.put_ranges_of_chain_id(chain_id, &[0..=1]).unwrap(); // this data does not exist
         drop(db);
 
@@ -305,7 +298,7 @@ mod tests {
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
         assert_eq!(
-            import(genesis_file.to_str().unwrap(), true)
+            import(tmpdir.path(), genesis_file.to_str().unwrap(), true)
                 .unwrap_err()
                 .to_string(),
             "Invalid metadata, block 1 does not exist"
@@ -319,8 +312,7 @@ mod tests {
         let genesis_data = genesis_parser::test_utils::generate_test_genesis(0, 5, &[]);
         let data_len = genesis_data.len();
         let corruption = [0xde, 0xad, 0xbe, 0xef];
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
 
         // Corrupted header
         {
@@ -328,7 +320,7 @@ mod tests {
             genesis_data[0..corruption.len()].copy_from_slice(&corruption); // Corrupt the first part of the file
             std::fs::write(&genesis_file, genesis_data).unwrap();
 
-            let result = import(genesis_file.to_str().unwrap(), false);
+            let result = import(tmpdir.path(), genesis_file.to_str().unwrap(), false);
             assert!(result.is_err());
             assert!(result.unwrap_err().to_string().contains("invalid header"));
         }
@@ -339,7 +331,7 @@ mod tests {
             genesis_data[data_len - corruption.len()..].copy_from_slice(&corruption); // Corrupt the last part of the file
             std::fs::write(&genesis_file, genesis_data).unwrap();
 
-            let result = import(genesis_file.to_str().unwrap(), false);
+            let result = import(tmpdir.path(), genesis_file.to_str().unwrap(), false);
             assert!(result.is_err());
             assert!(
                 result
@@ -353,9 +345,8 @@ mod tests {
     #[test]
     fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
-        let result = import("somepath", true);
+        let result = import(tmpdir.path(), "somepath", true);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no database found at {} - did you forget to run init?",
@@ -369,11 +360,13 @@ mod tests {
 
         // Create a read-only database
         init_app_dir(tmpdir.path()).unwrap();
-        let db_path = tmpdir.path().join(BLOCK_DB_NAME);
-        std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o555)).unwrap();
+        std::fs::set_permissions(
+            tmpdir.path().join(BLOCK_DB_NAME),
+            std::fs::Permissions::from_mode(0o555),
+        )
+        .unwrap();
 
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        let result = import("somepath", true);
+        let result = import(tmpdir.path(), "somepath", true);
         // We expect an error because we cannot write to the database
         assert!(result.is_err());
         assert!(

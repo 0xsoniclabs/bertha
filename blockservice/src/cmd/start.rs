@@ -10,10 +10,10 @@ use crate::{
 };
 
 pub async fn start(
+    app_dir: impl AsRef<Path>,
     listener: tokio::net::TcpListener,
     config: HashMap<u64, String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let app_dir = Path::new("./").canonicalize()?;
     let db = open_app_dir(app_dir, false)?;
     // Put the db in an Arc to share it between multiple tasks
     let db = Arc::new(db);
@@ -62,7 +62,7 @@ async fn sync(
 
 #[cfg(test)]
 mod tests {
-    use std::{path::Path, time::Duration};
+    use std::time::Duration;
 
     use bertha_types::{Block, BlockHeader, HexConvert, TransactionReceipt};
     use prost::Message;
@@ -70,9 +70,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        app_dir::BLOCK_DB_NAME,
-        cmd::{ChangeWorkingDir, init, start},
-        db::{BlockDb, RocksBlockDb, proto},
+        app_dir::{init_app_dir, open_app_dir},
+        cmd::start,
+        db::{BlockDb, proto},
         grpc::RpcClient,
         json_rpc::{
             BlockHeaderWithTransactions,
@@ -83,11 +83,9 @@ mod tests {
     #[tokio::test]
     async fn start_starts_server_successfully() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         {
-            let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
-            let db = RocksBlockDb::open(db_path).unwrap();
+            let db = open_app_dir(tmpdir.path(), false).unwrap();
             db.put_raw(1, 1, vec![1, 2, 3].as_slice()).unwrap();
         }
 
@@ -96,7 +94,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let job = tokio::spawn(async move {
-            start(listener, config).await.unwrap();
+            start(tmpdir.path(), listener, config).await.unwrap();
         });
 
         let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
@@ -117,10 +115,9 @@ mod tests {
     #[tokio::test]
     async fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
         let config = HashMap::new();
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
-        let result = start(listener, config).await;
+        let result = start(tmpdir.path(), listener, config).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no database found at {} - did you forget to run init?",
@@ -131,10 +128,8 @@ mod tests {
     #[tokio::test]
     async fn sync_fails_if_server_url_is_invalid() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
-        let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
-        let db = RocksBlockDb::open(&db_path).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
 
         let json_rpc_config = [(1, "invalid_url".to_string())].into_iter().collect();
 
@@ -146,11 +141,9 @@ mod tests {
     #[tokio::test]
     async fn sync_forwards_db_error() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
-        init(None::<&Path>).unwrap();
-        let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
-        let db = RocksBlockDb::open_for_reading(&db_path).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+        let db = open_app_dir(tmpdir.path(), true).unwrap();
 
         let mock_server = MockServer::start().await;
 
@@ -198,11 +191,10 @@ mod tests {
     #[tokio::test]
     async fn sync_fetches_blocks_and_stores_them_in_db() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
-        init(None::<&Path>).unwrap();
-        let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
-        let db = Arc::new(RocksBlockDb::open(&db_path).unwrap());
+        init_app_dir(tmpdir.path()).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let db = Arc::new(db);
 
         let mock_server = MockServer::start().await;
 
@@ -261,9 +253,8 @@ mod tests {
     #[tokio::test]
     async fn start_starts_sync_and_rpc_clients_can_query_synchronized_blocks() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
 
         let mock_server = MockServer::start().await;
 
@@ -303,7 +294,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let task = tokio::spawn(async move {
-            start(listener, config).await.unwrap();
+            start(tmpdir.path(), listener, config).await.unwrap();
         });
         // wait for the sync task to fetch the header, transactions and receipts for the first block
         while mock_server.received_requests().await.unwrap().len() < 2 {
