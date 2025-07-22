@@ -9,37 +9,37 @@ service BlockRpc {
   rpc List (ListRequest) returns (ChainRanges);
 }
 
-/// The requested range of blocks for a specific chain ID for the GetBlockRange RPC.
+/// The requested range of blocks for a specific chain ID for the GetBlockRange RPC endpoint.
 message BlockRangeRequest {
   uint64 chainId = 1;
   uint64 from = 2;
   uint64 to = 3;
 }
 
-/// The encoded block data returned by the GetBlockRange RPC.
+/// The encoded block data and block number returned by the GetBlockRange RPC endpoint.
 message EncodedBlock {
   bytes data = 1;
   uint64 number = 2;
 }
 
-/// The request for the List RPC, which lists all chain block ranges.
+/// The request for the List RPC endpoint, which lists all chain block ranges.
 /// It can optionally specify a chain ID to filter the results.
 message ListRequest {
   optional uint64 chainId = 1;
 }
 
-/// The list of block ranges for the requested chains, returned by the List RPC.
+/// The list of block ranges for the requested chains, returned by the List RPC endpoint.
 message ChainRanges {
   repeated ChainRange chainRanges = 1;
 }
 
-/// The block ranges for a specific chain, returned by the List RPC.
+/// The block ranges for a specific chain.
 message ChainRange {
   uint64 chainId = 1;
   repeated BlockRange blockRanges = 2;
 }
 
-/// A block range, which specifies the start and end block numbers.
+/// A block range, consisting of the start and end block numbers (both inclusive).
 message BlockRange {
   uint64 from = 1;
   uint64 to = 2;
