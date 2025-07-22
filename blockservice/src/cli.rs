@@ -3,13 +3,13 @@ use std::path::PathBuf;
 use bertha_types::{Hash, HexConvert};
 use clap::{Parser, Subcommand};
 
-const DEFAULT_BLOCKSERIVCE_PATH: &str = ".";
+const DEFAULT_APPLICATION_DIRECTORY: &str = ".";
 
 /// Block Service
 #[derive(Debug, Clone, PartialEq, Eq, Parser)]
 pub struct Args {
     /// The path to the blockservice directory.
-    #[arg(long, global = true, default_value = DEFAULT_BLOCKSERIVCE_PATH )]
+    #[arg(long, global = true, default_value = DEFAULT_APPLICATION_DIRECTORY )]
     pub dir: PathBuf,
     #[command(subcommand)]
     pub command: Command,
@@ -167,7 +167,7 @@ Options:
     fn call_with_init_subcommand_without_argument_parses_successfully() {
         let args = ["blockservice", "init"];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::Init,
         };
         parse_and_compare(&args, Ok(expected));
@@ -220,7 +220,7 @@ For more information, try '--help'.
         let path = "/path/to/snapshot.g";
         let args = ["blockservice", "import", path];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::Import {
                 snapshot_file: PathBuf::from(path),
                 verify: false,
@@ -270,7 +270,7 @@ For more information, try '--help'.
     fn call_with_list_subcommand_without_argument_parses_successfully() {
         let args = ["blockservice", "list"];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::List {
                 chain_id: None,
                 url: None,
@@ -284,7 +284,7 @@ For more information, try '--help'.
         let chain_id = 146;
         let args = ["blockservice", "list", &chain_id.to_string()];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::List {
                 chain_id: Some(chain_id),
                 url: None,
@@ -299,7 +299,7 @@ For more information, try '--help'.
         let url = "http://example.com";
         let args = ["blockservice", "list", &chain_id.to_string(), "--url", url];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::List {
                 chain_id: Some(chain_id),
                 url: Some(url.to_string()),
@@ -378,7 +378,7 @@ For more information, try '--help'.
             block_hash,
         ];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::Verify {
                 chain_id,
                 block_number: Some(block_number),
@@ -458,7 +458,7 @@ For more information, try '--help'.
         let chain_id = 146;
         let args = ["blockservice", "purge", &chain_id.to_string()];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::Purge {
                 chain_id,
                 from: None,
@@ -481,7 +481,7 @@ For more information, try '--help'.
             &to.to_string(),
         ];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::Purge {
                 chain_id,
                 from: Some(from),
@@ -561,7 +561,7 @@ For more information, try '--help'.
             &block_number.to_string(),
         ];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::View {
                 chain_id,
                 block_number,
@@ -617,7 +617,7 @@ For more information, try '--help'.
     fn call_with_start_subcommand_without_argument_parses_successfully() {
         let args = ["blockservice", "start"];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::Start { port: 8080 },
         };
         parse_and_compare(&args, Ok(expected));
@@ -735,7 +735,7 @@ For more information, try '--help'.
         // No `from` or `to` arguments
         let args = ["blockservice", "fetch", url, &chain_id.to_string()];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::Fetch {
                 url: url.to_string(),
                 chain_id,
@@ -755,7 +755,7 @@ For more information, try '--help'.
             &from.to_string(),
         ];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::Fetch {
                 url: url.to_string(),
                 chain_id,
@@ -775,7 +775,7 @@ For more information, try '--help'.
             &to.to_string(),
         ];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::Fetch {
                 url: url.to_string(),
                 chain_id,
@@ -797,7 +797,7 @@ For more information, try '--help'.
             &to.to_string(),
         ];
         let expected = Args {
-            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
             command: Command::Fetch {
                 url: url.to_string(),
                 chain_id,
