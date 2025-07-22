@@ -1,6 +1,7 @@
 use std::{collections::HashMap, ops::Deref, path::Path, sync::Arc};
 
 use tokio_stream::{StreamExt, StreamMap};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     app_dir::open_app_dir,
@@ -9,24 +10,59 @@ use crate::{
     json_rpc::{NetworkSource, subscribe_to_blocks},
 };
 
+/// Starts the block service server.
+///
+/// The `_test_notify_tasks_spawned` parameter is used in tests to notify when the internal async
+/// tasks have been spawned; non-test code should simply pass [None] here.
 pub async fn start(
     app_dir: impl AsRef<Path>,
     listener: tokio::net::TcpListener,
     config: HashMap<u64, String>,
+    cancellation_token: CancellationToken,
+    _test_notify_tasks_spawned: Option<Arc<tokio::sync::Notify>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (_cfg, db) = open_app_dir(app_dir, false)?;
     // Put the db in an Arc to share it between multiple tasks
     let db = Arc::new(db);
 
-    // Spawn task to sync blocks from the JSON-RPC servers.
+    // NOTE: This is a dummy task used to demonstrate graceful shutdown via cancellation token.
+    // TODO: Replace with telemetry task (#66)
     tokio::spawn({
-        let db = Arc::clone(&db);
+        let cancellation_token = cancellation_token.clone();
         async move {
-            if let Err(err) = sync(&config, db.deref()).await {
-                println!("error in block sync task: {err}");
+            tokio::select! {
+                _ = cancellation_token.cancelled() => {},
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(60)) => {},
             }
         }
     });
+
+    // Spawn task to sync blocks from the JSON-RPC servers.
+    tokio::spawn({
+        let cancellation_token = cancellation_token.clone();
+        let db = Arc::clone(&db);
+        async move {
+            tokio::select! {
+                _ = cancellation_token.cancelled() => {},
+                // NOTE: Even though `sync` internally spawns another task (via `subscribe_to_blocks`),
+                // we don't have to pass a cancellation token to it, as the task will exit once
+                // the read-end of the stream is closed.
+                r = sync(&config, db.deref()) => {
+                    if let Err(err) = r {
+                        println!("error in block sync task: {err}");
+                    }
+                },
+            }
+        }
+    });
+
+    #[cfg(test)]
+    {
+        if let Some(tasks_spawned) = _test_notify_tasks_spawned {
+            // Notify the test that the task has been spawned
+            tasks_spawned.notify_one();
+        }
+    }
 
     let server = RpcServer::new(db);
     server.serve(listener).await
@@ -93,8 +129,14 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let job = tokio::spawn(async move {
-            start(tmpdir.path(), listener, config).await.unwrap();
+        let token = CancellationToken::new();
+        let job = tokio::spawn({
+            let token = token.clone();
+            async move {
+                start(tmpdir.path(), listener, config, token, None)
+                    .await
+                    .unwrap();
+            }
         });
 
         let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
@@ -109,7 +151,58 @@ mod tests {
                 .data,
             vec![1, 2, 3]
         );
+        token.cancel();
         job.abort(); // Stop the server
+    }
+
+    #[tokio::test]
+    async fn start_allows_internal_tasks_to_be_cancelled() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
+        let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
+
+        let metrics = tokio::runtime::Handle::current().metrics();
+        let num_tasks_before = metrics.num_alive_tasks();
+
+        let tasks_spawned = Arc::new(tokio::sync::Notify::new());
+        let token = CancellationToken::new();
+        let job = tokio::spawn({
+            let token = token.clone();
+            let tasks_spawned = tasks_spawned.clone();
+            async move {
+                start(
+                    tmpdir.path(),
+                    listener,
+                    HashMap::new(),
+                    token,
+                    Some(tasks_spawned),
+                )
+                .await
+                .unwrap();
+            }
+        });
+
+        // Wait for internal tasks to be spawned
+        tasks_spawned.notified().await;
+
+        let metrics = tokio::runtime::Handle::current().metrics();
+        let num_tasks_now = metrics.num_alive_tasks();
+        assert!(num_tasks_now > num_tasks_before);
+        // Aborting the local task does not suffice, as we spawn additional tasks internally.
+        job.abort();
+        job.await.unwrap_err(); // JoinError
+        let num_tasks_now = metrics.num_alive_tasks();
+        assert!(num_tasks_now > num_tasks_before);
+        token.cancel();
+
+        let mut elapsed_time = Duration::from_millis(0);
+        while metrics.num_alive_tasks() > num_tasks_before {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            elapsed_time += Duration::from_millis(10);
+            if elapsed_time >= Duration::from_secs(1) {
+                panic!("task did not stop after 1 second");
+            }
+        }
     }
 
     #[tokio::test]
@@ -117,7 +210,14 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let config = HashMap::new();
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
-        let result = start(tmpdir.path(), listener, config).await;
+        let result = start(
+            tmpdir.path(),
+            listener,
+            config,
+            CancellationToken::new(),
+            None,
+        )
+        .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no blockservice.toml found at {} - did you forget to run init?",
@@ -293,8 +393,14 @@ mod tests {
         let config = HashMap::from([(chain_id, mock_server.uri())]);
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let task = tokio::spawn(async move {
-            start(tmpdir.path(), listener, config).await.unwrap();
+        let token = CancellationToken::new();
+        let task = tokio::spawn({
+            let token = token.clone();
+            async move {
+                start(tmpdir.path(), listener, config, token, None)
+                    .await
+                    .unwrap();
+            }
         });
         // wait for the sync task to fetch the header, transactions and receipts for the first block
         while mock_server.received_requests().await.unwrap().len() < 2 {
@@ -322,6 +428,7 @@ mod tests {
                 block_receipts
             )
         );
+        token.cancel();
         task.abort();
     }
 }

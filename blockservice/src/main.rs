@@ -10,8 +10,13 @@ use blockservice::{
     cmd,
 };
 use clap::Parser;
+use tokio::signal;
+use tokio_util::sync::CancellationToken;
 
-async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
+async fn execute(
+    args: Args,
+    cancellation_token: CancellationToken,
+) -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
         Command::Init => cmd::init(args.dir),
         Command::Import {
@@ -57,7 +62,14 @@ async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 
             let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
             let listener = tokio::net::TcpListener::bind(addr).await?;
-            cmd::start(args.dir, listener, json_rpc_config).await
+            cmd::start(
+                args.dir,
+                listener,
+                json_rpc_config,
+                cancellation_token,
+                None,
+            )
+            .await
         }
     }
 }
@@ -65,9 +77,27 @@ async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
-    let result = execute(args).await;
-    if let Err(e) = result {
-        eprintln!("Error: {e}");
-        std::process::exit(1);
-    }
+
+    let cancellation_token = CancellationToken::new();
+
+    tokio::spawn({
+        let cancellation_token = cancellation_token.clone();
+        async move {
+            tokio::select! {
+                _ = cancellation_token.cancelled() => {},
+                result = execute(args, cancellation_token.clone()) =>{
+                    if let Err(e) = result {
+                        eprintln!("Error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+    });
+
+    signal::ctrl_c()
+        .await
+        .expect("failed to install Ctrl+C handler");
+    println!("\nReceived Ctrl+C, shutting down...");
+    cancellation_token.cancel();
 }

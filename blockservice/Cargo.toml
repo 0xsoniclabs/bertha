@@ -27,8 +27,9 @@ tonic = { version = "0.13.1", features = ["zstd"] }
 jsonrpsee = { version = "0.25.1", features = ["http-client"] }
 
 # async
-tokio = { version = "1.45.1", features = ["rt-multi-thread"] }
+tokio = { version = "1.45.1", features = ["rt-multi-thread", "signal"] }
 tokio-stream = "0.1.17"
+tokio-util = "0.7.15"
 
 # cli
 clap = { version = "4.5.40", features = ["derive"] }
