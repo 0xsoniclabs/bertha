@@ -3,20 +3,22 @@ use std::path::PathBuf;
 use bertha_types::{Hash, HexConvert};
 use clap::{Parser, Subcommand};
 
+const DEFAULT_BLOCKSERIVCE_PATH: &str = ".";
+
 /// Block Service
 #[derive(Debug, Clone, PartialEq, Eq, Parser)]
 pub struct Args {
+    /// The path to the blockservice directory.
+    #[arg(long, global = true, default_value = DEFAULT_BLOCKSERIVCE_PATH )]
+    pub dir: PathBuf,
     #[command(subcommand)]
     pub command: Command,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
 pub enum Command {
-    /// Initialize a new block database in the current directory or at the specified path.
-    Init {
-        /// The path to the block database. Defaults to the current working directory.
-        path: Option<PathBuf>,
-    },
+    /// Initialize a new block database.
+    Init,
     /// Import all blocks from the specified snapshot (`.g`) file into the block database, and
     /// optionally also verify the parent hashes.
     Import {
@@ -84,10 +86,10 @@ mod tests {
         let expected = "\
 Block Service
 
-Usage: blockservice <COMMAND>
+Usage: blockservice [OPTIONS] <COMMAND>
 
 Commands:
-  init    Initialize a new block database in the current directory or at the specified path
+  init    Initialize a new block database
   import  Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
   fetch   Fetch blocks from a remote block service and store them in the local database
   list    List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
@@ -98,7 +100,8 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+      --dir <DIR>  The path to the blockservice directory [default: .]
+  -h, --help       Print help
 ";
         parse_and_compare(&args, Err(expected));
     }
@@ -109,7 +112,7 @@ Options:
         let expected = "\
 error: unrecognized subcommand 'invalid'
 
-Usage: blockservice <COMMAND>
+Usage: blockservice [OPTIONS] <COMMAND>
 
 For more information, try '--help'.
 ";
@@ -122,10 +125,10 @@ For more information, try '--help'.
         let expected = "\
 Block Service
 
-Usage: blockservice <COMMAND>
+Usage: blockservice [OPTIONS] <COMMAND>
 
 Commands:
-  init    Initialize a new block database in the current directory or at the specified path
+  init    Initialize a new block database
   import  Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
   fetch   Fetch blocks from a remote block service and store them in the local database
   list    List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
@@ -136,28 +139,36 @@ Commands:
   help    Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help  Print help
+      --dir <DIR>  The path to the blockservice directory [default: .]
+  -h, --help       Print help
 ";
         parse_and_compare(&args, Err(expected));
+    }
+
+    #[test]
+    fn db_path_can_be_passed_to_root_or_subcommand() {
+        // `--dir` is an argument on the root command, but because it is marked as `global`, it
+        // can also be used with any subcommand.
+        let path = "some/path";
+        let expected = Args {
+            dir: PathBuf::from(path.to_owned()),
+            command: Command::Init,
+        };
+        let args_cases = [
+            ["blockservice", "--dir", path, "init"], // pass path to root command
+            ["blockservice", "init", "--dir", path], // pass path to subcommand
+        ];
+        for args in args_cases {
+            parse_and_compare(&args, Ok(expected.clone()));
+        }
     }
 
     #[test]
     fn call_with_init_subcommand_without_argument_parses_successfully() {
         let args = ["blockservice", "init"];
         let expected = Args {
-            command: Command::Init { path: None },
-        };
-        parse_and_compare(&args, Ok(expected));
-    }
-
-    #[test]
-    fn call_with_init_subcommand_with_path_parses_successfully() {
-        let path = "/path/to/database";
-        let args = ["blockservice", "init", path];
-        let expected = Args {
-            command: Command::Init {
-                path: Some(PathBuf::from(path)),
-            },
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
+            command: Command::Init,
         };
         parse_and_compare(&args, Ok(expected));
     }
@@ -166,26 +177,24 @@ Options:
     fn call_with_init_subcommand_with_help_argument_prints_subcommand_help() {
         let args = ["blockservice", "init", "--help"];
         let expected = "\
-Initialize a new block database in the current directory or at the specified path
+Initialize a new block database
 
-Usage: blockservice init [PATH]
-
-Arguments:
-  [PATH]  The path to the block database. Defaults to the current working directory
+Usage: blockservice init [OPTIONS]
 
 Options:
-  -h, --help  Print help
+      --dir <DIR>  The path to the blockservice directory [default: .]
+  -h, --help       Print help
 ";
         parse_and_compare(&args, Err(expected));
     }
 
     #[test]
     fn call_with_init_subcommand_with_additional_argument_prints_parse_error() {
-        let args = ["blockservice", "init", "/path/to/database", "additional"];
+        let args = ["blockservice", "init", "additional"];
         let expected = "\
 error: unexpected argument 'additional' found
 
-Usage: blockservice init [PATH]
+Usage: blockservice init [OPTIONS]
 
 For more information, try '--help'.
 ";
@@ -211,6 +220,7 @@ For more information, try '--help'.
         let path = "/path/to/snapshot.g";
         let args = ["blockservice", "import", path];
         let expected = Args {
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
             command: Command::Import {
                 snapshot_file: PathBuf::from(path),
                 verify: false,
@@ -231,8 +241,9 @@ Arguments:
   <SNAPSHOT_FILE>
 
 Options:
+      --dir <DIR>  The path to the blockservice directory [default: .]
       --verify
-  -h, --help    Print help
+  -h, --help       Print help
 ";
         parse_and_compare(&args, Err(expected));
     }
@@ -259,6 +270,7 @@ For more information, try '--help'.
     fn call_with_list_subcommand_without_argument_parses_successfully() {
         let args = ["blockservice", "list"];
         let expected = Args {
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
             command: Command::List {
                 chain_id: None,
                 url: None,
@@ -272,6 +284,7 @@ For more information, try '--help'.
         let chain_id = 146;
         let args = ["blockservice", "list", &chain_id.to_string()];
         let expected = Args {
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
             command: Command::List {
                 chain_id: Some(chain_id),
                 url: None,
@@ -286,6 +299,7 @@ For more information, try '--help'.
         let url = "http://example.com";
         let args = ["blockservice", "list", &chain_id.to_string(), "--url", url];
         let expected = Args {
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
             command: Command::List {
                 chain_id: Some(chain_id),
                 url: Some(url.to_string()),
@@ -306,6 +320,7 @@ Arguments:
   [CHAIN_ID]
 
 Options:
+      --dir <DIR>  The path to the blockservice directory [default: .]
   -u, --url <URL>
   -h, --help       Print help
 ";
@@ -363,6 +378,7 @@ For more information, try '--help'.
             block_hash,
         ];
         let expected = Args {
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
             command: Command::Verify {
                 chain_id,
                 block_number: Some(block_number),
@@ -378,7 +394,7 @@ For more information, try '--help'.
         let expected = "\
 Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
 
-Usage: blockservice verify <CHAIN_ID> [BLOCK_NUMBER] [BLOCK_HASH]
+Usage: blockservice verify [OPTIONS] <CHAIN_ID> [BLOCK_NUMBER] [BLOCK_HASH]
 
 Arguments:
   <CHAIN_ID>
@@ -386,7 +402,8 @@ Arguments:
   [BLOCK_HASH]
 
 Options:
-  -h, --help  Print help
+      --dir <DIR>  The path to the blockservice directory [default: .]
+  -h, --help       Print help
 ";
         parse_and_compare(&args, Err(expected));
     }
@@ -415,7 +432,7 @@ For more information, try '--help'.
         let expected = "\
 error: unexpected argument 'additional' found
 
-Usage: blockservice verify <CHAIN_ID> [BLOCK_NUMBER] [BLOCK_HASH]
+Usage: blockservice verify [OPTIONS] <CHAIN_ID> [BLOCK_NUMBER] [BLOCK_HASH]
 
 For more information, try '--help'.
 ";
@@ -441,6 +458,7 @@ For more information, try '--help'.
         let chain_id = 146;
         let args = ["blockservice", "purge", &chain_id.to_string()];
         let expected = Args {
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
             command: Command::Purge {
                 chain_id,
                 from: None,
@@ -463,6 +481,7 @@ For more information, try '--help'.
             &to.to_string(),
         ];
         let expected = Args {
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
             command: Command::Purge {
                 chain_id,
                 from: Some(from),
@@ -478,7 +497,7 @@ For more information, try '--help'.
         let expected = "\
 Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
 
-Usage: blockservice purge <CHAIN_ID> [FROM] [TO]
+Usage: blockservice purge [OPTIONS] <CHAIN_ID> [FROM] [TO]
 
 Arguments:
   <CHAIN_ID>
@@ -486,7 +505,8 @@ Arguments:
   [TO]
 
 Options:
-  -h, --help  Print help
+      --dir <DIR>  The path to the blockservice directory [default: .]
+  -h, --help       Print help
 ";
         parse_and_compare(&args, Err(expected));
     }
@@ -508,7 +528,7 @@ For more information, try '--help'.
         let expected = "\
 error: unexpected argument 'additional' found
 
-Usage: blockservice purge <CHAIN_ID> [FROM] [TO]
+Usage: blockservice purge [OPTIONS] <CHAIN_ID> [FROM] [TO]
 
 For more information, try '--help'.
 ";
@@ -541,6 +561,7 @@ For more information, try '--help'.
             &block_number.to_string(),
         ];
         let expected = Args {
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
             command: Command::View {
                 chain_id,
                 block_number,
@@ -555,14 +576,15 @@ For more information, try '--help'.
         let expected = "\
 Print the block as JSON
 
-Usage: blockservice view <CHAIN_ID> <BLOCK_NUMBER>
+Usage: blockservice view [OPTIONS] <CHAIN_ID> <BLOCK_NUMBER>
 
 Arguments:
   <CHAIN_ID>
   <BLOCK_NUMBER>
 
 Options:
-  -h, --help  Print help
+      --dir <DIR>  The path to the blockservice directory [default: .]
+  -h, --help       Print help
 ";
         parse_and_compare(&args, Err(expected));
     }
@@ -584,7 +606,7 @@ For more information, try '--help'.
         let expected = "\
 error: unexpected argument 'additional' found
 
-Usage: blockservice view <CHAIN_ID> <BLOCK_NUMBER>
+Usage: blockservice view [OPTIONS] <CHAIN_ID> <BLOCK_NUMBER>
 
 For more information, try '--help'.
 ";
@@ -595,6 +617,7 @@ For more information, try '--help'.
     fn call_with_start_subcommand_without_argument_parses_successfully() {
         let args = ["blockservice", "start"];
         let expected = Args {
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
             command: Command::Start { port: 8080 },
         };
         parse_and_compare(&args, Ok(expected));
@@ -606,13 +629,14 @@ For more information, try '--help'.
         let expected = "\
 Start the block server
 
-Usage: blockservice start [PORT]
+Usage: blockservice start [OPTIONS] [PORT]
 
 Arguments:
   [PORT]  [default: 8080]
 
 Options:
-  -h, --help  Print help
+      --dir <DIR>  The path to the blockservice directory [default: .]
+  -h, --help       Print help
 ";
         parse_and_compare(&args, Err(expected));
     }
@@ -634,7 +658,7 @@ For more information, try '--help'.
         let expected = "\
 error: unexpected argument 'additional' found
 
-Usage: blockservice start [PORT]
+Usage: blockservice start [OPTIONS] [PORT]
 
 For more information, try '--help'.
 ";
@@ -654,6 +678,7 @@ Arguments:
   <CHAIN_ID>
 
 Options:
+      --dir <DIR>    The path to the blockservice directory [default: .]
   -f, --from <FROM>  The first block number in the range to fetch. If not specified, fetching starts from block 0
   -t, --to <TO>      The last block number in the range to fetch. If not specified, fetching ends at the latest available block
   -h, --help         Print help
@@ -710,6 +735,7 @@ For more information, try '--help'.
         // No `from` or `to` arguments
         let args = ["blockservice", "fetch", url, &chain_id.to_string()];
         let expected = Args {
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
             command: Command::Fetch {
                 url: url.to_string(),
                 chain_id,
@@ -729,6 +755,7 @@ For more information, try '--help'.
             &from.to_string(),
         ];
         let expected = Args {
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
             command: Command::Fetch {
                 url: url.to_string(),
                 chain_id,
@@ -748,6 +775,7 @@ For more information, try '--help'.
             &to.to_string(),
         ];
         let expected = Args {
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
             command: Command::Fetch {
                 url: url.to_string(),
                 chain_id,
@@ -769,6 +797,7 @@ For more information, try '--help'.
             &to.to_string(),
         ];
         let expected = Args {
+            dir: PathBuf::from(DEFAULT_BLOCKSERIVCE_PATH),
             command: Command::Fetch {
                 url: url.to_string(),
                 chain_id,
@@ -801,11 +830,17 @@ For more information, try '--help'.
                 );
             }
             (Ok(args), Ok(expected)) => {
-                assert_eq!(args, expected);
+                assert_eq!(
+                    args, expected,
+                    "arguments parsed successfully, but do not match the expected ones"
+                );
             }
             (Err(parse_msg), Err(expected_msg)) => {
-                let help: String = trim_whitespace_at_end_of_lines(&parse_msg.to_string());
-                assert_eq!(help, expected_msg);
+                let msg = trim_whitespace_at_end_of_lines(&parse_msg.to_string());
+                assert_eq!(
+                    msg, expected_msg,
+                    "arguments failed to parse with error, as expected, but the error message does not match the expected one"
+                );
             }
         }
     }

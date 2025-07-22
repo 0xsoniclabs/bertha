@@ -3,6 +3,7 @@ use std::path::Path;
 use crate::{app_dir::open_app_dir, db::BlockDb, grpc::RpcClient};
 
 pub async fn list(
+    app_dir: impl AsRef<Path>,
     chain_id: Option<u64>,
     url: Option<String>,
     mut writer: impl std::io::Write,
@@ -25,7 +26,6 @@ pub async fn list(
             })
             .collect()
     } else {
-        let app_dir = Path::new("./").canonicalize()?;
         let db = open_app_dir(app_dir, true)?;
 
         let chain_ids = match chain_id {
@@ -67,9 +67,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        app_dir::BLOCK_DB_NAME,
-        cmd::{ChangeWorkingDir, init},
-        db::RocksBlockDb,
+        app_dir::{BLOCK_DB_NAME, init_app_dir},
         grpc::{
             proto_rpc::{BlockRange, ChainRange, ChainRanges},
             test_utils::{MockRpcServer, TestServer},
@@ -79,9 +77,8 @@ mod tests {
     #[tokio::test]
     async fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
-        let result = list(None, None, std::io::sink()).await;
+        let result = list(tmpdir.path(), None, None, std::io::sink()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no database found at {} - did you forget to run init?",
@@ -94,36 +91,47 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
 
         // create database
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
 
         // remove read permissions
-        let db_path = tmpdir.path().join(BLOCK_DB_NAME);
-        std::fs::set_permissions(&db_path, std::fs::Permissions::from_mode(0o333)).unwrap();
+        std::fs::set_permissions(
+            tmpdir.path().join(BLOCK_DB_NAME),
+            std::fs::Permissions::from_mode(0o333),
+        )
+        .unwrap();
 
-        let result = list(None, None, std::io::sink()).await;
+        let result = list(tmpdir.path(), None, None, std::io::sink()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Failed to open"));
     }
 
     #[tokio::test]
     async fn fails_for_invalid_server_url() {
+        let tmpdir = tempfile::tempdir().unwrap();
         let url = "invalid-url".to_string();
-        let result = list(None, Some(url), std::io::sink()).await;
-        let err = result.expect_err("Fetch should fail with invalid url");
 
-        assert_eq!(err.to_string(), "transport error");
+        let result = list(tmpdir.path(), None, Some(url), std::io::sink()).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("transport error"));
     }
 
     #[tokio::test]
     async fn fails_on_server_error() {
+        let tmpdir = tempfile::tempdir().unwrap();
+
         let mut mock_server = MockRpcServer::new();
         mock_server
             .expect_list()
             .returning(|_| Err(tonic::Status::internal("Server error")));
         let server = TestServer::new(mock_server).await;
 
-        let result = list(None, Some(server.address.clone()), std::io::sink()).await;
+        let result = list(
+            tmpdir.path(),
+            None,
+            Some(server.address.clone()),
+            std::io::sink(),
+        )
+        .await;
 
         let err = result.expect_err("Fetch should fail with server error");
         assert!(err.to_string().contains("Server error"));
@@ -132,23 +140,21 @@ mod tests {
     #[tokio::test]
     async fn prints_message_for_each_range() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
 
         // no blocks for chain id
         let mut buf = Vec::new();
-        let result = list(Some(1), None, &mut buf).await;
+        let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
         assert!(result.is_ok());
         assert_eq!(String::from_utf8(buf).unwrap(), "[chain ID 1] no blocks\n");
 
         // block ranges for chain id
-        let db_path = tmpdir.path().join(BLOCK_DB_NAME);
-        let db = RocksBlockDb::open(db_path.clone()).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
         db.put_ranges_of_chain_id(1, &[2..=4, 6..=8]).unwrap();
         drop(db);
 
         let mut buf = Vec::new();
-        let result = list(Some(1), None, &mut buf).await;
+        let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -156,14 +162,13 @@ mod tests {
         );
 
         // block ranges for multiple chain ids
-        let db_path = tmpdir.path().join(BLOCK_DB_NAME);
-        let db = RocksBlockDb::open(db_path.clone()).unwrap();
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
         db.put_ranges_of_chain_id(3, &[3..=5]).unwrap();
         db.put_chain_ids(&[1, 3]).unwrap();
         drop(db);
 
         let mut buf = Vec::new();
-        let result = list(None, None, &mut buf).await;
+        let result = list(tmpdir.path(), None, None, &mut buf).await;
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -173,6 +178,7 @@ mod tests {
 
     #[tokio::test]
     async fn prints_message_for_each_remote_range() {
+        let tmpdir = tempfile::tempdir().unwrap();
         {
             // no blocks for chain id
             let list_response = ChainRanges {
@@ -189,7 +195,13 @@ mod tests {
             let server = TestServer::new(mock_server).await;
 
             let mut buf = Vec::new();
-            let result = list(Some(1), Some(server.address.clone()), &mut buf).await;
+            let result = list(
+                tmpdir.path(),
+                Some(1),
+                Some(server.address.clone()),
+                &mut buf,
+            )
+            .await;
             assert!(result.is_ok());
             assert_eq!(String::from_utf8(buf).unwrap(), "[chain ID 1] no blocks\n");
         }
@@ -212,7 +224,7 @@ mod tests {
             let server = TestServer::new(mock_server).await;
 
             let mut buf = Vec::new();
-            let result = list(None, Some(server.address.clone()), &mut buf).await;
+            let result = list(tmpdir.path(), None, Some(server.address.clone()), &mut buf).await;
             assert!(result.is_ok());
             assert_eq!(
                 String::from_utf8(buf).unwrap(),
@@ -244,7 +256,7 @@ mod tests {
             let server = TestServer::new(mock_server).await;
 
             let mut buf = Vec::new();
-            let result = list(None, Some(server.address.clone()), &mut buf).await;
+            let result = list(tmpdir.path(), None, Some(server.address.clone()), &mut buf).await;
             assert!(result.is_ok());
             assert_eq!(
                 String::from_utf8(buf).unwrap(),

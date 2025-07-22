@@ -9,17 +9,16 @@ use crate::{
 /// If `from` is not provided, it defaults to 0.
 /// If `to` is not provided, it defaults to the last block of the chain on the remote server.
 pub async fn fetch(
+    app_dir: impl AsRef<Path>,
     url: String,
     chain_id: u64,
     from: Option<u64>,
     to: Option<u64>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let app_dir = Path::new("./").canonicalize()?;
     let db = open_app_dir(app_dir, false)?;
 
     let mut client = RpcClient::try_new(url).await?;
-    let mut uncompressed_bytes_written = 0;
 
     // Get remote chain ranges
     let remote_ranges = client.list(Some(chain_id)).await?;
@@ -87,6 +86,7 @@ pub async fn fetch(
     }
 
     let mut count = 0;
+    let mut uncompressed_bytes_written = 0;
     let progress_bar = make_progress_bar(
         ranges_to_fetch
             .iter()
@@ -140,15 +140,13 @@ pub async fn fetch(
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
-
     use prost::Message;
 
     use crate::{
         BlockRange,
-        app_dir::{BLOCK_DB_NAME, init_app_dir},
-        cmd::{ChangeWorkingDir, fetch::fetch, init, purge},
-        db::{BlockDb, RocksBlockDb, proto},
+        app_dir::{init_app_dir, open_app_dir},
+        cmd::{fetch::fetch, purge},
+        db::{BlockDb, proto},
         grpc::{
             proto_rpc::{self, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock},
             test_utils::{MockRpcServer, TestServer},
@@ -158,10 +156,17 @@ mod tests {
     #[tokio::test]
     async fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
         let server = TestServer::new(MockRpcServer::new()).await;
-        let result = fetch(server.address.clone(), 1, None, None, std::io::sink()).await;
+        let result = fetch(
+            tmpdir.path(),
+            server.address.clone(),
+            1,
+            None,
+            None,
+            std::io::sink(),
+        )
+        .await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no database found at {} - did you forget to run init?",
@@ -173,10 +178,9 @@ mod tests {
     async fn fails_for_invalid_server_url() {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
 
         let url = "invalid-url".to_string();
-        let result = fetch(url, 1, None, None, std::io::sink()).await;
+        let result = fetch(tmpdir.path(), url, 1, None, None, std::io::sink()).await;
         let err = result.expect_err("Fetch should fail with invalid url");
 
         assert_eq!(err.to_string(), "transport error");
@@ -185,11 +189,9 @@ mod tests {
     #[tokio::test]
     async fn fails_on_invalid_stored_chain_ids() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         {
-            let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
-            let db = RocksBlockDb::open(db_path.clone()).unwrap();
+            let db = open_app_dir(tmpdir.path(), false).unwrap();
             db.put_metadata_raw(1, vec![0].as_slice()).unwrap(); // Invalid metadata length
         }
         let mut mock_server = MockRpcServer::new();
@@ -202,7 +204,15 @@ mod tests {
             }))
         });
         let server = TestServer::new(mock_server).await;
-        let result = fetch(server.address.clone(), 1, None, None, std::io::sink()).await;
+        let result = fetch(
+            tmpdir.path(),
+            server.address.clone(),
+            1,
+            None,
+            None,
+            std::io::sink(),
+        )
+        .await;
         let err = result.expect_err("Fetch should fail with invalid DB");
         assert!(
             err.to_string()
@@ -213,8 +223,7 @@ mod tests {
     #[tokio::test]
     async fn fails_on_server_error() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
             Ok(tonic::Response::new(ChainRanges {
@@ -229,7 +238,15 @@ mod tests {
             .returning(|_| Err(tonic::Status::internal("Server error")));
         let server = TestServer::new(mock_server).await;
 
-        let result = fetch(server.address.clone(), 1, None, None, std::io::sink()).await;
+        let result = fetch(
+            tmpdir.path(),
+            server.address.clone(),
+            1,
+            None,
+            None,
+            std::io::sink(),
+        )
+        .await;
 
         let err = result.expect_err("Fetch should fail with server error");
         assert!(err.to_string().contains("Server error"));
@@ -238,8 +255,7 @@ mod tests {
     #[tokio::test]
     async fn fails_if_block_stream_response_contains_error() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         let mut server = MockRpcServer::new();
         server.expect_list().returning(|_| {
             Ok(tonic::Response::new(ChainRanges {
@@ -256,6 +272,7 @@ mod tests {
 
         let test_server = TestServer::new(server).await;
         let result = fetch(
+            tmpdir.path(),
             test_server.address.clone(),
             1,
             Some(0),
@@ -270,9 +287,7 @@ mod tests {
     #[tokio::test]
     async fn fails_if_no_remote_chain_ids() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
-
+        init_app_dir(tmpdir.path()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
             Ok(tonic::Response::new(ChainRanges {
@@ -285,6 +300,7 @@ mod tests {
 
         let test_server = TestServer::new(mock_server).await;
         let result = fetch(
+            tmpdir.path(),
             test_server.address.clone(),
             1, // Chain ID that does not exist
             None,
@@ -299,8 +315,7 @@ mod tests {
     #[tokio::test]
     async fn fails_on_invalid_remote_chain_ranges() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         // Empty chain ranges for chain ID 1
         {
             let mut mock_server = MockRpcServer::new();
@@ -314,6 +329,7 @@ mod tests {
             });
             let test_server = TestServer::new(mock_server).await;
             let result = fetch(
+                tmpdir.path(),
                 test_server.address.clone(),
                 1, // Chain ID that exists but has no ranges
                 None,
@@ -340,6 +356,7 @@ mod tests {
             });
             let test_server = TestServer::new(mock_server).await;
             let result = fetch(
+                tmpdir.path(),
                 test_server.address.clone(),
                 1, // Chain ID that exists but has unsorted ranges
                 None,
@@ -358,8 +375,7 @@ mod tests {
     #[tokio::test]
     async fn fails_on_invalid_requested_range() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
             Ok(tonic::Response::new(ChainRanges {
@@ -372,6 +388,7 @@ mod tests {
 
         let test_server = TestServer::new(mock_server).await;
         let result = fetch(
+            tmpdir.path(),
             test_server.address.clone(),
             1,
             Some(5),
@@ -389,8 +406,7 @@ mod tests {
     #[tokio::test]
     async fn fails_if_requested_range_does_not_exist_on_remote_server() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
             Ok(tonic::Response::new(ChainRanges {
@@ -405,6 +421,7 @@ mod tests {
         // Range is completely after the remote ranges
         {
             let result = fetch(
+                tmpdir.path(),
                 test_server.address.clone(),
                 1,
                 Some(11), // Range that does not exist on the remote server
@@ -421,6 +438,7 @@ mod tests {
         // Range is completely before the remote ranges
         {
             let result = fetch(
+                tmpdir.path(),
                 test_server.address.clone(),
                 1,
                 Some(0),
@@ -437,6 +455,7 @@ mod tests {
         // Range partially overlaps with the remote ranges but is not fully covered
         {
             let result = fetch(
+                tmpdir.path(),
                 test_server.address.clone(),
                 1,
                 Some(5),
@@ -455,8 +474,7 @@ mod tests {
     #[tokio::test]
     async fn fails_if_get_block_range_returns_unexpected_block_range() {
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
         // Less block than expected
         {
             let mut mock_server = MockRpcServer::new();
@@ -494,6 +512,7 @@ mod tests {
 
             let test_server = TestServer::new(mock_server).await;
             let result = fetch(
+                tmpdir.path(),
                 test_server.address.clone(),
                 1,
                 Some(0),
@@ -507,7 +526,7 @@ mod tests {
                 "received fewer blocks than expected: expected 3, got 2",
             );
         }
-        purge(1, None, None).unwrap(); // Clear the database for the next test
+        purge(tmpdir.path(), 1, None, None).unwrap(); // Clear the database for the next test
         // More blocks than expected
         {
             let mut mock_server = MockRpcServer::new();
@@ -539,6 +558,7 @@ mod tests {
 
             let test_server = TestServer::new(mock_server).await;
             let result = fetch(
+                tmpdir.path(),
                 test_server.address.clone(),
                 1,
                 Some(0),
@@ -552,7 +572,7 @@ mod tests {
                 "received fewer blocks than expected: expected 3, got 5"
             );
         }
-        purge(1, None, None).unwrap(); // Clear the database for the next test
+        purge(tmpdir.path(), 1, None, None).unwrap(); // Clear the database for the next test
         // Block number mismatch
         {
             let mut mock_server = MockRpcServer::new();
@@ -590,6 +610,7 @@ mod tests {
 
             let test_server = TestServer::new(mock_server).await;
             let result = fetch(
+                tmpdir.path(),
                 test_server.address.clone(),
                 1,
                 Some(0),
@@ -617,9 +638,7 @@ mod tests {
         }
 
         let tmpdir = tempfile::tempdir().unwrap();
-        let _cwd = ChangeWorkingDir::new(tmpdir.path());
-        init(None::<&Path>).unwrap();
-        let db_path = Path::new("./").join(BLOCK_DB_NAME).canonicalize().unwrap();
+        init_app_dir(tmpdir.path()).unwrap();
 
         let max_block_number: u64 = 40;
         let local_blocks_ranges = to_proto_block_range([
@@ -643,7 +662,7 @@ mod tests {
         }
         let init_db = || {
             // Initialize the database
-            let db = RocksBlockDb::open(db_path.clone()).unwrap();
+            let db = open_app_dir(tmpdir.path(), false).unwrap();
             db.delete_range(1, None, None).unwrap(); // Clear the database
             assert!(db.get_ranges_of_chain_id(1).unwrap().is_empty()); // make sure the database is empty
             // Insert the local blocks into the database
@@ -765,7 +784,7 @@ mod tests {
                 }
                 let server = TestServer::new(mock_server).await;
                 let mut buf = Vec::new();
-                fetch(server.address.clone(), 1, from, to, &mut buf)
+                fetch(tmpdir.path(), server.address.clone(), 1, from, to, &mut buf)
                     .await
                     .expect("Fetch should succeed");
                 // Check that the output is as expected
@@ -773,7 +792,7 @@ mod tests {
                 // Check that the data were written to the database
                 for proto_rpc::BlockRange { from, to } in expected_ranges_to_fetch {
                     for i in from..=to {
-                        let db = RocksBlockDb::open_for_reading(db_path.clone()).unwrap();
+                        let db = open_app_dir(tmpdir.path(), true).unwrap();
                         let block = db.get(1, i).unwrap();
                         assert!(block.is_some(), "Block {i} not found in the database");
                         let block = block.unwrap();
