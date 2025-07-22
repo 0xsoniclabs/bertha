@@ -14,12 +14,9 @@ pub fn purge(
     print!("Are you sure you want to purge blocks for chain {chain_id}? (y/n): ");
     std::io::stdout().flush()?;
     reader.read_line(&mut input)?;
-    match input.trim() {
-        "y" | "Y" => {
-            let db = open_app_dir(app_dir, false)?;
-            db.delete_range(chain_id, from, to)?;
-        }
-        _ => {}
+    if matches!(input.trim(), "y" | "Y") {
+        let db = open_app_dir(app_dir, false)?;
+        db.delete_range(chain_id, from, to)?;
     }
     Ok(())
 }
@@ -130,8 +127,11 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
 
-        let result = purge(tmpdir.path(), 0, None, None, confirm_purge(false));
-        assert!(result.is_ok());
+        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        db.put_raw(42, 1, vec![1, 2, 3].as_slice()).unwrap();
+
+        purge(tmpdir.path(), 0, None, None, confirm_purge(false)).expect("purge should succeed");
+        assert_eq!(db.get_raw(42, 1).unwrap(), Some(vec![1, 2, 3]));
     }
 
     #[test]
