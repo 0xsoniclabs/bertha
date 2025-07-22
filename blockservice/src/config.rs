@@ -8,6 +8,7 @@ use toml_edit::{Document, DocumentMut, Item};
 
 use crate::Error;
 
+/// The default config file, used for the implementation of [Config::default].
 const DEFAULT_CONFIG_TOML: &str = include_str!("../res/blockservice.toml");
 
 /// A collection of various configuration options for the blockservice.
@@ -109,7 +110,8 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        // Comments are prefixed with '##' to not be parsed by the unit test below.
+        // Cosmetic: Comments are prefixed with '##' to not be parsed by the unit test below,
+        // remove the first '#' before writing to disk (e.g. in [Config::create_default]).
         let config_toml = DEFAULT_CONFIG_TOML.replace("##", "#");
 
         Config {
