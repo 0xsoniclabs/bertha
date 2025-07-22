@@ -3,12 +3,11 @@ use std::{
     net::{IpAddr, Ipv6Addr, SocketAddr},
 };
 
-use blockservice::cmd;
+use blockservice::{
+    cli::{Args, Command},
+    cmd,
+};
 use clap::Parser;
-
-use crate::cli::{Args, Command};
-
-mod cli;
 
 async fn execute(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
