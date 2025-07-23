@@ -4,7 +4,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Server;
 
 use crate::{
-    config::{ChainConfig, Config},
+    config::Config,
     db::BlockDb,
     grpc::{
         GRPC_COMPRESSION_ALGORITHM,
@@ -164,32 +164,29 @@ where
             None => println!("Received state updates request for chain ID {chain_id}"),
         }
 
-        let chain_cfg = self
+        let state_updates = self
             .cfg
             .get_chain_config(chain_id)
-            .unwrap_or(ChainConfig::new(chain_id));
+            .and_then(|cfg| cfg.state_updates)
+            .unwrap_or_default();
 
-        let updates = if let Some(files) = chain_cfg.state_updates {
-            files
-                .into_iter()
-                .map(|path| -> Result<StateUpdate, tonic::Status> {
-                    let data = fs::read_to_string(&path).map_err(|_| {
-                        tonic::Status::new(
-                            tonic::Code::Internal,
-                            format!("failed to read file {}", &path.display()),
-                        )
-                    })?;
-                    Ok(StateUpdate {
-                        // Safe to unwrap because reading would've already failed if this was not a
-                        // file path.
-                        filename: path.file_name().unwrap().to_string_lossy().into_owned(),
-                        data,
-                    })
+        let updates = state_updates
+            .into_iter()
+            .map(|path| -> Result<StateUpdate, tonic::Status> {
+                let data = fs::read_to_string(&path).map_err(|_| {
+                    tonic::Status::new(
+                        tonic::Code::Internal,
+                        format!("failed to read file {}", &path.display()),
+                    )
+                })?;
+                Ok(StateUpdate {
+                    // Safe to unwrap because reading would've already failed if this was not a
+                    // file path.
+                    filename: path.file_name().unwrap().to_string_lossy().into_owned(),
+                    data,
                 })
-                .collect::<Result<Vec<_>, _>>()?
-        } else {
-            vec![]
-        };
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(tonic::Response::new(StateUpdates { updates }))
     }

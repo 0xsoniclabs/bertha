@@ -39,7 +39,10 @@ pub enum Command {
         #[arg(short, long)]
         to: Option<u64>,
     },
-    /// Fetch available state update files from a remote block service.
+    /// Fetch state update files from a remote block service.
+    ///
+    /// Fetches all available state update files for the specified chain ID and writes them to the
+    /// application directory. If a file with the same name already exists, it will be skipped.
     FetchStateUpdates { url: String, chain_id: u64 },
     /// List all block ranges for all chains or only for the specific chain if specified. If url is
     /// not set this lists the locally stored block ranges, otherwise the block ranges of the remote

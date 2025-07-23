@@ -129,6 +129,9 @@ pub struct ChainConfig {
     pub id: u64,
     pub name: String,
     pub description: String,
+
+    /// An optional list of paths to state update files for this chain.
+    /// Can be transferred to other blockservice instances using the `fetch-state-updates` command.
     pub state_updates: Option<Vec<PathBuf>>,
 }
 

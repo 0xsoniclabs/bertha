@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{io::Write, path::Path};
 
 use crate::{app_dir::open_app_dir, grpc::RpcClient};
 
@@ -15,9 +15,9 @@ pub async fn fetch_state_updates(
     let mut client = RpcClient::try_new(url).await?;
     let updates = client.get_state_updates(chain_id).await?;
 
-    write!(
+    writeln!(
         writer,
-        "Received {} state updates for chain ID {}",
+        "Received {} state update files for chain ID {}",
         updates.updates.len(),
         chain_id
     )?;
@@ -25,13 +25,12 @@ pub async fn fetch_state_updates(
     for update in updates.updates {
         match std::fs::File::create_new(app_dir.as_ref().join(&update.filename)) {
             Ok(mut file) => {
-                use std::io::Write;
                 file.write_all(update.data.as_bytes())?;
-                write!(writer, "{}", update.filename)?;
+                writeln!(writer, "{}", update.filename)?;
             }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::AlreadyExists {
-                    write!(writer, "{} already exists - skipping", update.filename)?;
+                    writeln!(writer, "{} already exists - skipping", update.filename)?;
                 } else {
                     return Err(e.into());
                 }
@@ -77,7 +76,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn files_to_application_directory() {
+    async fn fetches_files_and_stores_them_in_application_directory() {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
 
@@ -88,7 +87,7 @@ mod tests {
 
         assert!(result.is_ok());
         let log_str = String::from_utf8(log).unwrap();
-        assert!(log_str.contains("Received 2 state updates for chain ID 7"));
+        assert!(log_str.contains("Received 2 state update files for chain ID 7"));
         assert!(log_str.contains("update1.json"));
         assert!(log_str.contains("update2.json"));
 
@@ -116,7 +115,7 @@ mod tests {
 
         assert!(result.is_ok());
         let log_str = String::from_utf8(log).unwrap();
-        assert!(log_str.contains("Received 2 state updates for chain ID 7"));
+        assert!(log_str.contains("Received 2 state update files for chain ID 7"));
         assert!(log_str.contains("update1.json already exists - skipping"));
         assert!(log_str.contains("update2.json"));
 
