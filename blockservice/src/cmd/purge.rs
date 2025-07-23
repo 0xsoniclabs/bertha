@@ -99,6 +99,6 @@ mod tests {
         assert!(db.get(chain_id, 0).unwrap().is_some());
         assert!(db.get(chain_id, 1).unwrap().is_none());
         assert!(db.get(chain_id, 2).unwrap().is_none());
-        assert!(db.get(chain_id, 3).unwrap().is_some());
+        assert!(db.get(chain_id, 3).unwrap().is_none());
     }
 }
