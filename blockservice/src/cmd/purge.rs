@@ -93,7 +93,7 @@ mod tests {
 
         drop(db); // close the database to ensure that the purge command can open it
 
-        purge(tmpdir.path(), chain_id, Some(1), Some(3)).unwrap();
+        purge(tmpdir.path(), chain_id, Some(1), Some(2)).unwrap();
 
         let db = open_app_dir(tmpdir.path(), false).unwrap();
         assert!(db.get(chain_id, 0).unwrap().is_some());

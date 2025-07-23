@@ -223,8 +223,13 @@ impl BlockDb for RocksBlockDb {
     ) -> Result<(), Error> {
         let from_block = from_block.unwrap_or(0);
         let to_block = to_block.unwrap_or(u64::MAX);
+        if from_block > to_block {
+            return Err(Error::StorageLayer(
+                "Invalid argument: end key comes before start key".to_string(),
+            ));
+        }
         let from = Self::make_key(chain_id, from_block);
-        let to = Self::make_key(chain_id, to_block);
+        let to = Self::make_key(chain_id, to_block.saturating_add(1)); // RocksDB expects the end key to be exclusive
 
         let mut batch = WriteBatchWithTransaction::<false>::default();
         batch.delete_range(from, to);
@@ -626,7 +631,7 @@ mod tests {
         assert_eq!(db.get_raw(chain_id, 1).unwrap(), Some(b"block 1".to_vec()));
         assert_eq!(db.get_raw(chain_id, 2).unwrap(), None);
         assert_eq!(db.get_raw(chain_id, 3).unwrap(), None);
-        assert_eq!(db.get_raw(chain_id, 4).unwrap(), Some(b"block 4".to_vec())); // range end is exclusive
+        assert_eq!(db.get_raw(chain_id, 4).unwrap(), None); // range end is exclusive
         assert_eq!(db.get_raw(chain_id, 5).unwrap(), Some(b"block 5".to_vec()));
     }
 
