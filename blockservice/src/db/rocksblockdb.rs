@@ -215,14 +215,7 @@ impl BlockDb for RocksBlockDb {
         self.iterate_with_direction_raw(chain_id, from, rocksdb::Direction::Reverse)
     }
 
-    fn delete_range(
-        &self,
-        chain_id: u64,
-        from_block: Option<u64>,
-        to_block: Option<u64>,
-    ) -> Result<(), Error> {
-        let from_block = from_block.unwrap_or(0);
-        let to_block = to_block.unwrap_or(u64::MAX);
+    fn delete_range(&self, chain_id: u64, from_block: u64, to_block: u64) -> Result<(), Error> {
         if from_block > to_block {
             return Err(Error::StorageLayer(
                 "Invalid argument: end key comes before start key".to_string(),
@@ -495,7 +488,7 @@ mod tests {
         db.put_chain_ids(&[chain_id]).unwrap();
         db.put_ranges_of_chain_id(chain_id, &[block_number..=block_number])
             .unwrap();
-        db.delete_range(chain_id, Some(block_number), Some(block_number))
+        db.delete_range(chain_id, block_number, block_number)
             .unwrap();
 
         assert_eq!(db.db.get(0u64.to_be_bytes().as_slice()), Ok(Some(vec![])));
@@ -623,7 +616,7 @@ mod tests {
         }
 
         // Delete blocks 2 to 4
-        db.delete_range(chain_id, Some(2), Some(4)).unwrap();
+        db.delete_range(chain_id, 2, 4).unwrap();
 
         // Check remaining blocks
         assert_eq!(db.get_raw(chain_id, 1).unwrap(), Some(b"block 1".to_vec()));
@@ -639,7 +632,7 @@ mod tests {
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
         // delete range when no blocks exist
-        assert!(db.delete_range(1, Some(1), Some(5)).is_ok());
+        assert!(db.delete_range(1, 1, 5).is_ok());
     }
 
     #[test]
@@ -656,7 +649,7 @@ mod tests {
 
         // Delete range with start greater than end
         assert_eq!(
-            db.delete_range(chain_id, Some(2), Some(1)),
+            db.delete_range(chain_id, 2, 1),
             Err(Error::StorageLayer(
                 "Invalid argument: end key comes before start key".to_string(),
             ))
