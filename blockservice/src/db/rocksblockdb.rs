@@ -229,7 +229,7 @@ impl BlockDb for RocksBlockDb {
             ));
         }
         let from = Self::make_key(chain_id, from_block);
-        let to = Self::make_key(chain_id, to_block.saturating_add(1)); // make 'to' inclusive
+        let to = Self::make_key(chain_id, to_block.saturating_add(1)); // RocksDB expects the end key to be exclusive
 
         let mut batch = WriteBatchWithTransaction::<false>::default();
         batch.delete_range(from, to);
