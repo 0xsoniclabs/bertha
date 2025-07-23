@@ -1,45 +1,45 @@
 syntax = "proto3";
 package rpc;
 
-/// BlockRpc defines the RPC services exposed by the block service.
+// Defines the RPC services exposed by the block service.
 service BlockRpc {
-  /// GetBlockRange retrieves a range of blocks for a specific chain ID and returns them as a stream of encoded blocks.
+  // Retrieves a range of blocks for a specific chain ID and returns them as a stream of encoded blocks.
   rpc GetBlockRange (BlockRangeRequest) returns (stream EncodedBlock);
-  /// List retrieves the list of block ranges stored on the block service for all chains or a specific chain ID.
+  // Retrieves the list of block ranges stored on the block service for all chains or a specific chain ID.
   rpc List (ListRequest) returns (ChainRanges);
 }
 
-/// The requested range of blocks for a specific chain ID for the GetBlockRange RPC endpoint.
+// The requested range of blocks for a specific chain ID for the GetBlockRange RPC endpoint.
 message BlockRangeRequest {
   uint64 chainId = 1;
   uint64 from = 2;
   uint64 to = 3;
 }
 
-/// The encoded block data and block number returned by the GetBlockRange RPC endpoint.
+// The encoded block data and block number returned by the GetBlockRange RPC endpoint.
 message EncodedBlock {
   bytes data = 1;
   uint64 number = 2;
 }
 
-/// The request for the List RPC endpoint, which lists all chain block ranges.
-/// It can optionally specify a chain ID to filter the results.
+// The request for the List RPC endpoint, which lists all chain block ranges.
+// It can optionally specify a chain ID to filter the results.
 message ListRequest {
   optional uint64 chainId = 1;
 }
 
-/// The list of block ranges for the requested chains, returned by the List RPC endpoint.
+// The list of block ranges for the requested chains, returned by the List RPC endpoint.
 message ChainRanges {
   repeated ChainRange chainRanges = 1;
 }
 
-/// The block ranges for a specific chain.
+// The block ranges for a specific chain.
 message ChainRange {
   uint64 chainId = 1;
   repeated BlockRange blockRanges = 2;
 }
 
-/// A block range, consisting of the start and end block numbers (both inclusive).
+// A block range, consisting of the start and end block numbers (both inclusive).
 message BlockRange {
   uint64 from = 1;
   uint64 to = 2;
