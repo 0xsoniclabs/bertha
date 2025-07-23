@@ -106,7 +106,6 @@ impl RangesExt for Vec<BlockRange> {
 /// - ranges are non-empty (start <= end)
 /// - ranges are non-overlapping
 /// - ranges are sorted
-#[cfg(test)]
 pub fn intersect_ranges(target: BlockRange, candidates: &[BlockRange]) -> Vec<BlockRange> {
     let mut segments = Vec::new();
     for candidate in candidates {
