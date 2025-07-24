@@ -53,7 +53,7 @@ async fn execute(
         Command::FetchStateUpdates { url, chain_id } => {
             cmd::fetch_state_updates(args.dir, url, chain_id, std::io::stdout()).await
         }
-        Command::Start {} => {
+        Command::Start => {
             let port = {
                 let app_dir = Path::new("./").canonicalize()?;
                 let (cfg, _db) = open_app_dir(app_dir, true)?;
