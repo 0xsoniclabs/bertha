@@ -293,6 +293,7 @@ mod tests {
 
     #[test]
     fn intersect_ranges_returns_correct_intersections() {
+        // test cases in the form of (target range, candidate ranges, expected intersection union)
         let cases = [
             // intersection with empty candidates
             (0..=1, vec![], vec![]),
