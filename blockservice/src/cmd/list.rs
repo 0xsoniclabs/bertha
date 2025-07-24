@@ -8,8 +8,10 @@ pub async fn list(
     url: Option<String>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if matches!(chain_id, Some(0)) {
+        return Err("chain ID cannot be 0".into());
+    }
     let (cfg, db) = open_app_dir(app_dir, true)?;
-
     let chain_ranges = if let Some(url) = url {
         let mut client = RpcClient::try_new(url).await?;
         let remote_ranges = client.list(chain_id).await?;
@@ -150,6 +152,16 @@ mod tests {
 
         let err = result.expect_err("Fetch should fail with server error");
         assert!(err.to_string().contains("Server error"));
+    }
+
+    #[tokio::test]
+    async fn fails_for_chain_id_zero() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+
+        let result = list(tmpdir.path(), Some(0), None, std::io::sink()).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "chain ID cannot be 0");
     }
 
     #[tokio::test]
