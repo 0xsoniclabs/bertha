@@ -70,7 +70,7 @@ pub mod tests {
 
     use super::*;
     use crate::grpc::{
-        proto_rpc::{BlockRange, ChainRange},
+        proto_rpc::{BlockRange, ChainRange, StateUpdate},
         test_utils::{MockRpcServer, TestServer, get_mock_server_and_client},
     };
 
@@ -220,5 +220,45 @@ pub mod tests {
         let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
         let result = rpc_client.list(None).await;
         assert!(result.is_err(), "Expected error for internal server error");
+    }
+
+    #[tokio::test]
+    async fn get_state_updates_returns_updates_successfully() {
+        let expected_updates = vec![
+            StateUpdate {
+                filename: "update1.json".to_string(),
+                data: "data1".to_string(),
+            },
+            StateUpdate {
+                filename: "update2.json".to_string(),
+                data: "data2".to_string(),
+            },
+        ];
+
+        let mut mock_server = MockRpcServer::new();
+        mock_server.expect_get_state_updates().returning({
+            let updates = expected_updates.clone();
+            move |_| {
+                Ok(tonic::Response::new(StateUpdates {
+                    updates: updates.clone(),
+                }))
+            }
+        });
+        let mut rpc_client = get_mock_server_and_client(mock_server).await;
+        let updates = rpc_client.get_state_updates(1).await.unwrap();
+        assert_eq!(updates.updates, expected_updates);
+    }
+
+    #[tokio::test]
+    async fn get_state_updates_propagates_error() {
+        let mut mock_server = MockRpcServer::new();
+        mock_server
+            .expect_get_state_updates()
+            .returning(|_| Err(tonic::Status::internal("Internal error")));
+        let mut rpc_client = get_mock_server_and_client(mock_server).await;
+        let result = rpc_client.get_state_updates(1).await;
+        let err = result.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Internal);
+        assert!(err.message().contains("Internal error"));
     }
 }
