@@ -242,6 +242,7 @@ impl BlockDb for RocksBlockDb {
 /// A batch of blocks to be written to the database.
 /// This wrapper keeps track of the block ranges that are added to the batch, so that they can be
 /// added to the database after the batch is written.
+#[derive(Default)]
 pub struct BlockBatch {
     /// The buffer of blocks to be written.
     /// The `false` parameter indicates that this batch is not transactional.
@@ -253,10 +254,7 @@ pub struct BlockBatch {
 impl BlockBatch {
     /// Creates a new empty block batch.
     pub fn new() -> Self {
-        BlockBatch {
-            batch: WriteBatchWithTransaction::default(),
-            block_ranges: Vec::new(),
-        }
+        BlockBatch::default()
     }
 
     /// Stores the raw protobuf-encoded data for the specified chain-ID and block number in the
