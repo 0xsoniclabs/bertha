@@ -11,7 +11,7 @@ pub fn verify(
     block_hash: Option<Hash>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let db = open_app_dir(app_dir, true)?;
+    let (_cfg, db) = open_app_dir(app_dir, true)?;
 
     let mut errors = 0;
 
@@ -107,7 +107,7 @@ mod tests {
         let result = verify(tmpdir.path(), 0, None, None, std::io::sink());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
-            "no database found at {} - did you forget to run init?",
+            "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
     }
@@ -137,7 +137,7 @@ mod tests {
 
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let block = Block::default();
         db.put(chain_id, block.clone()).unwrap();
@@ -210,7 +210,7 @@ mod tests {
 
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let mut block = Block::default();
         db.put(chain_id, block.clone()).unwrap();
@@ -249,7 +249,7 @@ mod tests {
 
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let block0 = Block::default();
         db.put(chain_id, block0.clone()).unwrap();
@@ -294,7 +294,7 @@ mod tests {
 
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let mut block = Block::default();
         db.put(chain_id, block.clone()).unwrap();

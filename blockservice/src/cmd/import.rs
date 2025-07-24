@@ -17,7 +17,7 @@ pub fn import(
     snapshot_path: impl AsRef<Path>,
     verify: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let db = open_app_dir(app_dir, false)?;
+    let (_cfg, db) = open_app_dir(app_dir, false)?;
 
     let file = File::open(snapshot_path)?;
     let mut reader = BufReader::new(file);
@@ -155,7 +155,7 @@ mod tests {
 
         import(tmpdir.path(), genesis_file.to_str().unwrap(), true).unwrap();
 
-        let db = open_app_dir(tmpdir.path(), true).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
         for i in 0..num_blocks {
             let block = db.get(chain_id, i as u64).unwrap();
             assert!(block.is_some(), "Block {i} not found in the database");
@@ -186,7 +186,7 @@ mod tests {
         let mut genesis_blocks = all_blocks.clone();
 
         init_app_dir(tmpdir.path()).unwrap();
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
         for block in db_blocks {
             db.put(chain_id, block.clone()).unwrap();
         }
@@ -204,7 +204,7 @@ mod tests {
 
         import(tmpdir.path(), genesis_file.to_str().unwrap(), false).unwrap();
 
-        let db = open_app_dir(tmpdir.path(), true).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
         for block in all_blocks {
             let db_block = db.get(chain_id, block.number).unwrap();
             // check that the missing blocks were inserted and the existing blocks were not
@@ -262,7 +262,7 @@ mod tests {
         let genesis_file = tmpdir.path().join("genesis.g");
         let genesis_data = genesis_parser::test_utils::generate_test_genesis(chain_id, 2, &[]);
         std::fs::write(&genesis_file, genesis_data).unwrap();
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
         db.put(
             chain_id,
             Block {
@@ -289,7 +289,7 @@ mod tests {
 
         let chain_id = 146;
 
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
         db.put_ranges_of_chain_id(chain_id, &[0..=1]).unwrap(); // this data does not exist
         drop(db);
 
@@ -349,7 +349,7 @@ mod tests {
         let result = import(tmpdir.path(), "somepath", true);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
-            "no database found at {} - did you forget to run init?",
+            "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
     }

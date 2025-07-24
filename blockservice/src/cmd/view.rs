@@ -8,7 +8,7 @@ pub fn view(
     block_number: u64,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let db = open_app_dir(app_dir, true)?;
+    let (_cfg, db) = open_app_dir(app_dir, true)?;
 
     let block = db.get(chain_id, block_number)?;
     match block {
@@ -40,7 +40,7 @@ mod tests {
         let result = view(tmpdir.path(), 1, 0, std::io::sink());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
-            "no database found at {} - did you forget to run init?",
+            "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
     }
@@ -72,7 +72,7 @@ mod tests {
 
         let chain_id = 1;
         let block = Block::default();
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
         db.put(chain_id, block.clone()).unwrap();
 
         let mut buf = Vec::new();

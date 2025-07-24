@@ -14,7 +14,7 @@ pub async fn start(
     listener: tokio::net::TcpListener,
     config: HashMap<u64, String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let db = open_app_dir(app_dir, false)?;
+    let (_cfg, db) = open_app_dir(app_dir, false)?;
     // Put the db in an Arc to share it between multiple tasks
     let db = Arc::new(db);
 
@@ -85,7 +85,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
         {
-            let db = open_app_dir(tmpdir.path(), false).unwrap();
+            let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
             db.put_raw(1, 1, vec![1, 2, 3].as_slice()).unwrap();
         }
 
@@ -120,7 +120,7 @@ mod tests {
         let result = start(tmpdir.path(), listener, config).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
-            "no database found at {} - did you forget to run init?",
+            "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
     }
@@ -129,7 +129,7 @@ mod tests {
     async fn sync_fails_if_server_url_is_invalid() {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let json_rpc_config = [(1, "invalid_url".to_string())].into_iter().collect();
 
@@ -143,7 +143,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
 
         init_app_dir(tmpdir.path()).unwrap();
-        let db = open_app_dir(tmpdir.path(), true).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
 
         let mock_server = MockServer::start().await;
 
@@ -193,7 +193,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
 
         init_app_dir(tmpdir.path()).unwrap();
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
         let db = Arc::new(db);
 
         let mock_server = MockServer::start().await;

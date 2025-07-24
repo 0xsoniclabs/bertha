@@ -26,7 +26,7 @@ pub async fn list(
             })
             .collect()
     } else {
-        let db = open_app_dir(app_dir, true)?;
+        let (_cfg, db) = open_app_dir(app_dir, true)?;
 
         let chain_ids = match chain_id {
             Some(chain_id) => vec![chain_id],
@@ -81,7 +81,7 @@ mod tests {
         let result = list(tmpdir.path(), None, None, std::io::sink()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
-            "no database found at {} - did you forget to run init?",
+            "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
     }
@@ -149,7 +149,7 @@ mod tests {
         assert_eq!(String::from_utf8(buf).unwrap(), "[chain ID 1] no blocks\n");
 
         // block ranges for chain id
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
         db.put_ranges_of_chain_id(1, &[2..=4, 6..=8]).unwrap();
         drop(db);
 
@@ -162,7 +162,7 @@ mod tests {
         );
 
         // block ranges for multiple chain ids
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
         db.put_ranges_of_chain_id(3, &[3..=5]).unwrap();
         db.put_chain_ids(&[1, 3]).unwrap();
         drop(db);

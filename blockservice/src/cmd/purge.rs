@@ -15,7 +15,7 @@ pub fn purge(
     std::io::stdout().flush()?;
     reader.read_line(&mut input)?;
     if matches!(input.trim(), "y" | "Y") {
-        let db = open_app_dir(app_dir, false)?;
+        let (_cfg, db) = open_app_dir(app_dir, false)?;
         db.delete_range(chain_id, from, to)?;
     }
     Ok(())
@@ -44,7 +44,7 @@ mod tests {
         let result = purge(tmpdir.path(), 0, None, None, confirm_purge(true));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
-            "no database found at {} - did you forget to run init?",
+            "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
     }
@@ -92,7 +92,7 @@ mod tests {
 
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let chain_id = 146;
         let mut block = Block::default();
@@ -115,7 +115,7 @@ mod tests {
         )
         .unwrap();
 
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
         assert!(db.get(chain_id, 0).unwrap().is_some());
         assert!(db.get(chain_id, 1).unwrap().is_none());
         assert!(db.get(chain_id, 2).unwrap().is_none());
@@ -127,7 +127,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
 
-        let db = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
         db.put_raw(42, 1, vec![1, 2, 3].as_slice()).unwrap();
 
         purge(tmpdir.path(), 0, None, None, confirm_purge(false)).expect("purge should succeed");
@@ -140,32 +140,22 @@ mod tests {
         init_app_dir(tmpdir.path()).unwrap();
 
         let set_elem = || {
-            let db = open_app_dir(tmpdir.path(), false).unwrap();
+            let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
             db.put_raw(42, 1, vec![1, 2, 3].as_slice()).unwrap();
         };
         // lowercase 'y'
         {
             set_elem();
             purge(tmpdir.path(), 42, None, None, Cursor::new("y")).expect("purge should succeed");
-            assert!(
-                open_app_dir(tmpdir.path(), true)
-                    .unwrap()
-                    .get(42, 1)
-                    .unwrap()
-                    .is_none()
-            );
+            let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
+            assert!(db.get(42, 1).unwrap().is_none());
         }
         // uppercase 'Y'
         {
             set_elem();
             purge(tmpdir.path(), 42, None, None, Cursor::new("Y")).expect("purge should succeed");
-            assert!(
-                open_app_dir(tmpdir.path(), true)
-                    .unwrap()
-                    .get(42, 1)
-                    .unwrap()
-                    .is_none()
-            );
+            let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
+            assert!(db.get(42, 1).unwrap().is_none());
         }
     }
 }
