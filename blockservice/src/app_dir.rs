@@ -180,9 +180,8 @@ mod tests {
         {
             let mut cfg = Config::create_default(cfg_path.clone()).unwrap();
             cfg.add_chain(ChainConfig {
-                id: 123,
                 name: "Test Chain".to_owned(),
-                description: "A test chain".to_owned(),
+                ..ChainConfig::new(123)
             })
             .unwrap();
         }
@@ -200,9 +199,8 @@ mod tests {
             // Manually initialize app dir
             let mut cfg = Config::create_default(tmpdir.path().join(CONFIG_FILE_NAME)).unwrap();
             cfg.add_chain(ChainConfig {
-                id: 123,
                 name: "Test Chain".to_owned(),
-                description: "A test chain".to_owned(),
+                ..ChainConfig::new(123)
             })
             .unwrap();
             let db = RocksBlockDb::create(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();

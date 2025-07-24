@@ -1,14 +1,16 @@
-use std::sync::Arc;
+use std::{fs, sync::Arc};
 
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Server;
 
 use crate::{
+    config::Config,
     db::BlockDb,
     grpc::{
         GRPC_COMPRESSION_ALGORITHM,
         proto_rpc::{
-            BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock, ListRequest,
+            BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock, ListRequest, StateUpdate,
+            StateUpdates, StateUpdatesRequest,
             block_rpc_server::{BlockRpc, BlockRpcServer},
         },
     },
@@ -21,6 +23,7 @@ const STREAMING_RESPONSE_CHANNEL_SIZE: usize = 1000;
 #[derive(Debug)]
 pub struct RpcServer<Db: BlockDb + Send + Sync + 'static> {
     db: Arc<Db>,
+    cfg: Config,
 }
 
 impl<Db> RpcServer<Db>
@@ -28,8 +31,8 @@ where
     Db: BlockDb + Send + Sync + 'static,
 {
     /// Creates a new [RpcServer] instance with the provided database.
-    pub fn new(db: Arc<Db>) -> Self {
-        RpcServer { db }
+    pub fn new(db: Arc<Db>, cfg: Config) -> Self {
+        RpcServer { db, cfg }
     }
 
     /// Starts the gRPC server on the specified port.
@@ -144,12 +147,55 @@ where
             Err(e) => Err(tonic::Status::internal(e.to_string())),
         }
     }
+
+    /// Returns all state update files (filename and contents) for a given chain ID,
+    /// if any are configured.
+    async fn get_state_updates(
+        &self,
+        request: tonic::Request<StateUpdatesRequest>,
+    ) -> Result<tonic::Response<StateUpdates>, tonic::Status> {
+        let remote_addr = request.remote_addr();
+        let chain_id = request.into_inner().chain_id;
+
+        match remote_addr {
+            Some(addr) => {
+                println!("Received state updates request for chain ID {chain_id} from {addr}");
+            }
+            None => println!("Received state updates request for chain ID {chain_id}"),
+        }
+
+        let state_updates = self
+            .cfg
+            .get_chain_config(chain_id)
+            .and_then(|cfg| cfg.state_updates)
+            .unwrap_or_default();
+
+        let updates = state_updates
+            .into_iter()
+            .map(|path| -> Result<StateUpdate, tonic::Status> {
+                let data = fs::read_to_string(&path).map_err(|_| {
+                    tonic::Status::new(
+                        tonic::Code::Internal,
+                        format!("failed to read file {}", &path.display()),
+                    )
+                })?;
+                Ok(StateUpdate {
+                    // Safe to unwrap because reading would've already failed if this was not a
+                    // file path.
+                    filename: path.file_name().unwrap().to_string_lossy().into_owned(),
+                    data,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(tonic::Response::new(StateUpdates { updates }))
+    }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use std::vec;
+    use std::{path::PathBuf, vec};
 
     use mockall::predicate::eq;
     use tokio_stream::StreamExt;
@@ -158,6 +204,7 @@ mod tests {
     use super::*;
     use crate::{
         Error,
+        config::ChainConfig,
         db::MockBlockDb,
         grpc::{
             client::RpcClient,
@@ -186,7 +233,7 @@ mod tests {
             }
         });
 
-        let server = RpcServer::new(Arc::new(db));
+        let server = RpcServer::new(Arc::new(db), Config::default());
 
         let request = Request::new(BlockRangeRequest {
             chain_id: 1,
@@ -214,7 +261,7 @@ mod tests {
     async fn get_block_range_returns_error_for_invalid_range() {
         // From greater than To
         let db = MockBlockDb::new();
-        let server = RpcServer::new(Arc::new(db));
+        let server = RpcServer::new(Arc::new(db), Config::default());
         let request = Request::new(BlockRangeRequest {
             chain_id: 1,
             from: 10,
@@ -236,7 +283,7 @@ mod tests {
                 ))))
             });
 
-        let server = RpcServer::new(Arc::new(db));
+        let server = RpcServer::new(Arc::new(db), Config::default());
         let request = Request::new(BlockRangeRequest {
             chain_id: 1,
             from: 0,
@@ -262,7 +309,7 @@ mod tests {
             move |_, _| Box::new(vec![Ok((1, vec![1, 2, 3].into_boxed_slice()))].into_iter())
         });
 
-        let server = RpcServer::new(Arc::new(db));
+        let server = RpcServer::new(Arc::new(db), Config::default());
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let job = tokio::spawn(async move {
@@ -292,7 +339,7 @@ mod tests {
             db.expect_get_ranges_of_chain_id()
                 .with(eq(1))
                 .returning(|_| Ok(vec![1..=2, 3..=4]));
-            let server = RpcServer::new(Arc::new(db));
+            let server = RpcServer::new(Arc::new(db), Config::default());
 
             let req = Request::new(ListRequest { chain_id: Some(1) });
             let res = server.list(req).await.unwrap();
@@ -314,7 +361,7 @@ mod tests {
             db.expect_get_ranges_of_chain_id()
                 .with(eq(1))
                 .returning(|_| Ok(vec![]));
-            let server = RpcServer::new(Arc::new(db));
+            let server = RpcServer::new(Arc::new(db), Config::default());
 
             let req = Request::new(ListRequest { chain_id: Some(1) });
             let res = server.list(req).await.unwrap();
@@ -337,7 +384,7 @@ mod tests {
             db.expect_get_ranges_of_chain_id()
                 .with(eq(2))
                 .returning(|_| Ok(vec![5..=6]));
-            let server = RpcServer::new(Arc::new(db));
+            let server = RpcServer::new(Arc::new(db), Config::default());
 
             let req = Request::new(ListRequest { chain_id: None });
             let res = server.list(req).await.unwrap();
@@ -366,7 +413,7 @@ mod tests {
         let mut db = MockBlockDb::new();
         db.expect_get_chain_ids()
             .returning(|| Err(Error::StorageLayer("DB error".to_owned())));
-        let server = RpcServer::new(Arc::new(db));
+        let server = RpcServer::new(Arc::new(db), Config::default());
         let req = Request::new(ListRequest { chain_id: None });
 
         let res = server.list(req).await;
@@ -374,5 +421,76 @@ mod tests {
         let error = res.unwrap_err();
         assert_eq!(error.code(), tonic::Code::Internal);
         assert!(error.message().contains("DB error"));
+    }
+
+    #[tokio::test]
+    async fn get_state_updates_returns_state_updates_for_chain() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mut cfg = Config::create_default(tmpdir.path().join("config.toml")).unwrap();
+
+        let file1 = tmpdir.path().join("state_update_1.json");
+        let file2 = tmpdir.path().join("./state_update_2.json");
+        let file3 = tmpdir.path().join("./state_update_3.json");
+        fs::write(&file1, "123").unwrap();
+        fs::write(&file2, "456").unwrap();
+        fs::write(&file3, "789").unwrap();
+
+        cfg.add_chain(ChainConfig {
+            state_updates: Some(vec![file1, file2]),
+            ..ChainConfig::new(5)
+        })
+        .unwrap();
+        cfg.add_chain(ChainConfig {
+            state_updates: Some(vec![file3.canonicalize().unwrap()]), // use absolute path
+            ..ChainConfig::new(42)
+        })
+        .unwrap();
+        cfg.add_chain(ChainConfig {
+            state_updates: None,
+            ..ChainConfig::new(77)
+        })
+        .unwrap();
+
+        let server = RpcServer::new(Arc::new(MockBlockDb::new()), cfg);
+
+        let req = Request::new(StateUpdatesRequest { chain_id: 5 });
+        let res = server.get_state_updates(req).await.unwrap();
+        let updates = res.into_inner().updates;
+        assert_eq!(updates.len(), 2);
+        assert_eq!(updates[0].filename, "state_update_1.json");
+        assert_eq!(updates[0].data, "123");
+        assert_eq!(updates[1].filename, "state_update_2.json"); // without leading "./"
+        assert_eq!(updates[1].data, "456");
+
+        let req = Request::new(StateUpdatesRequest { chain_id: 42 });
+        let res = server.get_state_updates(req).await.unwrap();
+        let updates = res.into_inner().updates;
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].filename, "state_update_3.json"); // filename only (not absolute path)
+        assert_eq!(updates[0].data, "789");
+
+        let req = Request::new(StateUpdatesRequest { chain_id: 77 });
+        let res = server.get_state_updates(req).await.unwrap();
+        let updates = res.into_inner().updates;
+        assert_eq!(updates.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn get_state_updates_returns_error_if_file_cannot_be_read() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let mut cfg = Config::create_default(tmpdir.path().join("config.toml")).unwrap();
+
+        cfg.add_chain(ChainConfig {
+            state_updates: Some(vec![PathBuf::from("nonexisting.json")]),
+            ..ChainConfig::new(5)
+        })
+        .unwrap();
+
+        let server = RpcServer::new(Arc::new(MockBlockDb::new()), cfg);
+        let req = Request::new(StateUpdatesRequest { chain_id: 5 });
+        let res = server.get_state_updates(req).await;
+        let err = res.unwrap_err();
+        assert_eq!(err.code(), tonic::Code::Internal);
+        assert_eq!(err.message(), "failed to read file nonexisting.json",);
     }
 }

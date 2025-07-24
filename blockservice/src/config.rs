@@ -129,6 +129,10 @@ pub struct ChainConfig {
     pub id: u64,
     pub name: String,
     pub description: String,
+
+    /// An optional list of paths to state update files for this chain.
+    /// Can be transferred to other blockservice instances using the `fetch-state-updates` command.
+    pub state_updates: Option<Vec<PathBuf>>,
 }
 
 impl ChainConfig {
@@ -139,6 +143,7 @@ impl ChainConfig {
             id,
             name: String::default(),
             description: String::default(),
+            state_updates: None,
         }
     }
 
@@ -175,6 +180,7 @@ mod tests {
                 id: 133337,
                 name: "Example chain".to_string(),
                 description: "An example blockchain".to_string(),
+                state_updates: Some(vec![PathBuf::from("./state_updates_133337.json")])
             }]
         );
     }
@@ -220,6 +226,7 @@ mod tests {
             id: 133337,
             name: "Example chain".to_string(),
             description: "An example blockchain".to_string(),
+            state_updates: None,
         };
         let my_cfg = Config {
             port: 42,
@@ -310,6 +317,7 @@ mod tests {
             id: 133337,
             name: "Example chain".to_string(),
             description: "An example blockchain".to_string(),
+            state_updates: None,
         };
         config.add_chain(chain.clone()).unwrap();
         assert_eq!(config.chains.len(), 1);
@@ -358,11 +366,7 @@ mod tests {
 
     #[test]
     fn get_chain_config_returns_chain_config_for_given_id() {
-        let chain = ChainConfig {
-            id: 42,
-            name: "Test Chain".to_string(),
-            description: "A test blockchain".to_string(),
-        };
+        let chain = ChainConfig::new(42);
         let config = Config {
             chains: vec![chain.clone()],
             ..Default::default()
@@ -377,23 +381,21 @@ mod tests {
     #[test]
     fn chain_config_pretty_name_formats_correctly() {
         let chain = ChainConfig {
-            id: 1337,
             name: "Test Chain".to_string(),
             description: "A test blockchain".to_string(),
+            ..ChainConfig::new(1337)
         };
         assert_eq!(chain.pretty_name(), "[1337] Test Chain: A test blockchain");
 
         let chain_no_name = ChainConfig {
-            id: 42,
-            name: String::new(),
             description: "Unnamed chain".to_string(),
+            ..ChainConfig::new(42)
         };
         assert_eq!(chain_no_name.pretty_name(), "[42] (no name): Unnamed chain");
 
         let chain_no_description = ChainConfig {
-            id: 1,
             name: "Test Chain".to_string(),
-            description: String::new(),
+            ..ChainConfig::new(1)
         };
         assert_eq!(
             chain_no_description.pretty_name(),

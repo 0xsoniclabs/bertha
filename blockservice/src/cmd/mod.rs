@@ -1,6 +1,7 @@
 use std::fmt::Write;
 
 pub use fetch::fetch;
+pub use fetch_state_updates::fetch_state_updates;
 pub use import::import;
 use indicatif::{ProgressBar, style::TemplateError};
 pub use init::init;
@@ -11,6 +12,7 @@ pub use verify::verify;
 pub use view::view;
 
 mod fetch;
+mod fetch_state_updates;
 mod import;
 mod init;
 mod list;

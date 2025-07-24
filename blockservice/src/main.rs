@@ -50,6 +50,9 @@ async fn execute(
             chain_id,
             block_number,
         } => cmd::view(args.dir, chain_id, block_number, std::io::stdout()),
+        Command::FetchStateUpdates { url, chain_id } => {
+            cmd::fetch_state_updates(args.dir, url, chain_id, std::io::stdout()).await
+        }
         Command::Start => {
             let port = {
                 let app_dir = Path::new("./").canonicalize()?;
