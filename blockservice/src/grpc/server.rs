@@ -15,7 +15,7 @@ use crate::{
 };
 
 // TODO: Benchmark this to determine optimal size (#78)
-const SERVER_RESPONSE_BUFFER_SIZE: usize = 1000;
+const STREAMING_RESPONSE_CHANNEL_SIZE: usize = 1000;
 
 /// A gRPC server that provides access to block data stored in a database.
 #[derive(Debug)]
@@ -59,7 +59,7 @@ where
         &self,
         request: tonic::Request<BlockRangeRequest>,
     ) -> Result<tonic::Response<Self::GetBlockRangeStream>, tonic::Status> {
-        let (tx, rx) = tokio::sync::mpsc::channel(SERVER_RESPONSE_BUFFER_SIZE);
+        let (tx, rx) = tokio::sync::mpsc::channel(STREAMING_RESPONSE_CHANNEL_SIZE);
 
         let remote_addr = request.remote_addr();
         let BlockRangeRequest { chain_id, from, to } = request.into_inner();
@@ -170,7 +170,7 @@ mod tests {
         let mut db = MockBlockDb::new();
         // Request more than the buffer size to check that the channel works
         // properly (is filled/consumed asynchronously and does not block)
-        let request_count = SERVER_RESPONSE_BUFFER_SIZE + 10;
+        let request_count = STREAMING_RESPONSE_CHANNEL_SIZE + 10;
         let mut data = vec![];
         for i in 1..=request_count {
             data.push((i as u64, vec![i as u8]));
