@@ -3,6 +3,7 @@ use std::ops::RangeInclusive;
 mod app_dir;
 pub mod cli;
 pub mod cmd;
+pub mod config;
 mod db;
 mod error;
 pub mod grpc;

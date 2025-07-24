@@ -3,5 +3,6 @@
 /build
 # Vscode files
 .vscode/launch.json
-# DB
+# Created by blockservice
 .blockdb/
+blockservice.toml

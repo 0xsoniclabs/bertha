@@ -15,10 +15,30 @@ pub enum Error {
     // std::io::Error is not PartialEq + Eq, so we cannot wrap it directly
     #[error("I/O error: {0}")]
     Io(String),
+    #[error("configuration error: {0}")]
+    Config(String),
 }
 
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
         Error::Io(err.to_string())
+    }
+}
+
+impl From<toml::ser::Error> for Error {
+    fn from(err: toml::ser::Error) -> Self {
+        Error::Config(format!("TOML serialization failed: {err}"))
+    }
+}
+
+impl From<toml::de::Error> for Error {
+    fn from(err: toml::de::Error) -> Self {
+        Error::Config(format!("TOML deserialization failed: {err}"))
+    }
+}
+
+impl From<toml_edit::TomlError> for Error {
+    fn from(err: toml_edit::TomlError) -> Self {
+        Error::Config(format!("TOML edit failed: {err}"))
     }
 }
