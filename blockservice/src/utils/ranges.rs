@@ -309,12 +309,12 @@ mod tests {
             (1..=5, vec![0..=2, 4..=6], vec![1..=2, 4..=5]),
         ];
 
+        let mut rng = SmallRng::seed_from_u64(123);
         for (target, candidates, expected) in cases {
             let result = intersect_ranges(target.clone(), &candidates);
             assert_eq_expected_and_postconditions(&result, &expected);
 
             let mut shuffled_candidates = candidates.clone();
-            let mut rng = SmallRng::seed_from_u64(123);
             shuffle_and_make_overlapping(&mut shuffled_candidates, &mut rng);
             let result = intersect_ranges(target, &shuffled_candidates);
             assert_eq_expected_and_postconditions(&result, &expected);
