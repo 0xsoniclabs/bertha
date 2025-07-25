@@ -64,7 +64,7 @@ mod tests {
         assert_eq!(
             String::from_utf8(writer).unwrap(),
             format!("Are you sure you want to purge blocks for chain 0? (y/n): ")
-        )
+        );
     }
 
     #[test]
