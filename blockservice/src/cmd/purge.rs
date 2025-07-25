@@ -35,7 +35,10 @@ mod tests {
     use bertha_types::Block;
 
     use super::*;
-    use crate::app_dir::{BLOCK_DB_NAME, init_app_dir};
+    use crate::{
+        app_dir::{BLOCK_DB_NAME, init_app_dir},
+        utils::test_dir::{Permissions, TestDir},
+    };
 
     /// Helper function to simulate user confirmation for the purge command.
     fn confirm_purge(bool: bool) -> impl std::io::BufRead {
@@ -45,7 +48,7 @@ mod tests {
 
     #[test]
     fn fails_if_app_dir_is_not_initialized() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let mut writer = Vec::new();
         let result = purge(
@@ -69,7 +72,7 @@ mod tests {
 
     #[test]
     fn fails_if_no_write_permissions() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         // create database
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
@@ -105,7 +108,7 @@ mod tests {
 
     #[test]
     fn can_be_called_with_chain_id_or_chain_id_and_start_or_chain_id_and_start_and_end() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
@@ -175,7 +178,7 @@ mod tests {
         // BlockRocksDb::delete_range, not that all the corner cases work because they are
         // already tested in BlockRocksDb::delete_range
 
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let chain_id = 146;
@@ -292,7 +295,7 @@ mod tests {
 
     #[test]
     fn cancel_operation_if_user_does_not_confirm() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
@@ -318,7 +321,7 @@ mod tests {
 
     #[test]
     fn guard_is_case_unsensitive() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let set_elem = || {

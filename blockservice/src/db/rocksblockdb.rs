@@ -270,11 +270,14 @@ impl BlockBatch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::test_utils::{make_meta_value, make_range_value};
+    use crate::{
+        db::test_utils::{make_meta_value, make_range_value},
+        utils::test_dir::{Permissions, TestDir},
+    };
 
     #[test]
     fn rocksblockdb_create_creates_new_db() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         RocksBlockDb::create(tmpdir.path()).unwrap();
         let lock_file = tmpdir.path().join("LOCK");
         assert!(lock_file.exists(), "RocksDB LOCK file should exist");
@@ -282,7 +285,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_create_returns_error_if_db_exists() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         RocksBlockDb::create(tmpdir.path()).unwrap();
         let result = RocksBlockDb::create(tmpdir.path());
         assert!(result.is_err());
@@ -297,7 +300,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_open_opens_existing_db_for_reading_and_writing() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         {
             RocksBlockDb::create(tmpdir.path()).unwrap();
         }
@@ -309,7 +312,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_open_returns_error_if_db_does_not_exist() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let result = RocksBlockDb::open(tmpdir.path());
         assert!(result.is_err());
         assert_eq!(
@@ -323,7 +326,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_open_returns_error_if_db_already_opened() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let _db = RocksBlockDb::create(tmpdir.path()).unwrap();
         let result = RocksBlockDb::open(tmpdir.path());
         assert!(result.is_err());
@@ -337,7 +340,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_open_for_reading_opens_existing_db_for_reading() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         {
             let db = RocksBlockDb::create(tmpdir.path()).unwrap();
             db.db.put(b"foo", b"bar").unwrap();
@@ -349,7 +352,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_removes_secondary_path_on_drop() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         {
             RocksBlockDb::create(tmpdir.path()).unwrap();
         }
@@ -365,7 +368,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_open_for_reading_returns_error_if_db_does_not_exist() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let result = RocksBlockDb::open_for_reading(tmpdir.path());
         assert!(result.is_err());
         assert_eq!(
@@ -379,7 +382,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_can_be_opened_multiple_times_for_reading() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         {
             let db = RocksBlockDb::create(tmpdir.path()).unwrap();
             db.db.put(b"foo", b"bar").unwrap();
@@ -394,7 +397,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_can_be_opened_for_reading_and_writing_concurrently() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let write_db = RocksBlockDb::create(tmpdir.path()).unwrap();
         let read_db = RocksBlockDb::open_for_reading(tmpdir.path()).unwrap();
         write_db.db.put(b"foo", b"bar").unwrap();
@@ -405,7 +408,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_get_metadata_raw_returns_raw_metadata() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
         let key = 1u64;
@@ -431,7 +434,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_get_metadata_raw_returns_error_if_value_length_is_invalid() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
         let key = 1u64;
         let data = [1u8]; // not a multiple of 8 bytes
@@ -447,7 +450,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_put_metadata_raw_write_raw_metadata() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
         let key = 1u64;
         let data = [1u64; 2];
@@ -461,7 +464,7 @@ mod tests {
 
     #[test]
     fn blockrocksdb_put_raw_adds_range_and_chain_id() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
         let chain_id = 146;
@@ -480,7 +483,7 @@ mod tests {
 
     #[test]
     fn blockrocksdb_delete_range_removes_range_and_chain_id() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
         let chain_id = 146;
@@ -497,7 +500,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_put_raw_writes_raw_data() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
         let chain_id = 1;
         let block_number = 42;
@@ -511,7 +514,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_put_raw_fails_if_db_opened_as_read_only() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         {
             RocksBlockDb::create(tmpdir.path()).unwrap();
         }
@@ -526,7 +529,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_get_raw_returns_raw_data() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
         let chain_id = 1;
         let block_number = 42;
@@ -544,7 +547,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_iterate_raw_returns_blocks_for_single_chain_in_order() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
         db.put_raw(1, 0, b"block1-0").unwrap();
@@ -584,7 +587,7 @@ mod tests {
     fn rocksblockdb_iterate_raw_returns_error_if_error_occurs_and_stops() {
         let chain_id = 1;
 
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
         db.put_raw(chain_id, 0, b"block1-0").unwrap();
@@ -605,7 +608,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_delete_range_deletes_blocks_in_range() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
         let chain_id = 1;
 
@@ -628,7 +631,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_delete_range_succeeds_if_no_blocks_in_range() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
 
         // delete range when no blocks exist
@@ -637,7 +640,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_delete_range_returns_error_if_start_greater_than_end() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
         let chain_id = 1;
 
@@ -666,7 +669,7 @@ mod tests {
 
     #[test]
     fn rocksblockdb_batched_writes_write_all_elements_and_update_metadata() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db = RocksBlockDb::create(tmpdir.path()).unwrap();
         let chain_id = 1;
         let block_numbers = [1, 2, 4];

@@ -153,11 +153,12 @@ mod tests {
             proto_rpc::{self, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock},
             test_utils::{MockRpcServer, TestServer},
         },
+        utils::test_dir::{Permissions, TestDir},
     };
 
     #[tokio::test]
     async fn fails_if_app_dir_is_not_initialized() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let server = TestServer::new(MockRpcServer::new()).await;
         let result = fetch(
@@ -178,7 +179,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_for_invalid_server_url() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let url = "invalid-url".to_string();
@@ -190,7 +191,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_on_invalid_stored_chain_ids() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         {
             let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
@@ -224,7 +225,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_on_server_error() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
@@ -256,7 +257,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_if_block_stream_response_contains_error() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut server = MockRpcServer::new();
         server.expect_list().returning(|_| {
@@ -288,7 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_if_no_remote_chain_ids() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
@@ -316,7 +317,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_on_invalid_remote_chain_ranges() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         // Empty chain ranges for chain ID 1
         {
@@ -376,7 +377,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_on_invalid_requested_range() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
@@ -407,7 +408,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_if_requested_range_does_not_exist_on_remote_server() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
@@ -475,7 +476,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_if_get_block_range_returns_unexpected_block_range() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         // Less block than expected
         {
@@ -655,7 +656,7 @@ mod tests {
             expected_output: &'static str, // Expected output to be written
         }
 
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let max_block_number: u64 = 40;

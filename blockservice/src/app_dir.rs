@@ -115,14 +115,17 @@ pub fn open_app_dir(
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
 
     use super::*;
-    use crate::{config::ChainConfig, db::BlockDb};
+    use crate::{
+        config::ChainConfig,
+        db::BlockDb,
+        utils::test_dir::{Permissions, TestDir},
+    };
 
     #[test]
     fn init_app_dir_creates_db_and_config_file() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let mut writer = Vec::new();
         init_app_dir(tmpdir.path(), &mut writer).unwrap();
         assert!(tmpdir.path().join(BLOCK_DB_NAME).exists());
@@ -156,7 +159,7 @@ mod tests {
 
     #[test]
     fn init_app_dir_fails_if_already_initialized() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let mut writer = Vec::new();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let result = init_app_dir(tmpdir.path(), &mut writer);
@@ -174,8 +177,7 @@ mod tests {
 
     #[test]
     fn init_app_dir_fails_if_no_write_permissions() {
-        let tmpdir = tempfile::tempdir().unwrap();
-        std::fs::set_permissions(tmpdir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadOnly).unwrap();
 
         let mut writer = Vec::new();
         let result = init_app_dir(tmpdir.path(), &mut writer);
@@ -200,7 +202,7 @@ mod tests {
 
     #[test]
     fn init_app_dir_creates_config_file_if_db_exists_but_config_does_not() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db_path = tmpdir.path().join(BLOCK_DB_NAME);
         {
             let db = RocksBlockDb::create(&db_path).unwrap();
@@ -228,7 +230,7 @@ mod tests {
 
     #[test]
     fn init_app_dir_creates_db_if_config_exists_but_db_does_not() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let cfg_path = tmpdir.path().join(CONFIG_FILE_NAME);
         {
             let mut cfg = Config::create_default(cfg_path.clone()).unwrap();
@@ -257,7 +259,7 @@ mod tests {
 
     #[test]
     fn open_app_dir_returns_config_and_db() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         {
             // Manually initialize app dir
             let mut cfg = Config::create_default(tmpdir.path().join(CONFIG_FILE_NAME)).unwrap();
@@ -290,7 +292,7 @@ mod tests {
 
     #[test]
     fn open_app_dir_fails_if_config_does_not_exist() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db_path = tmpdir.path().join(BLOCK_DB_NAME);
         RocksBlockDb::create(db_path).unwrap();
 
@@ -307,7 +309,7 @@ mod tests {
 
     #[test]
     fn open_app_dir_fails_if_db_does_not_exist() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         Config::create_default(tmpdir.path().join(CONFIG_FILE_NAME)).unwrap();
 
         let result = open_app_dir(tmpdir.path(), false);

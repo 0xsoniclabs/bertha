@@ -89,20 +89,20 @@ pub fn verify(
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
 
     use bertha_types::Block;
     use prost::Message;
 
     use super::*;
     use crate::{
-        app_dir::{BLOCK_DB_NAME, init_app_dir},
+        app_dir::init_app_dir,
         db::proto,
+        utils::test_dir::{Permissions, TestDir},
     };
 
     #[test]
     fn fails_if_app_dir_is_not_initialized() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let result = verify(tmpdir.path(), 0, None, None, std::io::sink());
         assert!(result.is_err());
@@ -114,28 +114,29 @@ mod tests {
 
     #[test]
     fn fails_if_no_read_permissions() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         // create database
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         // remove read permissions
-        std::fs::set_permissions(
-            tmpdir.path().join(BLOCK_DB_NAME),
-            std::fs::Permissions::from_mode(0o333),
-        )
-        .unwrap();
+        tmpdir.set_permissions(Permissions::WriteOnly).unwrap();
 
         let result = verify(tmpdir.path(), 0, None, None, std::io::sink());
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Failed to open"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Permission denied")
+        );
     }
 
     #[test]
     fn checks_hash_of_block() {
         let chain_id = 146;
 
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
@@ -184,7 +185,7 @@ mod tests {
         let chain_id = 146;
         let block_number = 0;
 
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let mut buf = Vec::new();
@@ -208,7 +209,7 @@ mod tests {
     fn checks_number_of_block() {
         let chain_id = 146;
 
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
@@ -247,7 +248,7 @@ mod tests {
     fn checks_parent_hash_of_block() {
         let chain_id = 146;
 
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
@@ -292,7 +293,7 @@ mod tests {
     fn skips_parent_hash_check_between_disjoint_ranges() {
         let chain_id = 146;
 
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 

@@ -165,6 +165,7 @@ impl ChainConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::test_dir::{Permissions, TestDir};
 
     #[test]
     fn embedded_default_config_is_valid() {
@@ -194,7 +195,7 @@ mod tests {
 
     #[test]
     fn create_default_writes_default_config_to_file() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let config_path = tmpdir.path().join("blockservice.toml");
         Config::create_default(&config_path).unwrap();
 
@@ -207,7 +208,7 @@ mod tests {
 
     #[test]
     fn create_default_propagates_filesystem_errors() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let config_path = tmpdir.path().join("blockservice.toml");
         std::fs::File::create(&config_path).unwrap();
 
@@ -220,7 +221,7 @@ mod tests {
 
     #[test]
     fn load_loads_config_from_file() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let config_path = tmpdir.path().join("blockservice.toml");
         let chain = ChainConfig {
             id: 133337,
@@ -244,7 +245,7 @@ mod tests {
 
     #[test]
     fn load_propagates_filesystem_errors() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let config_path = tmpdir.path().join("blockservice.toml");
 
         let result = Config::load(&config_path);
@@ -256,7 +257,7 @@ mod tests {
 
     #[test]
     fn load_returns_error_for_incomplete_toml() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let config_path = tmpdir.path().join("blockservice.toml");
         std::fs::write(&config_path, "foo = 456").unwrap();
 
@@ -271,7 +272,7 @@ mod tests {
 
     #[test]
     fn load_returns_error_for_invalid_toml() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let config_path = tmpdir.path().join("blockservice.toml");
         std::fs::write(&config_path, "= 456").unwrap();
 
@@ -309,7 +310,7 @@ mod tests {
 
     #[test]
     fn add_chain_adds_chain_to_config() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let config_path = tmpdir.path().join("blockservice.toml");
         let mut config = Config::create_default(&config_path).unwrap();
         assert_eq!(config.chains.len(), 0);
@@ -336,7 +337,7 @@ mod tests {
 
     #[test]
     fn add_chain_fails_if_chain_with_id_already_exists() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let config_path = tmpdir.path().join("blockservice.toml");
         let mut config = Config::create_default(&config_path).unwrap();
         let chain = ChainConfig::new(42);
@@ -351,7 +352,7 @@ mod tests {
 
     #[test]
     fn add_chain_fails_if_toml_field_has_unexpected_type() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let config_path = tmpdir.path().join("blockservice.toml");
         let mut config = Config::create_default(&config_path).unwrap();
         config.toml += "\nchains = [42, 123]";
