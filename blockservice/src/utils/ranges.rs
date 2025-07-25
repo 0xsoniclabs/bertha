@@ -293,11 +293,11 @@ mod tests {
 
     #[test]
     fn intersect_ranges_returns_correct_intersections() {
-        // test cases in the form of (target range, candidate ranges, expected intersection union)
+        // test cases in the form of (target range, candidate ranges, expected intersection)
         let cases = [
             // intersection with empty candidates
             (0..=1, vec![], vec![]),
-            // empty intersection
+            // intersection with non-overlapping candidates
             (0..=1, vec![2..=3], vec![]),
             // target range is equal to candidate range
             (0..=1, vec![0..=1], vec![0..=1]),
@@ -314,10 +314,8 @@ mod tests {
             assert_eq_expected_and_postconditions(&result, &expected);
 
             let mut shuffled_candidates = candidates.clone();
-            shuffle_and_make_overlapping(
-                &mut shuffled_candidates,
-                &mut SmallRng::seed_from_u64(123),
-            );
+            let mut rng = SmallRng::seed_from_u64(123);
+            shuffle_and_make_overlapping(&mut shuffled_candidates, &mut rng);
             let result = intersect_ranges(target, &shuffled_candidates);
             assert_eq_expected_and_postconditions(&result, &expected);
         }
