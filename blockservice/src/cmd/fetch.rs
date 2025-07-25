@@ -665,7 +665,7 @@ mod tests {
         let init_db = || {
             // Initialize the database
             let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-            db.delete_range(1, None, None).unwrap(); // Clear the database
+            db.delete_range(1, 0, u64::MAX).unwrap(); // Clear the database
             assert!(db.get_ranges_of_chain_id(1).unwrap().is_empty()); // make sure the database is empty
             // Insert the local blocks into the database
             for block in local_blocks.clone() {

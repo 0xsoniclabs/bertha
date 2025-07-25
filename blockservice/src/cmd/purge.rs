@@ -2,6 +2,9 @@ use std::{io::Write, path::Path};
 
 use crate::{app_dir::open_app_dir, db::BlockDb};
 
+/// Purges blocks from the local database for a specific chain.
+/// If `from` is not provided, it defaults to 0.
+/// If `to` is not provided, it defaults to the last local block of the chain.
 pub fn purge(
     app_dir: impl AsRef<Path>,
     chain_id: u64,
@@ -16,7 +19,7 @@ pub fn purge(
     reader.read_line(&mut input)?;
     if matches!(input.trim(), "y" | "Y") {
         let (_cfg, db) = open_app_dir(app_dir, false)?;
-        db.delete_range(chain_id, from, to)?;
+        db.delete_range(chain_id, from.unwrap_or(0), to.unwrap_or(u64::MAX))?;
     }
     Ok(())
 }
@@ -92,34 +95,69 @@ mod tests {
 
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path()).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let chain_id = 146;
-        let mut block = Block::default();
-        db.put(chain_id, block.clone()).unwrap();
-        block.number = 1;
-        db.put(chain_id, block.clone()).unwrap();
-        block.number = 2;
-        db.put(chain_id, block.clone()).unwrap();
-        block.number = 3;
-        db.put(chain_id, block.clone()).unwrap();
+        let init_db = || {
+            let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
-        drop(db); // close the database to ensure that the purge command can open it
+            let mut block = Block::default();
+            db.put(chain_id, block.clone()).unwrap();
+            block.number = 1;
+            db.put(chain_id, block.clone()).unwrap();
+            block.number = 2;
+            db.put(chain_id, block.clone()).unwrap();
+            block.number = 3;
+            db.put(chain_id, block.clone()).unwrap();
+        };
 
-        purge(
-            tmpdir.path(),
-            chain_id,
-            Some(1),
-            Some(2),
-            confirm_purge(true),
-        )
-        .unwrap();
+        // from is Some, to is Some
+        {
+            init_db();
+            purge(
+                tmpdir.path(),
+                chain_id,
+                Some(1),
+                Some(2),
+                confirm_purge(true),
+            )
+            .unwrap();
 
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-        assert!(db.get(chain_id, 0).unwrap().is_some());
-        assert!(db.get(chain_id, 1).unwrap().is_none());
-        assert!(db.get(chain_id, 2).unwrap().is_none());
-        assert!(db.get(chain_id, 3).unwrap().is_some());
+            let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
+            assert!(db.get(chain_id, 0).unwrap().is_some());
+            assert!(db.get(chain_id, 1).unwrap().is_none());
+            assert!(db.get(chain_id, 2).unwrap().is_none());
+            assert!(db.get(chain_id, 3).unwrap().is_some());
+        }
+        // from is Some, to is None
+        {
+            init_db();
+            purge(tmpdir.path(), chain_id, Some(1), None, confirm_purge(true)).unwrap();
+            let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
+            assert!(db.get(chain_id, 0).unwrap().is_some());
+            assert!(db.get(chain_id, 1).unwrap().is_none());
+            assert!(db.get(chain_id, 2).unwrap().is_none());
+            assert!(db.get(chain_id, 3).unwrap().is_none());
+        }
+        // from is None, to is Some
+        {
+            init_db();
+            purge(tmpdir.path(), chain_id, None, Some(2), confirm_purge(true)).unwrap();
+            let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
+            assert!(db.get(chain_id, 0).unwrap().is_none());
+            assert!(db.get(chain_id, 1).unwrap().is_none());
+            assert!(db.get(chain_id, 2).unwrap().is_none());
+            assert!(db.get(chain_id, 3).unwrap().is_some());
+        }
+        // from is None, to is None
+        {
+            init_db();
+            purge(tmpdir.path(), chain_id, None, None, confirm_purge(true)).unwrap();
+            let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
+            assert!(db.get(chain_id, 0).unwrap().is_none());
+            assert!(db.get(chain_id, 1).unwrap().is_none());
+            assert!(db.get(chain_id, 2).unwrap().is_none());
+            assert!(db.get(chain_id, 3).unwrap().is_none());
+        }
     }
 
     #[test]

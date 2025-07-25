@@ -189,14 +189,9 @@ pub trait BlockDb {
         })
     }
 
-    /// Deletes all blocks for the specified chain-ID in the range from `from_block` (defaults to 0;
-    /// inclusive) to `to_block` (defaults to u64::MAX; inclusive).
-    fn delete_range(
-        &self,
-        chain_id: u64,
-        from_block: Option<u64>,
-        to_block: Option<u64>,
-    ) -> Result<(), Error>;
+    /// Deletes all blocks for the specified chain-ID in the range from `from_block` (inclusive) to
+    /// `to_block` (inclusive).
+    fn delete_range(&self, chain_id: u64, from_block: u64, to_block: u64) -> Result<(), Error>;
 
     /// Retrieves the raw metadata for the specified key.
     fn get_metadata_raw(&self, key: u64) -> Result<Option<Vec<u64>>, Error>;
@@ -634,8 +629,8 @@ mod tests {
         fn delete_range(
             &self,
             _chain_id: u64,
-            _from_block: Option<u64>,
-            _to_block: Option<u64>,
+            _from_block: u64,
+            _to_block: u64,
         ) -> Result<(), Error> {
             unimplemented!() // there is no delete_range_raw method so we test it directly on RocksBlockDb
         }
