@@ -119,7 +119,7 @@ mod tests {
     #[tokio::test]
     async fn start_starts_server_successfully() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         {
             let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
             db.put_raw(1, 1, vec![1, 2, 3].as_slice()).unwrap();
@@ -158,7 +158,7 @@ mod tests {
     #[tokio::test]
     async fn start_allows_internal_tasks_to_be_cancelled() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
 
         let metrics = tokio::runtime::Handle::current().metrics();
@@ -228,7 +228,7 @@ mod tests {
     #[tokio::test]
     async fn sync_fails_if_server_url_is_invalid() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let json_rpc_config = [(1, "invalid_url".to_string())].into_iter().collect();
@@ -242,7 +242,7 @@ mod tests {
     async fn sync_forwards_db_error() {
         let tmpdir = tempfile::tempdir().unwrap();
 
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
 
         let mock_server = MockServer::start().await;
@@ -292,7 +292,7 @@ mod tests {
     async fn sync_fetches_blocks_and_stores_them_in_db() {
         let tmpdir = tempfile::tempdir().unwrap();
 
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
         let db = Arc::new(db);
 
@@ -354,7 +354,7 @@ mod tests {
     async fn start_starts_sync_and_rpc_clients_can_query_synchronized_blocks() {
         let tmpdir = tempfile::tempdir().unwrap();
 
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let mock_server = MockServer::start().await;
 

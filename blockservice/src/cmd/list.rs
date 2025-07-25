@@ -104,7 +104,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
 
         // create database
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         // remove read permissions
         std::fs::set_permissions(
@@ -121,7 +121,7 @@ mod tests {
     #[tokio::test]
     async fn fails_for_invalid_server_url() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let url = "invalid-url".to_string();
 
         let result = list(tmpdir.path(), None, Some(url), std::io::sink()).await;
@@ -132,7 +132,7 @@ mod tests {
     #[tokio::test]
     async fn fails_on_server_error() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let mut mock_server = MockRpcServer::new();
         mock_server
@@ -155,7 +155,7 @@ mod tests {
     #[tokio::test]
     async fn prints_message_for_each_range() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let chain_cfg = ChainConfig {
             name: "Test Chain".to_string(),
@@ -221,7 +221,7 @@ mod tests {
     #[tokio::test]
     async fn prints_message_for_all_chains_in_db_and_config_file() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         // Add chain 32 to config file only
         let chain_cfg = ChainConfig {
@@ -258,7 +258,7 @@ mod tests {
     #[tokio::test]
     async fn prints_message_for_each_remote_range() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         {
             // no blocks for chain id

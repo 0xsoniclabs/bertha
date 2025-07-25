@@ -78,7 +78,7 @@ mod tests {
     #[tokio::test]
     async fn fetches_files_and_stores_them_in_application_directory() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let server = TestServer::new(build_mock_server()).await;
 
@@ -102,7 +102,7 @@ mod tests {
     #[tokio::test]
     async fn skips_existing_files() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let server = TestServer::new(build_mock_server()).await;
 
@@ -143,7 +143,7 @@ mod tests {
     #[tokio::test]
     async fn fails_for_invalid_server_url() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let url = "invalid-url".to_string();
         let result = fetch_state_updates(tmpdir.path(), url, 7, std::io::sink()).await;
@@ -153,7 +153,7 @@ mod tests {
     #[tokio::test]
     async fn forwards_server_errors() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let mut mock_server = MockRpcServer::new();
         mock_server
@@ -171,7 +171,7 @@ mod tests {
     #[tokio::test]
     async fn forwards_io_errors() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let server = TestServer::new(build_mock_server()).await;
 

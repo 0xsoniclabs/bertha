@@ -50,7 +50,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
 
         // create database
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         // remove read permissions
         std::fs::set_permissions(tmpdir.path(), std::fs::Permissions::from_mode(0o333)).unwrap();
@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn prints_block_if_exists() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let chain_id = 1;
         let block = Block::default();
@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn prints_error_message_if_not_exists() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let mut buf = Vec::new();
         let result = view(tmpdir.path(), 1, 0, &mut buf);

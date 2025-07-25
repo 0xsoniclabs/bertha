@@ -117,7 +117,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
 
         // create database
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         // remove read permissions
         std::fs::set_permissions(
@@ -136,7 +136,7 @@ mod tests {
         let chain_id = 146;
 
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let block = Block::default();
@@ -185,7 +185,7 @@ mod tests {
         let block_number = 0;
 
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let mut buf = Vec::new();
         let result = verify(
@@ -209,7 +209,7 @@ mod tests {
         let chain_id = 146;
 
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let mut block = Block::default();
@@ -248,7 +248,7 @@ mod tests {
         let chain_id = 146;
 
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let block0 = Block::default();
@@ -293,7 +293,7 @@ mod tests {
         let chain_id = 146;
 
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let mut block = Block::default();
