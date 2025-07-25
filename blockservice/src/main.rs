@@ -93,14 +93,21 @@ async fn main() {
                         eprintln!("Error: {e}");
                         std::process::exit(1);
                     }
+                    cancellation_token.cancel();
                 }
             }
         }
     });
 
-    signal::ctrl_c()
-        .await
-        .expect("failed to install Ctrl+C handler");
-    println!("\nReceived Ctrl+C, shutting down...");
-    cancellation_token.cancel();
+    tokio::select! {
+        _ = cancellation_token.cancelled() => {},
+        result = signal::ctrl_c() => {
+            if result.is_err() {
+                eprintln!("failed to install Ctrl+C handler");
+                std::process::exit(1);
+            }
+            println!("\nReceived Ctrl+C, shutting down...");
+            cancellation_token.cancel();
+        }
+    }
 }
