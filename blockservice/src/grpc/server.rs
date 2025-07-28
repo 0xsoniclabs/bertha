@@ -39,7 +39,7 @@ where
     pub async fn serve(
         self,
         listener: tokio::net::TcpListener,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("Listening on {}...", listener.local_addr()?);
 
         Server::builder()

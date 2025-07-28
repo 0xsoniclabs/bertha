@@ -7,7 +7,7 @@ pub async fn list(
     chain_id: Option<u64>,
     url: Option<String>,
     mut writer: impl std::io::Write,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if matches!(chain_id, Some(0)) {
         return Err("chain ID cannot be 0".into());
     }

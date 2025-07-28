@@ -7,7 +7,7 @@ pub fn view(
     chain_id: u64,
     block_number: u64,
     mut writer: impl std::io::Write,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (_cfg, db) = open_app_dir(app_dir, true)?;
 
     let block = db.get(chain_id, block_number)?;

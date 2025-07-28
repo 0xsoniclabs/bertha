@@ -15,7 +15,7 @@ pub fn purge(
     to: Option<u64>,
     mut writer: impl std::io::Write,
     reader: &impl InputReader,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if chain_id == 0 {
         return Err("chain ID cannot be 0".into());
     }
