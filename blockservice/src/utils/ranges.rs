@@ -99,6 +99,27 @@ impl RangesExt for Vec<BlockRange> {
     }
 }
 
+/// Intersects a target range with a list of candidate ranges.
+/// It returns the union of all intersections of the target range with the candidate ranges.
+///
+///  Postconditions:
+/// - ranges are non-empty (start <= end)
+/// - ranges are non-overlapping
+/// - ranges are sorted
+#[cfg(test)]
+pub fn intersect_ranges(target: BlockRange, candidates: &[BlockRange]) -> Vec<BlockRange> {
+    let mut segments = Vec::new();
+    for candidate in candidates {
+        if candidate.start() <= target.end() && candidate.end() >= target.start() {
+            let start = cmp::max(*candidate.start(), *target.start());
+            let end = cmp::min(*candidate.end(), *target.end());
+            segments.push(start..=end);
+        }
+    }
+    segments.canonicalize();
+    segments
+}
+
 /// Subtracts multiple ranges from a range.
 ///
 /// Postconditions:
@@ -267,6 +288,36 @@ mod tests {
         for (mut ranges, expected) in cases {
             ranges.canonicalize();
             assert_eq_expected_and_postconditions(&ranges, &expected);
+        }
+    }
+
+    #[test]
+    fn intersect_ranges_returns_correct_intersections() {
+        // test cases in the form of (target range, candidate ranges, expected intersection)
+        let cases = [
+            // intersection with empty candidates
+            (0..=1, vec![], vec![]),
+            // intersection with non-overlapping candidates
+            (0..=1, vec![2..=3], vec![]),
+            // target range is equal to candidate range
+            (0..=1, vec![0..=1], vec![0..=1]),
+            // target range contains all the candidates
+            (0..=3, vec![1..=2, 2..=3], vec![1..=3]),
+            // target range is contained in a candidate
+            (1..=2, vec![0..=3], vec![1..=2]),
+            // target range overlaps with non-adjacent candidates
+            (1..=5, vec![0..=2, 4..=6], vec![1..=2, 4..=5]),
+        ];
+
+        let mut rng = SmallRng::seed_from_u64(123);
+        for (target, candidates, expected) in cases {
+            let result = intersect_ranges(target.clone(), &candidates);
+            assert_eq_expected_and_postconditions(&result, &expected);
+
+            let mut shuffled_candidates = candidates.clone();
+            shuffle_and_make_overlapping(&mut shuffled_candidates, &mut rng);
+            let result = intersect_ranges(target, &shuffled_candidates);
+            assert_eq_expected_and_postconditions(&result, &expected);
         }
     }
 
