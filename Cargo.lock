@@ -491,6 +491,7 @@ dependencies = [
  "mockall",
  "prost",
  "rand 0.9.1",
+ "regex",
  "rocksdb",
  "serde",
  "serde_json",

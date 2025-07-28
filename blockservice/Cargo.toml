@@ -54,6 +54,7 @@ tower = "0.5.2"
 # utils
 rand = "0.9.1"
 indoc = "2.0.6"
+regex = "1.11.1"
 
 [build-dependencies]
 tonic-build = "*"
