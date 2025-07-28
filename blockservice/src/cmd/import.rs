@@ -17,6 +17,7 @@ pub fn import(
     app_dir: impl AsRef<Path>,
     snapshot_path: impl AsRef<Path>,
     verify: bool,
+    mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (mut cfg, db) = open_app_dir(app_dir, false)?;
 
@@ -30,10 +31,16 @@ pub fn import(
         .and_then(|b| b.as_ref().map(|b| b.number + 1).ok())
         .unwrap_or_default();
 
-    println!("Genesis file contains {total_blocks} blocks for chain ID {chain_id}");
+    writeln!(
+        writer,
+        "Genesis file contains {total_blocks} blocks for chain ID {chain_id}"
+    )?;
 
     if cfg.get_chain_config(chain_id).is_none() {
-        println!("Creating new entry for chain ID {chain_id} in the configuration");
+        writeln!(
+            writer,
+            "Creating new entry for chain ID {chain_id} in the configuration"
+        )?;
         cfg.add_chain(ChainConfig::new(chain_id))?;
     }
 
@@ -55,17 +62,21 @@ pub fn import(
     let import_blocks = total_blocks - smallest_import_block_number;
 
     if import_blocks != total_blocks {
-        println!(
+        writeln!(
+            writer,
             "Skipping {} blocks that are already in the database",
             total_blocks - import_blocks
-        );
+        )?;
     }
 
     let mut uncompressed_bytes_written = 0;
     let mut block_count = 0;
     let progress_bar = make_progress_bar(total_blocks)?;
 
-    println!("Importing {import_blocks} blocks for chain ID {chain_id}");
+    writeln!(
+        writer,
+        "Importing {import_blocks} blocks for chain ID {chain_id}"
+    )?;
 
     let mut batch = BlockBatch::new();
     let mut prev_parent_hash: Option<Hash> = None;
@@ -127,13 +138,14 @@ pub fn import(
     db.write_batch(chain_id, batch)?;
     let elapsed = before.elapsed();
     progress_bar.finish();
-    println!(
+    writeln!(
+        writer,
         "Wrote {} blocks, total uncompressed size: {} MiB, elapsed: {}s, throughput: {:.1} MiB/s",
         block_count,
         uncompressed_bytes_written / (1024 * 1024),
         elapsed.as_secs(),
         uncompressed_bytes_written as f64 / (1024.0 * 1024.0) / elapsed.as_secs_f64()
-    );
+    )?;
 
     Ok(())
 }
@@ -157,10 +169,22 @@ mod tests {
             genesis_parser::test_utils::generate_test_genesis(chain_id, num_blocks, &[]);
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let mut writer = Vec::new();
+        import(
+            tmpdir.path(),
+            genesis_file.to_str().unwrap(),
+            true,
+            &mut writer,
+        )
+        .unwrap();
 
-        import(tmpdir.path(), genesis_file.to_str().unwrap(), true).unwrap();
-
+        assert!(String::from_utf8(writer).unwrap().contains(indoc::indoc! {"
+            Genesis file contains 5 blocks for chain ID 62
+            Creating new entry for chain ID 62 in the configuration
+            Importing 5 blocks for chain ID 62
+            Wrote 5 blocks, total uncompressed size: 0 MiB, elapsed: 0s, throughput: "
+        }));
         let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
         for i in 0..num_blocks {
             let block = db.get(chain_id, i as u64).unwrap();
@@ -191,7 +215,7 @@ mod tests {
         let db_blocks = &all_blocks[..db_blocks_num];
         let mut genesis_blocks = all_blocks.clone();
 
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
         for block in db_blocks {
             db.put(chain_id, block.clone()).unwrap();
@@ -208,7 +232,23 @@ mod tests {
             genesis_parser::test_utils::generate_test_genesis(chain_id, 0, &genesis_blocks);
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
-        import(tmpdir.path(), genesis_file.to_str().unwrap(), false).unwrap();
+        let mut writer = Vec::new();
+        import(
+            tmpdir.path(),
+            genesis_file.to_str().unwrap(),
+            false,
+            &mut writer,
+        )
+        .unwrap();
+
+        let output = String::from_utf8(writer).unwrap();
+        assert!(output.contains(indoc::indoc! {"
+            Genesis file contains 5 blocks for chain ID 146
+            Creating new entry for chain ID 146 in the configuration
+            Skipping 2 blocks that are already in the database
+            Importing 3 blocks for chain ID 146
+            Wrote 3 blocks, total uncompressed size: 0 MiB, elapsed: 0s, throughput: "
+        }));
 
         let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
         for block in all_blocks {
@@ -222,7 +262,7 @@ mod tests {
     #[test]
     fn fails_if_parent_hash_of_block_0_is_not_0_hash() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
 
         let extra_blocks = [Block {
@@ -233,29 +273,50 @@ mod tests {
         let genesis_data = genesis_parser::test_utils::generate_test_genesis(1, 0, &extra_blocks);
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
+        let mut writer = Vec::new();
         assert!(
-            import(tmpdir.path(),genesis_file.to_str().unwrap(), true)
+            import(tmpdir.path(),genesis_file.to_str().unwrap(), true, &mut writer)
                 .unwrap_err()
                 .to_string()
                 .contains("Block zero must have parent hash 0x0000000000000000000000000000000000000000000000000000000000000000")
         );
+
+        let output = String::from_utf8(writer).unwrap();
+        assert!(output.contains(indoc::indoc! {"
+            Genesis file contains 1 blocks for chain ID 1
+            Creating new entry for chain ID 1 in the configuration
+            Importing 1 blocks for chain ID 1"
+        }));
     }
 
     #[test]
     fn fails_if_parent_hash_mismatches() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
         let extra_blocks = [Block::default_sonic()];
         let genesis_data = genesis_parser::test_utils::generate_test_genesis(1, 1, &extra_blocks);
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
+        let mut writer = Vec::new();
         assert!(
-            import(tmpdir.path(), genesis_file.to_str().unwrap(), true)
-                .unwrap_err()
-                .to_string()
-                .contains("Parent hash mismatch for block 1")
+            import(
+                tmpdir.path(),
+                genesis_file.to_str().unwrap(),
+                true,
+                &mut writer
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("Parent hash mismatch for block 1")
         );
+
+        let output = String::from_utf8(writer).unwrap();
+        assert!(output.contains(indoc::indoc! {"
+            Genesis file contains 1 blocks for chain ID 1
+            Creating new entry for chain ID 1 in the configuration
+            Importing 1 blocks for chain ID 1"
+        }));
     }
 
     #[test]
@@ -264,7 +325,7 @@ mod tests {
         // && hash(block_0 in db) != block_1.parent_hash
         let chain_id = 1;
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
         let genesis_data = genesis_parser::test_utils::generate_test_genesis(chain_id, 2, &[]);
         std::fs::write(&genesis_file, genesis_data).unwrap();
@@ -279,19 +340,33 @@ mod tests {
         .unwrap();
         drop(db);
 
+        let mut writer = Vec::new();
         assert!(
-            import(tmpdir.path(), genesis_file.to_str().unwrap(), true)
-                .unwrap_err()
-                .to_string()
-                .contains("Parent hash mismatch for block 1")
+            import(
+                tmpdir.path(),
+                genesis_file.to_str().unwrap(),
+                true,
+                &mut writer
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("Parent hash mismatch for block 1")
         );
+
+        let output = String::from_utf8(writer).unwrap();
+        assert!(output.contains(indoc::indoc! {"
+            Genesis file contains 2 blocks for chain ID 1
+            Creating new entry for chain ID 1 in the configuration
+            Skipping 1 blocks that are already in the database
+            Importing 1 blocks for chain ID 1"
+        }));
     }
 
     #[test]
     fn fails_when_metadata_invalid() {
         let tmpdir = tempfile::tempdir().unwrap();
 
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let chain_id = 146;
 
@@ -303,12 +378,26 @@ mod tests {
         let genesis_data = genesis_parser::test_utils::generate_test_genesis(chain_id, 3, &[]);
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
+        let mut writer = Vec::new();
         assert_eq!(
-            import(tmpdir.path(), genesis_file.to_str().unwrap(), true)
-                .unwrap_err()
-                .to_string(),
+            import(
+                tmpdir.path(),
+                genesis_file.to_str().unwrap(),
+                true,
+                &mut writer
+            )
+            .unwrap_err()
+            .to_string(),
             "Invalid metadata, block 1 does not exist"
         );
+
+        let output = String::from_utf8(writer).unwrap();
+        assert!(output.contains(indoc::indoc! {"
+            Genesis file contains 3 blocks for chain ID 146
+            Creating new entry for chain ID 146 in the configuration
+            Skipping 2 blocks that are already in the database
+            Importing 1 blocks for chain ID 146"
+        }));
     }
 
     #[test]
@@ -318,7 +407,7 @@ mod tests {
         let genesis_data = genesis_parser::test_utils::generate_test_genesis(0, 5, &[]);
         let data_len = genesis_data.len();
         let corruption = [0xde, 0xad, 0xbe, 0xef];
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         // Corrupted header
         {
@@ -326,9 +415,16 @@ mod tests {
             genesis_data[0..corruption.len()].copy_from_slice(&corruption); // Corrupt the first part of the file
             std::fs::write(&genesis_file, genesis_data).unwrap();
 
-            let result = import(tmpdir.path(), genesis_file.to_str().unwrap(), false);
+            let mut writer = Vec::new();
+            let result = import(
+                tmpdir.path(),
+                genesis_file.to_str().unwrap(),
+                false,
+                &mut writer,
+            );
             assert!(result.is_err());
             assert!(result.unwrap_err().to_string().contains("invalid header"));
+            assert!(writer.is_empty());
         }
 
         // Corrupted block
@@ -337,7 +433,13 @@ mod tests {
             genesis_data[data_len - corruption.len()..].copy_from_slice(&corruption); // Corrupt the last part of the file
             std::fs::write(&genesis_file, genesis_data).unwrap();
 
-            let result = import(tmpdir.path(), genesis_file.to_str().unwrap(), false);
+            let mut writer = Vec::new();
+            let result = import(
+                tmpdir.path(),
+                genesis_file.to_str().unwrap(),
+                false,
+                &mut writer,
+            );
             assert!(result.is_err());
             assert!(
                 result
@@ -345,6 +447,13 @@ mod tests {
                     .to_string()
                     .contains("corrupt gzip stream")
             );
+
+            let output = String::from_utf8(writer).unwrap();
+            assert!(output.contains(indoc::indoc! {"
+                Genesis file contains 0 blocks for chain ID 0
+                Creating new entry for chain ID 0 in the configuration
+                Importing 0 blocks for chain ID 0"
+            }));
         }
     }
 
@@ -352,12 +461,14 @@ mod tests {
     fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
 
-        let result = import(tmpdir.path(), "somepath", true);
+        let mut writer = Vec::new();
+        let result = import(tmpdir.path(), "somepath", true, &mut writer);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
+        assert!(writer.is_empty());
     }
 
     #[test]
@@ -365,14 +476,15 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
 
         // Create a read-only database
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         std::fs::set_permissions(
             tmpdir.path().join(BLOCK_DB_NAME),
             std::fs::Permissions::from_mode(0o555),
         )
         .unwrap();
 
-        let result = import(tmpdir.path(), "somepath", true);
+        let mut writer = Vec::new();
+        let result = import(tmpdir.path(), "somepath", true, &mut writer);
         // We expect an error because we cannot write to the database
         assert!(result.is_err());
         assert!(
@@ -381,5 +493,6 @@ mod tests {
                 .to_string()
                 .contains("Permission denied")
         );
+        assert!(writer.is_empty());
     }
 }

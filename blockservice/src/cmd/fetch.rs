@@ -179,7 +179,7 @@ mod tests {
     #[tokio::test]
     async fn fails_for_invalid_server_url() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let url = "invalid-url".to_string();
         let result = fetch(tmpdir.path(), url, 1, None, None, std::io::sink()).await;
@@ -191,7 +191,7 @@ mod tests {
     #[tokio::test]
     async fn fails_on_invalid_stored_chain_ids() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         {
             let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
             db.put_metadata_raw(1, vec![0].as_slice()).unwrap(); // Invalid metadata length
@@ -225,7 +225,7 @@ mod tests {
     #[tokio::test]
     async fn fails_on_server_error() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
             Ok(tonic::Response::new(ChainRanges {
@@ -257,7 +257,7 @@ mod tests {
     #[tokio::test]
     async fn fails_if_block_stream_response_contains_error() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut server = MockRpcServer::new();
         server.expect_list().returning(|_| {
             Ok(tonic::Response::new(ChainRanges {
@@ -289,7 +289,7 @@ mod tests {
     #[tokio::test]
     async fn fails_if_no_remote_chain_ids() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
             Ok(tonic::Response::new(ChainRanges {
@@ -317,7 +317,7 @@ mod tests {
     #[tokio::test]
     async fn fails_on_invalid_remote_chain_ranges() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         // Empty chain ranges for chain ID 1
         {
             let mut mock_server = MockRpcServer::new();
@@ -377,7 +377,7 @@ mod tests {
     #[tokio::test]
     async fn fails_on_invalid_requested_range() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
             Ok(tonic::Response::new(ChainRanges {
@@ -408,7 +408,7 @@ mod tests {
     #[tokio::test]
     async fn fails_if_requested_range_does_not_exist_on_remote_server() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
             Ok(tonic::Response::new(ChainRanges {
@@ -476,7 +476,7 @@ mod tests {
     #[tokio::test]
     async fn fails_if_get_block_range_returns_unexpected_block_range() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         // Less block than expected
         {
             let mut mock_server = MockRpcServer::new();
@@ -528,7 +528,15 @@ mod tests {
                 "received fewer blocks than expected: expected 3, got 2",
             );
         }
-        purge(tmpdir.path(), 1, None, None, Cursor::new("y")).unwrap(); // Clear the database for the next test
+        purge(
+            tmpdir.path(),
+            1,
+            None,
+            None,
+            std::io::sink(),
+            Cursor::new("y"),
+        )
+        .unwrap(); // Clear the database for the next test
         // More blocks than expected
         {
             let mut mock_server = MockRpcServer::new();
@@ -574,7 +582,15 @@ mod tests {
                 "received fewer blocks than expected: expected 3, got 5"
             );
         }
-        purge(tmpdir.path(), 1, None, None, Cursor::new("y")).unwrap(); // Clear the database for the next test
+        purge(
+            tmpdir.path(),
+            1,
+            None,
+            None,
+            std::io::sink(),
+            Cursor::new("y"),
+        )
+        .unwrap(); // Clear the database for the next test
         // Block number mismatch
         {
             let mut mock_server = MockRpcServer::new();
@@ -640,7 +656,7 @@ mod tests {
         }
 
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let max_block_number: u64 = 40;
         let local_blocks_ranges = to_proto_block_range([

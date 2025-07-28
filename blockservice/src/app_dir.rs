@@ -21,7 +21,7 @@ pub enum AppDirError {
 /// This allows to at least partially recover from a corrupted application directory.
 ///
 /// If both already exist, an error is returned.
-pub fn init_app_dir(path: impl AsRef<Path>) -> Result<(), Error> {
+pub fn init_app_dir(path: impl AsRef<Path>, mut writer: impl std::io::Write) -> Result<(), Error> {
     let path = path.as_ref().to_path_buf().canonicalize().map_err(|e| {
         Error::AppDir(AppDirError::CreateFailed(
             path.as_ref().to_path_buf(),
@@ -37,28 +37,45 @@ pub fn init_app_dir(path: impl AsRef<Path>) -> Result<(), Error> {
         )));
     }
 
-    println!(
+    writeln!(
+        writer,
         "Initializing new blockservice directory at: {}",
         path.display()
-    );
+    )?;
 
     // Create config file if it does not exist
     let cfg_path = path.join(CONFIG_FILE_NAME);
     if !cfg_path.exists() {
-        println!("Creating new configuration at: {}", cfg_path.display());
+        writeln!(
+            writer,
+            "Creating new configuration at: {}",
+            cfg_path.display()
+        )?;
         Config::create_default(cfg_path.clone())
             .map_err(|e| AppDirError::CreateFailed(path.clone(), e.to_string()))?;
     } else {
-        println!("Found existing configuration at: {}", cfg_path.display());
+        writeln!(
+            writer,
+            "Found existing configuration at: {}",
+            cfg_path.display()
+        )?;
     }
 
     // Create block database if it does not exist
     let db_path = path.join(BLOCK_DB_NAME);
     if !db_path.exists() {
-        println!("Creating new block database at: {}", db_path.display());
+        writeln!(
+            writer,
+            "Creating new block database at: {}",
+            db_path.display()
+        )?;
         RocksBlockDb::create(db_path)?;
     } else {
-        println!("Found existing block database at: {}", db_path.display());
+        writeln!(
+            writer,
+            "Found existing block database at: {}",
+            db_path.display()
+        )?;
     }
 
     Ok(())
@@ -106,15 +123,27 @@ mod tests {
     #[test]
     fn init_app_dir_creates_db_and_config_file() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        let mut writer = Vec::new();
+        init_app_dir(tmpdir.path(), &mut writer).unwrap();
         assert!(tmpdir.path().join(BLOCK_DB_NAME).exists());
         assert!(tmpdir.path().join(CONFIG_FILE_NAME).exists());
+
+        assert_eq!(
+            String::from_utf8(writer).unwrap(),
+            format!(
+                "Initializing new blockservice directory at: {}\nCreating new configuration at: {}\nCreating new block database at: {}\n",
+                tmpdir.path().display(),
+                tmpdir.path().join(CONFIG_FILE_NAME).display(),
+                tmpdir.path().join(BLOCK_DB_NAME).display()
+            )
+        );
     }
 
     #[test]
     fn init_app_dir_fails_if_directory_does_not_exist() {
         let path = PathBuf::from("/non/existent/path");
-        let result = init_app_dir(&path);
+        let mut writer = Vec::new();
+        let result = init_app_dir(&path, &mut writer);
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
@@ -128,9 +157,10 @@ mod tests {
     #[test]
     fn init_app_dir_fails_if_already_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        let mut writer = Vec::new();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let result = init_app_dir(tmpdir.path(), &mut writer);
 
-        let result = init_app_dir(tmpdir.path());
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
@@ -139,6 +169,7 @@ mod tests {
                 "already exists".to_owned()
             ))
         );
+        assert!(writer.is_empty());
     }
 
     #[test]
@@ -146,7 +177,8 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         std::fs::set_permissions(tmpdir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
 
-        let result = init_app_dir(tmpdir.path());
+        let mut writer = Vec::new();
+        let result = init_app_dir(tmpdir.path(), &mut writer);
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err(),
@@ -154,6 +186,15 @@ mod tests {
                 tmpdir.path().to_path_buf(),
                 "I/O error: Permission denied (os error 13)".to_owned()
             ))
+        );
+
+        assert_eq!(
+            String::from_utf8(writer).unwrap(),
+            format!(
+                "Initializing new blockservice directory at: {}\nCreating new configuration at: {}\n",
+                tmpdir.path().display(),
+                tmpdir.path().join(CONFIG_FILE_NAME).display()
+            )
         );
     }
 
@@ -165,8 +206,20 @@ mod tests {
             let db = RocksBlockDb::create(&db_path).unwrap();
             db.put_raw(123, 456, vec![1, 2, 3].as_slice()).unwrap();
         }
-        init_app_dir(tmpdir.path()).unwrap();
+        let mut writer = Vec::new();
+        init_app_dir(tmpdir.path(), &mut writer).unwrap();
         assert!(tmpdir.path().join(CONFIG_FILE_NAME).exists());
+
+        assert_eq!(
+            String::from_utf8(writer).unwrap(),
+            format!(
+                "Initializing new blockservice directory at: {}\nCreating new configuration at: {}\nFound existing block database at: {}\n",
+                tmpdir.path().display(),
+                tmpdir.path().join(CONFIG_FILE_NAME).display(),
+                db_path.display()
+            )
+        );
+
         // DB was not overwritten
         let db = RocksBlockDb::open(db_path).unwrap();
         let res = db.get_raw(123, 456).unwrap();
@@ -185,8 +238,18 @@ mod tests {
             })
             .unwrap();
         }
-        init_app_dir(tmpdir.path()).unwrap();
+        let mut writer = Vec::new();
+        init_app_dir(tmpdir.path(), &mut writer).unwrap();
         assert!(tmpdir.path().join(BLOCK_DB_NAME).exists());
+        assert_eq!(
+            String::from_utf8(writer).unwrap(),
+            format!(
+                "Initializing new blockservice directory at: {}\nFound existing configuration at: {}\nCreating new block database at: {}\n",
+                tmpdir.path().display(),
+                cfg_path.display(),
+                tmpdir.path().join(BLOCK_DB_NAME).display()
+            )
+        );
         // Config was not overwritten
         let config = Config::load(cfg_path).unwrap();
         assert_eq!(config.get_chain_config(123).unwrap().name, "Test Chain");

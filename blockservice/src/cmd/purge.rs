@@ -10,11 +10,15 @@ pub fn purge(
     chain_id: u64,
     from: Option<u64>,
     to: Option<u64>,
+    mut writer: impl std::io::Write,
     mut reader: impl std::io::BufRead,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Guard the purge command
     let mut input = String::new();
-    print!("Are you sure you want to purge blocks for chain {chain_id}? (y/n): ");
+    write!(
+        writer,
+        "Are you sure you want to purge blocks for chain {chain_id}? (y/n): "
+    )?;
     std::io::stdout().flush()?;
     reader.read_line(&mut input)?;
     if matches!(input.trim(), "y" | "Y") {
@@ -43,13 +47,24 @@ mod tests {
     fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = tempfile::tempdir().unwrap();
 
-        // set the stdin
-        let result = purge(tmpdir.path(), 0, None, None, confirm_purge(true));
+        let mut writer = Vec::new();
+        let result = purge(
+            tmpdir.path(),
+            0,
+            None,
+            None,
+            &mut writer,
+            confirm_purge(true),
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no blockservice.toml found at {} - did you forget to run init?",
             tmpdir.path().display()
         )));
+        assert_eq!(
+            String::from_utf8(writer).unwrap(),
+            format!("Are you sure you want to purge blocks for chain 0? (y/n): ")
+        );
     }
 
     #[test]
@@ -57,7 +72,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
 
         // create database
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         // remove write permissions
         std::fs::set_permissions(
@@ -66,7 +81,15 @@ mod tests {
         )
         .unwrap();
 
-        let result = purge(tmpdir.path(), 0, None, None, confirm_purge(true));
+        let mut writer = Vec::new();
+        let result = purge(
+            tmpdir.path(),
+            0,
+            None,
+            None,
+            &mut writer,
+            confirm_purge(true),
+        );
         assert!(result.is_err());
         assert!(
             result
@@ -74,17 +97,76 @@ mod tests {
                 .to_string()
                 .contains("Permission denied")
         );
+        assert_eq!(
+            String::from_utf8(writer).unwrap(),
+            format!("Are you sure you want to purge blocks for chain 0? (y/n): ")
+        );
     }
 
     #[test]
     fn can_be_called_with_chain_id_or_chain_id_and_start_or_chain_id_and_start_and_end() {
         let tmpdir = tempfile::tempdir().unwrap();
 
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
-        assert!(purge(tmpdir.path(), 0, None, None, confirm_purge(true)).is_ok());
-        assert!(purge(tmpdir.path(), 0, Some(0), None, confirm_purge(true)).is_ok());
-        assert!(purge(tmpdir.path(), 0, Some(0), Some(1), confirm_purge(true)).is_ok());
+        // From is None, to is None
+        {
+            let mut writer = Vec::new();
+            assert!(
+                purge(
+                    tmpdir.path(),
+                    0,
+                    None,
+                    None,
+                    &mut writer,
+                    confirm_purge(true)
+                )
+                .is_ok()
+            );
+            assert_eq!(
+                String::from_utf8(writer).unwrap(),
+                format!("Are you sure you want to purge blocks for chain 0? (y/n): ")
+            );
+        }
+        // From is Some, to is None
+        {
+            let mut writer = Vec::new();
+            assert!(
+                purge(
+                    tmpdir.path(),
+                    0,
+                    Some(0),
+                    None,
+                    &mut writer,
+                    confirm_purge(true)
+                )
+                .is_ok()
+            );
+            assert_eq!(
+                String::from_utf8(writer).unwrap(),
+                format!("Are you sure you want to purge blocks for chain 0? (y/n): ")
+            );
+        }
+        // From is Some, to is Some
+        {
+            let mut writer = Vec::new();
+            assert!(
+                purge(
+                    tmpdir.path(),
+                    0,
+                    Some(0),
+                    Some(1),
+                    &mut writer,
+                    confirm_purge(true)
+                )
+                .is_ok()
+            );
+
+            assert_eq!(
+                String::from_utf8(writer).unwrap(),
+                format!("Are you sure you want to purge blocks for chain 0? (y/n): ")
+            );
+        }
     }
 
     #[test]
@@ -94,7 +176,7 @@ mod tests {
         // already tested in BlockRocksDb::delete_range
 
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let chain_id = 146;
         let init_db = || {
@@ -113,14 +195,20 @@ mod tests {
         // from is Some, to is Some
         {
             init_db();
+            let mut writer = Vec::new();
             purge(
                 tmpdir.path(),
                 chain_id,
                 Some(1),
                 Some(2),
+                &mut writer,
                 confirm_purge(true),
             )
             .unwrap();
+            assert_eq!(
+                String::from_utf8(writer).unwrap(),
+                format!("Are you sure you want to purge blocks for chain {chain_id}? (y/n): ")
+            );
 
             let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
             assert!(db.get(chain_id, 0).unwrap().is_some());
@@ -131,7 +219,21 @@ mod tests {
         // from is Some, to is None
         {
             init_db();
-            purge(tmpdir.path(), chain_id, Some(1), None, confirm_purge(true)).unwrap();
+            let mut writer = Vec::new();
+            purge(
+                tmpdir.path(),
+                chain_id,
+                Some(1),
+                None,
+                &mut writer,
+                confirm_purge(true),
+            )
+            .unwrap();
+            assert_eq!(
+                String::from_utf8(writer).unwrap(),
+                format!("Are you sure you want to purge blocks for chain {chain_id}? (y/n): ")
+            );
+
             let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
             assert!(db.get(chain_id, 0).unwrap().is_some());
             assert!(db.get(chain_id, 1).unwrap().is_none());
@@ -141,7 +243,21 @@ mod tests {
         // from is None, to is Some
         {
             init_db();
-            purge(tmpdir.path(), chain_id, None, Some(2), confirm_purge(true)).unwrap();
+            let mut writer = Vec::new();
+            purge(
+                tmpdir.path(),
+                chain_id,
+                None,
+                Some(2),
+                &mut writer,
+                confirm_purge(true),
+            )
+            .unwrap();
+            assert_eq!(
+                String::from_utf8(writer).unwrap(),
+                format!("Are you sure you want to purge blocks for chain {chain_id}? (y/n): ")
+            );
+
             let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
             assert!(db.get(chain_id, 0).unwrap().is_none());
             assert!(db.get(chain_id, 1).unwrap().is_none());
@@ -151,7 +267,21 @@ mod tests {
         // from is None, to is None
         {
             init_db();
-            purge(tmpdir.path(), chain_id, None, None, confirm_purge(true)).unwrap();
+            let mut writer = Vec::new();
+            purge(
+                tmpdir.path(),
+                chain_id,
+                None,
+                None,
+                &mut writer,
+                confirm_purge(true),
+            )
+            .unwrap();
+            assert_eq!(
+                String::from_utf8(writer).unwrap(),
+                format!("Are you sure you want to purge blocks for chain {chain_id}? (y/n): ")
+            );
+
             let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
             assert!(db.get(chain_id, 0).unwrap().is_none());
             assert!(db.get(chain_id, 1).unwrap().is_none());
@@ -163,19 +293,33 @@ mod tests {
     #[test]
     fn cancel_operation_if_user_does_not_confirm() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
         db.put_raw(42, 1, vec![1, 2, 3].as_slice()).unwrap();
 
-        purge(tmpdir.path(), 0, None, None, confirm_purge(false)).expect("purge should succeed");
+        let mut writer = Vec::new();
+        purge(
+            tmpdir.path(),
+            0,
+            None,
+            None,
+            &mut writer,
+            confirm_purge(false),
+        )
+        .expect("purge should succeed");
         assert_eq!(db.get_raw(42, 1).unwrap(), Some(vec![1, 2, 3]));
+
+        assert_eq!(
+            String::from_utf8(writer).unwrap(),
+            format!("Are you sure you want to purge blocks for chain 0? (y/n): ")
+        );
     }
 
     #[test]
     fn guard_is_case_unsensitive() {
         let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path()).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let set_elem = || {
             let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
@@ -184,14 +328,26 @@ mod tests {
         // lowercase 'y'
         {
             set_elem();
-            purge(tmpdir.path(), 42, None, None, Cursor::new("y")).expect("purge should succeed");
+            let mut writer = Vec::new();
+            purge(tmpdir.path(), 42, None, None, &mut writer, Cursor::new("y"))
+                .expect("purge should succeed");
+            assert_eq!(
+                String::from_utf8(writer).unwrap(),
+                format!("Are you sure you want to purge blocks for chain 42? (y/n): ")
+            );
             let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
             assert!(db.get(42, 1).unwrap().is_none());
         }
         // uppercase 'Y'
         {
             set_elem();
-            purge(tmpdir.path(), 42, None, None, Cursor::new("Y")).expect("purge should succeed");
+            let mut writer = Vec::new();
+            purge(tmpdir.path(), 42, None, None, &mut writer, Cursor::new("Y"))
+                .expect("purge should succeed");
+            assert_eq!(
+                String::from_utf8(writer).unwrap(),
+                format!("Are you sure you want to purge blocks for chain 42? (y/n): ")
+            );
             let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
             assert!(db.get(42, 1).unwrap().is_none());
         }

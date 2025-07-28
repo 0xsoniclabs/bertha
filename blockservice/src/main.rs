@@ -18,11 +18,11 @@ async fn execute(
     cancellation_token: CancellationToken,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match args.command {
-        Command::Init => cmd::init(args.dir),
+        Command::Init => cmd::init(args.dir, std::io::stdout()),
         Command::Import {
             snapshot_file,
             verify,
-        } => cmd::import(args.dir, snapshot_file, verify),
+        } => cmd::import(args.dir, snapshot_file, verify, std::io::stdout()),
         Command::List { chain_id, url } => {
             cmd::list(args.dir, chain_id, url, std::io::stdout()).await
         }
@@ -32,9 +32,14 @@ async fn execute(
             from,
             to,
         } => cmd::fetch(args.dir, url, chain_id, from, to, std::io::stdout()).await,
-        Command::Purge { chain_id, from, to } => {
-            cmd::purge(args.dir, chain_id, from, to, std::io::stdin().lock())
-        }
+        Command::Purge { chain_id, from, to } => cmd::purge(
+            args.dir,
+            chain_id,
+            from,
+            to,
+            std::io::stdout(),
+            std::io::stdin().lock(),
+        ),
         Command::Verify {
             chain_id,
             block_number,
