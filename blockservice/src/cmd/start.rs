@@ -20,6 +20,7 @@ pub async fn start(
     config: HashMap<u64, String>,
     cancellation_token: CancellationToken,
     _test_notify_tasks_spawned: Option<Arc<tokio::sync::Notify>>,
+    _test_sync_block_count: Option<Arc<std::sync::atomic::AtomicU64>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (cfg, db) = open_app_dir(app_dir, false)?;
     // Put the db in an Arc to share it between multiple tasks
@@ -47,7 +48,7 @@ pub async fn start(
                 // NOTE: Even though `sync` internally spawns another task (via `subscribe_to_blocks`),
                 // we don't have to pass a cancellation token to it, as the task will exit once
                 // the read-end of the stream is closed.
-                r = sync(&config, db.deref()) => {
+                r = sync(&config, db.deref(), _test_sync_block_count) => {
                     if let Err(err) = r {
                         println!("error in block sync task: {err}");
                     }
@@ -71,6 +72,7 @@ pub async fn start(
 async fn sync(
     json_rpc_config: &HashMap<u64, String>,
     db: &impl BlockDb,
+    _test_num_blocks_written: Option<Arc<std::sync::atomic::AtomicU64>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut streams = StreamMap::new();
     for (&chain_id, server) in json_rpc_config {
@@ -88,7 +90,15 @@ async fn sync(
 
     while let Some((chain_id, block)) = streams.next().await {
         match block {
-            Ok(block) => db.put(chain_id, block)?,
+            Ok(block) => {
+                db.put(chain_id, block)?;
+                #[cfg(test)]
+                {
+                    if let Some(num_blocks_written) = &_test_num_blocks_written {
+                        num_blocks_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+            }
             Err(err) => println!("[chain ID {chain_id}] error fetching next block: {err}"),
         }
     }
@@ -133,7 +143,7 @@ mod tests {
         let job = tokio::spawn({
             let token = token.clone();
             async move {
-                start(tmpdir.path(), listener, config, token, None)
+                start(tmpdir.path(), listener, config, token, None, None)
                     .await
                     .unwrap();
             }
@@ -176,6 +186,7 @@ mod tests {
                     HashMap::new(),
                     token,
                     Some(tasks_spawned),
+                    None,
                 )
                 .await
                 .unwrap();
@@ -216,6 +227,7 @@ mod tests {
             config,
             CancellationToken::new(),
             None,
+            None,
         )
         .await;
         assert!(result.is_err());
@@ -233,7 +245,7 @@ mod tests {
 
         let json_rpc_config = [(1, "invalid_url".to_string())].into_iter().collect();
 
-        let result = sync(&json_rpc_config, &db).await;
+        let result = sync(&json_rpc_config, &db, None).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid URL"));
     }
@@ -278,7 +290,7 @@ mod tests {
 
         let json_rpc_config = [(1, mock_server.uri())].into_iter().collect();
 
-        let result = sync(&json_rpc_config, &db).await;
+        let result = sync(&json_rpc_config, &db, None).await;
         assert!(result.is_err());
         assert!(
             result
@@ -331,14 +343,18 @@ mod tests {
             .into_iter()
             .collect();
 
+        let block_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let task = tokio::spawn({
             let db = Arc::clone(&db);
+            let block_count = block_count.clone();
             async move {
-                sync(&json_rpc_config, db.deref()).await.unwrap();
+                sync(&json_rpc_config, db.deref(), Some(block_count))
+                    .await
+                    .unwrap();
             }
         });
         // wait for the sync task to fetch the header, transactions and receipts for the first block
-        while mock_server.received_requests().await.unwrap().len() < 4 {
+        while block_count.load(std::sync::atomic::Ordering::Relaxed) < 2 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
@@ -394,16 +410,25 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let token = CancellationToken::new();
+        let sync_block_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let task = tokio::spawn({
             let token = token.clone();
+            let sync_block_count = sync_block_count.clone();
             async move {
-                start(tmpdir.path(), listener, config, token, None)
-                    .await
-                    .unwrap();
+                start(
+                    tmpdir.path(),
+                    listener,
+                    config,
+                    token,
+                    None,
+                    Some(sync_block_count),
+                )
+                .await
+                .unwrap();
             }
         });
         // wait for the sync task to fetch the header, transactions and receipts for the first block
-        while mock_server.received_requests().await.unwrap().len() < 2 {
+        while sync_block_count.load(std::sync::atomic::Ordering::Relaxed) < 1 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
