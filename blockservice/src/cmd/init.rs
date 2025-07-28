@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::app_dir::init_app_dir;
 
-pub fn init(app_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error>> {
+pub fn init(app_dir: impl AsRef<Path>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     init_app_dir(app_dir)?;
     Ok(())
 }

@@ -10,7 +10,7 @@ pub fn verify(
     block_number: Option<u64>,
     block_hash: Option<Hash>,
     mut writer: impl std::io::Write,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (_cfg, db) = open_app_dir(app_dir, true)?;
 
     let mut errors = 0;

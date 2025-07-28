@@ -20,7 +20,7 @@ pub async fn start(
     config: HashMap<u64, String>,
     cancellation_token: CancellationToken,
     _test_notify_tasks_spawned: Option<Arc<tokio::sync::Notify>>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (cfg, db) = open_app_dir(app_dir, false)?;
     // Put the db in an Arc to share it between multiple tasks
     let db = Arc::new(db);

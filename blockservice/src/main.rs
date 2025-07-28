@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 async fn execute(
     args: Args,
     cancellation_token: CancellationToken,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match args.command {
         Command::Init => cmd::init(args.dir),
         Command::Import {

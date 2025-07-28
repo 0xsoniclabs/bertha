@@ -7,7 +7,7 @@ pub async fn list(
     chain_id: Option<u64>,
     url: Option<String>,
     mut writer: impl std::io::Write,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (cfg, db) = open_app_dir(app_dir, true)?;
 
     let chain_ranges = if let Some(url) = url {

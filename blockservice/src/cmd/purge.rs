@@ -11,7 +11,7 @@ pub fn purge(
     from: Option<u64>,
     to: Option<u64>,
     mut reader: impl std::io::BufRead,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Guard the purge command
     let mut input = String::new();
     print!("Are you sure you want to purge blocks for chain {chain_id}? (y/n): ");
