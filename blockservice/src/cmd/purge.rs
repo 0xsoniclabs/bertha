@@ -1,6 +1,9 @@
-use std::{io::Write, path::Path};
+use std::{
+    io::{BufRead, Write},
+    path::Path,
+};
 
-use crate::{app_dir::open_app_dir, db::BlockDb};
+use crate::{app_dir::open_app_dir, db::BlockDb, utils::InputReader};
 
 /// Purges blocks from the local database for a specific chain.
 /// If `from` is not provided, it defaults to 0.
@@ -11,7 +14,7 @@ pub fn purge(
     from: Option<u64>,
     to: Option<u64>,
     mut writer: impl std::io::Write,
-    mut reader: impl std::io::BufRead,
+    reader: impl InputReader,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if chain_id == 0 {
         return Err("chain ID cannot be 0".into());
@@ -23,7 +26,7 @@ pub fn purge(
         "Are you sure you want to purge blocks for chain {chain_id}? (y/n): "
     )?;
     std::io::stdout().flush()?;
-    reader.read_line(&mut input)?;
+    reader.get_reader().read_line(&mut input)?;
     if matches!(input.trim(), "y" | "Y") {
         let (_cfg, db) = open_app_dir(app_dir, false)?;
         db.delete_range(chain_id, from.unwrap_or(0), to.unwrap_or(u64::MAX))?;
@@ -44,7 +47,7 @@ mod tests {
     };
 
     /// Helper function to simulate user confirmation for the purge command.
-    fn confirm_purge(bool: bool) -> impl std::io::BufRead {
+    fn confirm_purge(bool: bool) -> impl InputReader {
         let input = if bool { "y\n" } else { "n\n" };
         Cursor::new(input)
     }
