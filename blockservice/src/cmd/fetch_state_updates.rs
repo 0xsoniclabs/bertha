@@ -43,7 +43,6 @@ pub async fn fetch_state_updates(
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
 
     use super::*;
     use crate::{
@@ -52,6 +51,7 @@ mod tests {
             proto_rpc,
             test_utils::{MockRpcServer, TestServer},
         },
+        utils::test_dir::{Permissions, TestDir},
     };
 
     fn build_mock_server() -> MockRpcServer {
@@ -77,7 +77,7 @@ mod tests {
 
     #[tokio::test]
     async fn fetches_files_and_stores_them_in_application_directory() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let server = TestServer::new(build_mock_server()).await;
@@ -101,7 +101,7 @@ mod tests {
 
     #[tokio::test]
     async fn skips_existing_files() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let server = TestServer::new(build_mock_server()).await;
@@ -126,7 +126,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_if_app_dir_is_not_initialized() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let mut log = Vec::new();
         let result =
@@ -142,7 +142,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_for_invalid_server_url() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let url = "invalid-url".to_string();
@@ -152,7 +152,7 @@ mod tests {
 
     #[tokio::test]
     async fn forwards_server_errors() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let mut mock_server = MockRpcServer::new();
@@ -170,13 +170,13 @@ mod tests {
 
     #[tokio::test]
     async fn forwards_io_errors() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let server = TestServer::new(build_mock_server()).await;
 
         // Make directory read-only
-        std::fs::set_permissions(tmpdir.path(), std::fs::Permissions::from_mode(0o544)).unwrap();
+        tmpdir.set_permissions(Permissions::ReadOnly).unwrap();
 
         let mut log = Vec::new();
         let result = fetch_state_updates(tmpdir.path(), server.address.clone(), 7, &mut log).await;
@@ -187,8 +187,5 @@ mod tests {
                 .to_string()
                 .contains("Permission denied")
         );
-
-        // Reset permissions to allow cleanup
-        std::fs::set_permissions(tmpdir.path(), std::fs::Permissions::from_mode(0o744)).unwrap();
     }
 }

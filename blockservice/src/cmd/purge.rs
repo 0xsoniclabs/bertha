@@ -30,13 +30,13 @@ pub fn purge(
 
 #[cfg(test)]
 mod tests {
-    use std::{io::Cursor, os::unix::fs::PermissionsExt, vec};
+    use std::{io::Cursor, vec};
 
     use bertha_types::Block;
 
     use super::*;
     use crate::{
-        app_dir::{BLOCK_DB_NAME, init_app_dir},
+        app_dir::init_app_dir,
         utils::test_dir::{Permissions, TestDir},
     };
 
@@ -77,12 +77,7 @@ mod tests {
         // create database
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
-        // remove write permissions
-        std::fs::set_permissions(
-            tmpdir.path().join(BLOCK_DB_NAME),
-            std::fs::Permissions::from_mode(0o555),
-        )
-        .unwrap();
+        tmpdir.set_permissions(Permissions::WriteOnly).unwrap();
 
         let mut writer = Vec::new();
         let result = purge(

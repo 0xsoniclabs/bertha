@@ -220,7 +220,7 @@ mod tests {
 
     #[tokio::test]
     async fn prints_message_for_all_chains_in_db_and_config_file() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         // Add chain 32 to config file only

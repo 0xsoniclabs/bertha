@@ -210,6 +210,7 @@ mod tests {
             client::RpcClient,
             proto_rpc::{self, BlockRangeRequest, block_rpc_server::BlockRpc},
         },
+        utils::test_dir::{Permissions, TestDir},
     };
 
     #[tokio::test]
@@ -425,7 +426,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_state_updates_returns_state_updates_for_chain() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let mut cfg = Config::create_default(tmpdir.path().join("config.toml")).unwrap();
 
         let file1 = tmpdir.path().join("state_update_1.json");
@@ -477,7 +478,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_state_updates_returns_error_if_file_cannot_be_read() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let mut cfg = Config::create_default(tmpdir.path().join("config.toml")).unwrap();
 
         cfg.add_chain(ChainConfig {

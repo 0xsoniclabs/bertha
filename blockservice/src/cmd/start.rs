@@ -158,7 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_allows_internal_tasks_to_be_cancelled() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
 
