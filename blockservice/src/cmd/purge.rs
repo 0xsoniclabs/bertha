@@ -14,7 +14,7 @@ pub fn purge(
     from: Option<u64>,
     to: Option<u64>,
     mut writer: impl std::io::Write,
-    reader: impl InputReader,
+    reader: &impl InputReader,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if chain_id == 0 {
         return Err("chain ID cannot be 0".into());
@@ -46,25 +46,15 @@ mod tests {
         utils::test_dir::{Permissions, TestDir},
     };
 
-    /// Helper function to simulate user confirmation for the purge command.
-    fn confirm_purge(bool: bool) -> impl InputReader {
-        let input = if bool { "y\n" } else { "n\n" };
-        Cursor::new(input)
-    }
+    static CONFIRM_PURGE: Cursor<&'static str> = Cursor::new("y\n");
+    static DENY_PURGE: Cursor<&'static str> = Cursor::new("n\n");
 
     #[test]
     fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let mut writer = Vec::new();
-        let result = purge(
-            tmpdir.path(),
-            1,
-            None,
-            None,
-            &mut writer,
-            confirm_purge(true),
-        );
+        let result = purge(tmpdir.path(), 1, None, None, &mut writer, &CONFIRM_PURGE);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no blockservice.toml found at {} - did you forget to run init?",
@@ -86,14 +76,7 @@ mod tests {
         tmpdir.set_permissions(Permissions::WriteOnly).unwrap();
 
         let mut writer = Vec::new();
-        let result = purge(
-            tmpdir.path(),
-            1,
-            None,
-            None,
-            &mut writer,
-            confirm_purge(true),
-        );
+        let result = purge(tmpdir.path(), 1, None, None, &mut writer, &CONFIRM_PURGE);
         assert!(result.is_err());
         assert!(
             result
@@ -113,14 +96,7 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let mut writer = Vec::new();
-        let result = purge(
-            tmpdir.path(),
-            0,
-            None,
-            None,
-            &mut writer,
-            confirm_purge(true),
-        );
+        let result = purge(tmpdir.path(), 0, None, None, &mut writer, &CONFIRM_PURGE);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().to_string(), "chain ID cannot be 0");
     }
@@ -134,17 +110,7 @@ mod tests {
         // From is None, to is None
         {
             let mut writer = Vec::new();
-            assert!(
-                purge(
-                    tmpdir.path(),
-                    1,
-                    None,
-                    None,
-                    &mut writer,
-                    confirm_purge(true)
-                )
-                .is_ok()
-            );
+            assert!(purge(tmpdir.path(), 1, None, None, &mut writer, &CONFIRM_PURGE).is_ok());
             assert_eq!(
                 String::from_utf8(writer).unwrap(),
                 format!("Are you sure you want to purge blocks for chain 1? (y/n): ")
@@ -153,17 +119,7 @@ mod tests {
         // From is Some, to is None
         {
             let mut writer = Vec::new();
-            assert!(
-                purge(
-                    tmpdir.path(),
-                    1,
-                    Some(0),
-                    None,
-                    &mut writer,
-                    confirm_purge(true)
-                )
-                .is_ok()
-            );
+            assert!(purge(tmpdir.path(), 1, Some(0), None, &mut writer, &CONFIRM_PURGE).is_ok());
             assert_eq!(
                 String::from_utf8(writer).unwrap(),
                 format!("Are you sure you want to purge blocks for chain 1? (y/n): ")
@@ -179,7 +135,7 @@ mod tests {
                     Some(0),
                     Some(1),
                     &mut writer,
-                    confirm_purge(true)
+                    &CONFIRM_PURGE
                 )
                 .is_ok()
             );
@@ -224,7 +180,7 @@ mod tests {
                 Some(1),
                 Some(2),
                 &mut writer,
-                confirm_purge(true),
+                &CONFIRM_PURGE,
             )
             .unwrap();
             assert_eq!(
@@ -248,7 +204,7 @@ mod tests {
                 Some(1),
                 None,
                 &mut writer,
-                confirm_purge(true),
+                &CONFIRM_PURGE,
             )
             .unwrap();
             assert_eq!(
@@ -272,7 +228,7 @@ mod tests {
                 None,
                 Some(2),
                 &mut writer,
-                confirm_purge(true),
+                &CONFIRM_PURGE,
             )
             .unwrap();
             assert_eq!(
@@ -296,7 +252,7 @@ mod tests {
                 None,
                 None,
                 &mut writer,
-                confirm_purge(true),
+                &CONFIRM_PURGE,
             )
             .unwrap();
             assert_eq!(
@@ -321,15 +277,8 @@ mod tests {
         db.put_raw(42, 1, vec![1, 2, 3].as_slice()).unwrap();
 
         let mut writer = Vec::new();
-        purge(
-            tmpdir.path(),
-            1,
-            None,
-            None,
-            &mut writer,
-            confirm_purge(false),
-        )
-        .expect("purge should succeed");
+        purge(tmpdir.path(), 1, None, None, &mut writer, &DENY_PURGE)
+            .expect("purge should succeed");
         assert_eq!(db.get_raw(42, 1).unwrap(), Some(vec![1, 2, 3]));
 
         assert_eq!(
@@ -351,8 +300,15 @@ mod tests {
         {
             set_elem();
             let mut writer = Vec::new();
-            purge(tmpdir.path(), 42, None, None, &mut writer, Cursor::new("y"))
-                .expect("purge should succeed");
+            purge(
+                tmpdir.path(),
+                42,
+                None,
+                None,
+                &mut writer,
+                &Cursor::new("y"),
+            )
+            .expect("purge should succeed");
             assert_eq!(
                 String::from_utf8(writer).unwrap(),
                 format!("Are you sure you want to purge blocks for chain 42? (y/n): ")
@@ -364,8 +320,15 @@ mod tests {
         {
             set_elem();
             let mut writer = Vec::new();
-            purge(tmpdir.path(), 42, None, None, &mut writer, Cursor::new("Y"))
-                .expect("purge should succeed");
+            purge(
+                tmpdir.path(),
+                42,
+                None,
+                None,
+                &mut writer,
+                &Cursor::new("Y"),
+            )
+            .expect("purge should succeed");
             assert_eq!(
                 String::from_utf8(writer).unwrap(),
                 format!("Are you sure you want to purge blocks for chain 42? (y/n): ")

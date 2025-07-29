@@ -38,7 +38,7 @@ async fn execute(
             from,
             to,
             std::io::stdout(),
-            std::io::stdin(),
+            &std::io::stdin(),
         ),
         Command::Verify {
             chain_id,

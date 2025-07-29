@@ -535,7 +535,7 @@ mod tests {
             None,
             None,
             std::io::sink(),
-            Cursor::new("y"),
+            &Cursor::new("y"),
         )
         .unwrap(); // Clear the database for the next test
         // More blocks than expected
@@ -589,7 +589,7 @@ mod tests {
             None,
             None,
             std::io::sink(),
-            Cursor::new("y"),
+            &Cursor::new("y"),
         )
         .unwrap(); // Clear the database for the next test
         // Block number mismatch
