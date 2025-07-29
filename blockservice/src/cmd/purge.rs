@@ -13,6 +13,9 @@ pub fn purge(
     mut writer: impl std::io::Write,
     mut reader: impl std::io::BufRead,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if chain_id == 0 {
+        return Err("chain ID cannot be 0".into());
+    }
     // Guard the purge command
     let mut input = String::new();
     write!(
@@ -53,7 +56,7 @@ mod tests {
         let mut writer = Vec::new();
         let result = purge(
             tmpdir.path(),
-            0,
+            1,
             None,
             None,
             &mut writer,
@@ -66,7 +69,7 @@ mod tests {
         )));
         assert_eq!(
             String::from_utf8(writer).unwrap(),
-            format!("Are you sure you want to purge blocks for chain 0? (y/n): ")
+            format!("Are you sure you want to purge blocks for chain 1? (y/n): ")
         );
     }
 
@@ -82,7 +85,7 @@ mod tests {
         let mut writer = Vec::new();
         let result = purge(
             tmpdir.path(),
-            0,
+            1,
             None,
             None,
             &mut writer,
@@ -97,8 +100,26 @@ mod tests {
         );
         assert_eq!(
             String::from_utf8(writer).unwrap(),
-            format!("Are you sure you want to purge blocks for chain 0? (y/n): ")
+            format!("Are you sure you want to purge blocks for chain 1? (y/n): ")
         );
+    }
+
+    #[tokio::test]
+    async fn fails_for_chain_id_zero() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+
+        let mut writer = Vec::new();
+        let result = purge(
+            tmpdir.path(),
+            0,
+            None,
+            None,
+            &mut writer,
+            confirm_purge(true),
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "chain ID cannot be 0");
     }
 
     #[test]
@@ -113,7 +134,7 @@ mod tests {
             assert!(
                 purge(
                     tmpdir.path(),
-                    0,
+                    1,
                     None,
                     None,
                     &mut writer,
@@ -123,7 +144,7 @@ mod tests {
             );
             assert_eq!(
                 String::from_utf8(writer).unwrap(),
-                format!("Are you sure you want to purge blocks for chain 0? (y/n): ")
+                format!("Are you sure you want to purge blocks for chain 1? (y/n): ")
             );
         }
         // From is Some, to is None
@@ -132,7 +153,7 @@ mod tests {
             assert!(
                 purge(
                     tmpdir.path(),
-                    0,
+                    1,
                     Some(0),
                     None,
                     &mut writer,
@@ -142,7 +163,7 @@ mod tests {
             );
             assert_eq!(
                 String::from_utf8(writer).unwrap(),
-                format!("Are you sure you want to purge blocks for chain 0? (y/n): ")
+                format!("Are you sure you want to purge blocks for chain 1? (y/n): ")
             );
         }
         // From is Some, to is Some
@@ -151,7 +172,7 @@ mod tests {
             assert!(
                 purge(
                     tmpdir.path(),
-                    0,
+                    1,
                     Some(0),
                     Some(1),
                     &mut writer,
@@ -162,7 +183,7 @@ mod tests {
 
             assert_eq!(
                 String::from_utf8(writer).unwrap(),
-                format!("Are you sure you want to purge blocks for chain 0? (y/n): ")
+                format!("Are you sure you want to purge blocks for chain 1? (y/n): ")
             );
         }
     }
@@ -299,7 +320,7 @@ mod tests {
         let mut writer = Vec::new();
         purge(
             tmpdir.path(),
-            0,
+            1,
             None,
             None,
             &mut writer,
@@ -310,7 +331,7 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(writer).unwrap(),
-            format!("Are you sure you want to purge blocks for chain 0? (y/n): ")
+            format!("Are you sure you want to purge blocks for chain 1? (y/n): ")
         );
     }
 
