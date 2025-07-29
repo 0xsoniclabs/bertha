@@ -74,7 +74,6 @@ pub async fn list(
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
 
     use super::*;
     use crate::{
@@ -85,11 +84,12 @@ mod tests {
             proto_rpc::{BlockRange, ChainRange, ChainRanges},
             test_utils::{MockRpcServer, TestServer},
         },
+        utils::test_dir::{Permissions, TestDir},
     };
 
     #[tokio::test]
     async fn fails_if_app_dir_is_not_initialized() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let result = list(tmpdir.path(), None, None, std::io::sink()).await;
         assert!(result.is_err());
@@ -101,26 +101,26 @@ mod tests {
 
     #[tokio::test]
     async fn fails_if_no_read_permissions() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         // create database
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
         // remove read permissions
-        std::fs::set_permissions(
-            tmpdir.path().join(BLOCK_DB_NAME),
-            std::fs::Permissions::from_mode(0o333),
-        )
-        .unwrap();
+        tmpdir.set_permissions(Permissions::WriteOnly).unwrap();
 
         let result = list(tmpdir.path(), None, None, std::io::sink()).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Failed to open"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Permission denied")
+        );
     }
 
     #[tokio::test]
     async fn fails_for_invalid_server_url() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let url = "invalid-url".to_string();
 
@@ -131,7 +131,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_on_server_error() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let mut mock_server = MockRpcServer::new();
@@ -154,7 +154,7 @@ mod tests {
 
     #[tokio::test]
     async fn prints_message_for_each_range() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let chain_cfg = ChainConfig {
@@ -220,7 +220,7 @@ mod tests {
 
     #[tokio::test]
     async fn prints_message_for_all_chains_in_db_and_config_file() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         // Add chain 32 to config file only
@@ -257,7 +257,7 @@ mod tests {
 
     #[tokio::test]
     async fn prints_message_for_each_remote_range() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         {

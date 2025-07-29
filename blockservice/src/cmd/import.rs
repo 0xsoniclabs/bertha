@@ -152,16 +152,18 @@ pub fn import(
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
 
     use bertha_types::Block;
 
     use super::*;
-    use crate::app_dir::{BLOCK_DB_NAME, init_app_dir};
+    use crate::{
+        app_dir::init_app_dir,
+        utils::test_dir::{Permissions, TestDir},
+    };
 
     #[test]
     fn inserts_all_blocks_from_snapshot_file_into_db_and_verifies_them() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
         let num_blocks = 5;
         let chain_id = 62;
@@ -194,7 +196,7 @@ mod tests {
 
     #[test]
     fn inserts_missing_blocks_from_snapshot_file_into_db() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let num_blocks = 5;
         let chain_id = 146;
@@ -261,7 +263,7 @@ mod tests {
 
     #[test]
     fn fails_if_parent_hash_of_block_0_is_not_0_hash() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
 
@@ -291,7 +293,7 @@ mod tests {
 
     #[test]
     fn fails_if_parent_hash_mismatches() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
         let extra_blocks = [Block::default_sonic()];
@@ -324,7 +326,7 @@ mod tests {
         // hash(block_0 in snapshot) == block_1.parent_hash
         // && hash(block_0 in db) != block_1.parent_hash
         let chain_id = 1;
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
         let genesis_data = genesis_parser::test_utils::generate_test_genesis(chain_id, 2, &[]);
@@ -364,7 +366,7 @@ mod tests {
 
     #[test]
     fn fails_when_metadata_invalid() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
@@ -402,7 +404,7 @@ mod tests {
 
     #[test]
     fn aborts_on_invalid_snapshot_file() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
         let genesis_data = genesis_parser::test_utils::generate_test_genesis(0, 5, &[]);
         let data_len = genesis_data.len();
@@ -459,7 +461,7 @@ mod tests {
 
     #[test]
     fn fails_if_app_dir_is_not_initialized() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let mut writer = Vec::new();
         let result = import(tmpdir.path(), "somepath", true, &mut writer);
@@ -473,15 +475,11 @@ mod tests {
 
     #[test]
     fn fails_if_no_write_permissions() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         // Create a read-only database
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        std::fs::set_permissions(
-            tmpdir.path().join(BLOCK_DB_NAME),
-            std::fs::Permissions::from_mode(0o555),
-        )
-        .unwrap();
+        tmpdir.set_permissions(Permissions::ReadOnly).unwrap();
 
         let mut writer = Vec::new();
         let result = import(tmpdir.path(), "somepath", true, &mut writer);

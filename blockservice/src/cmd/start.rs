@@ -114,11 +114,12 @@ mod tests {
             BlockHeaderWithTransactions,
             test_utils::build_mock_server_request_handler_for_infinitely_many_requests,
         },
+        utils::test_dir::{Permissions, TestDir},
     };
 
     #[tokio::test]
     async fn start_starts_server_successfully() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         {
             let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
@@ -157,7 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_allows_internal_tasks_to_be_cancelled() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
 
@@ -207,7 +208,7 @@ mod tests {
 
     #[tokio::test]
     async fn fails_if_app_dir_is_not_initialized() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let config = HashMap::new();
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let result = start(
@@ -227,7 +228,7 @@ mod tests {
 
     #[tokio::test]
     async fn sync_fails_if_server_url_is_invalid() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
@@ -240,7 +241,7 @@ mod tests {
 
     #[tokio::test]
     async fn sync_forwards_db_error() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
@@ -290,7 +291,7 @@ mod tests {
 
     #[tokio::test]
     async fn sync_fetches_blocks_and_stores_them_in_db() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
@@ -352,7 +353,7 @@ mod tests {
 
     #[tokio::test]
     async fn start_starts_sync_and_rpc_clients_can_query_synchronized_blocks() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 

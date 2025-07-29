@@ -26,16 +26,18 @@ pub fn view(
 
 #[cfg(test)]
 mod tests {
-    use std::os::unix::fs::PermissionsExt;
 
     use bertha_types::Block;
 
     use super::*;
-    use crate::app_dir::{BLOCK_DB_NAME, init_app_dir};
+    use crate::{
+        app_dir::init_app_dir,
+        utils::test_dir::{Permissions, TestDir},
+    };
 
     #[test]
     fn fails_if_app_dir_is_not_initialized() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let result = view(tmpdir.path(), 1, 0, std::io::sink());
         assert!(result.is_err());
@@ -47,27 +49,27 @@ mod tests {
 
     #[test]
     fn fails_if_no_read_permissions() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         // create database
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         // remove read permissions
-        std::fs::set_permissions(tmpdir.path(), std::fs::Permissions::from_mode(0o333)).unwrap();
-        std::fs::set_permissions(
-            tmpdir.path().join(BLOCK_DB_NAME),
-            std::fs::Permissions::from_mode(0o333),
-        )
-        .unwrap();
+        tmpdir.set_permissions(Permissions::WriteOnly).unwrap();
 
         let result = view(tmpdir.path(), 0, 1, std::io::sink());
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Failed to open"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Permission denied")
+        );
     }
 
     #[test]
     fn prints_block_if_exists() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let chain_id = 1;
@@ -86,7 +88,7 @@ mod tests {
 
     #[test]
     fn prints_error_message_if_not_exists() {
-        let tmpdir = tempfile::tempdir().unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let mut buf = Vec::new();
