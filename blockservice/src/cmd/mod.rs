@@ -53,13 +53,13 @@ pub trait AddressBinder {
     async fn bind_address(self) -> Result<TcpListener, Box<dyn std::error::Error + Send + Sync>>;
 }
 
-/// An `AddressBinder` that uses the config file to bind the address.
+/// An [`AddressBinder`] that uses the config file to bind the address.
 pub struct ConfigFileAddressBinder {
     config_dir: std::path::PathBuf,
 }
 
 impl ConfigFileAddressBinder {
-    /// Creates a new `DefaultAddressBinder` with the specified config directory.
+    /// Creates a new [`ConfigFileAddressBinder`] with the specified config directory.
     pub fn new(config_dir: std::path::PathBuf) -> Self {
         Self { config_dir }
     }
@@ -68,7 +68,7 @@ impl ConfigFileAddressBinder {
 #[tonic::async_trait]
 impl AddressBinder for ConfigFileAddressBinder {
     /// Binds the address using the port specified in the config file.
-    /// Returns a `TcpListener` bound to the specified address.
+    /// Returns a [`TcpListener`] bound to the specified address.
     async fn bind_address(self) -> Result<TcpListener, Box<dyn std::error::Error + Send + Sync>> {
         let port = {
             let (cfg, _db) = open_app_dir(self.config_dir.clone(), true)?;
