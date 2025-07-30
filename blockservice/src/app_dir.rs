@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::{Error, config::Config, db::RocksBlockDb};
 
-const CONFIG_FILE_NAME: &str = "blockservice.toml";
+pub const CONFIG_FILE_NAME: &str = "blockservice.toml";
 pub const BLOCK_DB_NAME: &str = ".blockdb";
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
