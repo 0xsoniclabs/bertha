@@ -83,11 +83,14 @@ impl AddressBinder for ConfigFileAddressBinder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app_dir::{CONFIG_FILE_NAME, init_app_dir};
+    use crate::{
+        app_dir::{CONFIG_FILE_NAME, init_app_dir},
+        utils::test_dir::{Permissions, TestDir},
+    };
 
     #[tokio::test]
     async fn config_file_address_binder_bind_address_binds_address_with_config_file_port() {
-        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(temp_dir.path(), std::io::sink()).unwrap();
         let binder = ConfigFileAddressBinder::new(temp_dir.path().to_path_buf());
         let listener = binder.bind_address().await.unwrap();
@@ -110,7 +113,7 @@ mod tests {
 
     #[tokio::test]
     async fn config_file_address_binder_fails_for_invalid_port() {
-        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_dir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(temp_dir.path(), std::io::sink()).unwrap();
 
         // Bind an address to be sure the port is already taken
