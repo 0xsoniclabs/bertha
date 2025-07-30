@@ -96,7 +96,7 @@ mod tests {
 
     fn write_port_cfg(app_dir: impl AsRef<Path>, port: u16) {
         let config_path = app_dir.as_ref().join(CONFIG_FILE_NAME);
-        std::fs::write(&config_path, format!("port = {}", port)).unwrap();
+        std::fs::write(&config_path, format!("port = {port}")).unwrap();
     }
 
     #[tokio::test]
