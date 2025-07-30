@@ -83,7 +83,7 @@ impl AddressBinder for ConfigFileAddressBinder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app_dir::init_app_dir;
+    use crate::app_dir::{CONFIG_FILE_NAME, init_app_dir};
 
     #[tokio::test]
     async fn config_file_address_binder_bind_address_binds_address_with_config_file_port() {
@@ -92,5 +92,43 @@ mod tests {
         let binder = ConfigFileAddressBinder::new(temp_dir.path().to_path_buf());
         let listener = binder.bind_address().await.unwrap();
         assert_eq!(listener.local_addr().unwrap().port(), 8080); // Default port
+    }
+
+    #[tokio::test]
+    async fn config_file_address_binder_fails_for_non_existing_config_dir() {
+        let non_existing_dir = std::path::PathBuf::from("/non/existing/dir");
+        let binder = ConfigFileAddressBinder::new(non_existing_dir);
+        let result = binder.bind_address().await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No such file or directory")
+        );
+    }
+
+    #[tokio::test]
+    async fn config_file_address_binder_fails_for_invalid_port() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        init_app_dir(temp_dir.path(), std::io::sink()).unwrap();
+
+        // Bind an address to be sure the port is already taken
+        let listener = TcpListener::bind("[::]:0").await.unwrap();
+        let config_path = temp_dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(
+            &config_path,
+            format!("port = {}", listener.local_addr().unwrap().port()),
+        )
+        .unwrap(); // port is already in use
+        let binder = ConfigFileAddressBinder::new(temp_dir.path().to_path_buf());
+        let result = binder.bind_address().await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Address already in use")
+        );
     }
 }
