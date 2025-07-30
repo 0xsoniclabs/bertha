@@ -1,4 +1,9 @@
-use std::{collections::HashMap, ops::Deref, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    ops::Deref,
+    path::Path,
+    sync::{Arc, atomic::AtomicU64},
+};
 
 use tokio_stream::{StreamExt, StreamMap};
 use tokio_util::sync::CancellationToken;
@@ -20,7 +25,7 @@ pub async fn start(
     config: HashMap<u64, String>,
     cancellation_token: CancellationToken,
     _test_notify_tasks_spawned: Option<Arc<tokio::sync::Notify>>,
-    _test_sync_block_count: Option<Arc<std::sync::atomic::AtomicU64>>,
+    _test_sync_block_count: Option<Arc<AtomicU64>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (cfg, db) = open_app_dir(app_dir, false)?;
     // Put the db in an Arc to share it between multiple tasks
@@ -72,7 +77,7 @@ pub async fn start(
 async fn sync(
     json_rpc_config: &HashMap<u64, String>,
     db: &impl BlockDb,
-    _test_num_blocks_written: Option<Arc<std::sync::atomic::AtomicU64>>,
+    _test_num_blocks_written: Option<Arc<AtomicU64>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut streams = StreamMap::new();
     for (&chain_id, server) in json_rpc_config {
