@@ -108,7 +108,10 @@ async fn sync(
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::{
+        sync::atomic::{AtomicU64, Ordering},
+        time::Duration,
+    };
 
     use bertha_types::{Block, BlockHeader, HexConvert, TransactionReceipt};
     use prost::Message;
@@ -343,7 +346,7 @@ mod tests {
             .into_iter()
             .collect();
 
-        let block_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let block_count = Arc::new(AtomicU64::new(0));
         let task = tokio::spawn({
             let db = Arc::clone(&db);
             let block_count = block_count.clone();
@@ -354,7 +357,7 @@ mod tests {
             }
         });
         // wait for the sync task to fetch the header, transactions and receipts for the first block
-        while block_count.load(std::sync::atomic::Ordering::Relaxed) < 2 {
+        while block_count.load(Ordering::Relaxed) < 2 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
