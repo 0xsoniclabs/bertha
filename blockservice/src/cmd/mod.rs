@@ -82,19 +82,39 @@ impl AddressBinder for ConfigFileAddressBinder {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
+    use rand::{Rng, SeedableRng, rngs::SmallRng};
+
     use super::*;
     use crate::{
         app_dir::{CONFIG_FILE_NAME, init_app_dir},
         utils::test_dir::{Permissions, TestDir},
     };
 
+    fn write_port_cfg(app_dir: impl AsRef<Path>, port: u16) {
+        let config_path = app_dir.as_ref().join(CONFIG_FILE_NAME);
+        std::fs::write(&config_path, format!("port = {}", port)).unwrap();
+    }
+
     #[tokio::test]
     async fn config_file_address_binder_bind_address_binds_address_with_config_file_port() {
         let temp_dir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(temp_dir.path(), std::io::sink()).unwrap();
-        let binder = ConfigFileAddressBinder::new(temp_dir.path().to_path_buf());
-        let listener = binder.bind_address().await.unwrap();
-        assert_eq!(listener.local_addr().unwrap().port(), 8080); // Default port
+        let mut rng = SmallRng::seed_from_u64(123);
+        loop {
+            let port = rng.random_range(1024..u16::MAX);
+            write_port_cfg(temp_dir.path(), port);
+            let binder = ConfigFileAddressBinder::new(temp_dir.path().to_path_buf());
+            let result = binder.bind_address().await;
+            match result {
+                Ok(listener) => {
+                    assert_eq!(listener.local_addr().unwrap().port(), port);
+                    break;
+                }
+                Err(_) => continue,
+            }
+        }
     }
 
     #[tokio::test]
@@ -112,18 +132,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn config_file_address_binder_fails_for_invalid_port() {
+    async fn config_file_address_binder_fails_for_port_already_in_use() {
         let temp_dir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(temp_dir.path(), std::io::sink()).unwrap();
 
         // Bind an address to be sure the port is already taken
         let listener = TcpListener::bind("[::]:0").await.unwrap();
-        let config_path = temp_dir.path().join(CONFIG_FILE_NAME);
-        std::fs::write(
-            &config_path,
-            format!("port = {}", listener.local_addr().unwrap().port()),
-        )
-        .unwrap(); // port is already in use
+        // port is already in use
+        write_port_cfg(temp_dir.path(), listener.local_addr().unwrap().port());
         let binder = ConfigFileAddressBinder::new(temp_dir.path().to_path_buf());
         let result = binder.bind_address().await;
         assert!(result.is_err());
