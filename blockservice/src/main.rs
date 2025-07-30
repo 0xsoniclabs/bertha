@@ -76,6 +76,7 @@ async fn execute(
                 json_rpc_config,
                 cancellation_token,
                 None,
+                None,
             )
             .await
         }
