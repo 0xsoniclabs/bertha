@@ -47,7 +47,9 @@ pub fn make_progress_bar(total: u64) -> Result<ProgressBar, TemplateError> {
     Ok(bar)
 }
 
-/// Interface for binding an address to a TCP listener.
+/// A trait to bind an address to a [`TcpListener`].
+/// Different implementations can choose different strategies for constructing the address, e.g. by
+/// reading a config file.
 #[tonic::async_trait]
 pub trait AddressBinder {
     async fn bind_address(self) -> Result<TcpListener, Box<dyn std::error::Error + Send + Sync>>;
