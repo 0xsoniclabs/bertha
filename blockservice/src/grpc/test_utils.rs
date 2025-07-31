@@ -3,7 +3,10 @@ use std::vec::IntoIter;
 use hyper_util::rt::TokioIo;
 use mockall::mock;
 use tokio::net::TcpListener;
-use tonic::transport::{Endpoint, Server, Uri};
+use tonic::{
+    metadata::{Ascii, MetadataValue},
+    transport::{Endpoint, Server, Uri},
+};
 use tower::service_fn;
 
 use crate::grpc::{
@@ -88,7 +91,10 @@ impl Drop for TestServer {
 /// Start a mock server and a client connected through a duplex stream.
 /// The server will respond to a single request before terminating.
 /// This is useful for scenarios where the client needs to be explicitly constructed.
-pub async fn get_mock_server_and_client(mock_server: MockRpcServer) -> RpcClient {
+pub async fn get_mock_server_and_client(
+    mock_server: MockRpcServer,
+    auth_token: Option<MetadataValue<Ascii>>,
+) -> RpcClient {
     let (client, server) = tokio::io::duplex(1024);
     let mock_server = Server::builder()
         .add_service(BlockRpcServer::new(mock_server))
@@ -114,7 +120,7 @@ pub async fn get_mock_server_and_client(mock_server: MockRpcServer) -> RpcClient
         .await
         .unwrap();
 
-    RpcClient::new(BlockRpcClient::new(channel))
+    RpcClient::new(BlockRpcClient::new(channel), auth_token)
 }
 
 #[cfg(test)]
