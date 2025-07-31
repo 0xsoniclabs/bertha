@@ -7,7 +7,7 @@ pub async fn fetch_state_updates(
     url: String,
     chain_id: u64,
     mut writer: impl std::io::Write,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // To not write files into arbitrary directories, we first check that we actually
     // are in a valid application directory.
     open_app_dir(&app_dir, true)?;

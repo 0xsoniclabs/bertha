@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fmt::Write,
     net::{IpAddr, Ipv6Addr, SocketAddr},
 };
@@ -12,10 +13,16 @@ pub use list::list;
 pub use purge::purge;
 pub use start::start;
 use tokio::net::TcpListener;
+use tokio_util::sync::CancellationToken;
 pub use verify::verify;
 pub use view::view;
 
-use crate::app_dir::open_app_dir;
+use crate::{
+    app_dir::open_app_dir,
+    cli::{Args, Command},
+    cmd,
+    utils::InputReader,
+};
 
 mod fetch;
 mod fetch_state_updates;
@@ -79,6 +86,64 @@ impl AddressBinder for ConfigFileAddressBinder {
 
         let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), port);
         TcpListener::bind(addr).await.map_err(Into::into)
+    }
+}
+
+/// Executes a command with the provided arguments.
+/// Arguments:
+/// - `args`: the command arguments.
+/// - `cancellation_token`: a token for gracefully task shutdown.
+/// - `address_binder`: an `AddressBinder` to bind the address for the server.
+/// - `output`: an output writer for command results.
+/// - `input`: an input reader for command inputs.
+pub async fn execute(
+    args: Args,
+    cancellation_token: CancellationToken,
+    address_binder: impl AddressBinder,
+    mut output: impl std::io::Write,
+    input: impl InputReader,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match args.command {
+        Command::Init => cmd::init(args.dir, &mut output),
+        Command::Import {
+            snapshot_file,
+            verify,
+        } => cmd::import(args.dir, snapshot_file, verify, &mut output),
+        Command::List { chain_id, url } => cmd::list(args.dir, chain_id, url, &mut output).await,
+        Command::Fetch {
+            url,
+            chain_id,
+            from,
+            to,
+        } => cmd::fetch(args.dir, url, chain_id, from, to, &mut output).await,
+        Command::Purge { chain_id, from, to } => {
+            cmd::purge(args.dir, chain_id, from, to, &mut output, &input)
+        }
+        Command::Verify {
+            chain_id,
+            block_number,
+            block_hash,
+        } => cmd::verify(args.dir, chain_id, block_number, block_hash, &mut output),
+        Command::View {
+            chain_id,
+            block_number,
+        } => cmd::view(args.dir, chain_id, block_number, &mut output),
+        Command::FetchStateUpdates { url, chain_id } => {
+            cmd::fetch_state_updates(args.dir, url, chain_id, &mut output).await
+        }
+        Command::Start => {
+            // TODO Get JSON-RPC servers from config
+            let json_rpc_config = HashMap::new();
+            cmd::start(
+                args.dir,
+                address_binder.bind_address().await?,
+                json_rpc_config,
+                cancellation_token,
+                None,
+                None,
+            )
+            .await
+        }
     }
 }
 

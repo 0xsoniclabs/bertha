@@ -5,7 +5,7 @@ use crate::app_dir::init_app_dir;
 pub fn init(
     app_dir: impl AsRef<Path>,
     mut writer: impl std::io::Write,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     init_app_dir(app_dir, &mut writer)?;
     Ok(())
 }

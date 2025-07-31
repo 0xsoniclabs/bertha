@@ -15,7 +15,7 @@ pub async fn fetch(
     from: Option<u64>,
     to: Option<u64>,
     mut writer: impl std::io::Write,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (_cfg, db) = open_app_dir(app_dir, false)?;
 
     let mut client = RpcClient::try_new(url).await?;
