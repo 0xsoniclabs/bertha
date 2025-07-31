@@ -140,14 +140,12 @@ pub async fn fetch(
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-
     use prost::Message;
 
     use crate::{
         BlockRange,
         app_dir::{init_app_dir, open_app_dir},
-        cmd::{fetch::fetch, purge},
+        cmd::fetch::fetch,
         db::{BlockDb, proto},
         grpc::{
             proto_rpc::{self, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock},
@@ -478,6 +476,11 @@ mod tests {
     async fn fails_if_get_block_range_returns_unexpected_block_range() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let clear_db = || {
+            let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+            db.delete_range(1, 0, u64::MAX).unwrap(); // Clear the database
+            assert!(db.get_ranges_of_chain_id(1).unwrap().is_empty()); // make sure the database is empty
+        };
         // Less block than expected
         {
             let mut mock_server = MockRpcServer::new();
@@ -529,15 +532,7 @@ mod tests {
                 "received fewer blocks than expected: expected 3, got 2",
             );
         }
-        purge(
-            tmpdir.path(),
-            1,
-            None,
-            None,
-            std::io::sink(),
-            &Cursor::new("y"),
-        )
-        .unwrap(); // Clear the database for the next test
+        clear_db(); // Clear the database
         // More blocks than expected
         {
             let mut mock_server = MockRpcServer::new();
@@ -583,15 +578,7 @@ mod tests {
                 "received fewer blocks than expected: expected 3, got 5"
             );
         }
-        purge(
-            tmpdir.path(),
-            1,
-            None,
-            None,
-            std::io::sink(),
-            &Cursor::new("y"),
-        )
-        .unwrap(); // Clear the database for the next test
+        clear_db(); // Clear the database
         // Block number mismatch
         {
             let mut mock_server = MockRpcServer::new();
