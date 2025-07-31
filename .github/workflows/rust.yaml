@@ -117,6 +117,37 @@ jobs:
     - name: cargo test
       run: cargo test --all-features --all-targets
 
+  coverage:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+    - name: install rust
+      uses: dtolnay/rust-toolchain@1.86
+    - name: install protoc
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+    - name: install rocksdb
+      uses: awalsh128/cache-apt-pkgs-action@latest
+      with:
+        packages: librocksdb-dev
+    - name: load cache
+      uses: Swatinem/rust-cache@v2
+    - name: install cargo-llvm-cov
+      uses: taiki-e/install-action@cargo-llvm-cov
+    - name: generate code coverage
+      run: cargo llvm-cov --all-features --workspace --codecov --output-path codecov.json
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: codecov.json
+        fail_ci_if_error: true
+        verbose: true
+
   unused-deps:
     name: unused deps
     runs-on: ubuntu-latest
