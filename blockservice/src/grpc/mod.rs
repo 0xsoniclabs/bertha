@@ -1,3 +1,4 @@
+pub mod auth;
 mod client;
 pub mod proto_rpc;
 mod server;

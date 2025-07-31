@@ -3,10 +3,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+#[cfg(test)]
+use toml_edit::Formatted;
 use toml_edit::{Document, DocumentMut, Item};
+use tonic::metadata::{Ascii, MetadataValue};
 
-use crate::Error;
+use crate::{Error, grpc::auth};
 
 /// The default config file, used for the implementation of [Config::default].
 const DEFAULT_CONFIG_TOML: &str = include_str!("../res/blockservice.toml");
@@ -19,11 +22,36 @@ pub struct Config {
     port: u16,
     #[serde(default)]
     chains: Vec<ChainConfig>,
-
+    #[serde(
+        default,
+        serialize_with = "serialize_auth_token",
+        deserialize_with = "deserialize_auth_token"
+    )]
+    auth_token: Option<MetadataValue<Ascii>>,
     #[serde(skip)]
     toml: String,
     #[serde(skip)]
     path: PathBuf,
+}
+
+fn deserialize_auth_token<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<MetadataValue<Ascii>>, D::Error> {
+    Option::<String>::deserialize(deserializer)?
+        .map(auth::token_to_metadata_value)
+        .transpose()
+        .map_err(serde::de::Error::custom)
+}
+
+fn serialize_auth_token<S: Serializer>(
+    token: &Option<MetadataValue<Ascii>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match token {
+        Some(t) => serializer
+            .serialize_str(&auth::extract_user_token(t).map_err(serde::ser::Error::custom)?),
+        None => serializer.serialize_none(),
+    }
 }
 
 impl Config {
@@ -54,6 +82,44 @@ impl Config {
     /// Returns the port on which the blockservice should listen.
     pub fn get_port(&self) -> u16 {
         self.port
+    }
+
+    /// Returns the authentication token.
+    pub fn get_auth_token(&self) -> Option<&MetadataValue<Ascii>> {
+        self.auth_token.as_ref()
+    }
+
+    /// Sets the authentication token and writes the changes to the config file.
+    #[cfg(test)]
+    pub fn set_auth_token(
+        &mut self,
+        auth_token: Option<MetadataValue<Ascii>>,
+    ) -> Result<(), Error> {
+        self.auth_token = auth_token;
+
+        let mut doc = self.toml.parse::<DocumentMut>()?;
+        match &self.auth_token {
+            Some(auth_token) => {
+                let value = Item::Value(toml_edit::Value::String(Formatted::new(
+                    auth::extract_user_token(auth_token).map_err(Error::Config)?,
+                )));
+                if !doc.contains_key("auth_token") {
+                    doc.insert("auth_token", value);
+                } else {
+                    doc["auth_token"] = value;
+                }
+            }
+            None => {
+                doc.remove("auth_token");
+            }
+        }
+
+        self.toml = doc.to_string();
+
+        let mut file = std::fs::File::create(&self.path)?;
+        file.write_all(self.toml.as_bytes())?;
+
+        Ok(())
     }
 
     /// Returns all configured chain IDs in ascending order.
@@ -196,6 +262,25 @@ mod tests {
     }
 
     #[test]
+    fn auth_token_serialization_and_deserialization_succeed_for_valid_and_non_existing_auth_tokens()
+    {
+        let cases = [
+            (
+                "auth_token = \"my-token\"\n",
+                Some(auth::token_to_metadata_value("my-token").unwrap()),
+            ),
+            ("", None),
+        ];
+        for (toml_token_line, expected_token) in cases {
+            let config_toml = format! {"port = 8080\nchains = []\n{toml_token_line}"};
+            let config = toml::from_str::<Config>(&config_toml).unwrap();
+            assert_eq!(config.auth_token, expected_token);
+            let toml = toml::to_string(&config).unwrap();
+            assert_eq!(config_toml, toml);
+        }
+    }
+
+    #[test]
     fn default_creates_config_from_embedded_default_config() {
         let cfg = Config::default();
         assert_eq!(cfg.port, 8080);
@@ -242,6 +327,7 @@ mod tests {
         let my_cfg = Config {
             port: 42,
             chains: vec![chain.clone()],
+            auth_token: None,
             path: config_path.clone(),
             toml: String::new(),
         };
@@ -302,6 +388,47 @@ mod tests {
             ..Config::default()
         };
         assert_eq!(config.get_port(), 1234);
+    }
+
+    #[test]
+    fn get_auth_token_returns_auth_token() {
+        let cases = [
+            Some(auth::token_to_metadata_value("my-token").unwrap()),
+            None,
+        ];
+        for auth_token in cases {
+            let config = Config {
+                auth_token: auth_token.clone(),
+                ..Config::default()
+            };
+            assert_eq!(config.get_auth_token(), auth_token.as_ref());
+        }
+    }
+
+    #[test]
+    fn set_auth_token_sets_token_in_config_and_file() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let config_path = tmpdir.path().join("blockservice.toml");
+        let mut config = Config::create_default(&config_path).unwrap();
+        assert_eq!(config.auth_token, None);
+
+        let cases = [
+            Some(auth::token_to_metadata_value("my-token").unwrap()), // set token
+            Some(auth::token_to_metadata_value("my-token2").unwrap()), // update token
+            None,                                                     // remove token
+        ];
+        for auth_token in cases {
+            config.set_auth_token(auth_token.clone()).unwrap();
+            assert_eq!(config.auth_token, auth_token);
+
+            // Internal TOML representation is updated
+            let stored_config: Config = toml::from_str(&config.toml).unwrap();
+            assert_eq!(stored_config.auth_token, auth_token);
+
+            // Change is persisted to file
+            let loaded_config = Config::load(&config_path).unwrap();
+            assert_eq!(loaded_config.auth_token, auth_token);
+        }
     }
 
     #[test]

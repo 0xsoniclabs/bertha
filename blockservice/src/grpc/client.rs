@@ -1,7 +1,12 @@
-use tonic::{Request, Streaming, transport::Channel};
+use tonic::{
+    Request, Streaming,
+    metadata::{Ascii, MetadataValue},
+    transport::Channel,
+};
 
 use crate::grpc::{
     GRPC_COMPRESSION_ALGORITHM,
+    auth::AUTHORIZATION,
     proto_rpc::{
         BlockRangeRequest, ChainRanges, EncodedBlock, ListRequest, StateUpdates,
         StateUpdatesRequest, block_rpc_client::BlockRpcClient,
@@ -11,21 +16,28 @@ use crate::grpc::{
 /// A client for interacting with the Block RPC service.
 pub struct RpcClient {
     client: BlockRpcClient<Channel>,
+    auth_token: Option<MetadataValue<Ascii>>,
 }
 
 impl RpcClient {
     /// Creates a new [RpcClient] by connecting to the specified URL.
-    pub async fn try_new(url: String) -> Result<Self, tonic::transport::Error> {
+    pub async fn try_new(
+        url: String,
+        auth_token: Option<MetadataValue<Ascii>>,
+    ) -> Result<Self, tonic::transport::Error> {
         let client = BlockRpcClient::connect(url)
             .await?
             .accept_compressed(GRPC_COMPRESSION_ALGORITHM);
-        Ok(Self { client })
+        Ok(Self { client, auth_token })
     }
 
     #[cfg(test)]
     /// Creates a new [RpcClient] with the provided [BlockRpcClient].
-    pub(crate) fn new(client: BlockRpcClient<Channel>) -> Self {
-        Self { client }
+    pub(crate) fn new(
+        client: BlockRpcClient<Channel>,
+        auth_token: Option<MetadataValue<Ascii>>,
+    ) -> Self {
+        Self { client, auth_token }
     }
 
     /// Query a range of blocks by chain ID, from block number to block number.
@@ -35,20 +47,25 @@ impl RpcClient {
         from: u64,
         to: u64,
     ) -> Result<Streaming<EncodedBlock>, tonic::Status> {
-        let range = BlockRangeRequest { chain_id, from, to };
+        let mut request = Request::new(BlockRangeRequest { chain_id, from, to });
 
-        let stream = self
-            .client
-            .get_block_range(Request::new(range))
-            .await?
-            .into_inner();
+        if let Some(token) = &self.auth_token {
+            request.metadata_mut().insert(AUTHORIZATION, token.clone());
+        }
+
+        let stream = self.client.get_block_range(request).await?.into_inner();
 
         Ok(stream)
     }
 
     /// Queries the available block ranges of all chains or a specific chain.
     pub async fn list(&mut self, chain_id: Option<u64>) -> Result<ChainRanges, tonic::Status> {
-        let request = Request::new(ListRequest { chain_id });
+        let mut request = Request::new(ListRequest { chain_id });
+
+        if let Some(token) = &self.auth_token {
+            request.metadata_mut().insert(AUTHORIZATION, token.clone());
+        }
+
         let response = self.client.list(request).await?;
         Ok(response.into_inner())
     }
@@ -57,7 +74,12 @@ impl RpcClient {
         &mut self,
         chain_id: u64,
     ) -> Result<StateUpdates, tonic::Status> {
-        let request = Request::new(StateUpdatesRequest { chain_id });
+        let mut request = Request::new(StateUpdatesRequest { chain_id });
+
+        if let Some(token) = &self.auth_token {
+            request.metadata_mut().insert(AUTHORIZATION, token.clone());
+        }
+
         let response = self.client.get_state_updates(request).await?;
         Ok(response.into_inner())
     }
@@ -70,6 +92,7 @@ pub mod tests {
 
     use super::*;
     use crate::grpc::{
+        auth,
         proto_rpc::{BlockRange, ChainRange, StateUpdate},
         test_utils::{MockRpcServer, TestServer, get_mock_server_and_client},
     };
@@ -77,7 +100,7 @@ pub mod tests {
     #[tokio::test]
     async fn try_new_connects_successfully() {
         let server = TestServer::new(MockRpcServer::new()).await;
-        let rpc_client = RpcClient::try_new(server.address.clone()).await;
+        let rpc_client = RpcClient::try_new(server.address.clone(), None).await;
         assert!(rpc_client.is_ok(), "Failed to connect to RPC server");
     }
 
@@ -86,13 +109,13 @@ pub mod tests {
         // Invalid URL
         {
             let url = "invalid_url".to_string();
-            let rpc_client = RpcClient::try_new(url).await;
+            let rpc_client = RpcClient::try_new(url, None).await;
             assert!(rpc_client.is_err(), "Expected error for invalid URL");
         }
         // Non-existing server
         {
             let url = "http://[::1]:9999".to_string(); // Assuming no server is running on this port
-            let rpc_client = RpcClient::try_new(url).await;
+            let rpc_client = RpcClient::try_new(url, None).await;
             assert!(
                 rpc_client.is_err(),
                 "Expected error for non-existing server"
@@ -117,7 +140,7 @@ pub mod tests {
             Ok(tonic::Response::new(futures::stream::iter(blocks)))
         });
 
-        let mut rpc_client = get_mock_server_and_client(mock_server).await;
+        let mut rpc_client = get_mock_server_and_client(mock_server, None).await;
         let mut stream = rpc_client.get_block_range(1, 0, 2).await.unwrap();
         assert!(stream.next().await.unwrap().unwrap().data == vec![1, 2, 3]);
         assert!(stream.next().await.unwrap().unwrap().data == vec![4, 5, 6]);
@@ -125,6 +148,42 @@ pub mod tests {
             stream.next().await.is_none(),
             "Stream should end after two blocks"
         );
+    }
+
+    #[tokio::test]
+    async fn get_block_range_sets_auth_token() {
+        let auth_token = Some(auth::token_to_metadata_value("my-token").unwrap());
+        let mut mock_server = MockRpcServer::new();
+        mock_server
+            .expect_get_block_range()
+            .withf({
+                let auth_token = auth_token.clone();
+                move |request| {
+                    if auth_token.is_some() {
+                        let req_token = request.metadata().get(AUTHORIZATION);
+                        auth_token.as_ref() == req_token
+                    } else {
+                        true
+                    }
+                }
+            })
+            .returning(|_| {
+                let blocks = vec![
+                    Ok(EncodedBlock {
+                        data: vec![1, 2, 3],
+                        number: 1,
+                    }),
+                    Ok(EncodedBlock {
+                        data: vec![4, 5, 6],
+                        number: 2,
+                    }),
+                ];
+                Ok(tonic::Response::new(futures::stream::iter(blocks)))
+            });
+
+        let mut rpc_client = get_mock_server_and_client(mock_server, auth_token).await;
+        let result = rpc_client.get_block_range(1, 0, 2).await;
+        assert!(result.is_ok(), "Failed to get block range with auth token");
     }
 
     #[tokio::test]
@@ -136,7 +195,7 @@ pub mod tests {
                 .expect_get_block_range()
                 .returning(|_| Err(tonic::Status::internal("Internal error")));
 
-            let mut rpc_client = get_mock_server_and_client(mock_server).await;
+            let mut rpc_client = get_mock_server_and_client(mock_server, None).await;
             let result = rpc_client.get_block_range(1, 0, 2).await;
             assert!(result.is_err(), "Expected error for internal server error");
             let err = result.unwrap_err();
@@ -157,7 +216,7 @@ pub mod tests {
                 Ok(tonic::Response::new(futures::stream::iter(blocks)))
             });
 
-            let mut rpc_client = get_mock_server_and_client(mock_server).await;
+            let mut rpc_client = get_mock_server_and_client(mock_server, None).await;
             let mut stream = rpc_client.get_block_range(1, 0, 2).await.unwrap();
             assert!(stream.next().await.unwrap().unwrap().data == vec![1, 2, 3]);
             let error = stream.next().await.unwrap().unwrap_err();
@@ -186,9 +245,9 @@ pub mod tests {
                 move |_| Ok(tonic::Response::new(encoded_chain_ranges.clone()))
             });
 
-            let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
-            let block = rpc_client.list(None).await.unwrap();
-            assert_eq!(block, encoded_chain_ranges, "Chain ranges do not match");
+            let mut rpc_client = get_mock_server_and_client(mock_rpc_server, None).await;
+            let ranges = rpc_client.list(None).await.unwrap();
+            assert_eq!(ranges, encoded_chain_ranges, "Chain ranges do not match");
         }
         // ranges do not exist = empty
         {
@@ -198,10 +257,10 @@ pub mod tests {
                     chain_ranges: Vec::new(),
                 }))
             });
-            let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
-            let block = rpc_client.list(Some(1)).await.unwrap();
+            let mut rpc_client = get_mock_server_and_client(mock_rpc_server, None).await;
+            let ranges = rpc_client.list(Some(1)).await.unwrap();
             assert_eq!(
-                block,
+                ranges,
                 ChainRanges {
                     chain_ranges: Vec::new()
                 },
@@ -211,13 +270,49 @@ pub mod tests {
     }
 
     #[tokio::test]
+    async fn list_sets_auth_token() {
+        let auth_token = Some(auth::token_to_metadata_value("my-token").unwrap());
+        let encoded_chain_ranges = ChainRanges {
+            chain_ranges: vec![ChainRange {
+                chain_id: 1,
+                block_ranges: vec![BlockRange { from: 0, to: 10 }],
+            }],
+        };
+        let mut mock_rpc_server = MockRpcServer::new();
+        mock_rpc_server
+            .expect_list()
+            .withf({
+                let auth_token = auth_token.clone();
+                move |request| {
+                    if auth_token.is_some() {
+                        let req_token = request.metadata().get(AUTHORIZATION);
+                        auth_token.as_ref() == req_token
+                    } else {
+                        true
+                    }
+                }
+            })
+            .returning({
+                let encoded_chain_ranges = encoded_chain_ranges.clone();
+                move |_| Ok(tonic::Response::new(encoded_chain_ranges.clone()))
+            });
+
+        let mut rpc_client = get_mock_server_and_client(mock_rpc_server, auth_token).await;
+        let result = rpc_client.list(None).await;
+        assert!(
+            result.is_ok(),
+            "Failed to list block ranges with auth token"
+        );
+    }
+
+    #[tokio::test]
     async fn list_propagates_error() {
         let mut mock_rpc_server = MockRpcServer::new();
         mock_rpc_server
             .expect_list()
             .returning(|_| Err(tonic::Status::internal("Internal error")));
 
-        let mut rpc_client = get_mock_server_and_client(mock_rpc_server).await;
+        let mut rpc_client = get_mock_server_and_client(mock_rpc_server, None).await;
         let result = rpc_client.list(None).await;
         assert!(result.is_err(), "Expected error for internal server error");
     }
@@ -244,7 +339,7 @@ pub mod tests {
                 }))
             }
         });
-        let mut rpc_client = get_mock_server_and_client(mock_server).await;
+        let mut rpc_client = get_mock_server_and_client(mock_server, None).await;
         let updates = rpc_client.get_state_updates(1).await.unwrap();
         assert_eq!(updates.updates, expected_updates);
     }
@@ -255,10 +350,43 @@ pub mod tests {
         mock_server
             .expect_get_state_updates()
             .returning(|_| Err(tonic::Status::internal("Internal error")));
-        let mut rpc_client = get_mock_server_and_client(mock_server).await;
+        let mut rpc_client = get_mock_server_and_client(mock_server, None).await;
         let result = rpc_client.get_state_updates(1).await;
         let err = result.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Internal);
         assert!(err.message().contains("Internal error"));
+    }
+
+    #[tokio::test]
+    async fn get_state_updates_sets_auth_token() {
+        let auth_token = Some(auth::token_to_metadata_value("my-token").unwrap());
+        let mut mock_rpc_server = MockRpcServer::new();
+        mock_rpc_server
+            .expect_get_state_updates()
+            .withf({
+                let auth_token = auth_token.clone();
+                move |request| {
+                    if auth_token.is_some() {
+                        let req_token = request.metadata().get(AUTHORIZATION);
+                        auth_token.as_ref() == req_token
+                    } else {
+                        true
+                    }
+                }
+            })
+            .returning({
+                move |_| {
+                    Ok(tonic::Response::new(StateUpdates {
+                        updates: Vec::new(),
+                    }))
+                }
+            });
+
+        let mut rpc_client = get_mock_server_and_client(mock_rpc_server, auth_token).await;
+        let result = rpc_client.get_state_updates(1).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get state updates with auth token"
+        );
     }
 }

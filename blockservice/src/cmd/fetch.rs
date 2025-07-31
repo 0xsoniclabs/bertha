@@ -16,9 +16,11 @@ pub async fn fetch(
     to: Option<u64>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (_cfg, db) = open_app_dir(app_dir, false)?;
+    let (cfg, db) = open_app_dir(app_dir, false)?;
 
-    let mut client = RpcClient::try_new(url).await?;
+    let auth_token = cfg.get_auth_token().cloned();
+
+    let mut client = RpcClient::try_new(url, auth_token).await?;
 
     // Get remote chain ranges
     let remote_ranges = client.list(Some(chain_id)).await?;
@@ -148,6 +150,7 @@ mod tests {
         cmd::fetch::fetch,
         db::{BlockDb, proto},
         grpc::{
+            auth::{self, AUTHORIZATION},
             proto_rpc::{self, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock},
             test_utils::{MockRpcServer, TestServer},
         },
@@ -816,6 +819,81 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn provides_auth_token_when_supplied() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let (mut cfg, _db) = open_app_dir(tmpdir.path(), true).unwrap();
+
+        let cases = vec![
+            Some(auth::token_to_metadata_value("my-token").unwrap()),
+            None,
+        ];
+        for auth_token in cases {
+            cfg.set_auth_token(auth_token.clone()).unwrap();
+
+            let mut mock_server = MockRpcServer::new();
+            mock_server
+                .expect_list()
+                .withf({
+                    let auth_token = auth_token.clone();
+                    move |request| {
+                        if auth_token.is_some() {
+                            let req_token = request.metadata().get(AUTHORIZATION);
+                            auth_token.as_ref() == req_token
+                        } else {
+                            true
+                        }
+                    }
+                })
+                .returning(|_| {
+                    Ok(tonic::Response::new(ChainRanges {
+                        chain_ranges: vec![ChainRange {
+                            chain_id: 1,
+                            block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 0 }],
+                        }],
+                    }))
+                });
+
+            let range_response = vec![Ok(EncodedBlock {
+                number: 0,
+                data: proto::Block::from(bertha_types::Block {
+                    number: 0,
+                    ..bertha_types::Block::default_sonic()
+                })
+                .encode_to_vec(),
+            })];
+
+            mock_server
+                .expect_get_block_range()
+                .withf(move |request| {
+                    if auth_token.is_some() {
+                        let req_token = request.metadata().get(AUTHORIZATION);
+                        auth_token.as_ref() == req_token
+                    } else {
+                        true
+                    }
+                })
+                .return_once(move |_| {
+                    Ok(tonic::Response::new(futures::stream::iter(range_response)))
+                });
+
+            let server = TestServer::new(mock_server).await;
+            let mut buf = Vec::new();
+            let result = fetch(
+                tmpdir.path(),
+                server.address.clone(),
+                1,
+                Some(0),
+                Some(0),
+                &mut buf,
+            )
+            .await;
+            assert!(result.is_ok(), "Fetch should succeed");
+        }
+    }
+
+    /// Helper function to convert an iterator of `(u64, u64)` tuples into a `Vec<BlockRange>`.
     /// Converts an iterator of [BlockRange] into a [Vec<proto_rpc::BlockRange>].
     fn to_proto_block_range(
         ranges: impl IntoIterator<Item = BlockRange>,

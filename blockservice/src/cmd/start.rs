@@ -146,7 +146,7 @@ mod tests {
         app_dir::{init_app_dir, open_app_dir},
         cmd::start,
         db::{BlockDb, proto},
-        grpc::RpcClient,
+        grpc::{RpcClient, auth},
         json_rpc::{
             BlockHeaderWithTransactions,
             test_utils::build_mock_server_request_handler_for_infinitely_many_requests,
@@ -155,41 +155,48 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn start_starts_server_successfully() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        {
-            let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-            db.put_raw(1, 1, vec![1, 2, 3].as_slice()).unwrap();
-        }
-
-        let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-
-        let token = CancellationToken::new();
-        let job = tokio::spawn({
-            let token = token.clone();
-            async move {
-                start(tmpdir.path(), listener, token, None, None)
-                    .await
-                    .unwrap();
+    async fn starts_server_successfully_and_forwards_auth_token() {
+        let cases = [
+            Some(auth::token_to_metadata_value("my-token").unwrap()),
+            None,
+        ];
+        for auth_token in cases {
+            let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+            init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+            {
+                let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+                db.put_raw(1, 1, vec![1, 2, 3].as_slice()).unwrap();
             }
-        });
 
-        let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
-        assert!(client.is_ok());
-        let mut client = client.unwrap();
-        let mut res = client.get_block_range(1, 1, 1).await.unwrap();
-        assert_eq!(
-            res.next()
-                .await
-                .expect("stream should not be empty")
-                .expect("not an error")
-                .data,
-            vec![1, 2, 3]
-        );
-        token.cancel();
-        job.abort(); // Stop the server
+            let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+
+            let token = CancellationToken::new();
+            let job = tokio::spawn({
+                let token = token.clone();
+                async move {
+                    start(tmpdir.path(), listener, token, None, None)
+                        .await
+                        .unwrap();
+                }
+            });
+
+            let client =
+                RpcClient::try_new(format!("http://{addr}").parse().unwrap(), auth_token).await;
+            assert!(client.is_ok());
+            let mut client = client.unwrap();
+            let mut res = client.get_block_range(1, 1, 1).await.unwrap();
+            assert_eq!(
+                res.next()
+                    .await
+                    .expect("stream should not be empty")
+                    .expect("not an error")
+                    .data,
+                vec![1, 2, 3]
+            );
+            token.cancel();
+            job.abort(); // Stop the server
+        }
     }
 
     #[tokio::test]
@@ -473,7 +480,7 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
 
-        let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
+        let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap(), None).await;
         assert!(client.is_ok());
         let mut client = client.unwrap();
         let mut res = client
@@ -540,7 +547,7 @@ mod tests {
             }
         }
 
-        let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
+        let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap(), None).await;
         assert!(client.is_ok());
         let mut client = client.unwrap();
         let mut res = client.get_block_range(chain_id, 0, 0).await.unwrap();

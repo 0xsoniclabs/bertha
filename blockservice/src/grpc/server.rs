@@ -1,13 +1,13 @@
 use std::{fs, sync::Arc};
 
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::transport::Server;
+use tonic::{service::interceptor::InterceptedService, transport::Server};
 
 use crate::{
     config::Config,
     db::BlockDb,
     grpc::{
-        GRPC_COMPRESSION_ALGORITHM,
+        GRPC_COMPRESSION_ALGORITHM, auth,
         proto_rpc::{
             BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock, ListRequest, StateUpdate,
             StateUpdates, StateUpdatesRequest,
@@ -42,8 +42,13 @@ where
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("Listening on {}...", listener.local_addr()?);
 
+        let auth_token = self.cfg.get_auth_token().cloned();
+        let block_server = BlockRpcServer::new(self).send_compressed(GRPC_COMPRESSION_ALGORITHM);
+        let authenticated_block_server =
+            InterceptedService::new(block_server, auth::check_token(auth_token));
+
         Server::builder()
-            .add_service(BlockRpcServer::new(self).send_compressed(GRPC_COMPRESSION_ALGORITHM))
+            .add_service(authenticated_block_server)
             .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
             .await?;
         Ok(())
@@ -199,14 +204,16 @@ mod tests {
 
     use mockall::predicate::eq;
     use tokio_stream::StreamExt;
-    use tonic::Request;
+    use tonic::{Code, Request};
 
     use super::*;
     use crate::{
         Error,
+        app_dir::{init_app_dir, open_app_dir},
         config::ChainConfig,
         db::MockBlockDb,
         grpc::{
+            auth,
             client::RpcClient,
             proto_rpc::{self, BlockRangeRequest, block_rpc_server::BlockRpc},
         },
@@ -310,14 +317,19 @@ mod tests {
             move |_, _| Box::new(vec![Ok((1, vec![1, 2, 3].into_boxed_slice()))].into_iter())
         });
 
-        let server = RpcServer::new(Arc::new(db), Config::default());
+        let config = Config::default();
+        let server = RpcServer::new(Arc::new(db), config.clone());
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let job = tokio::spawn(async move {
             server.serve(listener).await.expect("Server should start");
         });
 
-        let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
+        let client = RpcClient::try_new(
+            format!("http://{addr}").parse().unwrap(),
+            config.get_auth_token().cloned(),
+        )
+        .await;
         assert!(client.is_ok());
         let mut client = client.unwrap();
         let mut res = client.get_block_range(1, 1, 1).await.unwrap();
@@ -330,6 +342,77 @@ mod tests {
             vec![1, 2, 3]
         );
         job.abort(); // Stop the server
+    }
+
+    #[tokio::test]
+    async fn serve_authenticates_user_if_token_specified() {
+        let mut db = MockBlockDb::new();
+        db.expect_iterate_raw().with(eq(1), eq(1)).returning({
+            move |_, _| Box::new(vec![Ok((1, vec![1, 2, 3].into_boxed_slice()))].into_iter())
+        });
+        let db = Arc::new(db);
+
+        let auth_token = Some("xyz");
+        let auth_token = auth_token
+            .map(auth::token_to_metadata_value)
+            .transpose()
+            .unwrap();
+
+        // request without token should fail
+        {
+            let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+            init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+            let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
+            cfg.set_auth_token(auth_token.clone()).unwrap();
+
+            let server = RpcServer::new(db.clone(), cfg);
+            let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let job = tokio::spawn(async move {
+                server.serve(listener).await.expect("Server should start");
+            });
+
+            let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap(), None).await;
+            assert!(client.is_ok());
+            let mut client = client.unwrap();
+            let res = client.get_block_range(1, 1, 1).await;
+            assert!(res.is_err());
+            let res = res.unwrap_err();
+            assert_eq!(res.code(), Code::Unauthenticated);
+            assert_eq!(res.message(), "Missing auth token");
+            job.abort(); // Stop the server
+        }
+        // request with token should succeed
+        {
+            let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+            init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+            let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
+            cfg.set_auth_token(auth_token.clone()).unwrap();
+
+            let server = RpcServer::new(db, cfg);
+            let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            let job = tokio::spawn(async move {
+                server.serve(listener).await.expect("Server should start");
+            });
+
+            let client =
+                RpcClient::try_new(format!("http://{addr}").parse().unwrap(), auth_token).await;
+            assert!(client.is_ok());
+            let mut client = client.unwrap();
+            let res = client.get_block_range(1, 1, 1).await;
+            assert!(res.is_ok());
+            assert_eq!(
+                res.unwrap()
+                    .next()
+                    .await
+                    .expect("stream should not be empty")
+                    .expect("not an error")
+                    .data,
+                vec![1, 2, 3]
+            );
+            job.abort(); // Stop the server
+        }
     }
 
     #[tokio::test]
