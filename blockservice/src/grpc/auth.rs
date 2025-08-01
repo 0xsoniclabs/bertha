@@ -27,7 +27,7 @@ pub fn check_token(
     auth_token: Option<MetadataValue<Ascii>>,
 ) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone {
     move |req: Request<()>| match &auth_token {
-        Some(token) => match req.metadata().get(AUTHORIZATION) {
+        Some(token) => match req.metadata().get(AUTHORIZATION_HEADER_NAME) {
             Some(t) if t == token => Ok(req),
             Some(_) => Err(Status::unauthenticated("Invalid auth token")),
             _ => Err(Status::unauthenticated("Missing auth token")),
@@ -36,7 +36,8 @@ pub fn check_token(
     }
 }
 
-pub const AUTHORIZATION: &str = "authorization";
+/// The name of the HTTP authorization header.
+pub const AUTHORIZATION_HEADER_NAME: &str = "authorization";
 
 #[cfg(test)]
 mod tests {
@@ -94,8 +95,10 @@ mod tests {
         {
             // Invalid token in request
             let mut req = Request::new(());
-            req.metadata_mut()
-                .insert(AUTHORIZATION, MetadataValue::from_static("invalid-token"));
+            req.metadata_mut().insert(
+                AUTHORIZATION_HEADER_NAME,
+                MetadataValue::from_static("invalid-token"),
+            );
             let result = check_fn(req);
             assert!(result.is_err());
             let error = result.unwrap_err();
@@ -105,8 +108,10 @@ mod tests {
         {
             // Valid token in request
             let mut req = Request::new(());
-            req.metadata_mut()
-                .insert(AUTHORIZATION, MetadataValue::from_static("Bearer my-token"));
+            req.metadata_mut().insert(
+                AUTHORIZATION_HEADER_NAME,
+                MetadataValue::from_static("Bearer my-token"),
+            );
             let result = check_fn(req);
             assert!(result.is_ok());
         }
@@ -124,8 +129,10 @@ mod tests {
         {
             // Some token in request
             let mut req = Request::new(());
-            req.metadata_mut()
-                .insert(AUTHORIZATION, MetadataValue::from_static("my-token"));
+            req.metadata_mut().insert(
+                AUTHORIZATION_HEADER_NAME,
+                MetadataValue::from_static("my-token"),
+            );
             let result = check_fn(req);
             assert!(result.is_ok());
         }

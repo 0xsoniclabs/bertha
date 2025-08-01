@@ -264,11 +264,14 @@ mod tests {
     #[test]
     fn auth_token_serialization_and_deserialization_succeed_for_valid_and_non_existing_auth_tokens()
     {
+        // Test cases in the form (line to add to config, expected auth token)
         let cases = [
+            // valid token
             (
                 "auth_token = \"my-token\"\n",
                 Some(auth::token_to_metadata_value("my-token").unwrap()),
             ),
+            // no token
             ("", None),
         ];
         for (toml_token_line, expected_token) in cases {
