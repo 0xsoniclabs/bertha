@@ -150,7 +150,7 @@ mod tests {
         cmd::fetch::fetch,
         db::{BlockDb, proto},
         grpc::{
-            auth::{self, AUTHORIZATION},
+            auth::{self, AUTHORIZATION_HEADER_NAME},
             proto_rpc::{self, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock},
             test_utils::{MockRpcServer, TestServer},
         },
@@ -839,7 +839,7 @@ mod tests {
                     let auth_token = auth_token.clone();
                     move |request| {
                         if auth_token.is_some() {
-                            let req_token = request.metadata().get(AUTHORIZATION);
+                            let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
                             auth_token.as_ref() == req_token
                         } else {
                             true
@@ -868,7 +868,7 @@ mod tests {
                 .expect_get_block_range()
                 .withf(move |request| {
                     if auth_token.is_some() {
-                        let req_token = request.metadata().get(AUTHORIZATION);
+                        let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
                         auth_token.as_ref() == req_token
                     } else {
                         true

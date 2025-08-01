@@ -6,7 +6,7 @@ use tonic::{
 
 use crate::grpc::{
     GRPC_COMPRESSION_ALGORITHM,
-    auth::AUTHORIZATION,
+    auth::AUTHORIZATION_HEADER_NAME,
     proto_rpc::{
         BlockRangeRequest, ChainRanges, EncodedBlock, ListRequest, StateUpdates,
         StateUpdatesRequest, block_rpc_client::BlockRpcClient,
@@ -50,7 +50,9 @@ impl RpcClient {
         let mut request = Request::new(BlockRangeRequest { chain_id, from, to });
 
         if let Some(token) = &self.auth_token {
-            request.metadata_mut().insert(AUTHORIZATION, token.clone());
+            request
+                .metadata_mut()
+                .insert(AUTHORIZATION_HEADER_NAME, token.clone());
         }
 
         let stream = self.client.get_block_range(request).await?.into_inner();
@@ -63,7 +65,9 @@ impl RpcClient {
         let mut request = Request::new(ListRequest { chain_id });
 
         if let Some(token) = &self.auth_token {
-            request.metadata_mut().insert(AUTHORIZATION, token.clone());
+            request
+                .metadata_mut()
+                .insert(AUTHORIZATION_HEADER_NAME, token.clone());
         }
 
         let response = self.client.list(request).await?;
@@ -77,7 +81,9 @@ impl RpcClient {
         let mut request = Request::new(StateUpdatesRequest { chain_id });
 
         if let Some(token) = &self.auth_token {
-            request.metadata_mut().insert(AUTHORIZATION, token.clone());
+            request
+                .metadata_mut()
+                .insert(AUTHORIZATION_HEADER_NAME, token.clone());
         }
 
         let response = self.client.get_state_updates(request).await?;
@@ -160,7 +166,7 @@ pub mod tests {
                 let auth_token = auth_token.clone();
                 move |request| {
                     if auth_token.is_some() {
-                        let req_token = request.metadata().get(AUTHORIZATION);
+                        let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
                         auth_token.as_ref() == req_token
                     } else {
                         true
@@ -285,7 +291,7 @@ pub mod tests {
                 let auth_token = auth_token.clone();
                 move |request| {
                     if auth_token.is_some() {
-                        let req_token = request.metadata().get(AUTHORIZATION);
+                        let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
                         auth_token.as_ref() == req_token
                     } else {
                         true
@@ -367,7 +373,7 @@ pub mod tests {
                 let auth_token = auth_token.clone();
                 move |request| {
                     if auth_token.is_some() {
-                        let req_token = request.metadata().get(AUTHORIZATION);
+                        let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
                         auth_token.as_ref() == req_token
                     } else {
                         true

@@ -50,7 +50,7 @@ mod tests {
     use crate::{
         app_dir::init_app_dir,
         grpc::{
-            auth::{self, AUTHORIZATION},
+            auth::{self, AUTHORIZATION_HEADER_NAME},
             proto_rpc,
             test_utils::{MockRpcServer, TestServer},
         },
@@ -212,7 +212,7 @@ mod tests {
                     let auth_token = auth_token.clone();
                     move |request| {
                         if auth_token.is_some() {
-                            let req_token = request.metadata().get(AUTHORIZATION);
+                            let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
                             auth_token.as_ref() == req_token
                         } else {
                             true

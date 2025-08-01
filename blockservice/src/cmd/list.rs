@@ -84,7 +84,7 @@ mod tests {
         config::ChainConfig,
         db::RocksBlockDb,
         grpc::{
-            auth::{self, AUTHORIZATION},
+            auth::{self, AUTHORIZATION_HEADER_NAME},
             proto_rpc::{self, BlockRange, ChainRange, ChainRanges},
             test_utils::{MockRpcServer, TestServer},
         },
@@ -399,7 +399,7 @@ mod tests {
                     let auth_token = auth_token.clone();
                     move |request| {
                         if auth_token.is_some() {
-                            let req_token = request.metadata().get(AUTHORIZATION);
+                            let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
                             auth_token.as_ref() == req_token
                         } else {
                             true
