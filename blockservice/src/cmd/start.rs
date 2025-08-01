@@ -57,6 +57,7 @@ pub async fn start(
                 r = sync(&chain_configs, db.deref(), _test_sync_block_count) => {
                     if let Err(err) = r {
                         println!("error in block sync task: {err}");
+                        #[cfg(test)]
                         if let Some(notify) = _test_notify {
                             notify.send(StartCmdStatusMsg::SyncError(err.to_string())).await.unwrap();
                         }
