@@ -4,7 +4,7 @@ use crate::test_utils::{
     IntegrationTestServer, check_init_output, execute_command, make_snapshot_file,
 };
 
-pub mod test_utils;
+mod test_utils;
 
 #[tokio::test]
 async fn dummy_client_server_integration() {
