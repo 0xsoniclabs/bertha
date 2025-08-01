@@ -5,12 +5,14 @@ use tonic::{
     metadata::{Ascii, MetadataValue, errors::InvalidMetadataValue},
 };
 
+/// Converts a token string into a gRPC metadata value with `Bearer ` prefix.
 pub fn token_to_metadata_value(
     token: impl AsRef<str>,
 ) -> Result<MetadataValue<Ascii>, InvalidMetadataValue> {
     MetadataValue::from_str(&format!("Bearer {}", token.as_ref()))
 }
 
+/// Extracts the user token from a gRPC metadata value, removing the `Bearer ` prefix.
 pub fn extract_user_token(token: &MetadataValue<Ascii>) -> Result<String, String> {
     match token.to_str() {
         Ok(token) if token.starts_with("Bearer ") => Ok(token[7..].to_string()),
@@ -19,6 +21,8 @@ pub fn extract_user_token(token: &MetadataValue<Ascii>) -> Result<String, String
     }
 }
 
+/// Returns a closure which implements the authentication check. If a token is specified, it
+/// extracts the authentication header from a gRPC request and checks it against the provided token.
 pub fn check_token(
     auth_token: Option<MetadataValue<Ascii>>,
 ) -> impl Fn(Request<()>) -> Result<Request<()>, Status> + Clone {
@@ -76,8 +80,8 @@ mod tests {
 
     #[test]
     fn check_token_intercepts_request_and_validates_token_when_token_is_supplied() {
-        let token = "my-token";
-        let check_fn = check_token(Some(MetadataValue::from_static(token)));
+        let token = token_to_metadata_value("my-token").unwrap();
+        let check_fn = check_token(Some(token));
 
         {
             // No token in request
@@ -102,7 +106,7 @@ mod tests {
             // Valid token in request
             let mut req = Request::new(());
             req.metadata_mut()
-                .insert(AUTHORIZATION, MetadataValue::from_static(token));
+                .insert(AUTHORIZATION, MetadataValue::from_static("Bearer my-token"));
             let result = check_fn(req);
             assert!(result.is_ok());
         }
