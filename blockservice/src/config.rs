@@ -106,6 +106,10 @@ impl Config {
     pub fn get_chain_config(&self, id: u64) -> Option<ChainConfig> {
         self.chains.iter().find(|c| c.id == id).cloned()
     }
+
+    pub fn get_chain_configs(&self) -> &[ChainConfig] {
+        &self.chains
+    }
 }
 
 impl Default for Config {
@@ -130,6 +134,9 @@ pub struct ChainConfig {
     pub name: String,
     pub description: String,
 
+    /// Optional JSON RPC endpoint for this chain.
+    pub json_rpc: Option<String>,
+
     /// An optional list of paths to state update files for this chain.
     /// Can be transferred to other blockservice instances using the `fetch-state-updates` command.
     pub state_updates: Option<Vec<PathBuf>>,
@@ -143,6 +150,7 @@ impl ChainConfig {
             id,
             name: String::default(),
             description: String::default(),
+            json_rpc: None,
             state_updates: None,
         }
     }
@@ -181,6 +189,7 @@ mod tests {
                 id: 133337,
                 name: "Example chain".to_string(),
                 description: "An example blockchain".to_string(),
+                json_rpc: Some("https://example.com/jsonrpc".to_string()),
                 state_updates: Some(vec![PathBuf::from("./state_updates_133337.json")])
             }]
         );
@@ -227,6 +236,7 @@ mod tests {
             id: 133337,
             name: "Example chain".to_string(),
             description: "An example blockchain".to_string(),
+            json_rpc: Some("https://example.com/jsonrpc".to_string()),
             state_updates: None,
         };
         let my_cfg = Config {
@@ -318,6 +328,7 @@ mod tests {
             id: 133337,
             name: "Example chain".to_string(),
             description: "An example blockchain".to_string(),
+            json_rpc: Some("https://example.com/jsonrpc".to_string()),
             state_updates: None,
         };
         config.add_chain(chain.clone()).unwrap();
@@ -377,6 +388,22 @@ mod tests {
 
         let non_existent_chain = config.get_chain_config(1337);
         assert!(non_existent_chain.is_none());
+    }
+
+    #[test]
+    fn get_chain_configs_returns_all_chain_configs() {
+        let cases = vec![
+            vec![],
+            vec![ChainConfig::new(1)],
+            vec![ChainConfig::new(1), ChainConfig::new(2)],
+        ];
+        for chain_configs in cases {
+            let config = Config {
+                chains: chain_configs.clone(),
+                ..Config::default()
+            };
+            assert_eq!(config.get_chain_configs(), &chain_configs);
+        }
     }
 
     #[test]

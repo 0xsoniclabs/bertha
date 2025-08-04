@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     ops::Deref,
     path::Path,
     sync::{Arc, atomic::AtomicU64},
@@ -10,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     app_dir::open_app_dir,
+    config::ChainConfig,
     db::BlockDb,
     grpc::RpcServer,
     json_rpc::{NetworkSource, subscribe_to_blocks},
@@ -22,9 +22,8 @@ use crate::{
 pub async fn start(
     app_dir: impl AsRef<Path>,
     listener: tokio::net::TcpListener,
-    config: HashMap<u64, String>,
     cancellation_token: CancellationToken,
-    _test_notify_tasks_spawned: Option<Arc<tokio::sync::Notify>>,
+    _test_notify: Option<tokio::sync::mpsc::Sender<StartCmdStatusMsg>>,
     _test_sync_block_count: Option<Arc<AtomicU64>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (cfg, db) = open_app_dir(app_dir, false)?;
@@ -47,15 +46,21 @@ pub async fn start(
     tokio::spawn({
         let cancellation_token = cancellation_token.clone();
         let db = Arc::clone(&db);
+        let chain_configs = cfg.get_chain_configs().to_owned();
+        let _test_notify = _test_notify.clone();
         async move {
             tokio::select! {
                 _ = cancellation_token.cancelled() => {},
                 // NOTE: Even though `sync` internally spawns another task (via `subscribe_to_blocks`),
                 // we don't have to pass a cancellation token to it, as the task will exit once
                 // the read-end of the stream is closed.
-                r = sync(&config, db.deref(), _test_sync_block_count) => {
+                r = sync(&chain_configs, db.deref(), _test_sync_block_count) => {
                     if let Err(err) = r {
                         println!("error in block sync task: {err}");
+                        #[cfg(test)]
+                        if let Some(notify) = _test_notify {
+                            notify.send(StartCmdStatusMsg::SyncError(err.to_string())).await.unwrap();
+                        }
                     }
                 },
             }
@@ -64,9 +69,9 @@ pub async fn start(
 
     #[cfg(test)]
     {
-        if let Some(tasks_spawned) = _test_notify_tasks_spawned {
+        if let Some(notify) = _test_notify {
             // Notify the test that the task has been spawned
-            tasks_spawned.notify_one();
+            notify.send(StartCmdStatusMsg::SyncStarted).await.unwrap();
         }
     }
 
@@ -75,12 +80,16 @@ pub async fn start(
 }
 
 async fn sync(
-    json_rpc_config: &HashMap<u64, String>,
+    chain_configs: &[ChainConfig],
     db: &impl BlockDb,
     _test_num_blocks_written: Option<Arc<AtomicU64>>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut streams = StreamMap::new();
-    for (&chain_id, server) in json_rpc_config {
+    for chain_config in chain_configs {
+        let chain_id = chain_config.id;
+        let Some(server) = chain_config.json_rpc.as_ref() else {
+            continue;
+        };
         let start_block = db
             .iterate_reverse(chain_id, u64::MAX)
             .next()
@@ -109,6 +118,16 @@ async fn sync(
     }
 
     Ok(())
+}
+
+/// A message send over the channel supplied to the start command to notify about the status of the
+/// start command.
+/// Messages of this type are sent over the `_test_notify` channel of the start command.
+#[allow(clippy::enum_variant_names)]
+pub enum StartCmdStatusMsg {
+    SyncStarted,
+    SyncFinished,
+    SyncError(String),
 }
 
 #[cfg(test)]
@@ -144,7 +163,6 @@ mod tests {
             db.put_raw(1, 1, vec![1, 2, 3].as_slice()).unwrap();
         }
 
-        let config = HashMap::new();
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
@@ -152,7 +170,7 @@ mod tests {
         let job = tokio::spawn({
             let token = token.clone();
             async move {
-                start(tmpdir.path(), listener, config, token, None, None)
+                start(tmpdir.path(), listener, token, None, None)
                     .await
                     .unwrap();
             }
@@ -183,27 +201,25 @@ mod tests {
         let metrics = tokio::runtime::Handle::current().metrics();
         let num_tasks_before = metrics.num_alive_tasks();
 
-        let tasks_spawned = Arc::new(tokio::sync::Notify::new());
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
         let token = CancellationToken::new();
         let job = tokio::spawn({
             let token = token.clone();
-            let tasks_spawned = tasks_spawned.clone();
             async move {
-                start(
-                    tmpdir.path(),
-                    listener,
-                    HashMap::new(),
-                    token,
-                    Some(tasks_spawned),
-                    None,
-                )
-                .await
-                .unwrap();
+                start(tmpdir.path(), listener, token, Some(tx), None)
+                    .await
+                    .unwrap();
             }
         });
 
         // Wait for internal tasks to be spawned
-        tasks_spawned.notified().await;
+        loop {
+            match rx.recv().await {
+                Some(StartCmdStatusMsg::SyncStarted) => break,
+                Some(_) => continue,
+                _ => panic!("Expected SyncStarted message"),
+            }
+        }
 
         let metrics = tokio::runtime::Handle::current().metrics();
         let num_tasks_now = metrics.num_alive_tasks();
@@ -228,12 +244,10 @@ mod tests {
     #[tokio::test]
     async fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let config = HashMap::new();
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let result = start(
             tmpdir.path(),
             listener,
-            config,
             CancellationToken::new(),
             None,
             None,
@@ -252,9 +266,12 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
-        let json_rpc_config = [(1, "invalid_url".to_string())].into_iter().collect();
+        let chain_configs = vec![ChainConfig {
+            json_rpc: Some("invalid_url".to_string()),
+            ..ChainConfig::new(1)
+        }];
 
-        let result = sync(&json_rpc_config, &db, None).await;
+        let result = sync(&chain_configs, &db, None).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid URL"));
     }
@@ -297,9 +314,12 @@ mod tests {
             )
             .await;
 
-        let json_rpc_config = [(1, mock_server.uri())].into_iter().collect();
+        let chain_configs = vec![ChainConfig {
+            json_rpc: Some(mock_server.uri().to_string()),
+            ..ChainConfig::new(1)
+        }];
 
-        let result = sync(&json_rpc_config, &db, None).await;
+        let result = sync(&chain_configs, &db, None).await;
         assert!(result.is_err());
         assert!(
             result
@@ -348,16 +368,27 @@ mod tests {
             )
             .await;
 
-        let json_rpc_config = [(1, mock_server.uri()), (2, mock_server.uri())]
-            .into_iter()
-            .collect();
+        let chain_configs = vec![
+            ChainConfig {
+                json_rpc: Some(mock_server.uri().to_string()),
+                ..ChainConfig::new(1)
+            },
+            ChainConfig {
+                json_rpc: Some(mock_server.uri().to_string()),
+                ..ChainConfig::new(2)
+            },
+            ChainConfig {
+                json_rpc: None, // this chain will be ignored
+                ..ChainConfig::new(2)
+            },
+        ];
 
         let block_count = Arc::new(AtomicU64::new(0));
         let task = tokio::spawn({
             let db = Arc::clone(&db);
             let block_count = block_count.clone();
             async move {
-                sync(&json_rpc_config, db.deref(), Some(block_count))
+                sync(&chain_configs, db.deref(), Some(block_count))
                     .await
                     .unwrap();
             }
@@ -415,7 +446,15 @@ mod tests {
             )
             .await;
 
-        let config = HashMap::from([(chain_id, mock_server.uri())]);
+        let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
+
+        let chain_config = ChainConfig {
+            json_rpc: Some(mock_server.uri().to_string()),
+            ..ChainConfig::new(chain_id)
+        };
+
+        cfg.add_chain(chain_config).unwrap();
+
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let token = CancellationToken::new();
@@ -424,16 +463,9 @@ mod tests {
             let token = token.clone();
             let sync_block_count = sync_block_count.clone();
             async move {
-                start(
-                    tmpdir.path(),
-                    listener,
-                    config,
-                    token,
-                    None,
-                    Some(sync_block_count),
-                )
-                .await
-                .unwrap();
+                start(tmpdir.path(), listener, token, None, Some(sync_block_count))
+                    .await
+                    .unwrap();
             }
         });
         // wait for the sync task to fetch the header, transactions and receipts for the first block
@@ -462,6 +494,60 @@ mod tests {
                 block_receipts
             )
         );
+        token.cancel();
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn start_continues_to_run_if_sync_failed() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+
+        let chain_id = 1;
+
+        {
+            let (mut cfg, db) = open_app_dir(tmpdir.path(), false).unwrap();
+            db.put(chain_id, Block::default()).unwrap();
+
+            let chain_config = ChainConfig {
+                json_rpc: Some("invalid#url".to_string()), // no server running here
+                ..ChainConfig::new(chain_id)
+            };
+
+            cfg.add_chain(chain_config).unwrap();
+        }
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let token = CancellationToken::new();
+        let task = tokio::spawn({
+            let token = token.clone();
+            async move {
+                start(tmpdir.path(), listener, token, Some(tx), None)
+                    .await
+                    .unwrap();
+            }
+        });
+
+        // wait for the sync task to fail
+        loop {
+            match rx.recv().await {
+                Some(StartCmdStatusMsg::SyncError(_)) => break,
+                Some(_) => continue,
+                _ => panic!("Expected SyncStarted message"),
+            }
+        }
+
+        let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap()).await;
+        assert!(client.is_ok());
+        let mut client = client.unwrap();
+        let mut res = client.get_block_range(chain_id, 0, 0).await.unwrap();
+        res.next()
+            .await
+            .expect("stream should not be empty")
+            .expect("block should be valid");
         token.cancel();
         task.abort();
     }

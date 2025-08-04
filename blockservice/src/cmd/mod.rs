@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     fmt::Write,
     net::{IpAddr, Ipv6Addr, SocketAddr},
 };
@@ -132,12 +131,9 @@ pub async fn execute(
             cmd::fetch_state_updates(args.dir, url, chain_id, &mut output).await
         }
         Command::Start => {
-            // TODO Get JSON-RPC servers from config
-            let json_rpc_config = HashMap::new();
             cmd::start(
                 args.dir,
                 address_binder.bind_address().await?,
-                json_rpc_config,
                 cancellation_token,
                 None,
                 None,
