@@ -12,8 +12,9 @@ pub async fn list(
         return Err("chain ID cannot be 0".into());
     }
     let (cfg, db) = open_app_dir(app_dir, true)?;
+    let auth_token = cfg.get_auth_token().cloned();
     let chain_ranges = if let Some(url) = url {
-        let mut client = RpcClient::try_new(url).await?;
+        let mut client = RpcClient::try_new(url, auth_token).await?;
         let remote_ranges = client.list(chain_id).await?;
         remote_ranges
             .chain_ranges
@@ -83,7 +84,8 @@ mod tests {
         config::ChainConfig,
         db::RocksBlockDb,
         grpc::{
-            proto_rpc::{BlockRange, ChainRange, ChainRanges},
+            auth::{self, AUTHORIZATION_HEADER_NAME},
+            proto_rpc::{self, BlockRange, ChainRange, ChainRanges},
             test_utils::{MockRpcServer, TestServer},
         },
         utils::test_dir::{Permissions, TestDir},
@@ -374,6 +376,49 @@ mod tests {
                     "
                 }
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn provides_auth_token_when_supplied() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let (mut cfg, _db) = open_app_dir(tmpdir.path(), true).unwrap();
+
+        let cases = vec![
+            Some(auth::token_to_metadata_value("my-token").unwrap()),
+            None,
+        ];
+        for auth_token in cases {
+            cfg.set_auth_token(auth_token.clone()).unwrap();
+
+            let mut mock_server = MockRpcServer::new();
+            mock_server
+                .expect_list()
+                .withf({
+                    let auth_token = auth_token.clone();
+                    move |request| {
+                        if auth_token.is_some() {
+                            let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
+                            auth_token.as_ref() == req_token
+                        } else {
+                            true
+                        }
+                    }
+                })
+                .returning(|_| {
+                    Ok(tonic::Response::new(ChainRanges {
+                        chain_ranges: vec![ChainRange {
+                            chain_id: 1,
+                            block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 0 }],
+                        }],
+                    }))
+                });
+
+            let server = TestServer::new(mock_server).await;
+            let mut buf = Vec::new();
+            let result = list(tmpdir.path(), None, Some(server.address.clone()), &mut buf).await;
+            assert!(result.is_ok(), "List should succeed");
         }
     }
 }

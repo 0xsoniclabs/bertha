@@ -10,9 +10,11 @@ pub async fn fetch_state_updates(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // To not write files into arbitrary directories, we first check that we actually
     // are in a valid application directory.
-    open_app_dir(&app_dir, true)?;
+    let (cfg, _) = open_app_dir(&app_dir, true)?;
 
-    let mut client = RpcClient::try_new(url).await?;
+    let auth_token = cfg.get_auth_token().cloned();
+
+    let mut client = RpcClient::try_new(url, auth_token).await?;
     let updates = client.get_state_updates(chain_id).await?;
 
     writeln!(
@@ -48,6 +50,7 @@ mod tests {
     use crate::{
         app_dir::init_app_dir,
         grpc::{
+            auth::{self, AUTHORIZATION_HEADER_NAME},
             proto_rpc,
             test_utils::{MockRpcServer, TestServer},
         },
@@ -187,5 +190,48 @@ mod tests {
                 .to_string()
                 .contains("Permission denied")
         );
+    }
+
+    #[tokio::test]
+    async fn provides_auth_token_when_supplied() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let (mut cfg, _db) = open_app_dir(tmpdir.path(), true).unwrap();
+
+        let cases = vec![
+            Some(auth::token_to_metadata_value("my-token").unwrap()),
+            None,
+        ];
+        for auth_token in cases {
+            cfg.set_auth_token(auth_token.clone()).unwrap();
+
+            let mut mock_server = MockRpcServer::new();
+            mock_server
+                .expect_get_state_updates()
+                .withf({
+                    let auth_token = auth_token.clone();
+                    move |request| {
+                        if auth_token.is_some() {
+                            let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
+                            auth_token.as_ref() == req_token
+                        } else {
+                            true
+                        }
+                    }
+                })
+                .returning({
+                    move |_| {
+                        Ok(tonic::Response::new(proto_rpc::StateUpdates {
+                            updates: vec![],
+                        }))
+                    }
+                });
+
+            let server = TestServer::new(mock_server).await;
+            let mut buf = Vec::new();
+            let result =
+                fetch_state_updates(tmpdir.path(), server.address.clone(), 1, &mut buf).await;
+            assert!(result.is_ok(), "fetch update state should succeed");
+        }
     }
 }
