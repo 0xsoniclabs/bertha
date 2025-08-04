@@ -122,6 +122,7 @@ async fn sync(
 
 /// A message send over the channel supplied to the start command to notify about the status of the
 /// start command.
+/// Messages of this type are sent over the `_test_notify` channel of the start command.
 #[allow(clippy::enum_variant_names)]
 pub enum StartCmdStatusMsg {
     SyncStarted,
@@ -200,7 +201,7 @@ mod tests {
         let metrics = tokio::runtime::Handle::current().metrics();
         let num_tasks_before = metrics.num_alive_tasks();
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
         let token = CancellationToken::new();
         let job = tokio::spawn({
             let token = token.clone();
