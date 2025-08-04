@@ -820,7 +820,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provides_auth_token_when_supplied() {
+    async fn uses_authentication_token_to_connect_when_available() {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (mut cfg, _db) = open_app_dir(tmpdir.path(), true).unwrap();
