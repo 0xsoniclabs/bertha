@@ -19,6 +19,7 @@ func getApp() *cli.Command {
 		Name:  "block-db",
 		Usage: "Block Database CLI",
 		Commands: []*cli.Command{
+			getStatsCommand(),
 			getReplayCommand(),
 			getVerifyCommand(),
 		},
