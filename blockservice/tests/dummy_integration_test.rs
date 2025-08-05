@@ -1,7 +1,8 @@
 use blockservice::cli::Command;
 
 use crate::test_utils::{
-    IntegrationTestServer, check_init_output, execute_command, make_snapshot_file,
+    CommandExecutionOutput, IntegrationTestServer, check_init_output, execute_command,
+    make_snapshot_file,
 };
 
 mod test_utils;
@@ -23,7 +24,7 @@ async fn dummy_client_server_integration() {
     // advisable as we would loose track of where the function asserted if it did. Unfortunately,
     // #[track_caller] is not available for async functions.
     let client_dir = tempfile::tempdir().unwrap();
-    let (result, output) = execute_command(
+    let CommandExecutionOutput { result, log } = execute_command(
         Command::Init,     // Command to execute
         client_dir.path(), // Working directory
         None,              // Optional input to the command
@@ -32,10 +33,10 @@ async fn dummy_client_server_integration() {
     )
     .await;
     assert!(result.is_ok(), "Failed to initialize client");
-    check_init_output(&output, client_dir.path());
+    check_init_output(&log, client_dir.path());
 
     // Execute a command that connects to the server
-    let (result, output) = execute_command(
+    let CommandExecutionOutput { result, log } = execute_command(
         Command::List {
             chain_id: Some(146),
             url: Some(server.uri()),
@@ -47,8 +48,8 @@ async fn dummy_client_server_integration() {
     )
     .await;
     assert!(result.is_ok(), "Failed to list blocks");
-    // Now we use the command output to verify that the command worked as expected
-    let output_str = String::from_utf8(output).unwrap();
+    // Now we use the command command_output.log to verify that the command worked as expected
+    let output_str = String::from_utf8(log).unwrap();
     assert_eq!(
         output_str,
         indoc::indoc! {"
