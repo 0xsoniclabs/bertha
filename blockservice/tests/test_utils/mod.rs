@@ -19,7 +19,7 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 /// process.
 pub struct IntegrationTestServer {
     addr: SocketAddr,
-    _drop_guard: DropGuard,
+    _server_task_handle: DropGuard,
 }
 
 impl IntegrationTestServer {
@@ -72,7 +72,7 @@ impl IntegrationTestServer {
 
         IntegrationTestServer {
             addr,
-            _drop_guard: cancellation_token.drop_guard(),
+            _server_task_handle: cancellation_token.drop_guard(),
         }
     }
 
@@ -134,7 +134,6 @@ pub fn make_snapshot_file(
 }
 
 /// An helper struct to capture both the result of a command execution and its output log.
-/// Used in [`execute_command`].
 pub struct CommandExecutionOutput {
     pub result: Result<(), Box<dyn std::error::Error + Send + Sync>>,
     pub log: Vec<u8>,
