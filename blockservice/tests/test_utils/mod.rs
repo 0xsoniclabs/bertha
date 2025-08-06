@@ -483,7 +483,7 @@ mod tests {
     fn add_chain_configs_to_config_file_fails_if_config_not_found() {
         let temp_dir = tempfile::tempdir().unwrap();
         // The config file does not exist, so it should return an error
-        let result = add_chain_configs_to_config_file(&vec![], temp_dir.path());
+        let result = add_chain_configs_to_config_file(&[], temp_dir.path());
         assert!(
             result.is_err(),
             "adding chain configs should fail if config file does not exist"
@@ -497,7 +497,7 @@ mod tests {
         // Create an invalid config file
         std::fs::write(&config_path, "invalid config").unwrap();
 
-        let result = add_chain_configs_to_config_file(&vec![], temp_dir.path());
+        let result = add_chain_configs_to_config_file(&[], temp_dir.path());
         assert!(
             result.is_err(),
             "adding chain configs should fail with invalid config"
@@ -520,11 +520,11 @@ mod tests {
             json_rpc: None,
             state_updates: None,
         };
-        add_chain_configs_to_config_file(&vec![chain_config.clone()], temp_dir.path())
+        add_chain_configs_to_config_file(&[chain_config.clone()], temp_dir.path())
             .expect("adding chain config should succeed");
 
         // Try to add the same chain config again, which should fail
-        let result = add_chain_configs_to_config_file(&vec![chain_config], temp_dir.path());
+        let result = add_chain_configs_to_config_file(&[chain_config], temp_dir.path());
         assert!(result.is_err(), "adding existing chain config should fail");
     }
 
