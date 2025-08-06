@@ -42,7 +42,7 @@ impl IntegrationTestServer {
 
         // Set JSON RPC endpoints
         if let Some(json_rpc_endpoints) = chain_configs {
-            set_chain_configs_to_config_file(&json_rpc_endpoints, app_dir).unwrap();
+            add_chain_configs_to_config_file(&json_rpc_endpoints, app_dir).unwrap();
         }
 
         // Initialize the DB with the import files
@@ -210,7 +210,7 @@ pub fn check_init_output(output: &[u8], path: impl AsRef<Path>) {
 }
 
 /// Save the chain configurations to the config file at the specified path.
-pub fn set_chain_configs_to_config_file(
+pub fn add_chain_configs_to_config_file(
     chain_configs: &[ChainConfig],
     path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -225,7 +225,7 @@ pub fn set_chain_configs_to_config_file(
 }
 
 /// Creates a default chain configuration for the SONIC chain.
-pub fn make_sonic_default_chain_config() -> ChainConfig {
+pub fn make_default_sonic_chain_config() -> ChainConfig {
     ChainConfig {
         id: 146,
         name: "SONIC".to_string(),
@@ -257,7 +257,7 @@ mod tests {
         let server = IntegrationTestServer::new(
             server_dir.path(),
             vec![make_snapshot_file(server_dir.path(), 1, 10, &[])],
-            Some(vec![make_sonic_default_chain_config()]),
+            Some(vec![make_default_sonic_chain_config()]),
         )
         .await;
 
@@ -446,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn set_chain_configs_to_config_file_saves_configs() {
+    fn add_chain_configs_to_config_file_saves_configs() {
         let temp_dir = tempfile::tempdir().unwrap();
         let config_path = temp_dir.path().join(CONFIG_FILE_NAME);
         {
@@ -470,7 +470,7 @@ mod tests {
             },
         ];
 
-        set_chain_configs_to_config_file(&chain_configs, temp_dir.path()).unwrap();
+        add_chain_configs_to_config_file(&chain_configs, temp_dir.path()).unwrap();
 
         let config = Config::load(config_path).unwrap();
         let res_chain_configs = config.get_chain_configs();
@@ -480,8 +480,57 @@ mod tests {
     }
 
     #[test]
+    fn add_chain_configs_to_config_file_fails_if_config_not_found() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        // The config file does not exist, so it should return an error
+        let result = add_chain_configs_to_config_file(&vec![], temp_dir.path());
+        assert!(
+            result.is_err(),
+            "adding chain configs should fail if config file does not exist"
+        );
+    }
+
+    #[test]
+    fn add_chain_configs_to_config_file_fails_if_config_is_invalid() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join(CONFIG_FILE_NAME);
+        // Create an invalid config file
+        std::fs::write(&config_path, "invalid config").unwrap();
+
+        let result = add_chain_configs_to_config_file(&vec![], temp_dir.path());
+        assert!(
+            result.is_err(),
+            "adding chain configs should fail with invalid config"
+        );
+    }
+
+    #[test]
+    fn add_chain_configs_to_config_file_fails_if_config_already_exists() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join(CONFIG_FILE_NAME);
+        {
+            Config::create_default(&config_path).unwrap();
+        }
+
+        // Add a chain config to the file
+        let chain_config = ChainConfig {
+            id: 1,
+            name: "Chain1".to_string(),
+            description: "Test Chain 1".to_string(),
+            json_rpc: None,
+            state_updates: None,
+        };
+        add_chain_configs_to_config_file(&vec![chain_config.clone()], temp_dir.path())
+            .expect("adding chain config should succeed");
+
+        // Try to add the same chain config again, which should fail
+        let result = add_chain_configs_to_config_file(&vec![chain_config], temp_dir.path());
+        assert!(result.is_err(), "adding existing chain config should fail");
+    }
+
+    #[test]
     fn make_sonic_default_chain_config_returns_correct_config() {
-        let config = make_sonic_default_chain_config();
+        let config = make_default_sonic_chain_config();
         assert_eq!(config.id, 146);
         assert_eq!(config.name, "SONIC");
         assert_eq!(config.description, "SONIC test chain");
