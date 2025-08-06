@@ -5,8 +5,6 @@ use crate::test_utils::{
     make_snapshot_file,
 };
 
-mod test_utils;
-
 #[tokio::test]
 async fn dummy_client_server_integration() {
     // Start a server
