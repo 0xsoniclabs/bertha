@@ -27,7 +27,7 @@ pub struct IntegrationTestServer {
 impl IntegrationTestServer {
     /// Initialize and starts a new [`IntegrationTestServer`] with the given app directory in a
     /// separate task.
-    /// It imports the specified snapshot files and optionally save some chain configurations in the
+    /// It imports the specified snapshot files and optionally saves some chain configurations in the
     /// local config file.
     /// The server is started on a random available port.
     pub async fn new(
@@ -209,7 +209,7 @@ pub fn check_init_output(output: &[u8], path: impl AsRef<Path>) {
     );
 }
 
-/// Save the chain configurations to the config file at the specified path.
+/// Adds the chain configurations to the config file at the specified path.
 pub fn add_chain_configs_to_config_file(
     chain_configs: &[ChainConfig],
     path: &Path,
