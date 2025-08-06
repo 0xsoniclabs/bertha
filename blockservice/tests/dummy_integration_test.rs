@@ -17,7 +17,7 @@ async fn dummy_client_server_integration() {
         10,  // num blocks
         &[], // extra blocks
     )];
-    let server = IntegrationTestServer::new(server_dir.path(), snapshot_files).await;
+    let server = IntegrationTestServer::new(server_dir.path(), snapshot_files, None).await;
 
     // To start a client, we need to initialize it.
     // NOTE: While this logic could be extracted into a separate "init client" function, this is not
