@@ -6,8 +6,10 @@ use std::{
 
 use bertha_types::Block;
 use blockservice::{
+    app_dir::CONFIG_FILE_NAME,
     cli::{Args, Command},
     cmd::{self, AddressBinder},
+    config::{ChainConfig, Config},
 };
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -23,14 +25,25 @@ pub struct IntegrationTestServer {
 }
 
 impl IntegrationTestServer {
-    /// Creates and starts a new [`IntegrationTestServer`] with the given app directory in a
-    /// separate task and imports the specified snapshot files.
-    /// It initializes the DB and config file and starts the server on a random available port.
-    pub async fn new(app_dir: &Path, import_files: Vec<PathBuf>) -> IntegrationTestServer {
+    /// Initialize and starts a new [`IntegrationTestServer`] with the given app directory in a
+    /// separate task.
+    /// It imports the specified snapshot files and optionally save some chain configurations in the
+    /// local config file.
+    /// The server is started on a random available port.
+    pub async fn new(
+        app_dir: &Path,
+        import_files: Vec<PathBuf>,
+        chain_configs: Option<Vec<ChainConfig>>,
+    ) -> IntegrationTestServer {
         let CommandExecutionOutput { result, log } =
             execute_command(Command::Init {}, app_dir, None, None, None).await;
         result.expect("initialization should succeed");
         check_init_output(&log, app_dir);
+
+        // Set JSON RPC endpoints
+        if let Some(json_rpc_endpoints) = chain_configs {
+            set_chain_configs_to_config_file(&json_rpc_endpoints, app_dir).unwrap();
+        }
 
         // Initialize the DB with the import files
         for file in import_files {
@@ -196,6 +209,32 @@ pub fn check_init_output(output: &[u8], path: impl AsRef<Path>) {
     );
 }
 
+/// Save the chain configurations to the config file at the specified path.
+pub fn set_chain_configs_to_config_file(
+    chain_configs: &[ChainConfig],
+    path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let config_path = path.join(CONFIG_FILE_NAME);
+    let mut config = Config::load(&config_path)?;
+
+    for chain_config in chain_configs {
+        config.add_chain(chain_config.clone())?;
+    }
+
+    Ok(())
+}
+
+/// Creates a default chain configuration for the SONIC chain.
+pub fn make_sonic_default_chain_config() -> ChainConfig {
+    ChainConfig {
+        id: 146,
+        name: "SONIC".to_string(),
+        description: "SONIC test chain".to_string(),
+        json_rpc: None,
+        state_updates: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -213,9 +252,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn integration_test_server_new_starts_server() {
+        let server_dir = tempfile::tempdir().unwrap();
+        let server = IntegrationTestServer::new(
+            server_dir.path(),
+            vec![make_snapshot_file(server_dir.path(), 1, 10, &[])],
+            Some(vec![make_sonic_default_chain_config()]),
+        )
+        .await;
+
+        // Check the config file is correctly initialized
+        let config_path = server_dir.path().join(CONFIG_FILE_NAME);
+        let config = Config::load(&config_path).expect("Config should load successfully");
+        let chain_configs = config.get_chain_configs();
+        assert_eq!(chain_configs.len(), 2); // One for SONIC and one for the example one
+        assert_eq!(chain_configs[0].id, 146);
+        assert_eq!(chain_configs[0].name, "SONIC");
+        assert_eq!(chain_configs[0].description, "SONIC test chain");
+
+        // Query the server to check if it is running
+        let client_dir = tempfile::tempdir().unwrap();
+        let CommandExecutionOutput { result, log: _ } =
+            execute_command(Command::Init {}, client_dir.path(), None, None, None).await;
+        result.expect("Initialization should succeed");
+        let CommandExecutionOutput { result, log } = execute_command(
+            Command::List {
+                chain_id: Some(1),
+                url: Some(server.uri()),
+            },
+            server_dir.path(),
+            None,
+            None,
+            None,
+        )
+        .await;
+        result.expect("List command should succeed");
+        assert_eq!(
+            String::from_utf8(log).unwrap(),
+            indoc::indoc! {"
+            [1] (no name): (no description)
+            └── 0 - 9
+            "},
+        );
+    }
+
+    #[tokio::test]
     async fn integration_test_server_stops_on_drop() {
         let server_dir = tempfile::tempdir().unwrap();
-        let server = IntegrationTestServer::new(server_dir.path(), vec![]).await;
+        let server = IntegrationTestServer::new(server_dir.path(), vec![], None).await;
         let server_url = server.uri();
         // Drop the server and check if it stops
         drop(server);
@@ -246,7 +330,7 @@ mod tests {
     #[tokio::test]
     async fn integration_test_server_uri_returns_valid_uri() {
         let server_dir = tempfile::tempdir().unwrap();
-        let server = IntegrationTestServer::new(server_dir.path(), vec![]).await;
+        let server = IntegrationTestServer::new(server_dir.path(), vec![], None).await;
         assert_eq!(
             &server.uri()[..7],
             "http://",
@@ -255,40 +339,6 @@ mod tests {
         assert!(
             SocketAddr::from_str(&server.uri()[7..]).is_ok(),
             "Server URI should be a valid SocketAddr"
-        );
-    }
-
-    #[tokio::test]
-    async fn integration_test_server_new_starts_server() {
-        let server_dir = tempfile::tempdir().unwrap();
-        let server = IntegrationTestServer::new(
-            server_dir.path(),
-            vec![make_snapshot_file(server_dir.path(), 1, 10, &[])],
-        )
-        .await;
-
-        let client_dir = tempfile::tempdir().unwrap();
-        let CommandExecutionOutput { result, log: _ } =
-            execute_command(Command::Init {}, client_dir.path(), None, None, None).await;
-        result.expect("Initialization should succeed");
-        let CommandExecutionOutput { result, log } = execute_command(
-            Command::List {
-                chain_id: Some(1),
-                url: Some(server.uri()),
-            },
-            server_dir.path(),
-            None,
-            None,
-            None,
-        )
-        .await;
-        result.expect("List command should succeed");
-        assert_eq!(
-            String::from_utf8(log).unwrap(),
-            indoc::indoc! {"
-            [1] (no name): (no description)
-            └── 0 - 9
-            "},
         );
     }
 
@@ -393,5 +443,49 @@ mod tests {
                 result.expect("IntegrationTestServer task should complete successfully");
             }
         }
+    }
+
+    #[test]
+    fn set_chain_configs_to_config_file_saves_configs() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join(CONFIG_FILE_NAME);
+        {
+            Config::create_default(&config_path).unwrap();
+        }
+
+        let chain_configs = vec![
+            ChainConfig {
+                id: 1,
+                name: "Chain1".to_string(),
+                description: "Test Chain 1".to_string(),
+                json_rpc: None,
+                state_updates: None,
+            },
+            ChainConfig {
+                id: 2,
+                name: "Chain2".to_string(),
+                description: "Test Chain 2".to_string(),
+                json_rpc: None,
+                state_updates: None,
+            },
+        ];
+
+        set_chain_configs_to_config_file(&chain_configs, temp_dir.path()).unwrap();
+
+        let config = Config::load(config_path).unwrap();
+        let res_chain_configs = config.get_chain_configs();
+        assert_eq!(res_chain_configs.len(), 2);
+        assert_eq!(res_chain_configs[0], chain_configs[0]);
+        assert_eq!(res_chain_configs[1], chain_configs[1]);
+    }
+
+    #[test]
+    fn make_sonic_default_chain_config_returns_correct_config() {
+        let config = make_sonic_default_chain_config();
+        assert_eq!(config.id, 146);
+        assert_eq!(config.name, "SONIC");
+        assert_eq!(config.description, "SONIC test chain");
+        assert!(config.json_rpc.is_none());
+        assert!(config.state_updates.is_none());
     }
 }
