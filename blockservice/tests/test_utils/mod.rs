@@ -27,8 +27,8 @@ pub struct IntegrationTestServer {
 impl IntegrationTestServer {
     /// Initialize and starts a new [`IntegrationTestServer`] with the given app directory in a
     /// separate task.
-    /// It imports the specified snapshot files and optionally saves some chain configurations in the
-    /// local config file.
+    /// It imports the specified snapshot files and optionally saves some chain configurations in
+    /// the local config file.
     /// The server is started on a random available port.
     pub async fn new(
         app_dir: &Path,
