@@ -1,5 +1,5 @@
-github.com/0xsoniclabs/carmen/go v0.0.0-20250708122828-bc69cb8f68d5 h1:8BnHxlzEUxADMjypppm8N81f4DyW8jQsjE2vrDj4PIY=
-github.com/0xsoniclabs/carmen/go v0.0.0-20250708122828-bc69cb8f68d5/go.mod h1:pOYoZnXK6Dacga5Yoh7/38ibbOJ57/B3Q54zMxWtqG8=
+github.com/0xsoniclabs/carmen/go v0.0.0-20250805215648-99c1aa621835 h1:jUzBn+a4/Ufqlw5noOdhX2cYgBB7e3yNRIj6qF9Vl24=
+github.com/0xsoniclabs/carmen/go v0.0.0-20250805215648-99c1aa621835/go.mod h1:EyfPnCDA/2Q45D9icCSj4MDhbkWbpkUNLSNE7ThjbGM=
 github.com/0xsoniclabs/go-ethereum v0.0.0-20250627083633-bbe492095a30 h1:3vpMpd29elfFfiaDG01WDRPpxX1P8I6jNuxQUkdDRn8=
 github.com/0xsoniclabs/go-ethereum v0.0.0-20250627083633-bbe492095a30/go.mod h1:yBASzR5thK8ugXyLfz9doxUsDJrkAfDOePc5upeFvvg=
 github.com/0xsoniclabs/sonic v0.0.0-20250710140101-72f58896fd10 h1:fQaNiGjrYQIrrO+ABgVYtLeBvyIDsEZCeZJ0bLj1hCM=
@@ -176,8 +176,8 @@ github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJ
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
 github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=
 github.com/rogpeppe/go-internal v1.9.0/go.mod h1:WtVeX8xhTBvf0smdhujwtBcq4Qrzq/fJaraNFVN+nFs=
-github.com/rogpeppe/go-internal v1.13.1 h1:KvO1DLK/DRN07sQ1LQKScxyZJuNnedQ5/wKSR38lUII=
-github.com/rogpeppe/go-internal v1.13.1/go.mod h1:uMEvuHeurkdAXX61udpOXGD/AzZDWNMNyH2VO9fmH0o=
+github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
+github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/schollz/progressbar/v3 v3.18.0 h1:uXdoHABRFmNIjUfte/Ex7WtuyVslrw2wVPQmCN62HpA=
 github.com/schollz/progressbar/v3 v3.18.0/go.mod h1:IsO3lpbaGuzh8zIMzgY3+J8l4C8GjO0Y9S69eFvNsec=
 github.com/shirou/gopsutil v3.21.11+incompatible h1:+1+c1VGhc88SSonWP6foOcLhvnKlUeu/erjjvaPEYiI=
