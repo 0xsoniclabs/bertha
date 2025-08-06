@@ -529,7 +529,7 @@ mod tests {
     }
 
     #[test]
-    fn make_sonic_default_chain_config_returns_correct_config() {
+    fn make_default_sonic_chain_config_returns_correct_config() {
         let config = make_default_sonic_chain_config();
         assert_eq!(config.id, 146);
         assert_eq!(config.name, "SONIC");
