@@ -244,13 +244,6 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn uri_constructs_correct_http_uri() {
-        let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 8080);
-        let expected_uri = "http://[::]:8080";
-        assert_eq!(uri(addr), expected_uri);
-    }
-
     #[tokio::test]
     async fn integration_test_server_new_starts_server() {
         let server_dir = tempfile::tempdir().unwrap();
@@ -340,6 +333,13 @@ mod tests {
             SocketAddr::from_str(&server.uri()[7..]).is_ok(),
             "Server URI should be a valid SocketAddr"
         );
+    }
+
+    #[test]
+    fn uri_constructs_correct_http_uri() {
+        let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), 8080);
+        let expected_uri = "http://[::]:8080";
+        assert_eq!(uri(addr), expected_uri);
     }
 
     #[tokio::test]
