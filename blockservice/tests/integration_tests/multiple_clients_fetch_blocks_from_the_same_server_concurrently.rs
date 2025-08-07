@@ -1,21 +1,22 @@
 use std::vec;
 
-use blockservice::cli::Command;
+use blockservice::{BlockRange, cli::Command};
 
 use crate::test_utils::{
-    CommandExecutionOutput, IntegrationTestServer, add_chain_configs_to_config_file,
-    check_init_output, execute_command, make_default_sonic_chain_config, make_snapshot_file,
+    CommandExecutionOutput, IntegrationTestServer, execute_command, init_blockservice,
+    make_default_sonic_chain_config, make_snapshot_file,
 };
 
 #[tokio::test(flavor = "multi_thread")]
 async fn multiple_clients_fetch_blocks_from_the_same_server_concurrently() {
+    const CHAIN_ID: u64 = 146;
     const BLOCK_COUNT: u64 = 10000;
     let server_dir = tempfile::tempdir().unwrap();
     let server = IntegrationTestServer::new(
         server_dir.path(),
         vec![make_snapshot_file(
             server_dir.path(),    // workdir
-            146,                  // chain_id
+            CHAIN_ID,             // CHAIN_ID
             BLOCK_COUNT as usize, // num_blocks
             &[],                  // extra_blocks
         )],
@@ -24,33 +25,20 @@ async fn multiple_clients_fetch_blocks_from_the_same_server_concurrently() {
     .await;
 
     let url = server.uri();
-    let client = async |from, to| {
-        let client_dir = tempfile::tempdir().unwrap();
-        let CommandExecutionOutput { result, log } = execute_command(
-            Command::Init {},
-            client_dir.path().to_path_buf(),
-            None,
-            None,
-            None,
-        )
-        .await;
-        assert!(result.is_ok(), "init should succeed");
-        check_init_output(&log, client_dir.path());
-        add_chain_configs_to_config_file(
-            [make_default_sonic_chain_config()].as_slice(),
-            client_dir.path(),
-        )
-        .unwrap();
+    let fetch_blocks = async |from, to| {
+        let client_dir = init_blockservice(None, [make_default_sonic_chain_config()].as_slice())
+            .await
+            .expect("blockservice should initialize");
 
         // Fetch all SONIC blocks from the server
         let CommandExecutionOutput { result, log } = execute_command(
             Command::Fetch {
                 url,
-                chain_id: 146,
+                chain_id: CHAIN_ID,
                 from: Some(from),
                 to: Some(to),
             },
-            client_dir.path().to_path_buf(),
+            &client_dir,
             None,
             None,
             None,
@@ -65,10 +53,10 @@ async fn multiple_clients_fetch_blocks_from_the_same_server_concurrently() {
         // List blocks in the client
         let CommandExecutionOutput { result, log } = execute_command(
             Command::List {
-                chain_id: Some(146),
+                chain_id: Some(CHAIN_ID),
                 url: None,
             },
-            client_dir.path().to_path_buf(),
+            &client_dir,
             None,
             None,
             None,
@@ -84,22 +72,42 @@ async fn multiple_clients_fetch_blocks_from_the_same_server_concurrently() {
         );
     };
 
-    // Spawn multiple clients to fetch different ranges of blocks
-    let client_1 = tokio::spawn({
-        let client = client.clone();
-        async move {
-            client(0, BLOCK_COUNT / 2).await;
+    // Ranges to fetch. Each range is fetched by a different client.
+    let cases = vec![
+        // Non overlapping ranges
+        [
+            BlockRange::new(0, BLOCK_COUNT / 2),
+            BlockRange::new(BLOCK_COUNT / 2 + 1, BLOCK_COUNT - 1),
+        ],
+        // Overlapping ranges
+        [
+            BlockRange::new(0, BLOCK_COUNT - 1),
+            BlockRange::new(0, BLOCK_COUNT - 1),
+        ],
+    ];
+
+    for case in cases {
+        let mut clients = vec![];
+        for block_range in case.iter() {
+            let start = *block_range.start();
+            let end = *block_range.end();
+            let fetch_blocks = fetch_blocks.clone();
+            clients.push((
+                block_range,
+                tokio::spawn(async move {
+                    fetch_blocks(start, end).await;
+                }),
+            ));
         }
-    });
-
-    let client_2 = tokio::spawn(async move {
-        client(BLOCK_COUNT / 2 + 1, BLOCK_COUNT - 1).await;
-    });
-
-    client_1
-        .await
-        .expect("client 1 should complete successfully");
-    client_2
-        .await
-        .expect("client 2 should complete successfully");
+        // Await for all clients to make sure they all complete
+        for (range_to_fetch, client) in clients {
+            let result = client.await;
+            assert!(
+                result.is_ok(),
+                "client fetching range {} - {} should complete successfully",
+                range_to_fetch.start(),
+                range_to_fetch.end()
+            );
+        }
+    }
 }

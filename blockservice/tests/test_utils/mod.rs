@@ -31,19 +31,13 @@ impl IntegrationTestServer {
     /// the local config file.
     /// The server is started on a random available port.
     pub async fn new(
-        app_dir: &Path,
+        app_dir: impl AsRef<Path>,
         import_files: Vec<PathBuf>,
         chain_configs: Option<Vec<ChainConfig>>,
     ) -> IntegrationTestServer {
-        let CommandExecutionOutput { result, log } =
-            execute_command(Command::Init {}, app_dir, None, None, None).await;
-        result.expect("initialization should succeed");
-        check_init_output(&log, app_dir);
-
-        // Set JSON RPC endpoints
-        if let Some(json_rpc_endpoints) = chain_configs {
-            add_chain_configs_to_config_file(&json_rpc_endpoints, app_dir).unwrap();
-        }
+        init_blockservice(Some(app_dir.as_ref()), &chain_configs.unwrap_or_default())
+            .await
+            .expect("blockservice should initialize");
 
         // Initialize the DB with the import files
         for file in import_files {
@@ -52,7 +46,7 @@ impl IntegrationTestServer {
                     snapshot_file: file,
                     verify: false,
                 },
-                app_dir,
+                app_dir.as_ref(),
                 None,
                 None,
                 None,
@@ -69,7 +63,7 @@ impl IntegrationTestServer {
 
         tokio::spawn({
             let cancellation_token = cancellation_token.clone();
-            let app_dir = app_dir.to_path_buf();
+            let app_dir = app_dir.as_ref().to_path_buf();
             async move {
                 let CommandExecutionOutput { result, log: _ } = execute_command(
                     Command::Start,
@@ -93,6 +87,26 @@ impl IntegrationTestServer {
     pub fn uri(&self) -> String {
         uri(self.addr)
     }
+}
+
+/// Helper function to initialize a blockservice instance in the specified path, or in a temporary
+/// directory if no path is provided.
+/// It sets up the configuration file with the provided chain
+/// configurations.
+pub async fn init_blockservice(
+    path: Option<&Path>,
+    chain_configs: &[ChainConfig],
+) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+    let dir = match path {
+        Some(p) => p.to_path_buf(),
+        None => tempfile::tempdir()?.keep(),
+    };
+    let CommandExecutionOutput { result, log } =
+        execute_command(Command::Init {}, &dir, None, None, None).await;
+    result?;
+    check_init_output(&log, &dir);
+    add_chain_configs_to_config_file(chain_configs, &dir)?;
+    Ok(dir)
 }
 
 /// An [`AddressBinder`] that constructs a [`tokio::net::TcpListener`] bound to a random available
@@ -212,9 +226,9 @@ pub fn check_init_output(output: &[u8], path: impl AsRef<Path>) {
 /// Adds the chain configurations to the config file at the specified path.
 pub fn add_chain_configs_to_config_file(
     chain_configs: &[ChainConfig],
-    path: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = path.join(CONFIG_FILE_NAME);
+    path: impl AsRef<Path>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let config_path = path.as_ref().join(CONFIG_FILE_NAME);
     let mut config = Config::load(&config_path)?;
 
     for chain_config in chain_configs {
@@ -240,16 +254,91 @@ mod tests {
 
     use std::{fs::File, io::BufReader, str::FromStr};
 
+    use blockservice::app_dir::BLOCK_DB_NAME;
     use genesis_parser::Genesis;
 
     use super::*;
+
+    #[tokio::test]
+    async fn init_blockservice_initializes_correctly() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let dir = init_blockservice(
+            Some(temp_dir.path()),
+            &[ChainConfig {
+                description: "A Test Chain".to_string(),
+                id: 1,
+                name: "Test Chain".to_string(),
+                json_rpc: None,
+                state_updates: None,
+            }],
+        )
+        .await
+        .expect("blockservice should initialize");
+        assert!(dir.exists(), "Directory should be created");
+        assert!(
+            dir.join(CONFIG_FILE_NAME).exists(),
+            "Config file should be created"
+        );
+        assert!(
+            dir.join(BLOCK_DB_NAME).exists(),
+            "Block database should be created"
+        );
+
+        // Check the config file is correctly initialized
+        let config_path = dir.join(CONFIG_FILE_NAME);
+        let config = Config::load(&config_path).expect("Config should load successfully");
+        let chain_configs = config.get_chain_configs();
+        assert_eq!(chain_configs.len(), 1);
+        assert_eq!(chain_configs[0].id, 1);
+        assert_eq!(chain_configs[0].name, "Test Chain");
+        assert_eq!(chain_configs[0].description, "A Test Chain");
+    }
+
+    #[tokio::test]
+    async fn init_blockservice_fails_if_dir_is_already_initialized() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let dir = temp_dir.path();
+        init_blockservice(Some(dir), &[])
+            .await
+            .expect("blockservice should initialize");
+
+        // Try to initialize again, it should fail
+        let result = init_blockservice(Some(dir), &[]).await;
+        assert!(result.is_err(), "Re-initialization should fail");
+    }
+
+    #[tokio::test]
+    async fn init_blockservice_fails_if_chain_config_already_exists() {
+        let chain_config = ChainConfig {
+            id: 1,
+            name: "Test Chain".to_string(),
+            description: "A Test Chain".to_string(),
+            json_rpc: None,
+            state_updates: None,
+        };
+        let temp_dir = tempfile::tempdir().unwrap();
+        let dir = temp_dir.path();
+        init_blockservice(
+            Some(dir),
+            &[chain_config.clone()],
+        )
+        .await
+        .expect("blockservice should initialize");
+
+        // Try to add the same chain config again, it should fail
+        let result = add_chain_configs_to_config_file(
+            &[chain_config],
+            dir,
+        );
+        assert!(result.is_err(), "Adding existing chain config should fail");
+    }
 
     #[tokio::test]
     async fn integration_test_server_new_starts_server() {
         let server_dir = tempfile::tempdir().unwrap();
         let server = IntegrationTestServer::new(
             server_dir.path(),
-            vec![make_snapshot_file(server_dir.path(), 1, 10, &[])],
+            vec![make_snapshot_file(server_dir.path(), 146, 10, &[])],
             Some(vec![make_default_sonic_chain_config()]),
         )
         .await;
@@ -258,7 +347,7 @@ mod tests {
         let config_path = server_dir.path().join(CONFIG_FILE_NAME);
         let config = Config::load(&config_path).expect("Config should load successfully");
         let chain_configs = config.get_chain_configs();
-        assert_eq!(chain_configs.len(), 2); // One for SONIC and one for the example one
+        assert_eq!(chain_configs.len(), 1); // One for SONIC and one for the example one
         assert_eq!(chain_configs[0].id, 146);
         assert_eq!(chain_configs[0].name, "SONIC");
         assert_eq!(chain_configs[0].description, "SONIC test chain");
@@ -270,7 +359,7 @@ mod tests {
         result.expect("Initialization should succeed");
         let CommandExecutionOutput { result, log } = execute_command(
             Command::List {
-                chain_id: Some(1),
+                chain_id: Some(146),
                 url: Some(server.uri()),
             },
             server_dir.path(),
@@ -283,7 +372,7 @@ mod tests {
         assert_eq!(
             String::from_utf8(log).unwrap(),
             indoc::indoc! {"
-            [1] (no name): (no description)
+            [146] SONIC: SONIC test chain
             └── 0 - 9
             "},
         );
