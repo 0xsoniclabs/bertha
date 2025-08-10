@@ -318,27 +318,22 @@ mod tests {
         };
         let temp_dir = tempfile::tempdir().unwrap();
         let dir = temp_dir.path();
-        init_blockservice(
-            Some(dir),
-            &[chain_config.clone()],
-        )
-        .await
-        .expect("blockservice should initialize");
+        init_blockservice(Some(dir), &[chain_config.clone()])
+            .await
+            .expect("blockservice should initialize");
 
         // Try to add the same chain config again, it should fail
-        let result = add_chain_configs_to_config_file(
-            &[chain_config],
-            dir,
-        );
+        let result = add_chain_configs_to_config_file(&[chain_config], dir);
         assert!(result.is_err(), "Adding existing chain config should fail");
     }
 
     #[tokio::test]
     async fn integration_test_server_new_starts_server() {
+        const CHAIN_ID: u64 = 146;
         let server_dir = tempfile::tempdir().unwrap();
         let server = IntegrationTestServer::new(
             server_dir.path(),
-            vec![make_snapshot_file(server_dir.path(), 146, 10, &[])],
+            vec![make_snapshot_file(server_dir.path(), CHAIN_ID, 10, &[])],
             Some(vec![make_default_sonic_chain_config()]),
         )
         .await;
@@ -348,7 +343,7 @@ mod tests {
         let config = Config::load(&config_path).expect("Config should load successfully");
         let chain_configs = config.get_chain_configs();
         assert_eq!(chain_configs.len(), 1); // One for SONIC and one for the example one
-        assert_eq!(chain_configs[0].id, 146);
+        assert_eq!(chain_configs[0].id, CHAIN_ID);
         assert_eq!(chain_configs[0].name, "SONIC");
         assert_eq!(chain_configs[0].description, "SONIC test chain");
 
@@ -359,7 +354,7 @@ mod tests {
         result.expect("Initialization should succeed");
         let CommandExecutionOutput { result, log } = execute_command(
             Command::List {
-                chain_id: Some(146),
+                chain_id: Some(CHAIN_ID),
                 url: Some(server.uri()),
             },
             server_dir.path(),
@@ -394,7 +389,7 @@ mod tests {
 
         let CommandExecutionOutput { result, log: _ } = execute_command(
             Command::List {
-                chain_id: Some(1),
+                chain_id: None,
                 url: Some(server_url),
             },
             server_dir.path(),
@@ -433,15 +428,18 @@ mod tests {
 
     #[tokio::test]
     async fn make_snapshot_file_creates_correct_file() {
+        const CHAIN_ID: u64 = 146;
         let temp_dir = tempfile::tempdir().unwrap();
-        let chain_id = 1;
         let num_blocks = 10;
         let extra_blocks = vec![Block::default_sonic(); 5];
 
         let snapshot_path =
-            make_snapshot_file(temp_dir.path(), chain_id, num_blocks, &extra_blocks);
+            make_snapshot_file(temp_dir.path(), CHAIN_ID, num_blocks, &extra_blocks);
         assert!(snapshot_path.exists());
-        assert_eq!(snapshot_path.file_name().unwrap(), "1_15_snapshot");
+        assert_eq!(
+            snapshot_path.file_name().unwrap(),
+            format!("{}_15_snapshot", CHAIN_ID).as_str()
+        );
 
         // Parse the genesis file to verify its contents
         let file = File::open(snapshot_path).unwrap();
@@ -481,6 +479,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_terminates_command_on_cancellation_token_cancellation() {
+        const CHAIN_ID: u64 = 146;
         let temp_dir = tempfile::tempdir().unwrap();
         let cancellation_token = CancellationToken::new();
         let address_binder = RandomPortAddressBinder::try_new()
@@ -511,7 +510,7 @@ mod tests {
         // Check if the server is running by executing a command
         let CommandExecutionOutput { result, log: _ } = execute_command(
             Command::List {
-                chain_id: Some(146),
+                chain_id: Some(CHAIN_ID),
                 url: Some(uri(address)),
             },
             temp_dir.path(),

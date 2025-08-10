@@ -7,6 +7,8 @@ use crate::test_utils::{
     make_default_sonic_chain_config, make_snapshot_file,
 };
 
+/// Using multi-threaded runtime so that client and server are executed in parallel and not just
+/// concurrently because this simulates the real world usage.
 #[tokio::test(flavor = "multi_thread")]
 async fn client_fetches_and_purges_data_and_fetches_again() {
     const CHAIN_ID: u64 = 146;
