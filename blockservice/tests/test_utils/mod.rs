@@ -438,7 +438,7 @@ mod tests {
         assert!(snapshot_path.exists());
         assert_eq!(
             snapshot_path.file_name().unwrap(),
-            format!("{}_15_snapshot", CHAIN_ID).as_str()
+            format!("{CHAIN_ID}_15_snapshot").as_str()
         );
 
         // Parse the genesis file to verify its contents
