@@ -96,22 +96,24 @@ func TestVerifyBlocks_ValidBlockHashSequence_DoesNotReportIssues(t *testing.T) {
 	// collected from the parent-hash field of the successor before checking
 	// the hash of the block itself.
 	slices.Reverse(validBlocks)
-
-	require.NoError(t, verifyBlocks(t.Context(), newIter(validBlocks), nil))
+	opts := BlockVerificationOptions{}
+	require.NoError(t, verifyBlocks(t.Context(), newIter(validBlocks), nil, opts))
 }
 
 func TestVerifyBlocks_InvalidBlockHash_IssueIsDetected(t *testing.T) {
 	blocks := []*blockdb.Block{{}, {}, {}}
+	opts := BlockVerificationOptions{VerifyBlockHash: true}
 	require.ErrorContains(t,
-		verifyBlocks(t.Context(), newIter(blocks), nil),
-		"lock verification failed for block 0: block hash mismatch",
+		verifyBlocks(t.Context(), newIter(blocks), nil, opts),
+		"block verification failed for block 0: block hash mismatch",
 	)
 }
 
 func TestVerifyBlocks_NilBlockInput_AbortsWithError(t *testing.T) {
 	blocks := []*blockdb.Block{{}, nil}
+	opts := BlockVerificationOptions{}
 	require.ErrorContains(t,
-		verifyBlocks(t.Context(), newIter(blocks), nil),
+		verifyBlocks(t.Context(), newIter(blocks), nil, opts),
 		"encountered nil block",
 	)
 }
@@ -123,17 +125,15 @@ func TestVerifyBlocks_ErrorDuringBlockRetrieval_AbortsWithError(t *testing.T) {
 			yield(nil, issue)
 		}
 	}()
-
-	got := verifyBlocks(t.Context(), blocks, nil)
+	opts := BlockVerificationOptions{}
+	got := verifyBlocks(t.Context(), blocks, nil, opts)
 	require.ErrorContains(t, got, "failed to get block")
 	require.ErrorIs(t, got, issue)
 }
 
 func TestVerifyBlocks_CancelledContext_ValidationAbortsWithError(t *testing.T) {
 	blocks := []*blockdb.Block{{}, {}, {}}
-
 	ctxt, cancel := context.WithCancel(t.Context())
-
 	counter := 0
 	progressCounter := func(uint64) {
 		counter++
@@ -141,12 +141,28 @@ func TestVerifyBlocks_CancelledContext_ValidationAbortsWithError(t *testing.T) {
 			cancel()
 		}
 	}
-
-	got := verifyBlocks(ctxt, newIter(blocks), progressCounter)
+	opts := BlockVerificationOptions{}
+	got := verifyBlocks(ctxt, newIter(blocks), progressCounter, opts)
 	want := ctxt.Err()
 	require.Error(t, want, "context should be cancelled")
 	require.ErrorIs(t, got, want)
 	require.Equal(t, 1, counter, "progress callback should not be called after context cancellation")
+}
+
+func TestVerifyBlock_InvalidHash_ReportsInvalidHash(t *testing.T) {
+	// Believe it or not, this is a valid encoding of a block.
+	block := &blockdb.Block{}
+	err := verifyBlock(common.Hash{}, block, BlockVerificationOptions{VerifyBlockHash: true})
+	require.ErrorContains(t, err, "block hash mismatch")
+}
+
+func TestVerifyBlock_CorrectHash_VerifyPasses(t *testing.T) {
+	block := &blockdb.Block{}
+	gethBlock, err := ConvertToGethBlock(block)
+	require.NoError(t, err)
+	hash := gethBlock.Hash()
+	opts := BlockVerificationOptions{VerifyBlockHash: true}
+	require.NoError(t, verifyBlock(hash, block, opts))
 }
 
 func TestVerifyBlock_InvalidBlock_FailsOnBlockConversion(t *testing.T) {
@@ -155,24 +171,90 @@ func TestVerifyBlock_InvalidBlock_FailsOnBlockConversion(t *testing.T) {
 			{TransactionType: 999}, // Invalid transaction type
 		},
 	}
-	err := verifyBlock(common.Hash{}, block)
+	err := verifyBlock(common.Hash{}, block, BlockVerificationOptions{})
 	require.ErrorContains(t, err, "unsupported transaction type")
 }
 
-func TestVerifyBlock_InvalidHash_ReportsInvalidHash(t *testing.T) {
-	// Believe it or not, this is a valid encoding of a block.
-	block := &blockdb.Block{}
-	err := verifyBlock(common.Hash{}, block)
-	require.ErrorContains(t, err, "block hash mismatch")
-}
-
-func TestVerifyBlock_CorrectHash_VerifyPasses(t *testing.T) {
+// Nonce verification
+func TestVerifyBlock_NonceCheck_FailsOnNonZeroNonce(t *testing.T) {
 	block := &blockdb.Block{}
 	gethBlock, err := ConvertToGethBlock(block)
 	require.NoError(t, err)
-
 	hash := gethBlock.Hash()
-	require.NoError(t, verifyBlock(hash, block))
+	opts := BlockVerificationOptions{VerifyNonce: true}
+	block.Nonce = []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	err = verifyBlock(hash, block, opts)
+	require.ErrorContains(t, err, "block nonce is not zero")
+}
+
+func TestVerifyBlock_DisableNonceCheck_AllowsNonZeroNonce(t *testing.T) {
+	block := &blockdb.Block{}
+	gethBlock, err := ConvertToGethBlock(block)
+	require.NoError(t, err)
+	hash := gethBlock.Hash()
+	opts := BlockVerificationOptions{VerifyNonce: false}
+	block.Nonce = []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	require.NoError(t, verifyBlock(hash, block, opts))
+}
+
+// Coinbase verification
+func TestVerifyBlock_CoinbaseCheck_FailsOnNonZeroCoinbase(t *testing.T) {
+	block := &blockdb.Block{}
+	gethBlock, err := ConvertToGethBlock(block)
+	require.NoError(t, err)
+	hash := gethBlock.Hash()
+	opts := BlockVerificationOptions{VerifyCoinbase: true}
+	block.Beneficiary = make([]byte, 20)
+	for i := range block.Beneficiary {
+		block.Beneficiary[i] = byte(i + 1)
+	}
+	err = verifyBlock(hash, block, opts)
+	require.ErrorContains(t, err, "block coinbase is not zero")
+}
+
+func TestVerifyBlock_DisableCoinbaseCheck_AllowsNonZeroCoinbase(t *testing.T) {
+	block := &blockdb.Block{}
+	gethBlock, err := ConvertToGethBlock(block)
+	require.NoError(t, err)
+	hash := gethBlock.Hash()
+	opts := BlockVerificationOptions{VerifyCoinbase: false}
+	block.Beneficiary = make([]byte, 20) // Set to non-zero address
+	for i := range block.Beneficiary {
+		block.Beneficiary[i] = byte(i + 1)
+	}
+	require.NoError(t, verifyBlock(hash, block, opts))
+}
+
+// Timestamp verification
+func TestVerifyBlocks_TimestampCheck_FailsOnNonMonotonicTimestamps(t *testing.T) {
+	blocks := []*blockdb.Block{
+		{Timestamp: 100},
+		{Timestamp: 50, ParentHash: make([]byte, 32)},
+	}
+	opts := BlockVerificationOptions{VerifyTimestamp: true}
+	err := verifyBlocks(context.Background(), newIter(blocks), nil, opts)
+	require.ErrorContains(t, err, "timestamp not monotonically increasing")
+}
+
+func TestVerifyBlock_DifficultyCheck_FailsOnNonZeroDifficulty(t *testing.T) {
+	block := &blockdb.Block{}
+	gethBlock, err := ConvertToGethBlock(block)
+	require.NoError(t, err)
+	hash := gethBlock.Hash()
+	opts := BlockVerificationOptions{VerifyDifficulty: true}
+	block.Difficulty = 1
+	err = verifyBlock(hash, block, opts)
+	require.ErrorContains(t, err, "block difficulty is not zero")
+}
+
+func TestVerifyBlock_DisableDifficultyCheck_AllowsNonZeroDifficulty(t *testing.T) {
+	block := &blockdb.Block{}
+	gethBlock, err := ConvertToGethBlock(block)
+	require.NoError(t, err)
+	hash := gethBlock.Hash()
+	opts := BlockVerificationOptions{VerifyDifficulty: false}
+	block.Difficulty = 1
+	require.NoError(t, verifyBlock(hash, block, opts))
 }
 
 func newIter(blocks []*blockdb.Block) iter.Seq2[*blockdb.Block, error] {
