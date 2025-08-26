@@ -163,10 +163,13 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	}()
 
 	// Load corrections for the Sonic mainnet.
-	corrections, err := GetSonicMainnetCorrections()
-	if err != nil {
-		return fmt.Errorf("failed to load corrections: %w", err)
-	}
+	corrections := Corrections{}
+	/*
+		corrections, err := GetSonicMainnetCorrections()
+		if err != nil {
+			return fmt.Errorf("failed to load corrections: %w", err)
+		}
+	*/
 
 	// Prepare the progress logger.
 	progress := startProgressLogger()
