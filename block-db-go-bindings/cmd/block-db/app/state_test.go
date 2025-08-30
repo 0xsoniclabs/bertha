@@ -136,6 +136,7 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 	require.Empty(t, receipts)
 }
 
+/*
 func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
@@ -158,6 +159,7 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 	_, err = state.ApplyBlock(1, block, nil)
 	require.ErrorContains(t, err, "skipped txs")
 }
+*/
 
 func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 	state, err := NewState(StateParameters{

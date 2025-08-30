@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/0xsoniclabs/blockdb"
+	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/linxGnu/grocksdb"
@@ -278,7 +279,7 @@ func TestRunReplayLoop_FailsOnWrongReceiptStatus(t *testing.T) {
 	chain.EXPECT().
 		ApplyBlock(gomock.Any(), gomock.Any()).
 		Return(
-			types.Receipts{{Status: types.ReceiptStatusFailed}},
+			[]tosca.Receipt{{Success: false}},
 			common.Hash{},
 			nil,
 		)
@@ -291,7 +292,7 @@ func TestRunReplayLoop_FailsOnWrongReceiptStatus(t *testing.T) {
 	}})
 	require.ErrorContains(t,
 		runReplayLoop(ctxt, blocks, chain, nil, nil),
-		"receipt status mismatch",
+		"receipt success mismatch",
 	)
 }
 
@@ -302,9 +303,9 @@ func TestRunReplayLoop_FailsOnWrongReceiptCumulatedGasUsed(t *testing.T) {
 	chain.EXPECT().
 		ApplyBlock(gomock.Any(), gomock.Any()).
 		Return(
-			types.Receipts{{
-				Status:            types.ReceiptStatusSuccessful,
-				CumulativeGasUsed: 100,
+			[]tosca.Receipt{{
+				Success: true,
+				GasUsed: 100,
 			}},
 			common.Hash{},
 			nil,
@@ -318,7 +319,7 @@ func TestRunReplayLoop_FailsOnWrongReceiptCumulatedGasUsed(t *testing.T) {
 	}})
 	require.ErrorContains(t,
 		runReplayLoop(ctxt, blocks, chain, nil, nil),
-		"receipt cumulative gas used mismatch",
+		"receipt gas used mismatch",
 	)
 }
 

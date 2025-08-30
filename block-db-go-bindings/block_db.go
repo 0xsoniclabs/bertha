@@ -128,6 +128,9 @@ func (db DB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) iter.
 		for it.Valid() {
 			key := it.Key().Data()
 			// Stop if we reach a key that has a different chain ID or a key number that is less than the start block number
+			if len(key) < 16 {
+				break
+			}
 			keyNum := binary.BigEndian.Uint64(key[8:])
 			if !slices.Equal(key[:8], endKey[:8]) || keyNum < startBlockNumber {
 				break

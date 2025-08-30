@@ -12,6 +12,7 @@ import (
 
 	"github.com/0xsoniclabs/blockdb"
 	_ "github.com/0xsoniclabs/carmen/go/state/gostate"
+	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/urfave/cli/v3"
@@ -266,16 +267,24 @@ func runReplayLoop(
 		}
 
 		// Check the receipts against the expected values in the block.
+		gasUsed := uint64(0)
 		for i, receipt := range receipts {
 			want := block.Receipts[i]
-			if receipt.Status != want.Status {
-				return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, want.Status, receipt.Status)
+			desiredSuccess := want.Status == types.ReceiptStatusSuccessful
+			if receipt.Success != desiredSuccess {
+				return fmt.Errorf("receipt success mismatch for block %d, tx %d: expected %t, got %t",
+					block.Number, i, desiredSuccess, receipt.Success)
 			}
-			if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
-				return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
+			if len(receipt.Logs) != len(want.Logs) {
+				return fmt.Errorf("receipt logs count mismatch for block %d, tx %d: expected %d, got %d",
+					block.Number, i, len(want.Logs), len(receipt.Logs))
 			}
+			wantedGasUse := want.CumulativeGasUsed - gasUsed
+			if uint64(receipt.GasUsed) != wantedGasUse {
+				return fmt.Errorf("receipt gas used mismatch for block %d, tx %d: expected %d, got %d",
+					block.Number, i, wantedGasUse, receipt.GasUsed)
+			}
+			gasUsed += uint64(receipt.GasUsed)
 			// TODO: check all receipt fields if needed.
 		}
 
@@ -298,7 +307,7 @@ func runReplayLoop(
 
 // Chain is an interface for an evolving block chain.
 type Chain interface {
-	ApplyBlock(*types.Block, Corrections) (types.Receipts, common.Hash, error)
+	ApplyBlock(*types.Block, Corrections) ([]tosca.Receipt, common.Hash, error)
 }
 
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
@@ -311,7 +320,7 @@ func (a *stateChainAdapter) ApplyBlock(
 	block *types.Block,
 	corrections Corrections,
 ) (
-	types.Receipts,
+	[]tosca.Receipt,
 	common.Hash,
 	error,
 ) {
