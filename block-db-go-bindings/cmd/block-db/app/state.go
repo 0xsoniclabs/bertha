@@ -38,6 +38,7 @@ type State struct {
 	// TODO: replace with Carmen facade
 	db               carmen.StateDB
 	blockHashHistory *blockHashHistory
+	processor        tosca.Processor
 }
 
 // StateParameters is a configuration struct for creating a new State instance.
@@ -67,14 +68,40 @@ func NewState(params StateParameters) (*State, error) {
 		Variant:      "go-file",
 		Schema:       carmen.Schema(5),
 		Archive:      archive,
-		LiveCache:    100 * 1024 * 1024, // 100MB
-		ArchiveCache: 100 * 1024 * 1024, // 100MB
+		LiveCache:    4 * 1024 * 1024 * 1024, // 4GB
+		ArchiveCache: 4 * 1024 * 1024 * 1024, // 4GB
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create state: %v", err)
 	}
 	db := carmen.CreateCustomStateDBUsing(state, 0)
-	return &State{db: db, blockHashHistory: &blockHashHistory{}}, nil
+	success := false
+	defer func() {
+		if !success {
+			db.Close()
+		}
+	}()
+
+	// Create a processor instance for handling transactions.
+	interpreterFactory := tosca.GetInterpreterFactory("lfvm")
+	if interpreterFactory == nil {
+		return nil, fmt.Errorf("failed to get interpreter factory")
+	}
+	interpreter, err := interpreterFactory(lfvm.Config{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create interpreter: %v", err)
+	}
+	processor := tosca.GetProcessor("geth-sonic", interpreter)
+	if processor == nil {
+		return nil, fmt.Errorf("failed to create processor instance")
+	}
+
+	success = true
+	return &State{
+		db:               db,
+		blockHashHistory: &blockHashHistory{},
+		processor:        processor,
+	}, nil
 }
 
 // Close closes the state database and releases any resources associated with it.
@@ -136,25 +163,6 @@ func (s *State) applyBlockUsingToscaProcessor(
 	block *types.Block,
 	corrections Corrections,
 ) ([]tosca.Receipt, error) {
-	evm_impl := "lfvm"
-	//evm_impl = "evmzero"
-	// TODO: create the processor at the beginning, only once
-	interpreterFactory := tosca.GetInterpreterFactory(evm_impl)
-	if block.Number().Int64() == targetBlock {
-		fmt.Printf("Block %d\n", block.Number().Int64())
-		interpreterFactory = tosca.GetInterpreterFactory("lfvm-logging")
-	}
-	if interpreterFactory == nil {
-		return nil, fmt.Errorf("failed to get interpreter factory")
-	}
-	interpreter, err := interpreterFactory(lfvm.Config{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create interpreter: %v", err)
-	}
-	processor := tosca.GetProcessor("geth-sonic", interpreter)
-	if processor == nil {
-		return nil, fmt.Errorf("failed to create processor instance")
-	}
 
 	blockParameter := tosca.BlockParameters{
 		ChainID:     uint64ToWord(chainId),
@@ -186,6 +194,7 @@ func (s *State) applyBlockUsingToscaProcessor(
 			return v.Sign() == 0 && r.Sign() == 0
 		}
 
+		var err error
 		var sender common.Address
 		if !isInternal(tx) {
 			sender, err = signer.Sender(tx)
@@ -236,7 +245,7 @@ func (s *State) applyBlockUsingToscaProcessor(
 		}
 
 		s.db.BeginTransaction()
-		receipt, err := processor.Run(blockParameter, transaction, txContext)
+		receipt, err := s.processor.Run(blockParameter, transaction, txContext)
 		s.db.EndTransaction()
 		if err != nil {
 			return nil, fmt.Errorf("failed to process transaction: %v", err)
