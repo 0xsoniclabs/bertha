@@ -7,7 +7,7 @@ require github.com/linxGnu/grocksdb v1.8.12
 require (
 	github.com/0xsoniclabs/carmen/go v0.0.0-20250708122828-bc69cb8f68d5
 	github.com/0xsoniclabs/sonic v0.0.0-20250710140101-72f58896fd10
-	github.com/0xsoniclabs/tosca v0.0.0-20250708111444-f020a558b11e
+	github.com/0xsoniclabs/tosca v0.0.0-20250902092631-194f71c48add
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
 	github.com/ethereum/go-ethereum v1.16.0
 	github.com/holiman/uint256 v1.3.2
@@ -94,4 +94,3 @@ replace github.com/ethereum/go-ethereum => github.com/0xsoniclabs/go-ethereum v0
 
 replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundation/lachesis-base-sonic v0.0.0-20250701061954-44075d09185c
 
-replace github.com/0xsoniclabs/tosca => github.com/0xsoniclabs/tosca v0.0.0-20250830164354-3b46d7d3b7b0

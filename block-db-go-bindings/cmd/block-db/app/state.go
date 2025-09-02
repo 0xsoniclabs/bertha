@@ -136,8 +136,10 @@ func (s *State) applyBlockUsingToscaProcessor(
 	block *types.Block,
 	corrections Corrections,
 ) ([]tosca.Receipt, error) {
+	evm_impl := "lfvm"
+	//evm_impl = "evmzero"
 	// TODO: create the processor at the beginning, only once
-	interpreterFactory := tosca.GetInterpreterFactory("lfvm")
+	interpreterFactory := tosca.GetInterpreterFactory(evm_impl)
 	if block.Number().Int64() == targetBlock {
 		fmt.Printf("Block %d\n", block.Number().Int64())
 		interpreterFactory = tosca.GetInterpreterFactory("lfvm-logging")
