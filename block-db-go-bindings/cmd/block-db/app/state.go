@@ -16,6 +16,7 @@ import (
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 )
 
 // State is an abstraction of the Chain State Database. It tracks the balances,
@@ -142,6 +143,14 @@ func (s *State) ApplyBlock(
 	stateDb := evmstore.CreateCarmenStateDb(s.db)
 
 	vmConfig := opera.GetVmConfig(opera.Rules{})
+
+	if true {
+		// Force the usage of the Geth EVM interpreter for all transactions.
+		vmConfig.Interpreter = func(evm *vm.EVM) vm.Interpreter {
+			return vm.NewEVMInterpreter(evm)
+		}
+	}
+
 	gasLimit := block.GasLimit()
 
 	s.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())
