@@ -1,7 +1,7 @@
 use alloy_rlp::{Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use bertha_types::{
     Block, EIP2718Unmarshallable, EMPTY_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Eip2718Marshallable,
-    Hash, HexConvert, RlpString, Transaction, TransactionType, U256,
+    Hash, RlpString, Transaction, TransactionType, U256,
 };
 
 use crate::transaction_receipt::{StoredReceiptRlp, StoredReceiptRlpWithTxType};
@@ -95,7 +95,7 @@ impl TryFrom<IdxFullBlock> for Block {
 
         Ok(Self {
             parent_hash: idx_full_block.block.parent_hash,
-            ommers_hash: Hash::try_from_hex(EMPTY_OMMERS_HASH).unwrap(),
+            ommers_hash: EMPTY_OMMERS_HASH,
             beneficiary: Default::default(),
             state_root: idx_full_block.block.state_root,
             difficulty: idx_full_block.block.difficulty,
@@ -108,7 +108,7 @@ impl TryFrom<IdxFullBlock> for Block {
             transactions,
             receipts,
             base_fee_per_gas: Some(idx_full_block.block.base_fee),
-            withdrawals_root: Some(Hash::try_from_hex(EMPTY_TREE_ROOT_HASH).unwrap()),
+            withdrawals_root: Some(EMPTY_TREE_ROOT_HASH),
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
@@ -176,7 +176,7 @@ impl TryFrom<Block> for IdxFullBlock {
 #[cfg(test)]
 mod tests {
     use bertha_types::{
-        AccessListEntry, Address, RlpString, SetCodeAuthorization, TransactionReceipt,
+        AccessListEntry, Address, HexConvert, RlpString, SetCodeAuthorization, TransactionReceipt,
         TransactionType,
     };
 
@@ -205,7 +205,7 @@ mod tests {
 
         let block = Block {
             parent_hash: [1; 32],
-            ommers_hash: Hash::try_from_hex(EMPTY_OMMERS_HASH).unwrap(),
+            ommers_hash: EMPTY_OMMERS_HASH,
             beneficiary: Default::default(),
             state_root: [2; 32],
             difficulty: 42,
@@ -221,7 +221,7 @@ mod tests {
             transactions: vec![],
             receipts: vec![],
             base_fee_per_gas: Some(U256::from(100u8)),
-            withdrawals_root: Some(Hash::try_from_hex(EMPTY_TREE_ROOT_HASH).unwrap()),
+            withdrawals_root: Some(EMPTY_TREE_ROOT_HASH),
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
@@ -256,7 +256,7 @@ mod tests {
      {
         let block = Block {
             parent_hash: [1; 32],
-            ommers_hash: Hash::try_from_hex(EMPTY_OMMERS_HASH).unwrap(),
+            ommers_hash: EMPTY_OMMERS_HASH,
             beneficiary: Default::default(),
             state_root: [2; 32],
             difficulty: 42,
@@ -274,7 +274,7 @@ mod tests {
                 ..TransactionReceipt::default()
             }],
             base_fee_per_gas: Some(U256::from(100u8)),
-            withdrawals_root: Some(Hash::try_from_hex(EMPTY_TREE_ROOT_HASH).unwrap()),
+            withdrawals_root: Some(EMPTY_TREE_ROOT_HASH),
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
