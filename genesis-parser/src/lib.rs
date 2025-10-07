@@ -1,11 +1,13 @@
 use std::{
+    ffi::OsStr,
     fs,
     io::{self, BufRead, Read, Seek},
+    marker::PhantomData,
     path::{Path, PathBuf},
 };
 
 use bertha_types::Block;
-use e2store::era::Era;
+use e2store::{era::Era, era1::Era1};
 
 pub use crate::error::{Error, GFileError};
 use crate::{block_parser::BlockParser, units::parse_metadata};
@@ -13,6 +15,7 @@ use crate::{block_parser::BlockParser, units::parse_metadata};
 mod block;
 mod block_parser;
 mod era;
+mod era1;
 mod error;
 mod slice_reader;
 // the module can not be `#[cfg(test)]` because then it can not be used in tests of other crates,
@@ -60,35 +63,37 @@ fn read_bytes<const N: usize>(mut reader: impl Read) -> Result<[u8; N], io::Erro
     Ok(data)
 }
 
-/// An accessor to parsed blocks from a directory containing `.era` files.
-pub struct EraDir {
+/// An accessor to parsed blocks from a directory containing `.era1` and `.era` files.
+pub struct EraDir<R: FileReader> {
     files: Vec<PathBuf>,
+    _reader: PhantomData<R>,
 }
 
-impl EraDir {
-    /// Opens the directory at the given path and scans for `.era` files.
+impl<R: FileReader> EraDir<R> {
+    /// Opens the directory at the given path and scans for `.era1` and `.era` files.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let mut files = Vec::new();
 
         for entry in fs::read_dir(&path)? {
             let entry = entry?;
-            if entry.file_type()?.is_file()
-                && entry
-                    .file_name()
-                    .to_str()
-                    .is_some_and(|n| n.ends_with(".era"))
-            {
-                files.push(entry.path());
+            if entry.file_type()?.is_file() {
+                let path = entry.path();
+                if path.extension().and_then(OsStr::to_str) == Some(R::EXTENSION) {
+                    files.push(path);
+                }
             }
         }
 
-        Ok(Self { files })
+        Ok(Self {
+            files,
+            _reader: PhantomData,
+        })
     }
 
     /// Returns and iterator over blocks in descending order (w.r.t. block number). Because the
-    /// `.era` files are parsed lazily while consuming the iterator, the yielded items are of
-    /// type `Result<Block, Error>` to be able to propagate errors during parsing. Once an error
-    /// was returned, the iterator will not yield any more blocks.
+    /// `.era1` and `.era` files are parsed lazily while consuming the iterator, the yielded items
+    /// are of type `Result<Block, Error>` to be able to propagate errors during parsing. Once
+    /// an error was returned, the iterator will not yield any more blocks.
     pub fn blocks(mut self) -> impl Iterator<Item = Result<Block, Error>> {
         // `.era` file naming convention: <config-name>-<era-number>-<short-historical-root>.era
         //     - config-name is the CONFIG_NAME field of the runtime configuration (mainnet, prater,
@@ -103,11 +108,11 @@ impl EraDir {
         self.files.sort_by(|a, b| b.cmp(a)); // sort in reverse
 
         self.files.into_iter().flat_map(|path| {
-            match read_era_file(path) {
+            match R::read_file(path) {
                 Ok(blocks) => {
                     let mut blocks: Vec<_> = blocks.collect();
-                    // The blocks in each `.era` file are in ascending order, so reverse them to get
-                    // descending order.
+                    // The blocks in `.era1` and `.era` files are in ascending order, so reverse
+                    // them to get descending order.
                     blocks.reverse();
                     blocks
                 }
@@ -117,17 +122,50 @@ impl EraDir {
     }
 }
 
-/// Reads and parses a single `.era` file at the given path, returning an iterator over its blocks.
-fn read_era_file(
-    path: impl AsRef<Path>,
-) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {
-    let data = fs::read(path.as_ref())?;
+pub trait FileReader {
+    const EXTENSION: &'static str;
 
-    let blocks = Era::deserialize_blocks(&data)
-        .map_err(|err| Error::Era(err.to_string()))?
-        .into_iter()
-        .map(era::convert_block);
-    Ok(blocks)
+    fn read_file(
+        path: impl AsRef<Path>,
+    ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error>;
+}
+
+pub struct Era1Reader;
+
+impl FileReader for Era1Reader {
+    const EXTENSION: &'static str = "era1";
+
+    /// Reads and parses a single `.era1` file at the given path, returning an iterator over its
+    /// blocks.
+    fn read_file(
+        path: impl AsRef<Path>,
+    ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {
+        let data = fs::read(path.as_ref())?;
+        Ok(Era1::iter_tuples(&data)
+            .map_err(|err| Error::Era(err.to_string()))?
+            .map(era1::convert_block)
+            .map(Ok))
+    }
+}
+
+pub struct EraReader;
+
+impl FileReader for EraReader {
+    const EXTENSION: &'static str = "era";
+
+    /// Reads and parses a single `.era` file at the given path, returning an iterator over its
+    /// blocks.
+    fn read_file(
+        path: impl AsRef<Path>,
+    ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {
+        let data = fs::read(path.as_ref())?;
+
+        let blocks = Era::deserialize_blocks(&data)
+            .map_err(|err| Error::Era(err.to_string()))?
+            .into_iter()
+            .map(era::convert_block);
+        Ok(blocks)
+    }
 }
 
 #[cfg(test)]

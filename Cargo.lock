@@ -2333,6 +2333,8 @@ dependencies = [
 name = "genesis-parser"
 version = "0.1.0"
 dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
  "alloy-rlp",
  "bertha-types",
  "const-hex",

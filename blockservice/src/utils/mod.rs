@@ -5,9 +5,9 @@ pub mod ranges;
 pub mod test_dir;
 
 /// A trait for getting a buffered reader from different input types.
-/// This trait is useful when the type from which the [`BufRead`] is produced implements [`Send`]
-/// and [`Sync`], but the [`std::io::BufRead`] type itself does not, because this way we can pass
-/// the original type around, and produce the buffered reader when needed.
+/// This trait is useful when the type from which the [`std::io::BufRead`] is produced implements
+/// [`Send`] and [`Sync`], but the [`std::io::BufRead`] type itself does not, because this way we
+/// can pass the original type around, and produce the buffered reader when needed.
 pub trait InputReader {
     fn get_reader(&self) -> impl std::io::BufRead;
 }

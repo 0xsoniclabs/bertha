@@ -21,6 +21,8 @@ thiserror = "2.0.12"
 # era parsing
 e2store = { git = "https://github.com/0xsoniclabs/trin", branch = "bertha-era" }
 tree_hash = "0.10.0"
+alloy-consensus = "1.0.37"
+alloy-eips = "1.0.37"
 
 [dev-dependencies]
 const-hex = "1.14.1"
