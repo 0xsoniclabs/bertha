@@ -6,12 +6,12 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("gzip decompression failed: {0}")]
     Decompression(#[from] flate2::DecompressError),
-    #[error("genesis validation failed: {0}")]
-    Genesis(#[from] GenesisError),
+    #[error("`.g` file validation failed: {0}")]
+    GFile(#[from] GFileError),
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum GenesisError {
+pub enum GFileError {
     #[error("header missing")]
     HeaderMissing,
     #[error("invalid header: got {got:?}, expected {expected:?}")]

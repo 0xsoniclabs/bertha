@@ -83,7 +83,7 @@ mod tests {
     use std::{io::Read, num::NonZeroUsize};
 
     use super::SliceReader;
-    use crate::Error;
+    use crate::{Error, GFileError};
 
     fn consume(slice: &mut &[u8], size: usize) -> Result<(), Error> {
         assert!(
@@ -182,10 +182,8 @@ mod tests {
         );
 
         assert!(matches!(
-            reader.process_with(|_| {
-                Result::<(), Error>::Err(Error::Genesis(crate::GenesisError::BlocksUnitMissing))
-            }),
-            Err(Error::Genesis(crate::GenesisError::BlocksUnitMissing))
+            reader.process_with(|_| { Err::<(), _>(Error::GFile(GFileError::BlocksUnitMissing)) }),
+            Err(Error::GFile(GFileError::BlocksUnitMissing))
         ));
     }
 
