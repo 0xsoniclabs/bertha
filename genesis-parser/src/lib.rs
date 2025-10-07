@@ -2,7 +2,7 @@ use std::io::{self, BufRead, Read, Seek};
 
 use bertha_types::Block;
 
-pub use crate::error::{Error, GenesisError};
+pub use crate::error::{Error, GFileError};
 use crate::{block_parser::BlockParser, units::parse_metadata};
 
 mod block;
@@ -16,13 +16,13 @@ pub mod test_utils;
 mod transaction_receipt;
 mod units;
 
-/// An accessor to parsed blocks from a genesis file.
-pub struct Genesis<R: BufRead + Seek> {
+/// An accessor to parsed blocks from a genesis `.g` file.
+pub struct GFile<R: BufRead + Seek> {
     chain_id: u64,
     blocks: BlockParser<R>,
 }
 
-impl<R: BufRead + Seek> Genesis<R> {
+impl<R: BufRead + Seek> GFile<R> {
     /// Parses the genesis file metadata and returns a [Genesis] object.
     pub fn parse(mut reader: R) -> Result<Self, Error> {
         let meta = parse_metadata(&mut reader)?;
@@ -58,14 +58,15 @@ fn read_bytes<const N: usize>(mut reader: impl Read) -> Result<[u8; N], io::Erro
 mod tests {
     use std::io::Cursor;
 
-    use crate::{Genesis, test_utils::generate_test_genesis};
+    use super::*;
+    use crate::test_utils::generate_test_genesis;
 
     #[test]
     fn parses_whole_genesis_file_and_yields_all_blocks() {
         let chain_id = 146;
         let blocks = 3;
         let buf = generate_test_genesis(chain_id, blocks, &[]);
-        let mut genesis = Genesis::parse(Cursor::new(buf)).unwrap();
+        let mut genesis = GFile::parse(Cursor::new(buf)).unwrap();
         assert_eq!(genesis.chain_id(), chain_id);
         assert_eq!(genesis.blocks().count(), blocks);
     }

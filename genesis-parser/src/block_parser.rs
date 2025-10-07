@@ -9,7 +9,7 @@ use bertha_types::Hash;
 use flate2::bufread::GzDecoder;
 
 use crate::{
-    Block, Error, GenesisError, block::IdxFullBlock, read_bytes, slice_reader::SliceReader,
+    Block, Error, GFileError, block::IdxFullBlock, read_bytes, slice_reader::SliceReader,
     units::UnitDescriptor,
 };
 
@@ -36,7 +36,7 @@ impl<R: BufRead + Seek> BlockParser<R> {
         }
         let blocks_unit = units
             .get("brs")
-            .ok_or(Error::Genesis(GenesisError::BlocksUnitMissing))?;
+            .ok_or(Error::GFile(GFileError::BlocksUnitMissing))?;
 
         // Now seek to the start of the blocks unit (offset) and decompress `compressed_size` bytes.
         // Source: sonic/opera/genesisstore/disk.go (OpenGenesisStore -> ReaderProvider)
@@ -59,7 +59,7 @@ impl<R: BufRead + Seek> BlockParser<R> {
         // This also means that we have the full MAX_MEM_USAGE of 256 MiB available for the buffer
         // in SliceReader.
         if piece_size + num_hashes * 128 > Self::MAX_MEM_USAGE {
-            return Err(Error::Genesis(GenesisError::PieceSizeTooLarge {
+            return Err(Error::GFile(GFileError::PieceSizeTooLarge {
                 got: piece_size,
                 max: Self::MAX_MEM_USAGE,
             }));
@@ -216,7 +216,7 @@ mod tests {
 
         assert!(matches!(
             blocks_iter,
-            Err(Error::Genesis(GenesisError::PieceSizeTooLarge {
+            Err(Error::GFile(GFileError::PieceSizeTooLarge {
                 got: _,
                 max: BlockParser::<Cursor<Vec<u8>>>::MAX_MEM_USAGE,
             }))
