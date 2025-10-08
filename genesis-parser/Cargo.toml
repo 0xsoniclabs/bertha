@@ -18,6 +18,11 @@ flate2 = "1.1.1"
 # error handling
 thiserror = "2.0.12"
 
+# era parsing
+e2store = { git = "https://github.com/ethereum/trin", rev = "30aeef8" }
+ethportal-api = { git = "https://github.com/ethereum/trin", rev = "30aeef8" } # the git dep on e2store uses a git dep on ethportal-api and we have to match it
+tree_hash = "0.10.0"
+
 [dev-dependencies]
 const-hex = "1.14.1"
 
