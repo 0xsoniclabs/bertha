@@ -5,7 +5,7 @@ use std::{
 
 pub use fetch::fetch;
 pub use fetch_state_updates::fetch_state_updates;
-pub use import::import;
+pub use import::{import_era, import_gfile};
 use indicatif::{ProgressBar, style::TemplateError};
 pub use init::init;
 pub use list::list;
@@ -104,10 +104,12 @@ pub async fn execute(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match args.command {
         Command::Init => cmd::init(args.dir, &mut output),
-        Command::Import {
-            snapshot_file,
-            verify,
-        } => cmd::import(args.dir, snapshot_file, verify, &mut output),
+        Command::ImportGfile { gfile, verify } => {
+            cmd::import_gfile(args.dir, gfile, verify, &mut output)
+        }
+        Command::ImportEra { era_dir, chain_id } => {
+            cmd::import_era(args.dir, era_dir, chain_id, &mut output)
+        }
         Command::List { chain_id, url } => cmd::list(args.dir, chain_id, url, &mut output).await,
         Command::Fetch {
             url,

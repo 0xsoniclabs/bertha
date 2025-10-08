@@ -21,11 +21,14 @@ pub enum Command {
     Init,
     /// Import all blocks from the specified snapshot (`.g`) file into the block database, and
     /// optionally also verify the parent hashes.
-    Import {
-        snapshot_file: PathBuf,
+    ImportGfile {
+        gfile: PathBuf,
         #[arg(long, default_value_t = false)]
         verify: bool,
     },
+    /// Import all blocks from the specified directory (which is expected to contain `.era` files)
+    /// into the block database. The blocks are stored under the specified chain ID.
+    ImportEra { era_dir: PathBuf, chain_id: u64 },
     /// Fetch blocks from a remote block service and store them in the local database.
     Fetch {
         url: String,
@@ -92,7 +95,8 @@ Usage: blockservice [OPTIONS] <COMMAND>
 
 Commands:
   init                 Initialize a new block database
-  import               Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  import-gfile         Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  import-era           Import all blocks from the specified directory (which is expected to contain `.era` files) into the block database. The blocks are stored under the specified chain ID
   fetch                Fetch blocks from a remote block service and store them in the local database
   fetch-state-updates  Fetch state update files from a remote block service
   list                 List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
@@ -132,7 +136,8 @@ Usage: blockservice [OPTIONS] <COMMAND>
 
 Commands:
   init                 Initialize a new block database
-  import               Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  import-gfile         Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  import-era           Import all blocks from the specified directory (which is expected to contain `.era` files) into the block database. The blocks are stored under the specified chain ID
   fetch                Fetch blocks from a remote block service and store them in the local database
   fetch-state-updates  Fetch state update files from a remote block service
   list                 List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
@@ -206,13 +211,13 @@ For more information, try '--help'.
     }
 
     #[test]
-    fn call_with_import_subcommand_without_argument_prints_parse_error() {
-        let args = ["blockservice", "import"];
+    fn call_with_import_gfile_subcommand_without_argument_prints_parse_error() {
+        let args = ["blockservice", "import-gfile"];
         let expected = "\
 error: the following required arguments were not provided:
-  <SNAPSHOT_FILE>
+  <GFILE>
 
-Usage: blockservice import <SNAPSHOT_FILE>
+Usage: blockservice import-gfile <GFILE>
 
 For more information, try '--help'.
 ";
@@ -220,13 +225,13 @@ For more information, try '--help'.
     }
 
     #[test]
-    fn call_with_import_subcommand_with_path_parses_successfully() {
+    fn call_with_import_gfile_subcommand_with_path_parses_successfully() {
         let path = "/path/to/snapshot.g";
-        let args = ["blockservice", "import", path];
+        let args = ["blockservice", "import-gfile", path];
         let expected = Args {
             dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
-            command: Command::Import {
-                snapshot_file: PathBuf::from(path),
+            command: Command::ImportGfile {
+                gfile: PathBuf::from(path),
                 verify: false,
             },
         };
@@ -234,15 +239,15 @@ For more information, try '--help'.
     }
 
     #[test]
-    fn call_with_import_subcommand_with_help_argument_prints_subcommand_help() {
-        let args = ["blockservice", "import", "--help"];
+    fn call_with_import_gfile_subcommand_with_help_argument_prints_subcommand_help() {
+        let args = ["blockservice", "import-gfile", "--help"];
         let expected = "\
 Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
 
-Usage: blockservice import [OPTIONS] <SNAPSHOT_FILE>
+Usage: blockservice import-gfile [OPTIONS] <GFILE>
 
 Arguments:
-  <SNAPSHOT_FILE>
+  <GFILE>
 
 Options:
       --dir <DIR>  The path to the blockservice directory [default: .]
@@ -253,17 +258,85 @@ Options:
     }
 
     #[test]
-    fn call_with_import_subcommand_with_additional_argument_prints_parse_error() {
+    fn call_with_import_gfile_subcommand_with_additional_argument_prints_parse_error() {
         let args = [
             "blockservice",
-            "import",
+            "import-gfile",
             "/path/to/snapshot.g",
             "additional",
         ];
         let expected = "\
 error: unexpected argument 'additional' found
 
-Usage: blockservice import [OPTIONS] <SNAPSHOT_FILE>
+Usage: blockservice import-gfile [OPTIONS] <GFILE>
+
+For more information, try '--help'.
+";
+        parse_and_compare(&args, Err(expected));
+    }
+
+    #[test]
+    fn call_with_import_era_subcommand_without_argument_prints_parse_error() {
+        let args = ["blockservice", "import-era"];
+        let expected = "\
+error: the following required arguments were not provided:
+  <ERA_DIR>
+  <CHAIN_ID>
+
+Usage: blockservice import-era <ERA_DIR> <CHAIN_ID>
+
+For more information, try '--help'.
+";
+        parse_and_compare(&args, Err(expected));
+    }
+
+    #[test]
+    fn call_with_import_era_subcommand_with_path_and_chain_id_parses_successfully() {
+        let path = "/path/to/era_dir";
+        let chain_id = 1;
+        let args = ["blockservice", "import-era", path, &chain_id.to_string()];
+        let expected = Args {
+            dir: PathBuf::from(DEFAULT_APPLICATION_DIRECTORY),
+            command: Command::ImportEra {
+                era_dir: PathBuf::from(path),
+                chain_id,
+            },
+        };
+        parse_and_compare(&args, Ok(expected));
+    }
+
+    #[test]
+    fn call_with_import_era_subcommand_with_help_argument_prints_subcommand_help() {
+        let args = ["blockservice", "import-era", "--help"];
+        let expected = "\
+Import all blocks from the specified directory (which is expected to contain `.era` files) into the block database. The blocks are stored under the specified chain ID
+
+Usage: blockservice import-era [OPTIONS] <ERA_DIR> <CHAIN_ID>
+
+Arguments:
+  <ERA_DIR>
+  <CHAIN_ID>
+
+Options:
+      --dir <DIR>  The path to the blockservice directory [default: .]
+  -h, --help       Print help
+";
+        parse_and_compare(&args, Err(expected));
+    }
+
+    #[test]
+    fn call_with_import_era_subcommand_with_additional_argument_prints_parse_error() {
+        let args = [
+            "blockservice",
+            "import-era",
+            "/path/to/era_dir",
+            "1",
+            "additional",
+        ];
+        let expected = "\
+error: unexpected argument 'additional' found
+
+Usage: blockservice import-era [OPTIONS] <ERA_DIR> <CHAIN_ID>
 
 For more information, try '--help'.
 ";

@@ -1,31 +1,67 @@
 use std::{fs::File, io::BufReader, path::Path};
 
-use bertha_types::{Hash, HexConvert};
-use genesis_parser::GFile;
+use bertha_types::{Block, Hash, HexConvert};
+use genesis_parser::{EraDir, GFile};
 use prost::Message;
 
 use crate::{
     app_dir::open_app_dir,
     cmd::make_progress_bar,
-    config::ChainConfig,
-    db::{BlockBatch, BlockDb, proto},
+    config::{ChainConfig, Config},
+    db::{BlockBatch, BlockDb, RocksBlockDb, proto},
 };
 
 const BATCH_SIZE: usize = 10000;
 
-pub fn import(
+/// Imports blocks from a directory containing `.era` files into the database located in `app_dir`.
+pub fn import_era(
     app_dir: impl AsRef<Path>,
-    snapshot_path: impl AsRef<Path>,
+    era_dir_path: impl AsRef<Path>,
+    chain_id: u64,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    writeln!(
+        writer,
+        "WARNING: `.era` file import is still experimental and might store invalid data."
+    )?;
+
+    let (cfg, db) = open_app_dir(app_dir, false)?;
+
+    let era_dir = EraDir::open(era_dir_path)?;
+    let blocks = era_dir.blocks();
+
+    import(cfg, &db, blocks, chain_id, false, &mut writer)
+}
+
+/// Imports blocks from a `.g` file into the database located in `app_dir` and optionally verifies
+/// the parent hashes.
+pub fn import_gfile(
+    app_dir: impl AsRef<Path>,
+    gfile_path: impl AsRef<Path>,
     verify: bool,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (mut cfg, db) = open_app_dir(app_dir, false)?;
+    let (cfg, db) = open_app_dir(app_dir, false)?;
 
-    let file = File::open(snapshot_path)?;
-    let mut reader = BufReader::new(file);
-    let mut genesis = GFile::parse(&mut reader)?;
+    let file = File::open(&gfile_path)?;
+    let reader = BufReader::new(file);
+    let mut genesis = GFile::parse(reader)?;
     let chain_id = genesis.chain_id();
-    let mut blocks = genesis.blocks().peekable();
+    let blocks = genesis.blocks();
+
+    import(cfg, &db, blocks, chain_id, verify, &mut writer)
+}
+
+fn import(
+    mut cfg: Config,
+    db: &RocksBlockDb,
+    blocks: impl Iterator<Item = Result<Block, genesis_parser::Error>>,
+    chain_id: u64,
+    verify: bool,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut blocks = blocks.peekable();
+
     let total_blocks = blocks
         .peek()
         .and_then(|b| b.as_ref().map(|b| b.number + 1).ok())
@@ -92,7 +128,8 @@ pub fn import(
                     format!("Invalid metadata, block {} does not exist", block.number)
                 })?;
             }
-            // Note: blocks in genesis/ g-file are in reverse order
+            // Note: The blocks in the `blocks` iterator are expected to be in descending order
+            // (w.r.t. block number).
             if let Some(prev_parent_hash) = prev_parent_hash {
                 let block_hash = block.to_header().compute_hash();
                 if block_hash != prev_parent_hash {
@@ -173,7 +210,7 @@ mod tests {
 
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut writer = Vec::new();
-        import(
+        import_gfile(
             tmpdir.path(),
             genesis_file.to_str().unwrap(),
             true,
@@ -235,7 +272,7 @@ mod tests {
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
         let mut writer = Vec::new();
-        import(
+        import_gfile(
             tmpdir.path(),
             genesis_file.to_str().unwrap(),
             false,
@@ -277,7 +314,7 @@ mod tests {
 
         let mut writer = Vec::new();
         assert!(
-            import(tmpdir.path(),genesis_file.to_str().unwrap(), true, &mut writer)
+            import_gfile(tmpdir.path(),genesis_file.to_str().unwrap(), true, &mut writer)
                 .unwrap_err()
                 .to_string()
                 .contains("Block zero must have parent hash 0x0000000000000000000000000000000000000000000000000000000000000000")
@@ -302,7 +339,7 @@ mod tests {
 
         let mut writer = Vec::new();
         assert!(
-            import(
+            import_gfile(
                 tmpdir.path(),
                 genesis_file.to_str().unwrap(),
                 true,
@@ -344,7 +381,7 @@ mod tests {
 
         let mut writer = Vec::new();
         assert!(
-            import(
+            import_gfile(
                 tmpdir.path(),
                 genesis_file.to_str().unwrap(),
                 true,
@@ -382,7 +419,7 @@ mod tests {
 
         let mut writer = Vec::new();
         assert_eq!(
-            import(
+            import_gfile(
                 tmpdir.path(),
                 genesis_file.to_str().unwrap(),
                 true,
@@ -418,7 +455,7 @@ mod tests {
             std::fs::write(&genesis_file, genesis_data).unwrap();
 
             let mut writer = Vec::new();
-            let result = import(
+            let result = import_gfile(
                 tmpdir.path(),
                 genesis_file.to_str().unwrap(),
                 false,
@@ -436,7 +473,7 @@ mod tests {
             std::fs::write(&genesis_file, genesis_data).unwrap();
 
             let mut writer = Vec::new();
-            let result = import(
+            let result = import_gfile(
                 tmpdir.path(),
                 genesis_file.to_str().unwrap(),
                 false,
@@ -464,7 +501,7 @@ mod tests {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let mut writer = Vec::new();
-        let result = import(tmpdir.path(), "somepath", true, &mut writer);
+        let result = import_gfile(tmpdir.path(), "somepath", true, &mut writer);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no blockservice.toml found at {} - did you forget to run init?",
@@ -482,7 +519,7 @@ mod tests {
         tmpdir.set_permissions(Permissions::ReadOnly).unwrap();
 
         let mut writer = Vec::new();
-        let result = import(tmpdir.path(), "somepath", true, &mut writer);
+        let result = import_gfile(tmpdir.path(), "somepath", true, &mut writer);
         // We expect an error because we cannot write to the database
         assert!(result.is_err());
         assert!(
