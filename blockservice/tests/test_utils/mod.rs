@@ -252,7 +252,7 @@ pub fn make_default_sonic_chain_config() -> ChainConfig {
 #[cfg(test)]
 mod tests {
 
-    use std::{fs::File, io::BufReader, str::FromStr};
+    use std::{fs::File, io::BufReader, slice, str::FromStr};
 
     use blockservice::app_dir::BLOCK_DB_NAME;
     use genesis_parser::Genesis;
@@ -318,7 +318,7 @@ mod tests {
         };
         let temp_dir = tempfile::tempdir().unwrap();
         let dir = temp_dir.path();
-        init_blockservice(Some(dir), &[chain_config.clone()])
+        init_blockservice(Some(dir), slice::from_ref(&chain_config))
             .await
             .expect("blockservice should initialize");
 
@@ -608,7 +608,7 @@ mod tests {
             json_rpc: None,
             state_updates: None,
         };
-        add_chain_configs_to_config_file(&[chain_config.clone()], temp_dir.path())
+        add_chain_configs_to_config_file(slice::from_ref(&chain_config), temp_dir.path())
             .expect("adding chain config should succeed");
 
         // Try to add the same chain config again, which should fail

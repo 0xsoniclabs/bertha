@@ -2,8 +2,8 @@ use ethbloom::{Bloom, Input};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Address, AsHex, BlockHeader, EMPTY_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, HexConvert,
-    Transaction, TransactionReceipt, U256, compute_root_hash,
+    Address, AsHex, BlockHeader, EMPTY_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, Transaction,
+    TransactionReceipt, U256, compute_root_hash,
 };
 
 /// An Ethereum-compatible block in "normal form", that is, without any redundant or derived fields.
@@ -64,11 +64,11 @@ impl Block {
     pub fn default_sonic() -> Self {
         Block {
             // in Sonic the ommers_hash is always set to the empty hash
-            ommers_hash: Hash::try_from_hex(EMPTY_OMMERS_HASH).unwrap(),
+            ommers_hash: EMPTY_OMMERS_HASH,
             // in Sonic the extra_data must be 12 bytes long because it holds the duration and
             // nanoseconds part of the timestamp
             extra_data: vec![0; 12],
-            withdrawals_root: Some(Hash::try_from_hex(EMPTY_TREE_ROOT_HASH).unwrap()),
+            withdrawals_root: Some(EMPTY_TREE_ROOT_HASH),
             // in Sonic the base_fee_per_gas is always set, so default to 0 instead of None
             base_fee_per_gas: Some(U256::default()),
             blob_gas_used: Some(0),
