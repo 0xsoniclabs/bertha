@@ -255,7 +255,7 @@ mod tests {
     use std::{fs::File, io::BufReader, slice, str::FromStr};
 
     use blockservice::app_dir::BLOCK_DB_NAME;
-    use genesis_parser::Genesis;
+    use genesis_parser::GFile;
 
     use super::*;
 
@@ -444,7 +444,7 @@ mod tests {
         // Parse the genesis file to verify its contents
         let file = File::open(snapshot_path).unwrap();
         let mut reader = BufReader::new(file);
-        let mut genesis = Genesis::parse(&mut reader).expect("Genesis should parse successfully");
+        let mut genesis = GFile::parse(&mut reader).expect("Genesis should parse successfully");
 
         let blocks = genesis.blocks().collect::<Result<Vec<_>, _>>().unwrap();
         assert_eq!(blocks.len(), num_blocks + extra_blocks.len());

@@ -1,7 +1,7 @@
 use std::{fs::File, io::BufReader, path::Path};
 
 use bertha_types::{Hash, HexConvert};
-use genesis_parser::Genesis;
+use genesis_parser::GFile;
 use prost::Message;
 
 use crate::{
@@ -23,7 +23,7 @@ pub fn import(
 
     let file = File::open(snapshot_path)?;
     let mut reader = BufReader::new(file);
-    let mut genesis = Genesis::parse(&mut reader)?;
+    let mut genesis = GFile::parse(&mut reader)?;
     let chain_id = genesis.chain_id();
     let mut blocks = genesis.blocks().peekable();
     let total_blocks = blocks

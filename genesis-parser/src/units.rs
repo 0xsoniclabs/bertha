@@ -8,7 +8,7 @@ use alloy_rlp::{Decodable, RlpDecodable, RlpEncodable};
 use bertha_types::Hash;
 
 use crate::{
-    error::{Error, GenesisError},
+    error::{Error, GFileError},
     read_bytes,
 };
 
@@ -53,13 +53,13 @@ fn read_file_header(mut reader: impl Read) -> Result<(), Error> {
     match read_bytes(&mut reader) {
         Ok(HEADER) => (),
         Ok(header) => {
-            return Err(Error::Genesis(GenesisError::InvalidHeader {
+            return Err(Error::GFile(GFileError::InvalidHeader {
                 got: header,
                 expected: HEADER,
             }));
         }
         Err(err) if err.kind() == ErrorKind::UnexpectedEof => {
-            return Err(Error::Genesis(GenesisError::HeaderMissing));
+            return Err(Error::GFile(GFileError::HeaderMissing));
         }
         Err(err) => {
             return Err(Error::Io(err));
@@ -69,13 +69,13 @@ fn read_file_header(mut reader: impl Read) -> Result<(), Error> {
     match read_bytes(&mut reader) {
         Ok(VERSION) => (),
         Ok(version) => {
-            return Err(Error::Genesis(GenesisError::InvalidFileVersion {
+            return Err(Error::GFile(GFileError::InvalidFileVersion {
                 got: version,
                 expected: VERSION,
             }));
         }
         Err(err) if err.kind() == ErrorKind::UnexpectedEof => {
-            return Err(Error::Genesis(GenesisError::HeaderMissing));
+            return Err(Error::GFile(GFileError::HeaderMissing));
         }
         Err(err) => {
             return Err(Error::Io(err));
@@ -130,7 +130,7 @@ pub fn parse_metadata(mut reader: impl BufRead + Seek) -> Result<GenesisMetadata
         match &header {
             Some(h) => {
                 if *h != unit.header {
-                    return Err(Error::Genesis(GenesisError::HeaderMismatch));
+                    return Err(Error::GFile(GFileError::HeaderMismatch));
                 }
             }
             None => header = Some(unit.header.clone()),
@@ -154,7 +154,7 @@ pub fn parse_metadata(mut reader: impl BufRead + Seek) -> Result<GenesisMetadata
         reader.seek_relative(compressed_size as i64)?;
     }
 
-    let header = header.ok_or(Error::Genesis(GenesisError::HeaderMissing))?;
+    let header = header.ok_or(Error::GFile(GFileError::HeaderMissing))?;
 
     Ok(GenesisMetadata {
         chain_id: header.network_id,
@@ -170,7 +170,7 @@ mod tests {
     use bertha_types::Hash;
 
     use crate::{
-        Error, GenesisError,
+        Error, GFileError,
         units::{GenesisHeader, HEADER, Unit, VERSION, parse_metadata, read_file_header},
     };
 
@@ -188,7 +188,7 @@ mod tests {
         let buf = Vec::new();
         assert!(matches!(
             read_file_header(buf.as_slice()).unwrap_err(),
-            Error::Genesis(GenesisError::HeaderMissing)
+            Error::GFile(GFileError::HeaderMissing)
         ));
 
         // invalid header
@@ -196,7 +196,7 @@ mod tests {
         buf.extend_from_slice(&[0, 0, 0, 0]);
         assert!(matches!(
             read_file_header(buf.as_slice()).unwrap_err(),
-            Error::Genesis(GenesisError::InvalidHeader {
+            Error::GFile(GFileError::InvalidHeader {
                 got: [0, 0, 0, 0],
                 expected: HEADER,
             })
@@ -207,7 +207,7 @@ mod tests {
         buf.extend_from_slice(&HEADER);
         assert!(matches!(
             read_file_header(buf.as_slice()).unwrap_err(),
-            Error::Genesis(GenesisError::HeaderMissing)
+            Error::GFile(GFileError::HeaderMissing)
         ));
 
         // invalid version
@@ -216,7 +216,7 @@ mod tests {
         buf.extend_from_slice(&[0, 0, 0, 0]);
         assert!(matches!(
             read_file_header(buf.as_slice()).unwrap_err(),
-            Error::Genesis(GenesisError::InvalidFileVersion {
+            Error::GFile(GFileError::InvalidFileVersion {
                 got: [0, 0, 0, 0],
                 expected: VERSION,
             })
@@ -302,7 +302,7 @@ mod tests {
         let meta = parse_metadata(Cursor::new(buf));
         assert!(matches!(
             meta,
-            Err(Error::Genesis(GenesisError::HeaderMismatch))
+            Err(Error::GFile(GFileError::HeaderMismatch))
         ));
     }
 }
