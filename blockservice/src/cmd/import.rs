@@ -53,10 +53,10 @@ pub fn import(
     // past and there is a newer one, we should only import the new blocks.
     let ranges = db.get_ranges_of_chain_id(chain_id)?;
     let mut smallest_import_block_number = 0; // this is the smallest block number we have to import
-    if let Some(range) = ranges.first() {
-        if *range.start() == 0 {
-            smallest_import_block_number = *range.end() + 1;
-        }
+    if let Some(range) = ranges.first()
+        && *range.start() == 0
+    {
+        smallest_import_block_number = *range.end() + 1;
     }
 
     let import_blocks = total_blocks - smallest_import_block_number;
