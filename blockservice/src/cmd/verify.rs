@@ -55,18 +55,18 @@ pub fn verify(
         if prev_block_number + 1 != block_number {
             prev_block_hash = None; // there was a gap so we have to skip the parent hash check
         }
-        if let Some(prev_block_hash) = prev_block_hash {
-            if block.parent_hash != prev_block_hash {
-                errors += 1;
-                writeln!(
-                    writer,
-                    "[chain ID {}] parent hash verification failed for block {}: expected hash {}, got {}.",
-                    chain_id,
-                    block_number,
-                    prev_block_hash.to_hex(),
-                    block.parent_hash.to_hex()
-                )?;
-            }
+        if let Some(prev_block_hash) = prev_block_hash
+            && block.parent_hash != prev_block_hash
+        {
+            errors += 1;
+            writeln!(
+                writer,
+                "[chain ID {}] parent hash verification failed for block {}: expected hash {}, got {}.",
+                chain_id,
+                block_number,
+                prev_block_hash.to_hex(),
+                block.parent_hash.to_hex()
+            )?;
         }
         prev_block_number = block_number;
         prev_block_hash = Some(block.to_header().compute_hash());

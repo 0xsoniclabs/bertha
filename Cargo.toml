@@ -2,6 +2,8 @@
 resolver = "3"
 members = ["bertha-types", "blockservice", "genesis-parser"]
 
+package.rust-version = "1.90"
+
 [workspace.lints.rust]
 macro_use_extern_crate = "warn"
 unused_unsafe = "warn"

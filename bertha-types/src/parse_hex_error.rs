@@ -27,7 +27,7 @@ impl From<bnum::errors::ParseIntError> for ParseHexError {
     fn from(value: bnum::errors::ParseIntError) -> Self {
         match value.kind() {
             IntErrorKind::InvalidDigit => Self::InvalidCharacter,
-            _ => Self::IntError(value.kind().clone()),
+            _ => Self::IntError(*value.kind()),
         }
     }
 }
@@ -36,7 +36,7 @@ impl From<std::num::ParseIntError> for ParseHexError {
     fn from(value: std::num::ParseIntError) -> Self {
         match value.kind() {
             IntErrorKind::InvalidDigit => Self::InvalidCharacter,
-            _ => Self::IntError(value.kind().clone()),
+            _ => Self::IntError(*value.kind()),
         }
     }
 }

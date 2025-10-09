@@ -100,12 +100,12 @@ mod tests {
                     let curr_block_number = block_number;
                     block_number += 1;
                     Box::pin(async move {
-                        Ok(BlockHeaderWithTransactions{
+                        Ok(BlockHeaderWithTransactions {
                             block_header: BlockHeader {
                                 number: curr_block_number,
                                 ..BlockHeader::default()
                             },
-                            transactions: Vec::new()
+                            transactions: Vec::new(),
                         })
                     })
                 }
@@ -118,9 +118,7 @@ mod tests {
                 move |requested_block_number| {
                     assert_eq!(requested_block_number, block_number);
                     block_number += 1;
-                    Box::pin(async {
-                        Ok(vec![TransactionReceipt::default()])
-                    })
+                    Box::pin(async { Ok(vec![TransactionReceipt::default()]) })
                 }
             });
 
