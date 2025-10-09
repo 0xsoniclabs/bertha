@@ -38,7 +38,7 @@ jobs:
     - name: checkout
       uses: actions/checkout@v4
     - name: install rust
-      uses: dtolnay/rust-toolchain@1.86
+      uses: dtolnay/rust-toolchain@1.90
       with:
         components: clippy
     - name: install protoc
@@ -58,7 +58,7 @@ jobs:
     - name: checkout
       uses: actions/checkout@v4
     - name: install rust
-      uses: dtolnay/rust-toolchain@1.86
+      uses: dtolnay/rust-toolchain@1.90
     - name: install protoc
       uses: arduino/setup-protoc@v3
       with:
@@ -81,7 +81,7 @@ jobs:
     - name: checkout
       uses: actions/checkout@v4
     - name: install rust
-      uses: dtolnay/rust-toolchain@1.86
+      uses: dtolnay/rust-toolchain@1.90
     - name: install protoc
       uses: arduino/setup-protoc@v3
       with:
@@ -103,7 +103,7 @@ jobs:
     - name: checkout
       uses: actions/checkout@v4
     - name: install rust
-      uses: dtolnay/rust-toolchain@1.86
+      uses: dtolnay/rust-toolchain@1.90
     - name: install protoc
       uses: arduino/setup-protoc@v3
       with:
@@ -125,7 +125,7 @@ jobs:
     - name: checkout
       uses: actions/checkout@v4
     - name: install rust
-      uses: dtolnay/rust-toolchain@1.86
+      uses: dtolnay/rust-toolchain@1.90
     - name: install protoc
       uses: arduino/setup-protoc@v3
       with:
