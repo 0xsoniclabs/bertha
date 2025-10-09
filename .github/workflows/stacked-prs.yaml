@@ -13,7 +13,7 @@ jobs:
     name: targets main
     runs-on: ubuntu-latest
     steps:
-      - name: Enforce 'main' as the target branch
+      - name: Enforce 'main' as the target branchx
         env:
           TARGET_BRANCH: ${{ github.base_ref }}
         run: |
