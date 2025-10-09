@@ -23,7 +23,7 @@ pub struct GFile<R: BufRead + Seek> {
 }
 
 impl<R: BufRead + Seek> GFile<R> {
-    /// Parses the genesis file metadata and returns a [Genesis] object.
+    /// Parses the genesis file metadata and returns a [GFile] object.
     pub fn parse(mut reader: R) -> Result<Self, Error> {
         let meta = parse_metadata(&mut reader)?;
         let blocks = BlockParser::try_new(reader, &meta.units)?;
