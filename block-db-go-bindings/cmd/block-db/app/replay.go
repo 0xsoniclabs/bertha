@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
-	"math"
 	"os"
 	"time"
 
 	"github.com/0xsoniclabs/blockdb"
+	carmen "github.com/0xsoniclabs/carmen/go/state"
 	_ "github.com/0xsoniclabs/carmen/go/state/gostate"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -44,6 +44,20 @@ var (
 		Name:  "keep-db",
 		Usage: "Keep the state database after running the replay",
 	}
+
+	dbSchema = &cli.IntFlag{
+		Name:    "db-schema",
+		Aliases: []string{"schema"},
+		Usage:   "Block database schema version to use",
+		Value:   5,
+	}
+
+	dbVariant = &cli.StringFlag{
+		Name:    "db-variant",
+		Aliases: []string{"variant"},
+		Usage:   "Block database variant to use (go-file, rust-memory, cpp-file, ...)",
+		Value:   "go-file",
+	}
 )
 
 func getReplayCommand() *cli.Command {
@@ -57,6 +71,9 @@ func getReplayCommand() *cli.Command {
 			stateDbDirectoryFlag,
 			withArchiveFlag,
 			keepDbFlag,
+			dbSchema,
+			dbVariant,
+			endBlockFlag,
 		},
 	}
 }
@@ -68,6 +85,10 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	blockDbDirectory := c.String(blockDatabaseDirectoryFlag.Name)
 	withArchive := c.Bool(withArchiveFlag.Name)
 	keepDb := c.Bool(keepDbFlag.Name)
+	endBlock := c.Uint64(endBlockFlag.Name)
+
+	schema := carmen.Schema(c.Int(dbSchema.Name))
+	variant := carmen.Variant(c.String(dbVariant.Name))
 
 	slog.Info("Loading genesis file", "file", genesisFileName)
 
@@ -92,6 +113,8 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	params := StateParameters{
 		Directory:   stateDbDirectory,
 		WithArchive: withArchive,
+		Schema:      schema,
+		Variant:     variant,
 	}
 	state, err := NewState(params)
 	if err != nil {
@@ -140,8 +163,12 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	// ---- Start Replay ----
 
-	blocks := database.GetRange(chainId, 0, math.MaxUint64)
-	chain := &stateChainAdapter{chainId: chainId, state: state}
+	blocks := database.GetRange(chainId, 0, endBlock)
+	chain := &stateChainAdapter{
+		chainId:         chainId,
+		state:           state,
+		isMptConformant: schema == 5,
+	}
 	return runReplayLoop(
 		ctx, blocks, chain, corrections, func(block *types.Block) {
 			if info := progress.LogProgress(block); len(info) > 0 {
@@ -283,9 +310,9 @@ func runReplayLoop(
 		// - check logs
 
 		// Check resulting state root.
-		if common.BytesToHash(block.StateRoot) != stateRoot {
+		if stateRoot != nil && common.BytesToHash(block.StateRoot) != *stateRoot {
 			return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
-				block.Number, block.StateRoot, stateRoot)
+				block.Number, block.StateRoot, *stateRoot)
 		}
 
 		// Report the progress of the replay.
@@ -298,13 +325,14 @@ func runReplayLoop(
 
 // Chain is an interface for an evolving block chain.
 type Chain interface {
-	ApplyBlock(*types.Block, Corrections) (types.Receipts, common.Hash, error)
+	ApplyBlock(*types.Block, Corrections) (types.Receipts, *common.Hash, error)
 }
 
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
 type stateChainAdapter struct {
-	chainId uint64
-	state   *State
+	chainId         uint64
+	state           *State
+	isMptConformant bool
 }
 
 func (a *stateChainAdapter) ApplyBlock(
@@ -312,13 +340,13 @@ func (a *stateChainAdapter) ApplyBlock(
 	corrections Corrections,
 ) (
 	types.Receipts,
-	common.Hash,
+	*common.Hash,
 	error,
 ) {
 	// Block 0 is skipped since it is equivalent with the genesis data
 	// import. The archive does not accept two blocks with the same number.
 	if block.NumberU64() == 0 {
-		return nil, a.state.GetStateRoot(), nil
+		return nil, a.getStateRoot(), nil
 	}
 
 	// Apply the block to the state database.
@@ -328,9 +356,17 @@ func (a *stateChainAdapter) ApplyBlock(
 		corrections,
 	)
 	if err != nil {
-		return nil, common.Hash{}, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
+		return nil, nil, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
 	}
 
 	// Return the receipts and the resulting state root.
-	return receipts, a.state.GetStateRoot(), nil
+	return receipts, a.getStateRoot(), nil
+}
+
+func (a *stateChainAdapter) getStateRoot() *common.Hash {
+	if !a.isMptConformant {
+		return nil
+	}
+	root := a.state.GetStateRoot()
+	return &root
 }

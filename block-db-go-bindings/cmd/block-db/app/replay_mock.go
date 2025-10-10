@@ -21,6 +21,7 @@ import (
 type MockChain struct {
 	ctrl     *gomock.Controller
 	recorder *MockChainMockRecorder
+	isgomock struct{}
 }
 
 // MockChainMockRecorder is the mock recorder for MockChain.
@@ -41,11 +42,11 @@ func (m *MockChain) EXPECT() *MockChainMockRecorder {
 }
 
 // ApplyBlock mocks base method.
-func (m *MockChain) ApplyBlock(arg0 *types.Block, arg1 Corrections) (types.Receipts, common.Hash, error) {
+func (m *MockChain) ApplyBlock(arg0 *types.Block, arg1 Corrections) (types.Receipts, *common.Hash, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ApplyBlock", arg0, arg1)
 	ret0, _ := ret[0].(types.Receipts)
-	ret1, _ := ret[1].(common.Hash)
+	ret1, _ := ret[1].(*common.Hash)
 	ret2, _ := ret[2].(error)
 	return ret0, ret1, ret2
 }
