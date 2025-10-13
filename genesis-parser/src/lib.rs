@@ -94,10 +94,13 @@ impl EraDir {
     /// was returned, the iterator will not yield any more blocks.
     pub fn blocks(mut self) -> impl Iterator<Item = Result<Block, Error>> {
         // `.era` file naming convention: <config-name>-<era-number>-<short-historical-root>.era
-        // - config-name is the CONFIG_NAME field of the runtime configuration (mainnet, prater,
-        //   ropsten, sepolia, etc)
-        // - era-number is the number of the first era stored in the file - for example, the genesis
-        //   era file has number 0 - as a 5-digit 0-filled decimal integer
+        //     - config-name is the CONFIG_NAME field of the runtime configuration (mainnet, prater,
+        //       ropsten, sepolia, etc)
+        //     - era-number is the number of the first era stored in the file - for example, the
+        //       genesis era file has number 0 - as a 5-digit 0-filled decimal integer
+        //     - short-historical-root is the first 4 bytes of the last historical root in the last
+        //       state in the era file, lower-case hex-encoded (8 characters), except the genesis
+        //       era which instead uses the genesis_validators_root field from the genesis state
         // The files in the directory are expected to be for the same configuration, so sorting by
         // the file name in reverse order, sorts the files according to their era number.
         self.files.sort_by(|a, b| b.cmp(a)); // sort in reverse
@@ -117,6 +120,7 @@ impl EraDir {
     }
 }
 
+/// Reads and parses a single `.era` file at the given path, returning an iterator over its blocks.
 fn read_era_file(
     path: impl AsRef<Path>,
 ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {

@@ -7,6 +7,9 @@ use tree_hash::TreeHash;
 
 use crate::Error;
 
+/// Parses transactions from their RLP-encoded representation.
+/// Each item in `data` is expected to be a byte slice containing the RLP encoding of a single
+/// transaction.
 fn parse_transactions(
     data: impl IntoIterator<Item = impl Deref<Target = [u8]>>,
 ) -> Result<Vec<Transaction>, Error> {
@@ -16,6 +19,7 @@ fn parse_transactions(
         .map_err(Error::from)
 }
 
+/// Converts a [`CompressedSignedBeaconBlock`] to a [`Block`].
 pub fn convert_block(block: CompressedSignedBeaconBlock) -> Result<Block, Error> {
     match block.block {
         SignedBeaconBlock::Bellatrix(blk) => {
