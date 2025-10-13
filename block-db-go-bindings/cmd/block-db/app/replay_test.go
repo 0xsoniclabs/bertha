@@ -162,6 +162,7 @@ func TestRunReplayLoop_CanProcessEmptyBlocks(t *testing.T) {
 func TestRunReplayLoop_CanProcessNonEmptyBlocks(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
+	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	// A block history with a few transactions.
 	blocks := []*blockdb.Block{
@@ -261,7 +262,7 @@ func TestRunReplayLoop_FailsOnBlockApplicationError(t *testing.T) {
 	chain := NewMockChain(ctrl)
 
 	injectedError := fmt.Errorf("injected error")
-	chain.EXPECT().ApplyBlock(gomock.Any(), gomock.Any()).Return(nil, nil, injectedError)
+	chain.EXPECT().ApplyBlock(gomock.Any(), gomock.Any()).Return(nil, common.Hash{}, injectedError)
 
 	ctxt := t.Context()
 	blocks := newIter([]*blockdb.Block{{}})
@@ -277,7 +278,11 @@ func TestRunReplayLoop_FailsOnWrongReceiptStatus(t *testing.T) {
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any(), gomock.Any()).
-		Return(types.Receipts{{Status: types.ReceiptStatusFailed}}, nil, nil)
+		Return(
+			types.Receipts{{Status: types.ReceiptStatusFailed}},
+			common.Hash{},
+			nil,
+		)
 
 	ctxt := t.Context()
 	blocks := newIter([]*blockdb.Block{{
@@ -302,7 +307,7 @@ func TestRunReplayLoop_FailsOnWrongReceiptCumulatedGasUsed(t *testing.T) {
 				Status:            types.ReceiptStatusSuccessful,
 				CumulativeGasUsed: 100,
 			}},
-			nil,
+			common.Hash{},
 			nil,
 		)
 
@@ -321,12 +326,13 @@ func TestRunReplayLoop_FailsOnWrongReceiptCumulatedGasUsed(t *testing.T) {
 func TestRunReplayLoop_FailsOnIncorrectStateRootHash(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
+	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any(), gomock.Any()).
 		Return(
 			nil,
-			&common.Hash{0x1},
+			common.Hash{0x1},
 			nil,
 		)
 

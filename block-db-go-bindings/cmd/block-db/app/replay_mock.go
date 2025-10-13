@@ -42,11 +42,11 @@ func (m *MockChain) EXPECT() *MockChainMockRecorder {
 }
 
 // ApplyBlock mocks base method.
-func (m *MockChain) ApplyBlock(arg0 *types.Block, arg1 Corrections) (types.Receipts, *common.Hash, error) {
+func (m *MockChain) ApplyBlock(arg0 *types.Block, arg1 Corrections) (types.Receipts, common.Hash, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ApplyBlock", arg0, arg1)
 	ret0, _ := ret[0].(types.Receipts)
-	ret1, _ := ret[1].(*common.Hash)
+	ret1, _ := ret[1].(common.Hash)
 	ret2, _ := ret[2].(error)
 	return ret0, ret1, ret2
 }
@@ -55,4 +55,18 @@ func (m *MockChain) ApplyBlock(arg0 *types.Block, arg1 Corrections) (types.Recei
 func (mr *MockChainMockRecorder) ApplyBlock(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyBlock", reflect.TypeOf((*MockChain)(nil).ApplyBlock), arg0, arg1)
+}
+
+// IsMptConformant mocks base method.
+func (m *MockChain) IsMptConformant() bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsMptConformant")
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// IsMptConformant indicates an expected call of IsMptConformant.
+func (mr *MockChainMockRecorder) IsMptConformant() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsMptConformant", reflect.TypeOf((*MockChain)(nil).IsMptConformant))
 }

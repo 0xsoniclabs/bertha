@@ -322,9 +322,9 @@ func runReplayLoop(
 		// - check logs
 
 		// Check resulting state root.
-		if stateRoot != nil && common.BytesToHash(block.StateRoot) != *stateRoot {
+		if chain.IsMptConformant() && common.BytesToHash(block.StateRoot) != stateRoot {
 			return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
-				block.Number, block.StateRoot, *stateRoot)
+				block.Number, block.StateRoot, stateRoot)
 		}
 
 		// Report the progress of the replay.
@@ -337,7 +337,8 @@ func runReplayLoop(
 
 // Chain is an interface for an evolving block chain.
 type Chain interface {
-	ApplyBlock(*types.Block, Corrections) (types.Receipts, *common.Hash, error)
+	IsMptConformant() bool
+	ApplyBlock(*types.Block, Corrections) (types.Receipts, common.Hash, error)
 }
 
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
@@ -347,18 +348,22 @@ type stateChainAdapter struct {
 	isMptConformant bool
 }
 
+func (a *stateChainAdapter) IsMptConformant() bool {
+	return a.isMptConformant
+}
+
 func (a *stateChainAdapter) ApplyBlock(
 	block *types.Block,
 	corrections Corrections,
 ) (
 	types.Receipts,
-	*common.Hash,
+	common.Hash,
 	error,
 ) {
 	// Block 0 is skipped since it is equivalent with the genesis data
 	// import. The archive does not accept two blocks with the same number.
 	if block.NumberU64() == 0 {
-		return nil, a.getStateRoot(), nil
+		return nil, a.state.GetStateRoot(), nil
 	}
 
 	// Apply the block to the state database.
@@ -368,17 +373,9 @@ func (a *stateChainAdapter) ApplyBlock(
 		corrections,
 	)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
+		return nil, common.Hash{}, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
 	}
 
 	// Return the receipts and the resulting state root.
-	return receipts, a.getStateRoot(), nil
-}
-
-func (a *stateChainAdapter) getStateRoot() *common.Hash {
-	if !a.isMptConformant {
-		return nil
-	}
-	root := a.state.GetStateRoot()
-	return &root
+	return receipts, a.state.GetStateRoot(), nil
 }
