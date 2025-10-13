@@ -6,7 +6,10 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"maps"
 	"os"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/0xsoniclabs/blockdb"
@@ -55,10 +58,19 @@ var (
 	dbVariant = &cli.StringFlag{
 		Name:    "db-variant",
 		Aliases: []string{"variant"},
-		Usage:   "Block database variant to use (go-file, rust-memory, cpp-file, ...)",
+		Usage:   "Block database variant to use (" + strings.Join(getListOfVariants(), ", ") + ")",
 		Value:   "go-file",
 	}
 )
+
+// getListOfVariants returns a sorted list of all registered database variants.
+func getListOfVariants() []string {
+	variants := map[string]struct{}{}
+	for config := range carmen.GetAllRegisteredStateFactories() {
+		variants[string(config.Variant)] = struct{}{}
+	}
+	return slices.Sorted(maps.Keys(variants))
+}
 
 func getReplayCommand() *cli.Command {
 	return &cli.Command{
