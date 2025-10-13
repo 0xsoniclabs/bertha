@@ -31,7 +31,7 @@ func TestRun_RunWithoutParameters_PrintsHelp(t *testing.T) {
 	require.Contains(t, string(content), "USAGE")
 }
 
-func TestRun_RunWithoutProfileFlag_ProducesProfile(t *testing.T) {
+func TestRun_RunWithProfileFlag_ProducesProfile(t *testing.T) {
 	tmp := filepath.Join(t.TempDir(), "out.txt")
 	require.False(t, exists(tmp))
 
