@@ -5,7 +5,10 @@ use std::{
 };
 
 use bertha_types::Block;
-use e2store::era::Era;
+use e2store::{
+    e2store::memory::E2StoreMemory,
+    era::{Era, SlotIndexStateEntry},
+};
 
 pub use crate::error::{Error, GFileError};
 use crate::{block_parser::BlockParser, units::parse_metadata};
@@ -118,6 +121,18 @@ fn read_era_file(
     path: impl AsRef<Path>,
 ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {
     let data = fs::read(path.as_ref())?;
+
+    // Check if does not contain pre-merge data.
+    let file = E2StoreMemory::deserialize(&data).map_err(|err| Error::Era(err.to_string()))?;
+    let entries_length = file.entries.len();
+    let slot_index_state = SlotIndexStateEntry::try_from(&file.entries[entries_length - 1])
+        .map_err(|err| Error::Era(err.to_string()))?;
+    if slot_index_state.slot_index.starting_slot < 4_636_672 {
+        // The file contains pre-merge data which is not supported - skip it (return an empty
+        // iterator).
+        return Ok(Vec::new().into_iter().map(era::convert_block)); // the .map(...) is to match the return type
+    }
+
     let blocks = Era::deserialize(&data)
         .map_err(|err| Error::Era(err.to_string()))?
         .blocks
