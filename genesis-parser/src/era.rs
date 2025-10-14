@@ -1,8 +1,9 @@
 use std::ops::Deref;
 
 use bertha_types::{Block, EIP2718Unmarshallable, EMPTY_OMMERS_HASH, Transaction, U256};
-use e2store::era::CompressedSignedBeaconBlock;
-use ethportal_api::consensus::beacon_block::SignedBeaconBlock;
+use e2store::{
+    era::CompressedSignedBeaconBlock, ethportal_api::consensus::beacon_block::SignedBeaconBlock,
+};
 use tree_hash::TreeHash;
 
 use crate::Error;
