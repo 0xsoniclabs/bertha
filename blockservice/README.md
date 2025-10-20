@@ -26,7 +26,8 @@ Usage: blockservice [OPTIONS] <COMMAND>
 
 Commands:
   init                 Initialize a new block database
-  import               Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  import-gfile         Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  import-era           Import all blocks from the specified directory (which is expected to contain `.era` files) into the block database. The blocks are stored under the specified chain ID
   fetch                Fetch blocks from a remote block service and store them in the local database
   fetch-state-updates  Fetch state update files from a remote block service
   list                 List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
@@ -56,10 +57,16 @@ Create a new block database
 cargo run --release -- init
 ```
 
-Import a Sonic genesis snapshot
+Import a Sonic `.g` file
 
 ```sh
-cargo run --release -- import </path/to/snapshot.g>
+cargo run --release -- import-gfile </path/to/snapshot.g>
+```
+
+Import Ethereum `.era` files
+
+```sh
+cargo run --release -- import-era </path/to/era_directory>
 ```
 
 Start the gRPC server (by default the port is 8080)

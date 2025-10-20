@@ -42,8 +42,8 @@ impl IntegrationTestServer {
         // Initialize the DB with the import files
         for file in import_files {
             let CommandExecutionOutput { result, log: _ } = execute_command(
-                Command::Import {
-                    snapshot_file: file,
+                Command::ImportGfile {
+                    gfile: file,
                     verify: false,
                 },
                 app_dir.as_ref(),
