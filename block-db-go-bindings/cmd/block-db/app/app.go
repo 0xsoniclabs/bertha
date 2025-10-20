@@ -15,6 +15,7 @@ func Run(args []string) error {
 }
 
 func getApp() *cli.Command {
+	var profiler *profiler
 	return &cli.Command{
 		Name:  "block-db",
 		Usage: "Block Database CLI",
@@ -22,7 +23,15 @@ func getApp() *cli.Command {
 			getReplayCommand(),
 			getVerifyCommand(),
 		},
-		Before: func(ctx context.Context, _ *cli.Command) (context.Context, error) {
+		Flags: []cli.Flag{
+			cpuProfileFlag,
+		},
+		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			var err error
+			profiler, err = StartCpuProfile(cmd.String(cpuProfileFlag.Name))
+			if err != nil {
+				return ctx, err
+			}
 			ctx, cancel := context.WithCancel(ctx)
 			go func() {
 				sigs := make(chan os.Signal, 1)
@@ -36,6 +45,12 @@ func getApp() *cli.Command {
 				}
 			}()
 			return ctx, nil
+		},
+		After: func(_ context.Context, cmd *cli.Command) error {
+			if profiler != nil {
+				return profiler.Stop()
+			}
+			return nil
 		},
 	}
 }

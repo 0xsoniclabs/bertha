@@ -33,6 +33,8 @@ func TestState_CanBeCreatedAndClosed(t *testing.T) {
 func TestNewState_CreatesEmptyDatabase(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
+		Schema:    5,
+		Variant:   "go-file",
 	})
 	require.NoError(t, err)
 	defer func() {

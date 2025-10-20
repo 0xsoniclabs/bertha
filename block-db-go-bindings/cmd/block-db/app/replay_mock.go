@@ -21,6 +21,7 @@ import (
 type MockChain struct {
 	ctrl     *gomock.Controller
 	recorder *MockChainMockRecorder
+	isgomock struct{}
 }
 
 // MockChainMockRecorder is the mock recorder for MockChain.
@@ -54,4 +55,18 @@ func (m *MockChain) ApplyBlock(arg0 *types.Block, arg1 Corrections) (types.Recei
 func (mr *MockChainMockRecorder) ApplyBlock(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyBlock", reflect.TypeOf((*MockChain)(nil).ApplyBlock), arg0, arg1)
+}
+
+// IsMptConformant mocks base method.
+func (m *MockChain) IsMptConformant() bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsMptConformant")
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// IsMptConformant indicates an expected call of IsMptConformant.
+func (mr *MockChainMockRecorder) IsMptConformant() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsMptConformant", reflect.TypeOf((*MockChain)(nil).IsMptConformant))
 }

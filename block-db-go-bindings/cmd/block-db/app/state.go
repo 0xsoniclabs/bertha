@@ -34,6 +34,8 @@ type State struct {
 type StateParameters struct {
 	Directory   string
 	WithArchive bool
+	Schema      carmen.Schema
+	Variant     carmen.Variant
 }
 
 // NewState creates a new State instance with the given parameters. The
@@ -54,8 +56,8 @@ func NewState(params StateParameters) (*State, error) {
 
 	state, err := carmen.NewState(carmen.Parameters{
 		Directory:    dir,
-		Variant:      "go-file",
-		Schema:       carmen.Schema(5),
+		Variant:      params.Variant,
+		Schema:       params.Schema,
 		Archive:      archive,
 		LiveCache:    100 * 1024 * 1024, // 100MB
 		ArchiveCache: 100 * 1024 * 1024, // 100MB

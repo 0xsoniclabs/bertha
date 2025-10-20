@@ -162,6 +162,7 @@ func TestRunReplayLoop_CanProcessEmptyBlocks(t *testing.T) {
 func TestRunReplayLoop_CanProcessNonEmptyBlocks(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
+	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	// A block history with a few transactions.
 	blocks := []*blockdb.Block{
@@ -325,6 +326,7 @@ func TestRunReplayLoop_FailsOnWrongReceiptCumulatedGasUsed(t *testing.T) {
 func TestRunReplayLoop_FailsOnIncorrectStateRootHash(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
+	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any(), gomock.Any()).

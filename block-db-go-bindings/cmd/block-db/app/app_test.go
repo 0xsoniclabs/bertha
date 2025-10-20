@@ -31,6 +31,15 @@ func TestRun_RunWithoutParameters_PrintsHelp(t *testing.T) {
 	require.Contains(t, string(content), "USAGE")
 }
 
+func TestRun_RunWithProfileFlag_ProducesProfile(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "out.txt")
+	require.False(t, exists(tmp))
+
+	args := []string{"test", "--" + cpuProfileFlag.Name, tmp}
+	_ = Run(args) // we ignore the error here
+	require.True(t, exists(tmp), "expected profile file to exist")
+}
+
 func TestRun_FailedRun_ReportsIssue(t *testing.T) {
 	require.ErrorContains(t,
 		Run([]string{"test", "verify"}),
