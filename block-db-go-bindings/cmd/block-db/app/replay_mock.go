@@ -42,7 +42,7 @@ func (m *MockChain) EXPECT() *MockChainMockRecorder {
 }
 
 // ApplyBlock mocks base method.
-func (m *MockChain) ApplyBlock(arg0 *types.Block, arg1 Corrections) (types.Receipts, common.Hash, error) {
+func (m *MockChain) ApplyBlock(arg0 *types.Block, arg1 Metadata) (types.Receipts, common.Hash, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ApplyBlock", arg0, arg1)
 	ret0, _ := ret[0].(types.Receipts)

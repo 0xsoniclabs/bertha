@@ -153,7 +153,7 @@ func TestRunReplayLoop_CanProcessEmptyBlocks(t *testing.T) {
 
 	iter := newIter(blocks)
 	counter := 0
-	require.NoError(t, runReplayLoop(t.Context(), iter, chain, nil, func(block *types.Block) {
+	require.NoError(t, runReplayLoop(t.Context(), iter, chain, Metadata{}, func(block *types.Block) {
 		counter++
 	}))
 	require.Equal(t, len(blocks), counter)
@@ -201,7 +201,7 @@ func TestRunReplayLoop_CanProcessNonEmptyBlocks(t *testing.T) {
 
 		call := chain.EXPECT().
 			ApplyBlock(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(b *types.Block, corrections Corrections) (
+			DoAndReturn(func(b *types.Block, _ Metadata) (
 				[]*types.Receipt, common.Hash, error,
 			) {
 				require.Equal(t, ethBlock.NumberU64(), b.NumberU64())
@@ -222,7 +222,7 @@ func TestRunReplayLoop_CanProcessNonEmptyBlocks(t *testing.T) {
 	}
 
 	iter := newIter(blocks)
-	require.NoError(t, runReplayLoop(t.Context(), iter, chain, nil, nil))
+	require.NoError(t, runReplayLoop(t.Context(), iter, chain, Metadata{}, nil))
 }
 
 func TestRunReplayLoop_FailsOnFailedBlockRetrieval(t *testing.T) {
@@ -230,7 +230,7 @@ func TestRunReplayLoop_FailsOnFailedBlockRetrieval(t *testing.T) {
 	blocks := func(yield func(*blockdb.Block, error) bool) {
 		yield(nil, injectedError)
 	}
-	require.ErrorIs(t, runReplayLoop(t.Context(), blocks, nil, nil, nil), injectedError)
+	require.ErrorIs(t, runReplayLoop(t.Context(), blocks, nil, Metadata{}, nil), injectedError)
 }
 
 func TestRunReplayLoop_FailsOnCancelledContext(t *testing.T) {
@@ -241,7 +241,7 @@ func TestRunReplayLoop_FailsOnCancelledContext(t *testing.T) {
 		{Number: 0, StateRoot: types.EmptyRootHash[:]},
 	})
 
-	require.ErrorIs(t, runReplayLoop(ctxt, blocks, nil, nil, nil), context.Canceled)
+	require.ErrorIs(t, runReplayLoop(ctxt, blocks, nil, Metadata{}, nil), context.Canceled)
 }
 
 func TestRunReplayLoop_FailsOnBlockConversionError(t *testing.T) {
@@ -252,7 +252,7 @@ func TestRunReplayLoop_FailsOnBlockConversionError(t *testing.T) {
 		}},
 	}})
 	require.ErrorContains(t,
-		runReplayLoop(ctxt, blocks, nil, nil, nil),
+		runReplayLoop(ctxt, blocks, nil, Metadata{}, nil),
 		"failed to convert block 0",
 	)
 }
@@ -267,7 +267,7 @@ func TestRunReplayLoop_FailsOnBlockApplicationError(t *testing.T) {
 	ctxt := t.Context()
 	blocks := newIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
-		runReplayLoop(ctxt, blocks, chain, nil, nil),
+		runReplayLoop(ctxt, blocks, chain, Metadata{}, nil),
 		injectedError,
 	)
 }
@@ -291,7 +291,7 @@ func TestRunReplayLoop_FailsOnWrongReceiptStatus(t *testing.T) {
 		}},
 	}})
 	require.ErrorContains(t,
-		runReplayLoop(ctxt, blocks, chain, nil, nil),
+		runReplayLoop(ctxt, blocks, chain, Metadata{}, nil),
 		"receipt status mismatch",
 	)
 }
@@ -318,7 +318,7 @@ func TestRunReplayLoop_FailsOnWrongReceiptCumulatedGasUsed(t *testing.T) {
 		}},
 	}})
 	require.ErrorContains(t,
-		runReplayLoop(ctxt, blocks, chain, nil, nil),
+		runReplayLoop(ctxt, blocks, chain, Metadata{}, nil),
 		"receipt cumulative gas used mismatch",
 	)
 }
@@ -341,7 +341,7 @@ func TestRunReplayLoop_FailsOnIncorrectStateRootHash(t *testing.T) {
 		StateRoot: common.Hash{0x2}.Bytes(),
 	}})
 	require.ErrorContains(t,
-		runReplayLoop(ctxt, blocks, chain, nil, nil),
+		runReplayLoop(ctxt, blocks, chain, Metadata{}, nil),
 		"state root mismatch",
 	)
 }
@@ -369,7 +369,7 @@ func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, _, err = chain.ApplyBlock(block, nil)
+	_, _, err = chain.ApplyBlock(block, Metadata{})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "failed to apply block")
 }

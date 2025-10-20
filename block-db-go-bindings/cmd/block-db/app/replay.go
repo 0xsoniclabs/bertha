@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-    // _ "[github.com/ianlancetaylor/cgosymbolizer](http://github.com/ianlancetaylor/cgosymbolizer)" // Enable to resolve symbols across cgo calls (this breaks Go symbols)
+	// _ "[github.com/ianlancetaylor/cgosymbolizer](http://github.com/ianlancetaylor/cgosymbolizer)" // Enable to resolve symbols across cgo calls (this breaks Go symbols)
 	"github.com/0xsoniclabs/blockdb"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	_ "github.com/0xsoniclabs/carmen/go/state/gostate"
@@ -162,14 +162,11 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		err = errors.Join(err, database.Close())
 	}()
 
-	// Load corrections for the Sonic mainnet.
-	corrections := Corrections{}
-	/*
-		corrections, err := GetSonicMainnetCorrections()
-		if err != nil {
-			return fmt.Errorf("failed to load corrections: %w", err)
-		}
-	*/
+	// Load metadata for the chain.
+	metadata, err := GetMetadataForChain(chainId)
+	if err != nil {
+		return fmt.Errorf("failed to get metadata for chain ID %d: %w", chainId, err)
+	}
 
 	// Prepare the progress logger.
 	progress := startProgressLogger()
@@ -186,7 +183,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		isMptConformant: schema == 5,
 	}
 	return runReplayLoop(
-		ctx, blocks, chain, corrections, func(block *types.Block) {
+		ctx, blocks, chain, metadata, func(block *types.Block) {
 			if info := progress.LogProgress(block); len(info) > 0 {
 				slog.Info(info)
 			}
@@ -286,7 +283,7 @@ func runReplayLoop(
 	ctx context.Context,
 	blocks iter.Seq2[*blockdb.Block, error],
 	chain Chain,
-	corrections Corrections,
+	metadata Metadata,
 	onBlockDone func(block *types.Block),
 ) error {
 	for block, err := range blocks {
@@ -303,7 +300,7 @@ func runReplayLoop(
 		}
 
 		// Run the transactions in the block against the state database.
-		receipts, stateRoot, err := chain.ApplyBlock(gethBlock, corrections)
+		receipts, stateRoot, err := chain.ApplyBlock(gethBlock, metadata)
 		if err != nil {
 			return fmt.Errorf("failed to apply block %d: %w", block.Number, err)
 		}
@@ -342,7 +339,7 @@ func runReplayLoop(
 // Chain is an interface for an evolving block chain.
 type Chain interface {
 	IsMptConformant() bool
-	ApplyBlock(*types.Block, Corrections) (types.Receipts, common.Hash, error)
+	ApplyBlock(*types.Block, Metadata) (types.Receipts, common.Hash, error)
 }
 
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
@@ -358,7 +355,7 @@ func (a *stateChainAdapter) IsMptConformant() bool {
 
 func (a *stateChainAdapter) ApplyBlock(
 	block *types.Block,
-	corrections Corrections,
+	metadata Metadata,
 ) (
 	types.Receipts,
 	common.Hash,
@@ -374,7 +371,7 @@ func (a *stateChainAdapter) ApplyBlock(
 	receipts, err := a.state.ApplyBlock(
 		a.chainId,
 		block,
-		corrections,
+		metadata,
 	)
 	if err != nil {
 		return nil, common.Hash{}, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)

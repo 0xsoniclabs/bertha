@@ -53,7 +53,6 @@ func ParseGenesis(jsonData []byte) (*Genesis, error) {
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode code for account %s: %w", account.Address, err)
 		}
-
 		res.Accounts = append(res.Accounts, Account{
 			Address: account.Address,
 			Balance: account.Balance,

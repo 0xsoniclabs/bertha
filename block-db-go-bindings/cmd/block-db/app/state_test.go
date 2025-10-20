@@ -83,8 +83,9 @@ func TestState_Close_CanBeCalledOnClosedDb(t *testing.T) {
 
 func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
 	genesis := &Genesis{
-		Accounts: map[common.Address]Account{
-			common.Address{1}: Account{
+		Accounts: []Account{
+			{
+				Address: common.Address{1},
 				Balance: *uint256.NewInt(1000),
 				Nonce:   1,
 				Code:    []byte{1, 2, 3},
@@ -133,7 +134,7 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 	block, err := ConvertToGethBlock(&blockdb.Block{})
 	require.NoError(t, err)
 
-	receipts, err := state.ApplyBlock(1, block, nil)
+	receipts, err := state.ApplyBlock(1, block, Metadata{})
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 }
@@ -157,7 +158,7 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = state.ApplyBlock(1, block, nil)
+	_, err = state.ApplyBlock(1, block, Metadata{})
 	require.ErrorContains(t, err, "skipped txs")
 }
 
@@ -181,7 +182,9 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 		},
 	}
 
-	receipts, err := state.ApplyBlock(1, block, corrections)
+	receipts, err := state.ApplyBlock(1, block, Metadata{
+		Corrections: corrections,
+	})
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 
