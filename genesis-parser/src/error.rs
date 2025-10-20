@@ -8,6 +8,8 @@ pub enum Error {
     Decompression(#[from] flate2::DecompressError),
     #[error("`.g` file validation failed: {0}")]
     GFile(#[from] GFileError),
+    #[error("era file parsing failed: {0}")]
+    Era(String),
 }
 
 #[derive(Debug, thiserror::Error)]
