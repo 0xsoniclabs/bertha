@@ -479,7 +479,7 @@ func TestToGethReceipt_ConvertsReceiptToGethReceipt(t *testing.T) {
 		},
 		"with content": {
 			input: &blockdb.TransactionReceipt{
-				Status:            1,
+				PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: 1},
 				CumulativeGasUsed: 1000,
 				Logs: []*blockdb.Log{
 					{Data: []byte{0x03}},

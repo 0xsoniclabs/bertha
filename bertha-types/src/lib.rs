@@ -22,7 +22,9 @@ pub use error::VerificationError;
 pub use hex_convert::HexConvert;
 pub use known_hashes::*;
 pub use log::Log;
-pub use receipts::TransactionReceipt;
+pub use receipts::{
+    PostStateOrStatus, RECEIPT_STATUS_FAILED_RLP, RECEIPT_STATUS_SUCCESS_RLP, TransactionReceipt,
+};
 pub use transaction::{AccessListEntry, SetCodeAuthorization, Transaction, TransactionType};
 pub use u256::U256;
 

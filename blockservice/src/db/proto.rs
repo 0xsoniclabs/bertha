@@ -2,6 +2,8 @@ use bertha_types::U256;
 
 tonic::include_proto!("block");
 
+use transaction_receipt::PostStateOrStatus;
+
 use crate::Error;
 
 impl From<bertha_types::AccessListEntry> for AccessListEntry {
@@ -80,7 +82,14 @@ impl From<bertha_types::TransactionReceipt> for TransactionReceipt {
             transaction_type: (value.transaction_type as u8).into(),
             cumulative_gas_used: value.cumulative_gas_used,
             logs,
-            status: value.status,
+            post_state_or_status: match value.post_state_or_status {
+                bertha_types::PostStateOrStatus::PostState(post_state) => {
+                    Some(PostStateOrStatus::PostState(post_state.to_vec()))
+                }
+                bertha_types::PostStateOrStatus::Status(status) => {
+                    Some(PostStateOrStatus::Status(status))
+                }
+            },
         }
     }
 }
@@ -241,7 +250,15 @@ impl TryFrom<TransactionReceipt> for bertha_types::TransactionReceipt {
                 .ok()
                 .and_then(|v| bertha_types::TransactionType::try_from(v).ok())
                 .ok_or(Error::TypeConversion)?,
-            status: value.status,
+            post_state_or_status: match value.post_state_or_status {
+                Some(PostStateOrStatus::Status(status)) => {
+                    bertha_types::PostStateOrStatus::Status(status)
+                }
+                Some(PostStateOrStatus::PostState(post_state)) if post_state.len() == 32 => {
+                    bertha_types::PostStateOrStatus::PostState(post_state.try_into().unwrap())
+                }
+                _ => return Err(Error::TypeConversion),
+            },
             cumulative_gas_used: value.cumulative_gas_used,
             logs,
         })
@@ -395,9 +412,15 @@ mod tests {
         rng: &mut TestRng,
         transaction_type: TransactionType,
     ) -> bertha_types::TransactionReceipt {
+        let post_state_or_status = match rng.u64() % 3 {
+            0 => bertha_types::PostStateOrStatus::Status(0),
+            1 => bertha_types::PostStateOrStatus::Status(1),
+            _ => bertha_types::PostStateOrStatus::PostState(rng.bytes()),
+        };
+
         bertha_types::TransactionReceipt {
             transaction_type,
-            status: rng.u64(),
+            post_state_or_status,
             cumulative_gas_used: rng.u64(),
             logs: vec![make_log(rng), make_log(rng)],
         }

@@ -287,7 +287,7 @@ func TestRunReplayLoop_FailsOnWrongReceiptStatus(t *testing.T) {
 	ctxt := t.Context()
 	blocks := newIter([]*blockdb.Block{{
 		Receipts: []*blockdb.TransactionReceipt{{
-			Status: types.ReceiptStatusSuccessful,
+			PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
 		}},
 	}})
 	require.ErrorContains(t,
@@ -314,7 +314,7 @@ func TestRunReplayLoop_FailsOnWrongReceiptCumulatedGasUsed(t *testing.T) {
 	ctxt := t.Context()
 	blocks := newIter([]*blockdb.Block{{
 		Receipts: []*blockdb.TransactionReceipt{{
-			Status: types.ReceiptStatusSuccessful,
+			PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
 		}},
 	}})
 	require.ErrorContains(t,

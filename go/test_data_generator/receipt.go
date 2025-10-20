@@ -9,6 +9,16 @@ import (
 
 // transactionReceiptFieldCases contains the corner cases for the fields of a transaction receipt.
 var transactionReceiptFieldCases = map[string][]any{
+	"PostState": {
+		[]byte{},
+		[]byte{
+			0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+		},
+	},
+	"Status": {
+		uint64(0),
+		uint64(1),
+	},
 	"Logs": {
 		[]*types.Log{},
 		generateLogs(),
@@ -32,15 +42,23 @@ var logFieldCases = map[string][]any{
 
 // toRustReceipt converts a Go transaction receipt to the Bertha TransactionReceipt type in Rust.
 func toRustReceipt(receipt *types.Receipt) string {
+	var postStateOrStatus string
+	if len(receipt.PostState) == 32 {
+		postStateOrStatus =
+			fmt.Sprintf(`PostStateOrStatus::PostState(%s)`, toRustByteArray(receipt.PostState))
+	} else {
+		postStateOrStatus =
+			fmt.Sprintf(`PostStateOrStatus::Status(%d)`, receipt.Status)
+	}
 	return fmt.Sprintf(`TransactionReceipt {
 		transaction_type: TransactionType::try_from(%d).unwrap(),
-		status: %d,
+		post_state_or_status: %s,
 		cumulative_gas_used: %d,
 		logs: %s
 		}
 		`,
 		receipt.Type,
-		receipt.Status,
+		postStateOrStatus,
 		receipt.CumulativeGasUsed,
 		toRustLogList(receipt.Logs),
 	)

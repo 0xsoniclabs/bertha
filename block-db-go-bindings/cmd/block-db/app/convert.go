@@ -214,7 +214,7 @@ func toGethReceipt(receipt *blockdb.TransactionReceipt) *types.Receipt {
 
 	res := &types.Receipt{
 		Type:              uint8(receipt.TransactionType),
-		Status:            receipt.Status,
+		Status:            receipt.GetStatus(),
 		CumulativeGasUsed: receipt.CumulativeGasUsed,
 		Logs:              logs,
 	}
