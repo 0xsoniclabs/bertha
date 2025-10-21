@@ -41,13 +41,15 @@ func TestParseGenesis_CanParseValidGenesisData(t *testing.T) {
 
 	require.Len(t, genesis.Accounts, 2)
 
-	account := genesis.Accounts[common.HexToAddress("0x01234567890abcdef1234567890abcdef1234567")]
+	account := genesis.Accounts[0]
+	require.Equal(t, common.HexToAddress("0x01234567890abcdef1234567890abcdef1234567"), account.Address)
 	require.Equal(t, uint64(7), account.Nonce)
 	require.Equal(t, uint64(1234), account.Balance.Uint64())
 	require.Empty(t, account.Code)
 	require.Empty(t, account.Storage)
 
-	account = genesis.Accounts[common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678")]
+	account = genesis.Accounts[1]
+	require.Equal(t, common.HexToAddress("0x1234567890abcdef1234567890abcdef12345678"), account.Address)
 	require.Equal(t, uint64(9), account.Nonce)
 	require.Equal(t, uint64(5678), account.Balance.Uint64())
 	require.Equal(t, "ABCDEF", fmt.Sprintf("%X", account.Code))

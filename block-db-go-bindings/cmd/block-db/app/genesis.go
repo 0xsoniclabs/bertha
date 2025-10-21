@@ -14,11 +14,12 @@ import (
 // Genesis is a data structure capturing the genesis state information.
 type Genesis struct {
 	ChainId  uint64
-	Accounts map[common.Address]Account
+	Accounts []Account
 }
 
 // Account represents an Ethereum account with its balance, nonce, code, and storage.
 type Account struct {
+	Address common.Address
 	Balance uint256.Int
 	Nonce   uint64
 	Code    []byte
@@ -45,19 +46,20 @@ func ParseGenesis(jsonData []byte) (*Genesis, error) {
 
 	res := &Genesis{
 		ChainId:  genesis.Rules.NetworkID,
-		Accounts: make(map[common.Address]Account),
+		Accounts: nil,
 	}
 	for _, account := range genesis.Accounts {
 		code, err := hex.DecodeString(strings.TrimPrefix(account.Code, "0x"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode code for account %s: %w", account.Address, err)
 		}
-		res.Accounts[account.Address] = Account{
+		res.Accounts = append(res.Accounts, Account{
+			Address: account.Address,
 			Balance: account.Balance,
 			Nonce:   account.Nonce,
 			Code:    code,
 			Storage: account.Storage,
-		}
+		})
 	}
 
 	return res, nil

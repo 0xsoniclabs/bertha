@@ -59,8 +59,8 @@ func NewState(params StateParameters) (*State, error) {
 		Variant:      params.Variant,
 		Schema:       params.Schema,
 		Archive:      archive,
-		LiveCache:    100 * 1024 * 1024, // 100MB
-		ArchiveCache: 100 * 1024 * 1024, // 100MB
+		LiveCache:    10 * 1024 * 1024 * 1024, // 10GB
+		ArchiveCache: 10 * 1024 * 1024 * 1024, // 10GB
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create state: %v", err)
@@ -91,12 +91,15 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 	// apply the genesis accounts to the state
 	s.db.BeginBlock()
 	s.db.BeginTransaction()
-	for address, account := range genesis.Accounts {
+	for _, account := range genesis.Accounts {
+		address := account.Address
+		s.db.AddBalance(cc.Address(address), amount.NewFromUint256(&account.Balance))
 		if len(account.Code) != 0 {
 			s.db.SetCode(cc.Address(address), account.Code)
 		}
-		s.setBalance(address, account.Balance.ToBig())
-		s.db.SetNonce(cc.Address(address), account.Nonce)
+		if account.Nonce != 0 {
+			s.db.SetNonce(cc.Address(address), account.Nonce)
+		}
 		for key, value := range account.Storage {
 			s.db.SetState(cc.Address(address), cc.Key(key), cc.Value(value))
 		}
@@ -112,14 +115,12 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 func (s *State) ApplyBlock(
 	chainId uint64,
 	block *types.Block,
-	corrections Corrections,
+	metadata Metadata,
 ) (types.Receipts, error) {
-
-	// TODO: use Tosca's processor interface instead of Geth's processor.
 
 	chainConfig := opera.CreateTransientEvmChainConfig(
 		chainId,
-		nil,
+		metadata.Upgrades,
 		idx.Block(block.NumberU64()),
 	)
 
@@ -143,7 +144,7 @@ func (s *State) ApplyBlock(
 
 	stateDb := evmstore.CreateCarmenStateDb(s.db)
 
-	vmConfig := opera.GetVmConfig(opera.Rules{})
+	vmConfig := opera.GetVmConfig(metadata.GetRulesAtBlock(block.NumberU64()))
 	gasLimit := block.GasLimit()
 
 	s.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())
@@ -164,7 +165,7 @@ func (s *State) ApplyBlock(
 	}
 
 	// Apply corrections if any are provided.
-	if fixes := corrections[block.NumberU64()]; len(fixes) > 0 {
+	if fixes := metadata.Corrections[block.NumberU64()]; len(fixes) > 0 {
 		s.db.BeginTransaction()
 		slog.Info("Applying corrections", "block", block.NumberU64())
 		for addr, acc := range fixes {
