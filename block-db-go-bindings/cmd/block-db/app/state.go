@@ -118,13 +118,6 @@ func (s *State) ApplyBlock(
 	metadata Metadata,
 ) (types.Receipts, error) {
 
-	rules := opera.Rules{}
-	for _, upgrade := range metadata.Upgrades {
-		if upgrade.Height <= idx.Block(block.NumberU64()) {
-			rules.Upgrades = upgrade.Upgrades
-		}
-	}
-
 	chainConfig := opera.CreateTransientEvmChainConfig(
 		chainId,
 		metadata.Upgrades,
@@ -151,7 +144,7 @@ func (s *State) ApplyBlock(
 
 	stateDb := evmstore.CreateCarmenStateDb(s.db)
 
-	vmConfig := opera.GetVmConfig(rules)
+	vmConfig := opera.GetVmConfig(metadata.GetRulesAtBlock(block.NumberU64()))
 	gasLimit := block.GasLimit()
 
 	s.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())

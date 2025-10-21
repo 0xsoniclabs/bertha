@@ -8,8 +8,10 @@ import (
 
 	"github.com/0xsoniclabs/blockdb"
 	cc "github.com/0xsoniclabs/carmen/go/common"
+	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
@@ -162,6 +164,71 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 	require.ErrorContains(t, err, "skipped txs")
 }
 
+func TestState_ApplyBlock_AppliesUpgrades(t *testing.T) {
+	state, err := NewState(StateParameters{
+		Directory: t.TempDir(),
+	})
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, state.Close())
+	}()
+
+	// To see an effect of upgrades, this test uses two different rule sets
+	// such that gas costs for a simple transaction with excess gas differ.
+	// If the single proposer block formation is enabled, no fees are charged
+	// for transactions using too high gas limits. If it is disabled, a 10%
+	// excess gas charge is applied.
+	noExcessGasCharges := opera.GetAllegroUpgrades()
+	noExcessGasCharges.SingleProposerBlockFormation = true
+
+	withExcessGasCharges := opera.GetAllegroUpgrades()
+	withExcessGasCharges.SingleProposerBlockFormation = false
+
+	metadata := Metadata{
+		Upgrades: []opera.UpgradeHeight{
+			{Height: 5, Upgrades: noExcessGasCharges},
+			{Height: 10, Upgrades: withExcessGasCharges},
+			{Height: 15, Upgrades: noExcessGasCharges},
+		},
+	}
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signer := types.LatestSignerForChainID(big.NewInt(1))
+
+	for blockNr := range 20 {
+		// Apply a block before any upgrades.
+		block, err := ConvertToGethBlock(&blockdb.Block{
+			Number:   uint64(blockNr),
+			GasLimit: 100_000,
+			Transactions: []*blockdb.Transaction{
+				toBerthaTransaction(types.MustSignNewTx(
+					key,
+					signer,
+					&types.LegacyTx{
+						Nonce: uint64(blockNr),
+						To:    &common.Address{0},
+						Gas:   50_000, // extra gas to 21_000 to check rule effect
+					},
+				)),
+			},
+		})
+		require.NoError(t, err)
+
+		receipts, err := state.ApplyBlock(1, block, metadata)
+		require.NoError(t, err)
+		require.Len(t, receipts, 1)
+		require.Equal(t, types.ReceiptStatusSuccessful, receipts[0].Status)
+
+		rules := metadata.GetRulesAtBlock(uint64(blockNr))
+		if rules.Upgrades.SingleProposerBlockFormation {
+			require.Equal(t, uint64(21_000), receipts[0].GasUsed)
+		} else {
+			require.Greater(t, receipts[0].GasUsed, uint64(21_000))
+		}
+	}
+}
+
 func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
@@ -258,4 +325,24 @@ func TestHistoryAdapter_ProducesHeaderWithCorrectHashes(t *testing.T) {
 	require.Equal(t, block-1, header.Number.Uint64())
 	require.Equal(t, parent, header.Hash)
 	require.Equal(t, grandParent, header.ParentHash)
+}
+
+func toBerthaTransaction(tx *types.Transaction) *blockdb.Transaction {
+	to := []byte{}
+	if tx.To() != nil {
+		to = tx.To().Bytes()
+	}
+	v, r, s := tx.RawSignatureValues()
+	return &blockdb.Transaction{
+		TransactionType: uint64(tx.Type()),
+		Nonce:           tx.Nonce(),
+		GasPrice:        tx.GasPrice().Bytes(),
+		GasLimit:        tx.Gas(),
+		To:              to,
+		Value:           tx.Value().Bytes(),
+		Data:            tx.Data(),
+		YParity:         v.Bytes(),
+		R:               r.Bytes(),
+		S:               s.Bytes(),
+	}
 }

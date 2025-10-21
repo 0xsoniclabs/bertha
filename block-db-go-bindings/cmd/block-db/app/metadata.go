@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/0xsoniclabs/sonic/opera"
+	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 )
 
 const (
@@ -11,11 +12,23 @@ const (
 	AllegroTestNetChainId = 14601
 )
 
-// Metadata holds chain-specific metadata such upgrades to the EVM rules and
+// Metadata holds chain-specific metadata such as upgrades to the EVM rules and
 // corrections to be applied to account states.
 type Metadata struct {
 	Upgrades    []opera.UpgradeHeight
 	Corrections Corrections
+}
+
+// GetRulesAtBlock returns the EVM rules that should be applied at the given
+// block number, based on the upgrades specified in the metadata.
+func (m Metadata) GetRulesAtBlock(blockNumber uint64) opera.Rules {
+	rules := opera.Rules{}
+	for _, upgrade := range m.Upgrades {
+		if upgrade.Height <= idx.Block(blockNumber) {
+			rules.Upgrades = upgrade.Upgrades
+		}
+	}
+	return rules
 }
 
 // GetMetadataForChain retrieves the metadata for a given chain ID.
