@@ -123,10 +123,12 @@ func (s *State) ApplyBlock(
 		metadata.Upgrades,
 		idx.Block(block.NumberU64()),
 	)
+	rules := metadata.GetRulesAtBlock(block.NumberU64())
 
 	processor := evmcore.NewStateProcessor(
 		chainConfig,
 		historyAdapter{history: s.blockHashHistory},
+		rules.Upgrades,
 	)
 
 	evmBlock := &evmcore.EvmBlock{
@@ -144,14 +146,14 @@ func (s *State) ApplyBlock(
 
 	stateDb := evmstore.CreateCarmenStateDb(s.db)
 
-	vmConfig := opera.GetVmConfig(metadata.GetRulesAtBlock(block.NumberU64()))
+	vmConfig := opera.GetVmConfig(rules)
 	gasLimit := block.GasLimit()
 
 	s.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())
 
 	s.db.BeginBlock()
 	var usedGas uint64
-	receipts, _, skipped := processor.Process(
+	processed := processor.Process(
 		evmBlock,
 		stateDb,
 		vmConfig,
@@ -160,8 +162,17 @@ func (s *State) ApplyBlock(
 		nil,
 	)
 
-	if len(skipped) > 0 {
-		return nil, fmt.Errorf("found block with skipped txs: %d", len(skipped))
+	// Check that all transactions were processed (i.e., none were skipped).
+	for i, processed := range processed {
+		if processed.Receipt == nil {
+			return nil, fmt.Errorf("found block with skipped txs at index %d", i)
+		}
+	}
+
+	// Retrieve the receipts from the processed transactions.
+	receipts := make(types.Receipts, len(processed))
+	for i, proc := range processed {
+		receipts[i] = proc.Receipt
 	}
 
 	// Apply corrections if any are provided.
