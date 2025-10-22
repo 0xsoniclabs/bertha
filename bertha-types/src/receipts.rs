@@ -18,7 +18,7 @@ pub struct TransactionReceipt {
     pub logs: Vec<Log>,
 }
 
-/// The post-state root (pre EIP 658) or the status code (post EIp 658) of a transaction receipt.
+/// The post-state root (pre EIP-658) or the status code (post EIP-658) of a transaction receipt.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub enum PostStateOrStatus {
     PostState(Hash),

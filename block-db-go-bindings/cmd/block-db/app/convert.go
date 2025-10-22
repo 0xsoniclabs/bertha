@@ -216,7 +216,7 @@ func toGethReceipt(receipt *blockdb.TransactionReceipt) *types.Receipt {
 	if x, ok := receipt.PostStateOrStatus.(*blockdb.TransactionReceipt_Status); ok {
 		status = x.Status
 	} else {
-		panic("receipts without the status field (pre EIP 658) are not supported")
+		panic("receipts without the status field (pre EIP-658) are not supported")
 	}
 
 	res := &types.Receipt{
