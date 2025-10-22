@@ -479,7 +479,7 @@ func TestToGethReceipt_ConvertsReceiptToGethReceipt(t *testing.T) {
 		},
 		"with content": {
 			input: &blockdb.TransactionReceipt{
-				Status:            1,
+				PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: 1},
 				CumulativeGasUsed: 1000,
 				Logs: []*blockdb.Log{
 					{Data: []byte{0x03}},
@@ -507,6 +507,14 @@ func TestToGethReceipt_ConvertsReceiptToGethReceipt(t *testing.T) {
 			require.Equal(t, want, got)
 		})
 	}
+}
+
+func TestToGethReceipt_PanicsOnPreEIP658Receipt(t *testing.T) {
+	require.Panics(t, func() {
+		toGethReceipt(&blockdb.TransactionReceipt{
+			PostStateOrStatus: &blockdb.TransactionReceipt_PostState{PostState: make([]byte, 32)},
+		})
+	})
 }
 
 func TestToGethLog_ConvertsLogToGethLog(t *testing.T) {

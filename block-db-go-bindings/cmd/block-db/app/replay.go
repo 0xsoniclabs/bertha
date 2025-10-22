@@ -308,9 +308,9 @@ func runReplayLoop(
 		// Check the receipts against the expected values in the block.
 		for i, receipt := range receipts {
 			want := block.Receipts[i]
-			if receipt.Status != want.Status {
+			if receipt.Status != want.GetStatus() {
 				return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, want.Status, receipt.Status)
+					block.Number, i, want.GetStatus(), receipt.Status)
 			}
 			if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
 				return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",

@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 use crate::{
     AccessListEntry, Address, Block, Hash, HexConvert, Log, SetCodeAuthorization, Transaction,
-    TransactionReceipt, TransactionType, U256,
+    TransactionReceipt, TransactionType, U256, receipts::PostStateOrStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -98,13 +98,13 @@ pub fn generate_blocks_with_data() -> impl IntoIterator<Item = BlockWithTestData
                 receipts: vec![
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![],
                     },
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![Log {
                             address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
@@ -220,13 +220,13 @@ pub fn generate_blocks_with_data() -> impl IntoIterator<Item = BlockWithTestData
                 receipts: vec![
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![],
                     },
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![Log {
                             address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
@@ -236,13 +236,13 @@ pub fn generate_blocks_with_data() -> impl IntoIterator<Item = BlockWithTestData
                     },
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![],
                     },
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![Log {
                             address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
@@ -488,13 +488,13 @@ pub fn generate_blocks_with_data() -> impl IntoIterator<Item = BlockWithTestData
                 receipts: vec![
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![],
                     },
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![Log {
                             address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
@@ -504,13 +504,13 @@ pub fn generate_blocks_with_data() -> impl IntoIterator<Item = BlockWithTestData
                     },
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![],
                     },
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![Log {
                             address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
@@ -520,13 +520,13 @@ pub fn generate_blocks_with_data() -> impl IntoIterator<Item = BlockWithTestData
                     },
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![],
                     },
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![Log {
                             address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
@@ -536,13 +536,13 @@ pub fn generate_blocks_with_data() -> impl IntoIterator<Item = BlockWithTestData
                     },
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![],
                     },
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![Log {
                             address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
@@ -552,13 +552,13 @@ pub fn generate_blocks_with_data() -> impl IntoIterator<Item = BlockWithTestData
                     },
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![],
                     },
                     TransactionReceipt {
                         transaction_type: TransactionType::try_from(0).unwrap(),
-                        status: 1,
+                        post_state_or_status: PostStateOrStatus::Status(1),
                         cumulative_gas_used: 0,
                         logs: vec![Log {
                             address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),

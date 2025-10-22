@@ -1,18 +1,53 @@
 use alloy_rlp::{BufMut, Encodable, Header};
 use serde::{Deserialize, Serialize};
 
-use crate::{AsHex, Bloom, Eip2718Marshallable, Log, TransactionType};
+use crate::{
+    AsHex, Bloom, Eip2718Marshallable, Hash, HexConvert, Log, RlpString, TransactionType,
+    parse_hex_error::ParseHexError,
+};
 
 /// Receipt for a transaction.
 /// The receipt provides information about the execution of the transaction like the amount of gas
 /// that was used or the emitted logs.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(from = "JsonRpcTransactionReceipt", into = "JsonRpcTransactionReceipt")]
 pub struct TransactionReceipt {
     pub transaction_type: TransactionType,
-    pub status: u64,
+    pub post_state_or_status: PostStateOrStatus,
     pub cumulative_gas_used: u64,
     pub logs: Vec<Log>,
+}
+
+/// The post-state root (pre EIP-658) or the status code (post EIP-658) of a transaction receipt.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
+pub enum PostStateOrStatus {
+    PostState(Hash),
+    Status(u64),
+}
+
+impl Default for PostStateOrStatus {
+    fn default() -> Self {
+        PostStateOrStatus::Status(0)
+    }
+}
+
+impl HexConvert for PostStateOrStatus {
+    fn try_from_hex(value: &str) -> Result<Self, ParseHexError> {
+        // The custom implementation is needed because the status is encoded as a hex string of odd
+        // length.
+        match value {
+            "0x0" => Ok(PostStateOrStatus::Status(0)),
+            "0x1" => Ok(PostStateOrStatus::Status(1)),
+            _ => <[u8; 32]>::try_from_hex(value).map(PostStateOrStatus::PostState),
+        }
+    }
+
+    fn to_hex(&self) -> String {
+        match self {
+            PostStateOrStatus::PostState(root) => root.to_hex(),
+            PostStateOrStatus::Status(status) => status.to_hex(),
+        }
+    }
 }
 
 impl TransactionReceipt {
@@ -32,28 +67,36 @@ impl Default for TransactionReceipt {
     fn default() -> Self {
         Self {
             transaction_type: TransactionType::Legacy,
-            status: u64::default(),
+            post_state_or_status: PostStateOrStatus::default(),
             cumulative_gas_used: u64::default(),
             logs: Vec::default(),
         }
     }
 }
 
+pub const RECEIPT_STATUS_SUCCESS_RLP: &[u8] = &[0x01];
+pub const RECEIPT_STATUS_FAILED_RLP: &[u8] = &[];
+
 impl Eip2718Marshallable for TransactionReceipt {
     fn marshal(&self) -> Vec<u8> {
+        let post_state_or_status = match self.post_state_or_status {
+            PostStateOrStatus::Status(1) => RlpString(RECEIPT_STATUS_SUCCESS_RLP.to_vec()),
+            PostStateOrStatus::Status(_) => RlpString(RECEIPT_STATUS_FAILED_RLP.to_vec()),
+            PostStateOrStatus::PostState(post_state) => RlpString(post_state.to_vec()),
+        };
         let mut out = Vec::new();
         if self.transaction_type != TransactionType::Legacy {
             out.put_u8(self.transaction_type as u8);
         }
         Header {
             list: true,
-            payload_length: self.status.length()
+            payload_length: post_state_or_status.length()
                 + self.cumulative_gas_used.length()
                 + self.logs_bloom().length()
                 + self.logs.length(),
         }
         .encode(&mut out);
-        self.status.encode(&mut out);
+        post_state_or_status.encode(&mut out);
         self.cumulative_gas_used.encode(&mut out);
         self.logs_bloom().encode(&mut out);
         self.logs.encode(&mut out);
@@ -61,12 +104,14 @@ impl Eip2718Marshallable for TransactionReceipt {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct JsonRpcTransactionReceipt {
     #[serde(rename = "type")]
     pub transaction_type: AsHex<TransactionType>,
     pub status: AsHex<u64>,
+    #[serde(rename = "root")]
+    pub post_state: Option<AsHex<Vec<u8>>>,
     pub cumulative_gas_used: AsHex<u64>,
     pub logs_bloom: AsHex<Bloom>,
     pub logs: Vec<Log>,
@@ -84,9 +129,15 @@ struct JsonRpcTransactionReceipt {
 
 impl From<JsonRpcTransactionReceipt> for TransactionReceipt {
     fn from(value: JsonRpcTransactionReceipt) -> Self {
+        let post_state_or_status = match (value.post_state, value.status) {
+            (Some(post_state), _) if post_state.0.len() == 32 => {
+                PostStateOrStatus::PostState(post_state.0.try_into().unwrap())
+            }
+            (_, status) => PostStateOrStatus::Status(status.0),
+        };
         Self {
             transaction_type: value.transaction_type.0,
-            status: value.status.0,
+            post_state_or_status,
             cumulative_gas_used: value.cumulative_gas_used.0,
             logs: value.logs,
         }
@@ -95,11 +146,17 @@ impl From<JsonRpcTransactionReceipt> for TransactionReceipt {
 
 impl From<TransactionReceipt> for JsonRpcTransactionReceipt {
     fn from(value: TransactionReceipt) -> Self {
+        let logs_bloom = value.logs_bloom();
+        let (post_state, status) = match value.post_state_or_status {
+            PostStateOrStatus::PostState(root) => (Some(AsHex(root.to_vec())), AsHex(0u64)),
+            PostStateOrStatus::Status(status) => (None, AsHex(status)),
+        };
         Self {
             transaction_type: AsHex(value.transaction_type),
-            status: AsHex(value.status),
+            post_state,
+            status,
             cumulative_gas_used: AsHex(value.cumulative_gas_used),
-            logs_bloom: AsHex(value.logs_bloom()),
+            logs_bloom: AsHex(logs_bloom),
             logs: value.logs,
         }
     }

@@ -523,11 +523,15 @@ func (x *SetCodeAuthorization) GetS() []byte {
 
 // Corresponds to bertha_types::TransactionReceipt
 type TransactionReceipt struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	TransactionType   uint64                 `protobuf:"varint,1,opt,name=transaction_type,json=transactionType,proto3" json:"transaction_type,omitempty"`
-	Status            uint64                 `protobuf:"varint,2,opt,name=status,proto3" json:"status,omitempty"`
-	CumulativeGasUsed uint64                 `protobuf:"varint,3,opt,name=cumulative_gas_used,json=cumulativeGasUsed,proto3" json:"cumulative_gas_used,omitempty"`
-	Logs              []*Log                 `protobuf:"bytes,4,rep,name=logs,proto3" json:"logs,omitempty"`
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	TransactionType uint64                 `protobuf:"varint,1,opt,name=transaction_type,json=transactionType,proto3" json:"transaction_type,omitempty"`
+	// Types that are valid to be assigned to PostStateOrStatus:
+	//
+	//	*TransactionReceipt_PostState
+	//	*TransactionReceipt_Status
+	PostStateOrStatus isTransactionReceipt_PostStateOrStatus `protobuf_oneof:"post_state_or_status"`
+	CumulativeGasUsed uint64                                 `protobuf:"varint,4,opt,name=cumulative_gas_used,json=cumulativeGasUsed,proto3" json:"cumulative_gas_used,omitempty"`
+	Logs              []*Log                                 `protobuf:"bytes,5,rep,name=logs,proto3" json:"logs,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -569,9 +573,27 @@ func (x *TransactionReceipt) GetTransactionType() uint64 {
 	return 0
 }
 
+func (x *TransactionReceipt) GetPostStateOrStatus() isTransactionReceipt_PostStateOrStatus {
+	if x != nil {
+		return x.PostStateOrStatus
+	}
+	return nil
+}
+
+func (x *TransactionReceipt) GetPostState() []byte {
+	if x != nil {
+		if x, ok := x.PostStateOrStatus.(*TransactionReceipt_PostState); ok {
+			return x.PostState
+		}
+	}
+	return nil
+}
+
 func (x *TransactionReceipt) GetStatus() uint64 {
 	if x != nil {
-		return x.Status
+		if x, ok := x.PostStateOrStatus.(*TransactionReceipt_Status); ok {
+			return x.Status
+		}
 	}
 	return 0
 }
@@ -589,6 +611,22 @@ func (x *TransactionReceipt) GetLogs() []*Log {
 	}
 	return nil
 }
+
+type isTransactionReceipt_PostStateOrStatus interface {
+	isTransactionReceipt_PostStateOrStatus()
+}
+
+type TransactionReceipt_PostState struct {
+	PostState []byte `protobuf:"bytes,2,opt,name=post_state,json=postState,proto3,oneof"`
+}
+
+type TransactionReceipt_Status struct {
+	Status uint64 `protobuf:"varint,3,opt,name=status,proto3,oneof"`
+}
+
+func (*TransactionReceipt_PostState) isTransactionReceipt_PostStateOrStatus() {}
+
+func (*TransactionReceipt_Status) isTransactionReceipt_PostStateOrStatus() {}
 
 // Corresponds to bertha_types::Log
 type Log struct {
@@ -720,13 +758,16 @@ const file_block_proto_rawDesc = "" +
 	"\x05nonce\x18\x03 \x01(\x04R\x05nonce\x12\x19\n" +
 	"\by_parity\x18\x04 \x01(\x04R\ayParity\x12\f\n" +
 	"\x01r\x18\x05 \x01(\fR\x01r\x12\f\n" +
-	"\x01s\x18\x06 \x01(\fR\x01s\"\xa7\x01\n" +
+	"\x01s\x18\x06 \x01(\fR\x01s\"\xe2\x01\n" +
 	"\x12TransactionReceipt\x12)\n" +
-	"\x10transaction_type\x18\x01 \x01(\x04R\x0ftransactionType\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\x04R\x06status\x12.\n" +
-	"\x13cumulative_gas_used\x18\x03 \x01(\x04R\x11cumulativeGasUsed\x12\x1e\n" +
-	"\x04logs\x18\x04 \x03(\v2\n" +
-	".block.LogR\x04logs\"K\n" +
+	"\x10transaction_type\x18\x01 \x01(\x04R\x0ftransactionType\x12\x1f\n" +
+	"\n" +
+	"post_state\x18\x02 \x01(\fH\x00R\tpostState\x12\x18\n" +
+	"\x06status\x18\x03 \x01(\x04H\x00R\x06status\x12.\n" +
+	"\x13cumulative_gas_used\x18\x04 \x01(\x04R\x11cumulativeGasUsed\x12\x1e\n" +
+	"\x04logs\x18\x05 \x03(\v2\n" +
+	".block.LogR\x04logsB\x16\n" +
+	"\x14post_state_or_status\"K\n" +
 	"\x03Log\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\fR\aaddress\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x16\n" +
@@ -773,6 +814,10 @@ func file_block_proto_init() {
 	}
 	file_block_proto_msgTypes[0].OneofWrappers = []any{}
 	file_block_proto_msgTypes[1].OneofWrappers = []any{}
+	file_block_proto_msgTypes[4].OneofWrappers = []any{
+		(*TransactionReceipt_PostState)(nil),
+		(*TransactionReceipt_Status)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

@@ -68,9 +68,12 @@ message SetCodeAuthorization {
 // Corresponds to bertha_types::TransactionReceipt
 message TransactionReceipt {
   uint64 transaction_type = 1;
-  uint64 status = 2;
-  uint64 cumulative_gas_used = 3;
-  repeated Log logs = 4;
+  oneof post_state_or_status {
+    bytes post_state = 2;
+    uint64 status = 3;
+  };
+  uint64 cumulative_gas_used = 4;
+  repeated Log logs = 5;
 }
 
 // Corresponds to bertha_types::Log

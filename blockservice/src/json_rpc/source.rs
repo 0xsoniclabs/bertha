@@ -133,7 +133,7 @@ mod tests {
         let block_receipts = vec![TransactionReceipt {
             cumulative_gas_used: u64::default(),
             logs: Vec::default(),
-            status: u64::default(),
+            post_state_or_status: bertha_types::PostStateOrStatus::default(),
             transaction_type: TransactionType::Legacy,
         }];
 

@@ -1,5 +1,8 @@
 use alloy_rlp::{RlpDecodable, RlpEncodable};
-use bertha_types::{Hash, Log, RlpString, TransactionReceipt, TransactionType};
+use bertha_types::{
+    Hash, Log, PostStateOrStatus, RECEIPT_STATUS_FAILED_RLP, RECEIPT_STATUS_SUCCESS_RLP, RlpString,
+    TransactionReceipt, TransactionType,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StoredReceiptRlpWithTxType {
@@ -14,11 +17,6 @@ pub(crate) struct StoredReceiptRlp {
     pub logs: Vec<Log>,
 }
 
-const RECEIPT_STATUS_SUCCESS_RLP: &[u8] = &[0x01];
-const RECEIPT_STATUS_FAILED_RLP: &[u8] = &[];
-const RECEIPT_STATUS_SUCCESS: u64 = 1;
-const RECEIPT_STATUS_FAILED: u64 = 0;
-
 impl TryFrom<StoredReceiptRlpWithTxType> for TransactionReceipt {
     type Error = &'static str;
 
@@ -28,22 +26,18 @@ impl TryFrom<StoredReceiptRlpWithTxType> for TransactionReceipt {
             transaction_type,
         }: StoredReceiptRlpWithTxType,
     ) -> Result<Self, Self::Error> {
-        let status = match receipt.post_state_or_status.0.as_slice() {
-            RECEIPT_STATUS_FAILED_RLP => RECEIPT_STATUS_FAILED,
-            RECEIPT_STATUS_SUCCESS_RLP => RECEIPT_STATUS_SUCCESS,
+        let post_state_or_status = match receipt.post_state_or_status.0.as_slice() {
+            RECEIPT_STATUS_FAILED_RLP => PostStateOrStatus::Status(0),
+            RECEIPT_STATUS_SUCCESS_RLP => PostStateOrStatus::Status(1),
             root if root.len() == size_of::<Hash>() => {
-                return Err(
-                    "post_state_or_status should not contain a hash for root/post_state in sonic",
-                );
+                PostStateOrStatus::PostState(root.try_into().unwrap())
             }
-            _ => {
-                return Err("invalid receipt status");
-            }
+            _ => return Err("invalid receipt status"),
         };
 
         Ok(Self {
             transaction_type,
-            status,
+            post_state_or_status,
             cumulative_gas_used: receipt.cumulative_gas_used,
             logs: receipt.logs,
         })
@@ -53,11 +47,10 @@ impl TryFrom<StoredReceiptRlpWithTxType> for TransactionReceipt {
 impl From<TransactionReceipt> for StoredReceiptRlp {
     fn from(receipt: TransactionReceipt) -> Self {
         Self {
-            // in Sonic post_state / root is not used and always empty
-            post_state_or_status: if receipt.status == RECEIPT_STATUS_FAILED {
-                RlpString(Vec::from(RECEIPT_STATUS_FAILED_RLP))
-            } else {
-                RlpString(Vec::from(RECEIPT_STATUS_SUCCESS_RLP))
+            post_state_or_status: match receipt.post_state_or_status {
+                PostStateOrStatus::Status(1) => RlpString(Vec::from(RECEIPT_STATUS_SUCCESS_RLP)),
+                PostStateOrStatus::Status(_) => RlpString(Vec::from(RECEIPT_STATUS_FAILED_RLP)),
+                PostStateOrStatus::PostState(post_state) => RlpString(post_state.to_vec()),
             },
             cumulative_gas_used: receipt.cumulative_gas_used,
             logs: receipt.logs,
@@ -68,7 +61,7 @@ impl From<TransactionReceipt> for StoredReceiptRlp {
 #[cfg(test)]
 mod tests {
     use alloy_rlp::{Decodable, Encodable};
-    use bertha_types::{Hash, RlpString, TransactionReceipt, TransactionType};
+    use bertha_types::{PostStateOrStatus, RlpString, TransactionReceipt, TransactionType};
 
     use crate::transaction_receipt::{StoredReceiptRlp, StoredReceiptRlpWithTxType};
 
@@ -76,7 +69,7 @@ mod tests {
     fn from_into_is_identity() {
         let mut orig = TransactionReceipt {
             transaction_type: TransactionType::Legacy,
-            status: 1,
+            post_state_or_status: PostStateOrStatus::Status(1),
             cumulative_gas_used: 21000,
             logs: vec![],
         };
@@ -94,7 +87,7 @@ mod tests {
 
     #[test]
     fn from_returns_error_if_status_is_invalid() {
-        let mut rlp_with_type = StoredReceiptRlpWithTxType {
+        let rlp_with_type = StoredReceiptRlpWithTxType {
             receipt: StoredReceiptRlp {
                 post_state_or_status: RlpString(vec![0x02]),
                 cumulative_gas_used: Default::default(),
@@ -105,12 +98,6 @@ mod tests {
         assert_eq!(
             TransactionReceipt::try_from(rlp_with_type.clone()).unwrap_err(),
             "invalid receipt status"
-        );
-
-        rlp_with_type.receipt.post_state_or_status = RlpString(Hash::default().to_vec());
-        assert_eq!(
-            TransactionReceipt::try_from(rlp_with_type).unwrap_err(),
-            "post_state_or_status should not contain a hash for root/post_state in sonic"
         );
     }
 
