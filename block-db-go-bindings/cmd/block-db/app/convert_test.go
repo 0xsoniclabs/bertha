@@ -509,6 +509,14 @@ func TestToGethReceipt_ConvertsReceiptToGethReceipt(t *testing.T) {
 	}
 }
 
+func TestToGethReceipt_PanicsOnPreEIP658Receipt(t *testing.T) {
+	require.Panics(t, func() {
+		toGethReceipt(&blockdb.TransactionReceipt{
+			PostStateOrStatus: &blockdb.TransactionReceipt_PostState{PostState: make([]byte, 32)},
+		})
+	})
+}
+
 func TestToGethLog_ConvertsLogToGethLog(t *testing.T) {
 	tests := map[string]struct {
 		input *blockdb.Log

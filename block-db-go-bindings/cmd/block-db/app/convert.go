@@ -212,9 +212,16 @@ func toGethReceipt(receipt *blockdb.TransactionReceipt) *types.Receipt {
 		logs = append(logs, &entry)
 	}
 
+	var status uint64
+	if x, ok := receipt.PostStateOrStatus.(*blockdb.TransactionReceipt_Status); ok {
+		status = x.Status
+	} else {
+		panic("receipts without the status field (pre EIP 658) are not supported")
+	}
+
 	res := &types.Receipt{
 		Type:              uint8(receipt.TransactionType),
-		Status:            receipt.GetStatus(),
+		Status:            status,
 		CumulativeGasUsed: receipt.CumulativeGasUsed,
 		Logs:              logs,
 	}
