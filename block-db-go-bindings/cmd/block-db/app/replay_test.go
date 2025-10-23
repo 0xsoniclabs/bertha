@@ -96,12 +96,12 @@ func TestProgressLogger_ProducesLogMessagesEvery10kSteps(t *testing.T) {
 
 	require.Empty(logger.LogProgress(block0))
 	require.Regexp(
-		`Processing block 10000 from 1970-01-01 01:33:20 @ t= 0:00:[0-9]{2}, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime`,
+		`Processing block 10000 from 1970-01-01 [0-9]{2}:33:20 @ t= 0:00:[0-9]{2}, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime`,
 		logger.LogProgress(block10k),
 	)
 	require.Empty(logger.LogProgress(block15k))
 	require.Regexp(
-		`Processing block 20000 from 1970-01-01 01:58:20 @ t= 0:00:[0-9]{2}, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime`,
+		`Processing block 20000 from 1970-01-01 [0-9]{2}:58:20 @ t= 0:00:[0-9]{2}, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime`,
 		logger.LogProgress(block20k),
 	)
 }
