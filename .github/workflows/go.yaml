@@ -63,7 +63,7 @@ jobs:
         packages: librocksdb-dev
     - name: go test
       working-directory: block-db-go-bindings
-      run: go test ./...
+      run: go test --count 1 ./...
 
   # This is currently disabled because we can not guarantee that the protobuf compiler versions between CI and dev machines do not get out of sync.
   #codegen:
