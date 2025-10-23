@@ -6,7 +6,7 @@ require github.com/linxGnu/grocksdb v1.8.12
 
 require (
 	github.com/0xsoniclabs/carmen/go v0.0.0-20251014092906-75df60dc78cb
-	github.com/0xsoniclabs/sonic v0.0.0-20251022163858-e9442fb8f1d0 // < in review
+	github.com/0xsoniclabs/sonic v0.0.0-20251023141423-d6c534d50584
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
 	github.com/ethereum/go-ethereum v1.16.5
 	github.com/holiman/uint256 v1.3.2
@@ -17,7 +17,7 @@ require (
 )
 
 require (
-	github.com/0xsoniclabs/tosca v0.0.0-20251022160447-4d235118032d // indirect
+	github.com/0xsoniclabs/tosca v0.0.0-20251023131117-f542dea83f5b // indirect
 	github.com/DataDog/zstd v1.5.6 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/VictoriaMetrics/fastcache v1.13.0 // indirect
