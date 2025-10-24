@@ -7,6 +7,7 @@ require github.com/linxGnu/grocksdb v1.8.12
 require (
 	github.com/0xsoniclabs/carmen/go v0.0.0-20251014092906-75df60dc78cb
 	github.com/0xsoniclabs/sonic v0.0.0-20251023141423-d6c534d50584
+	github.com/0xsoniclabs/tracy v0.0.0-20251027125423-00a5ab7968fb
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
 	github.com/ethereum/go-ethereum v1.16.5
 	github.com/holiman/uint256 v1.3.2
@@ -97,3 +98,7 @@ require (
 replace github.com/ethereum/go-ethereum => github.com/0xsoniclabs/go-ethereum v0.0.0-20251022155730-949ae6d396a5
 
 replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundation/lachesis-base-sonic v0.0.0-20250701061954-44075d09185c
+
+// Enable local carmen and tracy modules if required for Tracy support.
+//replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
+//replace github.com/0xsoniclabs/tracy => ../../tracy
