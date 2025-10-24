@@ -66,10 +66,14 @@ cargo run --release -- import-gfile </path/to/snapshot.g>
 
 Import Ethereum `.era1` and `.era` files
 
+`.era1` files store pre-merge Ethereum history, while `.era` files store post-merge Ethereum beacon chain history.
+Thus, `.era1` files contain all data that is stored in bertha, while `.era` files are missing transaction receipts.
+Therefore, `.era` file import does not support parent hash verification, because the computed parent hash will be always incorrect because of the missing receipts.
+
 *Note: First import the `.era1` files and then the `.era` files.*
 
 ```sh
-cargo run --release -- import-era </path/to/era1_directory>
+cargo run --release -- import-era1 </path/to/era1_directory> [--verify]
 cargo run --release -- import-era </path/to/era_directory>
 ```
 
