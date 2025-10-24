@@ -27,6 +27,7 @@ Usage: blockservice [OPTIONS] <COMMAND>
 Commands:
   init                 Initialize a new block database
   import-gfile         Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  import-era1          Import all blocks from the specified directory (which is expected to contain `.era1` files) into the block database, and optionally also verify the parent hashes. The blocks are stored under the specified chain ID
   import-era           Import all blocks from the specified directory (which is expected to contain `.era` files) into the block database. The blocks are stored under the specified chain ID
   fetch                Fetch blocks from a remote block service and store them in the local database
   fetch-state-updates  Fetch state update files from a remote block service
@@ -63,9 +64,16 @@ Import a Sonic `.g` file
 cargo run --release -- import-gfile </path/to/snapshot.g>
 ```
 
-Import Ethereum `.era` files
+Import Ethereum `.era1` and `.era` files
+
+`.era1` files store pre-merge Ethereum history, while `.era` files store post-merge Ethereum beacon chain history.
+Thus, `.era1` files contain all data that is stored in bertha, while `.era` files are missing transaction receipts.
+Therefore, `.era` file import does not support parent hash verification, because the computed parent hash will be always incorrect because of the missing receipts.
+
+*Note: First import the `.era1` files and then the `.era` files.*
 
 ```sh
+cargo run --release -- import-era1 </path/to/era1_directory> [--verify]
 cargo run --release -- import-era </path/to/era_directory>
 ```
 

@@ -5,7 +5,7 @@ use std::{
 
 pub use fetch::fetch;
 pub use fetch_state_updates::fetch_state_updates;
-pub use import::{import_era, import_gfile};
+pub use import::{import_era, import_era1, import_gfile};
 use indicatif::{ProgressBar, style::TemplateError};
 pub use init::init;
 pub use list::list;
@@ -107,6 +107,11 @@ pub async fn execute(
         Command::ImportGfile { gfile, verify } => {
             cmd::import_gfile(args.dir, gfile, verify, &mut output)
         }
+        Command::ImportEra1 {
+            era1_dir,
+            chain_id,
+            verify,
+        } => cmd::import_era1(args.dir, era1_dir, chain_id, verify, &mut output),
         Command::ImportEra { era_dir, chain_id } => {
             cmd::import_era(args.dir, era_dir, chain_id, &mut output)
         }

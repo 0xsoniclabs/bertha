@@ -1,7 +1,7 @@
 use std::{fs::File, io::BufReader, path::Path};
 
 use bertha_types::{Block, Hash, HexConvert};
-use genesis_parser::{EraDir, GFile};
+use genesis_parser::{Era1Reader, EraDir, EraReader, GFile};
 use prost::Message;
 
 use crate::{
@@ -12,6 +12,28 @@ use crate::{
 };
 
 const BATCH_SIZE: usize = 10000;
+
+/// Imports blocks from a directory containing `.era1` files into the database located in `app_dir`,
+/// and optionally verifies the parent hashes.
+pub fn import_era1(
+    app_dir: impl AsRef<Path>,
+    era_dir_path: impl AsRef<Path>,
+    chain_id: u64,
+    verify: bool,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    writeln!(
+        writer,
+        "WARNING: `.era1` file import is still experimental and might store invalid data."
+    )?;
+
+    let (cfg, db) = open_app_dir(app_dir, false)?;
+
+    let era_dir = EraDir::<Era1Reader>::open(era_dir_path)?;
+    let blocks = era_dir.blocks();
+
+    import(cfg, &db, blocks, chain_id, verify, &mut writer)
+}
 
 /// Imports blocks from a directory containing `.era` files into the database located in `app_dir`.
 pub fn import_era(
@@ -27,7 +49,7 @@ pub fn import_era(
 
     let (cfg, db) = open_app_dir(app_dir, false)?;
 
-    let era_dir = EraDir::open(era_dir_path)?;
+    let era_dir = EraDir::<EraReader>::open(era_dir_path)?;
     let blocks = era_dir.blocks();
 
     import(cfg, &db, blocks, chain_id, false, &mut writer)
