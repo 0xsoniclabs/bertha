@@ -1,6 +1,6 @@
 #include "tracy/TracyC.h"
 
-#include "TracyClient.cpp"  // < import and build client as part of this module
+//#include "TracyClient.cpp"  // < import and build client as part of this module
 #include "tracy.h"
 #include <map>
 

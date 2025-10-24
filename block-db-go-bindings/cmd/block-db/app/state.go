@@ -10,7 +10,7 @@ import (
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/amount"
 
-	//_ "github.com/0xsoniclabs/carmen/go/experimental"
+	_ "github.com/0xsoniclabs/carmen/go/experimental"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"

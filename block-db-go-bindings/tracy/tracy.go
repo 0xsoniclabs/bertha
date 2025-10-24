@@ -1,8 +1,17 @@
 package tracy
 
 // #cgo CPPFLAGS: -Wno-unused-result -DTRACY_ENABLE=1 -DTRACY_DELAYED_INIT=1 -DTRACY_MANUAL_LIFETIME=1 -I${SRCDIR}/../../third-party/tracy/public
+// #cgo LDFLAGS: -lTracyClient -L${SRCDIR}/../../third-party/tracy/build -Wl,-rpath=${SRCDIR}/../../third-party/tracy/build
 // #include "tracy.h"
 import "C"
+
+// The Tracy client library is build using the following commands:
+//
+// cmake -B build -DCMAKE_BUILD_TYPE=Release -DTRACY_STATIC=false -DTRACY_MANUAL_LIFETIME=true -DTRACY_DELAYED_INIT=true
+// cmake --build build --config Release --parallel
+//
+// Rust: TRACY_CLIENT_LIB=TracyClient TRACY_CLIENT_LIB_PATH=/home/herbert/coding/soniclabs/bertha/third-party/tracy/build  cargo build --release
+//
 
 import (
 	"runtime"
