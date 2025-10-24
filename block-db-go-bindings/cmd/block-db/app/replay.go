@@ -370,6 +370,9 @@ func (a *stateChainAdapter) ApplyBlock(
 	common.Hash,
 	error,
 ) {
+	zoneBlock := tracy.ZoneBegin("ProcessBlock", 0x00FF00)
+	defer zoneBlock.End()
+
 	// Block 0 is skipped since it is equivalent with the genesis data
 	// import. The archive does not accept two blocks with the same number.
 	if block.NumberU64() == 0 {

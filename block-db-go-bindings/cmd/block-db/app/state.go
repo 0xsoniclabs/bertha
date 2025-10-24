@@ -120,7 +120,6 @@ func (s *State) ApplyBlock(
 	block *types.Block,
 	metadata Metadata,
 ) (types.Receipts, error) {
-
 	chainConfig := opera.CreateTransientEvmChainConfig(
 		chainId,
 		metadata.Upgrades,
@@ -154,7 +153,7 @@ func (s *State) ApplyBlock(
 
 	s.db.BeginBlock()
 	var usedGas uint64
-	zone := tracy.ZoneBegin("ProcessBlock", 0x00FF00)
+	zone := tracy.ZoneBegin("ProcessTransactions", 0x00FF00)
 	receipts, _, skipped := processor.Process(
 		evmBlock,
 		stateDb,
