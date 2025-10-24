@@ -122,6 +122,7 @@ impl<R: FileReader> EraDir<R> {
     }
 }
 
+/// A trait for reading and parsing blocks from a specific file format.
 pub trait FileReader {
     const EXTENSION: &'static str;
 
