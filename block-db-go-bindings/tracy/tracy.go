@@ -1,11 +1,7 @@
 package tracy
 
-/*
-#cgo CPPFLAGS: -I${SRCDIR}/../../third-party/tracy/public -DTRACY_ENABLE -DTRACY_DELAYED_INIT -DTRACY_MANUAL_LIFETIME -DTRACY_VERBOSE=1
-#include "tracy.h"
-#include <stdlib.h>
-#include <stdio.h>
-*/
+// #cgo CPPFLAGS: -Wno-unused-result -DTRACY_ENABLE=1 -DTRACY_DELAYED_INIT=1 -DTRACY_MANUAL_LIFETIME=1 -I${SRCDIR}/../../third-party/tracy/public
+// #include "tracy.h"
 import "C"
 
 import (
@@ -13,9 +9,41 @@ import (
 	"sync"
 )
 
+func StartupProfiler() {
+	C.Bertha_TracyStartupProfiler()
+}
+
+func ShutdownProfiler() {
+	C.Bertha_TracyShutdownProfiler()
+}
+
+type Zone int
+
+func ZoneBegin(name string, color uint32) Zone {
+	runtime.LockOSThread()
+	tracyMutex.Lock()
+	defer tracyMutex.Unlock()
+
+	pc, filename, line, _ := runtime.Caller(1)
+	funcname := runtime.FuncForPC(pc).Name()
+
+	ret := C.Bertha_TracyZoneBegin(allocString(name), allocString(funcname),
+		allocString(filename), C.uint(line), C.uint(color))
+
+	return Zone(ret)
+}
+
+func (z Zone) End() {
+	tracyMutex.Lock()
+	C.Bertha_TracyZoneEnd(C.int(z))
+	tracyMutex.Unlock()
+	runtime.UnlockOSThread()
+}
+
+var tracyMutex sync.Mutex
+
 var tracyStringsMap map[string]*C.char = make(map[string]*C.char)
 var allocStringMutex sync.Mutex
-var tracyMutex sync.Mutex
 
 func allocString(text string) *C.char {
 
@@ -33,30 +61,5 @@ func allocString(text string) *C.char {
 	return cgotext
 }
 
-func TracyStartupProfiler() {
-	C.GoTracyStartupProfiler()
-}
-
-func TracyShutdownProfiler() {
-	C.GoTracyShutdownProfiler()
-}
-
-func TracyZoneBegin(name string, color uint32) int {
-
-	tracyMutex.Lock()
-
-	pc, filename, line, _ := runtime.Caller(1)
-	funcname := runtime.FuncForPC(pc).Name()
-
-	ret := C.GoTracyZoneBegin(allocString(name), allocString(funcname),
-		allocString(filename), C.uint(line), C.uint(color))
-
-	tracyMutex.Unlock()
-	return int(ret)
-}
-
-func TracyZoneEnd(c int) {
-	tracyMutex.Lock()
-	C.GoTracyZoneEnd(C.int(c))
-	tracyMutex.Unlock()
-}
+//go:linkname tracy_systemstack runtime.systemstack
+func tracy_systemstack(fn func())

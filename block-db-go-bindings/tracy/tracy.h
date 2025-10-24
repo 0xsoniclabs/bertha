@@ -1,5 +1,4 @@
-#ifndef __MAIN_H__
-#define __MAIN_H__
+#pragma once
 
 #include <stdint.h>
 #include <string.h>
@@ -8,16 +7,12 @@
 extern "C"
 {
 #endif
-void GoTracyStartupProfiler();
-void GoTracyShutdownProfiler();
+void Bertha_TracyStartupProfiler();
+void Bertha_TracyShutdownProfiler();
 
-void GoTracySetThreadName(const char*name);
-
-int GoTracyZoneBegin(const char*name, const char *function,const char*file, uint32_t line, uint32_t color);
-void GoTracyZoneEnd(int c);
+int Bertha_TracyZoneBegin(const char*name, const char *function,const char*file, uint32_t line, uint32_t color);
+void Bertha_TracyZoneEnd(int c);
 
 #ifdef __cplusplus
 }
 #endif
-
-#endif // __MAIN_H__

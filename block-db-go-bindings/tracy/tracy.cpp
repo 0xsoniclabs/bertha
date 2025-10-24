@@ -1,16 +1,24 @@
 #include "tracy/TracyC.h"
+
+#include "TracyClient.cpp"  // < import and build client as part of this module
 #include "tracy.h"
 #include <map>
-#include <string>
-#include <stdio.h>
-#include <iostream>
+
+void Bertha_TracyStartupProfiler() {
+    ___tracy_startup_profiler();
+}
+
+void Bertha_TracyShutdownProfiler() {
+    ___tracy_shutdown_profiler();
+}
+
 
 typedef struct  ___tracy_source_location_data TracyCZoneLocation;
 
 struct TracyZoneData
 {
     TracyCZoneLocation loc;
-    TracyCZoneCtx ctx;  
+    TracyCZoneCtx ctx;
 };
 
 std::map<int, TracyZoneData*> TracyCZoneCtxMap;
@@ -25,11 +33,11 @@ TracyZoneData* GetZoneContext(int c)
         auto data = new TracyZoneData();
         TracyCZoneCtxMap[c] = data;
         return data;
-    } 
+    }
     else {
         return search->second;
     }
-   
+
 }
 
 void DelZoneContext(int c)
@@ -48,20 +56,7 @@ int IsZoneContextExist(int c)
     return 1;
 }
 
-void GoTracyStartupProfiler() {
-    ___tracy_startup_profiler();
-}
-
-void GoTracyShutdownProfiler() {
-    ___tracy_shutdown_profiler();
-}
-
-void GoTracySetThreadName(const char*name)
-{
-    ___tracy_set_thread_name(name);
-}
-
-int GoTracyZoneBegin(const char*name,const char *function,const char*file, uint32_t line, uint32_t color)
+int Bertha_TracyZoneBegin(const char*name,const char *function,const char*file, uint32_t line, uint32_t color)
 {
     TracyCZoneCtxCounter++;
     TracyZoneData *data = GetZoneContext(TracyCZoneCtxCounter);
@@ -73,11 +68,10 @@ int GoTracyZoneBegin(const char*name,const char *function,const char*file, uint3
     data->loc.line = line;
     data->loc.color = color;
     data->ctx = ___tracy_emit_zone_begin( (___tracy_source_location_data*)&data->loc, 1);
-    std::cout << "Zone begin: " << name << " (id " << TracyCZoneCtxCounter << ") with internal id " << data->ctx.id << std::endl;
     return TracyCZoneCtxCounter;
 }
 
-void GoTracyZoneEnd(int c){
+void Bertha_TracyZoneEnd(int c){
     if (!IsZoneContextExist(c))
     {
         return;

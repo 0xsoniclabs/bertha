@@ -1,40 +1,39 @@
 package tracy
 
 import (
-	"fmt"
-	"runtime"
+	"sync"
 	"testing"
 	"time"
 )
 
 func TestStartStop(t *testing.T) {
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
+	StartupProfiler()
+	defer ShutdownProfiler()
 
-	TracyStartupProfiler()
-	defer TracyShutdownProfiler()
-
-	zone := TracyZoneBegin("outer", 0xff0000)
-	defer TracyZoneEnd(zone)
-	fmt.Printf("Zone: %v\n", zone)
+	zone := ZoneBegin("outer", 0xff0000)
+	defer zone.End()
 
 	time.Sleep(200 * time.Millisecond)
 
 	inner()
 
-	/*
-		//zone2 := ZoneBegin("inner", 0xff0000)
-		//defer zone2.End()
-		//fmt.Printf("Zone: %v\n", zone2)
-
-		time.Sleep(200 * time.Millisecond)
-		//zone2.End()
-	*/
+	const N = 5
+	wg := sync.WaitGroup{}
+	wg.Add(N)
+	for range N {
+		go func() {
+			defer wg.Done()
+			zone := ZoneBegin("goroutine", 0x0000ff)
+			defer zone.End()
+			inner()
+		}()
+	}
+	wg.Wait()
 }
 
 func inner() {
-	zone := TracyZoneBegin("innerFunc", 0x00ff00)
-	defer TracyZoneEnd(zone)
+	zone := ZoneBegin("innerFunc", 0x00ff00)
+	defer zone.End()
 
 	time.Sleep(100 * time.Millisecond)
 }
