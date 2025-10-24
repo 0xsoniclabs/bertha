@@ -14,6 +14,7 @@ import (
 
 	// _ "[github.com/ianlancetaylor/cgosymbolizer](http://github.com/ianlancetaylor/cgosymbolizer)" // Enable to resolve symbols across cgo calls (this breaks Go symbols)
 	"github.com/0xsoniclabs/blockdb"
+	"github.com/0xsoniclabs/blockdb/tracy"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	_ "github.com/0xsoniclabs/carmen/go/state/gostate"
 	"github.com/ethereum/go-ethereum/common"
@@ -287,6 +288,7 @@ func runReplayLoop(
 	onBlockDone func(block *types.Block),
 ) error {
 	for block, err := range blocks {
+		tracy.FrameMark()
 		if err != nil {
 			return fmt.Errorf("failed to get next block: %w", err)
 		}
@@ -306,27 +308,34 @@ func runReplayLoop(
 		}
 
 		// Check the receipts against the expected values in the block.
+		zone := tracy.ZoneBegin("VerifyReceipts", 0x0000FF)
 		for i, receipt := range receipts {
 			want := block.Receipts[i]
 			if receipt.Status != want.GetStatus() {
+				zone.End()
 				return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
 					block.Number, i, want.GetStatus(), receipt.Status)
 			}
 			if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
+				zone.End()
 				return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
 					block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
 			}
 			// TODO: check all receipt fields if needed.
 		}
+		zone.End()
 
 		// TODO:
 		// - check logs
 
 		// Check resulting state root.
+		zone = tracy.ZoneBegin("VerifyStateRoot", 0xFF00FF)
 		if chain.IsMptConformant() && common.BytesToHash(block.StateRoot) != stateRoot {
+			zone.End()
 			return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
 				block.Number, block.StateRoot, stateRoot)
 		}
+		zone.End()
 
 		// Report the progress of the replay.
 		if onBlockDone != nil {

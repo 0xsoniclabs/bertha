@@ -10,6 +10,8 @@ extern "C"
 void Bertha_TracyStartupProfiler();
 void Bertha_TracyShutdownProfiler();
 
+void Bertha_TracyFrameMark();
+
 int Bertha_TracyZoneBegin(const char*name, const char *function,const char*file, uint32_t line, uint32_t color);
 void Bertha_TracyZoneEnd(int c);
 

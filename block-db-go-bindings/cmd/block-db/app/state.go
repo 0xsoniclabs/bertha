@@ -6,8 +6,11 @@ import (
 	"math/big"
 	"os"
 
+	"github.com/0xsoniclabs/blockdb/tracy"
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/amount"
+
+	//_ "github.com/0xsoniclabs/carmen/go/experimental"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"
@@ -151,6 +154,7 @@ func (s *State) ApplyBlock(
 
 	s.db.BeginBlock()
 	var usedGas uint64
+	zone := tracy.ZoneBegin("ProcessBlock", 0x00FF00)
 	receipts, _, skipped := processor.Process(
 		evmBlock,
 		stateDb,
@@ -159,6 +163,7 @@ func (s *State) ApplyBlock(
 		&usedGas,
 		nil,
 	)
+	zone.End()
 
 	if len(skipped) > 0 {
 		return nil, fmt.Errorf("found block with skipped txs: %d", len(skipped))
@@ -166,6 +171,7 @@ func (s *State) ApplyBlock(
 
 	// Apply corrections if any are provided.
 	if fixes := metadata.Corrections[block.NumberU64()]; len(fixes) > 0 {
+		zone := tracy.ZoneBegin("ApplyCorrections", 0xFFAA00)
 		s.db.BeginTransaction()
 		slog.Info("Applying corrections", "block", block.NumberU64())
 		for addr, acc := range fixes {
@@ -177,6 +183,7 @@ func (s *State) ApplyBlock(
 			s.setBalance(addr, acc.Balance.ToBig())
 		}
 		s.db.EndTransaction()
+		zone.End()
 	}
 
 	s.db.EndBlock(block.NumberU64())

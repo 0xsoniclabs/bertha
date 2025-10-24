@@ -5,6 +5,7 @@ import (
 	"math/big"
 
 	"github.com/0xsoniclabs/blockdb"
+	"github.com/0xsoniclabs/blockdb/tracy"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/trie"
@@ -15,6 +16,8 @@ import (
 // It handles the conversion of transactions, receipts, and other block fields.
 // If the error is nil, the resulting block is never nil.
 func ConvertToGethBlock(block *blockdb.Block) (*types.Block, error) {
+	zone := tracy.ZoneBegin("ConvertToGethBlock", 0x00FF00)
+	defer zone.End()
 	if block == nil {
 		return nil, fmt.Errorf("cannot convert nil block")
 	}

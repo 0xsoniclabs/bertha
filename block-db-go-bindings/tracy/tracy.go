@@ -17,6 +17,10 @@ func ShutdownProfiler() {
 	C.Bertha_TracyShutdownProfiler()
 }
 
+func FrameMark() {
+	C.Bertha_TracyFrameMark()
+}
+
 type Zone int
 
 func ZoneBegin(name string, color uint32) Zone {

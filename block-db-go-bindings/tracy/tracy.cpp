@@ -12,6 +12,9 @@ void Bertha_TracyShutdownProfiler() {
     ___tracy_shutdown_profiler();
 }
 
+void Bertha_TracyFrameMark() {
+    ___tracy_emit_frame_mark((char*)0);
+}
 
 typedef struct  ___tracy_source_location_data TracyCZoneLocation;
 
