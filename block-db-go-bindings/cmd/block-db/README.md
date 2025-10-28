@@ -59,7 +59,7 @@ To enable instrumentation, the following steps are required:
   - use `--recursive` to check out sub-directories or run `go submodule update --init --recursive`
   after cloning the library
   - build the Tracy-Client shared library using `make` in the tracy project
-- add a replace to Bertha's [go.mod](./../../go.mod) file to use the manually build `tracy` package 
+- add a replace to Bertha's [go.mod](./../../go.mod) file to use the manually build `tracy` package
 instead of the one retrieved from github; (e.g. `replace github.com/0xsoniclabs/tracy => ../../tracy`)
 - build Bertha's Go commands with the `enable_tracy` tag. For instance, to run the replay command with instrumentation enabled, the
 following command can be used:
