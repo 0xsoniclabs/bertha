@@ -50,7 +50,7 @@ go test ./...
 
 ## Profiling With Tracy
 
-Bertha's replay command includes instrumentation for the 
+Bertha's replay command includes instrumentation for the
 [Tracy](https://github.com/wolfpld/tracy) frame profiler. By default, these
 instrumentation codes are disabled.
 
