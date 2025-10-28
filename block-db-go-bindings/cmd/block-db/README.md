@@ -77,8 +77,8 @@ TRACY_CLIENT_LIB=TracyClient TRACY_CLIENT_LIB_PATH=<path-to-tracy-project>/tracy
 ```
 
 After replacing Carmen in Bertha's [go.mod](./../../go.mod) file with the manually
-build version of Carmen, the following command can be used to replay blocks with
-enabled Tracy support:
+build version of Carmen and importing the experimental package in [state.go](./app/state.go), 
+the following command can be used to replay blocks with enabled Tracy support:
 ```
 go run --tags enable_tracy ./cmd/block-db replay -g sonic.json -db ../.blockdb -e 100 --db-schema 6 --db-variant rust-memory
 ```
