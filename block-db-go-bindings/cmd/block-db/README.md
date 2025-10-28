@@ -52,7 +52,7 @@ go test ./...
 
 Bertha's replay command includes instrumentation for the 
 [Tracy](https://github.com/wolfpld/tracy) frame profiler. By default, these
-instrumentation codes are disabled. 
+instrumentation codes are disabled.
 
 To enable instrumentation, the following steps are required:
 - check-out Sonic's [tracy](git@github.com:0xsoniclabs/tracy.git) binding library in a new directory
