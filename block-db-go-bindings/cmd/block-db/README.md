@@ -73,7 +73,7 @@ instrumentation, Carmen's Rust libraries need to be build using an external
 tracy client library. To do so, define the environment variables `TRACY_CLIENT_LIB`
 and `TRACY_CLIENT_LIB_PATH` as follows while building Carmen's Rust library:
 ```
-TRACY_CLIENT_LIB=TracyClient TRACY_CLIENT_LIB_PATH=<path-to-tracy-project>/tracy/build cargo build --release
+TRACY_CLIENT_LIB=TracyClient TRACY_CLIENT_LIB_PATH=<path-to-tracy-project>/tracy/build cargo build --release --features tracy
 ```
 
 After replacing Carmen in Bertha's [go.mod](./../../go.mod) file with the manually
