@@ -45,7 +45,7 @@ pub fn import_era1(
 
     let (cfg, db) = open_app_dir(app_dir, false)?;
 
-    let era_dir = EraDir::<Era1FileReader>::open(era_dir_path)?;
+    let era_dir = EraDir::<Era1FileReader>::open(era_dir_path, chain_id)?;
     let blocks = era_dir.blocks();
 
     import(cfg, &db, blocks, chain_id, verify, &mut writer)
@@ -65,7 +65,7 @@ pub fn import_era(
 
     let (cfg, db) = open_app_dir(app_dir, false)?;
 
-    let era_dir = EraDir::<EraFileReader>::open(era_dir_path)?;
+    let era_dir = EraDir::<EraFileReader>::open(era_dir_path, chain_id)?;
     let blocks = era_dir.blocks();
 
     import(cfg, &db, blocks, chain_id, false, &mut writer)

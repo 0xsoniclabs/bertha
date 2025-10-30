@@ -83,12 +83,13 @@ fn read_bytes<const N: usize>(mut reader: impl Read) -> Result<[u8; N], io::Erro
 /// An accessor to parsed blocks from a directory containing `.era1` and `.era` files.
 pub struct EraDir<R: FileReader> {
     files: Vec<PathBuf>,
+    chain_id: u64,
     _reader: PhantomData<R>,
 }
 
 impl<R: FileReader> EraDir<R> {
     /// Opens the directory at the given path and scans for `.era1` and `.era` files.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
+    pub fn open(path: impl AsRef<Path>, chain_id: u64) -> Result<Self, Error> {
         let mut files = Vec::new();
 
         for entry in fs::read_dir(&path)? {
@@ -103,6 +104,7 @@ impl<R: FileReader> EraDir<R> {
 
         Ok(Self {
             files,
+            chain_id,
             _reader: PhantomData,
         })
     }
@@ -124,8 +126,8 @@ impl<R: FileReader> EraDir<R> {
         // the file name in reverse order, sorts the files according to their era number.
         self.files.sort_by(|a, b| b.cmp(a)); // sort in reverse
 
-        self.files.into_iter().flat_map(|path| {
-            match R::read_file(path) {
+        self.files.into_iter().flat_map(move |path| {
+            match R::read_file(path, self.chain_id) {
                 Ok(blocks) => {
                     let mut blocks: Vec<_> = blocks.collect();
                     // The blocks in `.era1` and `.era` files are in ascending order, so reverse
@@ -145,6 +147,7 @@ pub trait FileReader {
 
     fn read_file(
         path: impl AsRef<Path>,
+        chain_id: u64,
     ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error>;
 }
 
@@ -157,6 +160,7 @@ impl FileReader for Era1FileReader {
     /// blocks.
     fn read_file(
         path: impl AsRef<Path>,
+        _chain_id: u64,
     ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {
         let file = File::open(path.as_ref())?;
         let reader = Era1Reader::new(file);
@@ -177,16 +181,17 @@ impl FileReader for EraFileReader {
     /// blocks.
     fn read_file(
         path: impl AsRef<Path>,
+        chain_id: u64,
     ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {
         let file = File::open(path.as_ref())?;
         let reader = EraReader::new(file);
-        Ok(reader.iter().map(|result| {
+        Ok(reader.iter().map(move |result| {
             let ssz_bytes = result?.decompress()?;
             // Determine the fork from the slot in the beacon block.
             // The slot is at a fixed offset in the SSZ: after the 4-byte offset for `message`
             // and 96-byte signature in SignedBeaconBlock, then at the start of BeaconBlock.
             let slot = decode_slot_from_signed_block(&ssz_bytes)?;
-            let fork = try_get_beacon_fork(slot)
+            let fork = try_get_beacon_fork(slot, chain_id)
                 .ok_or_else(|| Error::Era(format!("unsupported fork for slot {slot}")))?;
             let beacon_block =
                 SignedBeaconBlock::<MainnetEthSpec>::from_ssz_bytes_by_fork(&ssz_bytes, fork)
@@ -214,8 +219,14 @@ fn decode_slot_from_signed_block(ssz: &[u8]) -> Result<u64, Error> {
     Ok(u64::from_le_bytes(slot_bytes))
 }
 
-/// Returns the fork name for a given slot.
-fn try_get_beacon_fork(slot_index: u64) -> Option<ForkName> {
+/// Returns the fork name for a given slot and chain ID, based on the known fork activation slots
+/// for mainnet, sepolia, hoodi, and holeski.
+fn try_get_beacon_fork(slot_index: u64, chain_id: u64) -> Option<ForkName> {
+    const MAINNET: u64 = 1;
+    const SEPOLIA: u64 = 11155111;
+    const HOLESKI: u64 = 17000;
+    const HOODI: u64 = 560048;
+
     // go-ethereum/beacon/params/networks.go
     const MAINNET_BELLATRIX: u64 = 144896 * 32;
     const MAINNET_CAPELLA: u64 = 194048 * 32;
@@ -223,13 +234,50 @@ fn try_get_beacon_fork(slot_index: u64) -> Option<ForkName> {
     const MAINNET_ELECTRA: u64 = 364032 * 32;
     const MAINNET_FULU: u64 = 411392 * 32;
 
-    match slot_index {
-        0..MAINNET_BELLATRIX => None, // pre-merge
-        MAINNET_BELLATRIX..MAINNET_CAPELLA => Some(ForkName::Bellatrix),
-        MAINNET_CAPELLA..MAINNET_DENEB => Some(ForkName::Capella),
-        MAINNET_DENEB..MAINNET_ELECTRA => Some(ForkName::Deneb),
-        MAINNET_ELECTRA..MAINNET_FULU => Some(ForkName::Electra),
-        MAINNET_FULU.. => Some(ForkName::Fulu),
+    const SEPOLIA_BELLATRIX: u64 = 100 * 32;
+    const SEPOLIA_CAPELLA: u64 = 56832 * 32;
+    const SEPOLIA_DENEB: u64 = 132608 * 32;
+    const SEPOLIA_ELECTRA: u64 = 222464 * 32;
+    const SEPOLIA_FULU: u64 = 272640 * 32;
+
+    const HOLESKI_CAPELLA: u64 = 256 * 32;
+    const HOLESKI_DENEB: u64 = 29696 * 32;
+    const HOLESKI_ELECTRA: u64 = 115968 * 32;
+    const HOLESKI_FULU: u64 = 165120 * 32;
+
+    const HOODI_ELECTRA: u64 = 2048 * 32;
+    const HOODI_FULU: u64 = 50688 * 32;
+
+    match chain_id {
+        MAINNET => match slot_index {
+            0..MAINNET_BELLATRIX => None, // pre-merge
+            MAINNET_BELLATRIX..MAINNET_CAPELLA => Some(ForkName::Bellatrix),
+            MAINNET_CAPELLA..MAINNET_DENEB => Some(ForkName::Capella),
+            MAINNET_DENEB..MAINNET_ELECTRA => Some(ForkName::Deneb),
+            MAINNET_ELECTRA..MAINNET_FULU => Some(ForkName::Electra),
+            MAINNET_FULU.. => Some(ForkName::Fulu),
+        },
+        SEPOLIA => match slot_index {
+            0..SEPOLIA_BELLATRIX => None, // pre-merge
+            SEPOLIA_BELLATRIX..SEPOLIA_CAPELLA => Some(ForkName::Bellatrix),
+            SEPOLIA_CAPELLA..SEPOLIA_DENEB => Some(ForkName::Capella),
+            SEPOLIA_DENEB..SEPOLIA_ELECTRA => Some(ForkName::Deneb),
+            SEPOLIA_ELECTRA..SEPOLIA_FULU => Some(ForkName::Electra),
+            SEPOLIA_FULU.. => Some(ForkName::Fulu),
+        },
+        HOLESKI => match slot_index {
+            0..HOLESKI_CAPELLA => Some(ForkName::Bellatrix),
+            HOLESKI_CAPELLA..HOLESKI_DENEB => Some(ForkName::Capella),
+            HOLESKI_DENEB..HOLESKI_ELECTRA => Some(ForkName::Deneb),
+            HOLESKI_ELECTRA..HOLESKI_FULU => Some(ForkName::Electra),
+            HOLESKI_FULU.. => Some(ForkName::Fulu),
+        },
+        HOODI => match slot_index {
+            0..HOODI_ELECTRA => Some(ForkName::Deneb),
+            HOODI_ELECTRA..HOODI_FULU => Some(ForkName::Electra),
+            HOODI_FULU.. => Some(ForkName::Fulu),
+        },
+        _ => None,
     }
 }
 

@@ -142,6 +142,33 @@ pub fn convert_block(block: SignedBeaconBlock<MainnetEthSpec>) -> Result<Block, 
                 binary_state_root: None,
             })
         }
+        SignedBeaconBlock::Fulu(blk) => {
+            let execution_requests = blk.message.body.execution_requests;
+            let block = blk.message.body.execution_payload.execution_payload;
+            Ok(Block {
+                parent_hash: block.parent_hash.0.into(),
+                ommers_hash: EMPTY_OMMERS_HASH,
+                beneficiary: block.fee_recipient.0.into(),
+                state_root: block.state_root.into(),
+                difficulty: u64::default(), // 0 for proof-of-stake
+                number: block.block_number,
+                gas_limit: block.gas_limit,
+                timestamp: block.timestamp,
+                extra_data: block.extra_data.to_vec(),
+                prev_randao: block.prev_randao.into(),
+                nonce: <[u8; 8]>::default(), // 0 for proof-of-stake
+                transactions: parse_transactions(block.transactions)?,
+                receipts: Vec::default(), // .era files don't contain receipts
+                base_fee_per_gas: Some(U256::from_le_bytes(block.base_fee_per_gas.to_le_bytes())),
+                withdrawals_root: Some(execution_requests.withdrawals.tree_hash_root().into()),
+                blob_gas_used: Some(block.blob_gas_used),
+                excess_blob_gas: Some(block.excess_blob_gas),
+                parent_beacon_block_root: Some(blk.message.parent_root.into()),
+                requests_hash: Some(execution_requests.requests_hash().into()),
+                verkle_state_root: None,
+                binary_state_root: None,
+            })
+        }
         _ => Err(Error::Era("unsupported beacon block fork".to_string())),
     }
 }
