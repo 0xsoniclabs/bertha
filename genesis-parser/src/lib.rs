@@ -66,12 +66,13 @@ fn read_bytes<const N: usize>(mut reader: impl Read) -> Result<[u8; N], io::Erro
 /// An accessor to parsed blocks from a directory containing `.era1` and `.era` files.
 pub struct EraDir<R: FileReader> {
     files: Vec<PathBuf>,
+    chain_id: u64,
     _reader: PhantomData<R>,
 }
 
 impl<R: FileReader> EraDir<R> {
     /// Opens the directory at the given path and scans for `.era1` and `.era` files.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
+    pub fn open(path: impl AsRef<Path>, chain_id: u64) -> Result<Self, Error> {
         let mut files = Vec::new();
 
         for entry in fs::read_dir(&path)? {
@@ -86,6 +87,7 @@ impl<R: FileReader> EraDir<R> {
 
         Ok(Self {
             files,
+            chain_id,
             _reader: PhantomData,
         })
     }
@@ -107,8 +109,8 @@ impl<R: FileReader> EraDir<R> {
         // the file name in reverse order, sorts the files according to their era number.
         self.files.sort_by(|a, b| b.cmp(a)); // sort in reverse
 
-        self.files.into_iter().flat_map(|path| {
-            match R::read_file(path) {
+        self.files.into_iter().flat_map(move |path| {
+            match R::read_file(path, self.chain_id) {
                 Ok(blocks) => {
                     let mut blocks: Vec<_> = blocks.collect();
                     // The blocks in `.era1` and `.era` files are in ascending order, so reverse
@@ -128,6 +130,7 @@ pub trait FileReader {
 
     fn read_file(
         path: impl AsRef<Path>,
+        chain_id: u64,
     ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error>;
 }
 
@@ -140,6 +143,7 @@ impl FileReader for Era1Reader {
     /// blocks.
     fn read_file(
         path: impl AsRef<Path>,
+        _chain_id: u64,
     ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {
         let data = fs::read(path.as_ref())?;
         Ok(Era1::iter_tuples(&data)
@@ -158,10 +162,11 @@ impl FileReader for EraReader {
     /// blocks.
     fn read_file(
         path: impl AsRef<Path>,
+        chain_id: u64,
     ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {
         let data = fs::read(path.as_ref())?;
 
-        let blocks = Era::deserialize_blocks(&data)
+        let blocks = Era::deserialize_blocks(&data, chain_id)
             .map_err(|err| Error::Era(err.to_string()))?
             .into_iter()
             .map(era::convert_block);

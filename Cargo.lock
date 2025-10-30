@@ -1811,7 +1811,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 [[package]]
 name = "e2store"
 version = "0.4.1"
-source = "git+https://github.com/0xsoniclabs/trin?branch=bertha-era#7b7db61101050746cb181a026f1da566aba02124"
+source = "git+https://github.com/0xsoniclabs/trin?branch=bertha-era#5fcdbcaecf2ef3faabcb5d8850a5166f44684c84"
 dependencies = [
  "alloy",
  "alloy-rlp",
@@ -2056,7 +2056,7 @@ dependencies = [
 [[package]]
 name = "ethportal-api"
 version = "0.12.0"
-source = "git+https://github.com/0xsoniclabs/trin?branch=bertha-era#7b7db61101050746cb181a026f1da566aba02124"
+source = "git+https://github.com/0xsoniclabs/trin?branch=bertha-era#5fcdbcaecf2ef3faabcb5d8850a5166f44684c84"
 dependencies = [
  "alloy",
  "alloy-chains",
