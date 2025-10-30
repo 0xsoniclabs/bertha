@@ -13,9 +13,12 @@ import (
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"
 	"github.com/0xsoniclabs/sonic/inter"
 	"github.com/0xsoniclabs/sonic/opera"
+	"github.com/0xsoniclabs/tracy"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	// Uncomment to enable experimental Carmen features.
+	//_ "github.com/0xsoniclabs/carmen/go/experimental"
 )
 
 // State is an abstraction of the Chain State Database. It tracks the balances,
@@ -151,6 +154,7 @@ func (s *State) ApplyBlock(
 
 	s.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())
 
+	zone := tracy.ZoneBegin("TransactionProcessing")
 	s.db.BeginBlock()
 	var usedGas uint64
 	processed := processor.Process(
@@ -189,8 +193,11 @@ func (s *State) ApplyBlock(
 		}
 		s.db.EndTransaction()
 	}
+	zone.End()
 
+	zone = tracy.ZoneBegin("CommitBlock")
 	s.db.EndBlock(block.NumberU64())
+	zone.End()
 	return receipts, s.db.Check()
 }
 

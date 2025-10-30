@@ -16,6 +16,7 @@ import (
 	"github.com/0xsoniclabs/blockdb"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	_ "github.com/0xsoniclabs/carmen/go/state/gostate"
+	"github.com/0xsoniclabs/tracy"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/urfave/cli/v3"
@@ -287,6 +288,7 @@ func runReplayLoop(
 	onBlockDone func(block *types.Block),
 ) error {
 	for block, err := range blocks {
+		tracy.FrameMark()
 		if err != nil {
 			return fmt.Errorf("failed to get next block: %w", err)
 		}
@@ -361,6 +363,9 @@ func (a *stateChainAdapter) ApplyBlock(
 	common.Hash,
 	error,
 ) {
+	zoneBlock := tracy.ZoneBegin("ProcessBlock")
+	defer zoneBlock.End()
+
 	// Block 0 is skipped since it is equivalent with the genesis data
 	// import. The archive does not accept two blocks with the same number.
 	if block.NumberU64() == 0 {

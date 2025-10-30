@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/0xsoniclabs/tracy"
 	"github.com/urfave/cli/v3"
 )
 
@@ -27,6 +28,7 @@ func getApp() *cli.Command {
 			cpuProfileFlag,
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
+			tracy.StartupProfiler()
 			var err error
 			profiler, err = StartCpuProfile(cmd.String(cpuProfileFlag.Name))
 			if err != nil {
@@ -50,6 +52,7 @@ func getApp() *cli.Command {
 			if profiler != nil {
 				return profiler.Stop()
 			}
+			tracy.ShutdownProfiler()
 			return nil
 		},
 	}
