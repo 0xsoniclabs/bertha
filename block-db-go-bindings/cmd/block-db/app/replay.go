@@ -19,6 +19,7 @@ import (
 	"github.com/0xsoniclabs/tracy"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/trie"
 	"github.com/urfave/cli/v3"
 )
 
@@ -287,6 +288,8 @@ func runReplayLoop(
 	metadata Metadata,
 	onBlockDone func(block *types.Block),
 ) error {
+	fmt.Printf("Running replay with verification ...\n")
+	prevBlockHash := common.Hash{} // the parent hash of the genesis block is the zero hash
 	for block, err := range blocks {
 		tracy.FrameMark()
 		if err != nil {
@@ -307,19 +310,27 @@ func runReplayLoop(
 			return fmt.Errorf("failed to apply block %d: %w", block.Number, err)
 		}
 
-		// Check the receipts against the expected values in the block.
-		for i, receipt := range receipts {
-			want := block.Receipts[i]
-			if receipt.Status != want.GetStatus() {
-				return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, want.GetStatus(), receipt.Status)
-			}
-			if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
-				return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
-			}
-			// TODO: check all receipt fields if needed.
+		completeBlock := types.NewBlock(gethBlock.Header(), gethBlock.Body(), receipts, trie.NewStackTrie(nil))
+
+		got := completeBlock.ParentHash()
+		if got != prevBlockHash {
+			return fmt.Errorf("parent hash mismatch for block %d: expected %x, got %x", block.Number, prevBlockHash, got)
 		}
+		copy(prevBlockHash[:], completeBlock.Hash().Bytes())
+
+		// Check the receipts against the expected values in the block.
+		// for i, receipt := range receipts {
+		// 	want := block.Receipts[i]
+		// 	if receipt.Status != want.GetStatus() {
+		// 		return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
+		// 			block.Number, i, want.GetStatus(), receipt.Status)
+		// 	}
+		// 	if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
+		// 		return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
+		// 			block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
+		// 	}
+		// 	// TODO: check all receipt fields if needed.
+		// }
 
 		// TODO:
 		// - check logs
@@ -335,6 +346,7 @@ func runReplayLoop(
 			onBlockDone(gethBlock)
 		}
 	}
+	fmt.Printf("Replay verification succeeded\n")
 	return nil
 }
 
