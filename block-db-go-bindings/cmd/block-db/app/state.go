@@ -16,7 +16,11 @@ import (
 	"github.com/0xsoniclabs/tracy"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/holiman/uint256"
 	// Uncomment to enable experimental Carmen features.
 	//_ "github.com/0xsoniclabs/carmen/go/experimental"
 )
@@ -126,6 +130,10 @@ func (s *State) ApplyBlock(
 		metadata.Upgrades,
 		idx.Block(block.NumberU64()),
 	)
+
+	// TODO: take this from the metadata;
+	chainConfig = params.SepoliaChainConfig
+
 	rules := metadata.GetRulesAtBlock(block.NumberU64())
 
 	processor := evmcore.NewStateProcessor(
@@ -143,6 +151,7 @@ func (s *State) ApplyBlock(
 			PrevRandao:  block.Header().MixDigest,
 			BaseFee:     block.BaseFee(),
 			BlobBaseFee: big.NewInt(1),
+			Coinbase:    block.Coinbase(),
 		},
 		Transactions: block.Transactions(),
 	}
@@ -150,6 +159,14 @@ func (s *State) ApplyBlock(
 	stateDb := evmstore.CreateCarmenStateDb(s.db)
 
 	vmConfig := opera.GetVmConfig(rules)
+
+	// TODO: take these from the metadata; they should be enabled for Sonic
+	// chains, but disabled for Ethereum chains like Sepolia.
+	vmConfig.ChargeExcessGas = false
+	vmConfig.IgnoreGasFeeCap = false
+	vmConfig.InsufficientBalanceIsNotAnError = false
+	vmConfig.SkipTipPaymentToCoinbase = false
+
 	gasLimit := block.GasLimit()
 
 	s.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())
@@ -195,6 +212,9 @@ func (s *State) ApplyBlock(
 	}
 	zone.End()
 
+	// Apply block rewards.
+	accumulateRewards(chainConfig, stateDb, block.Header(), block.Uncles())
+
 	zone = tracy.ZoneBegin("CommitBlock")
 	s.db.EndBlock(block.NumberU64())
 	zone.End()
@@ -212,6 +232,42 @@ func (s *State) setBalance(address common.Address, balance *big.Int) {
 		diff, _ := amount.NewFromBigInt(new(big.Int).Sub(cur, balance))
 		s.db.SubBalance(addr, diff)
 	}
+}
+
+// accumulateRewards credits the coinbase of the given block with the mining
+// reward. The total reward consists of the static block reward and rewards for
+// included uncles. The coinbase of each uncle block is also rewarded.
+// Copied from
+// https://github.com/0xsoniclabs/go-ethereum/blob/949ae6d396a5798262c0d228a8de0e3fa504e00c/consensus/ethash/consensus.go#L570
+func accumulateRewards(config *params.ChainConfig, stateDB addBalancer, header *types.Header, uncles []*types.Header) {
+	// Select the correct block reward based on chain progression
+	blockReward := ethash.FrontierBlockReward
+	if config.IsByzantium(header.Number) {
+		blockReward = ethash.ByzantiumBlockReward
+	}
+	if config.IsConstantinople(header.Number) {
+		blockReward = ethash.ConstantinopleBlockReward
+	}
+	// Accumulate the rewards for the miner and any included uncles
+	reward := new(uint256.Int).Set(blockReward)
+	r := new(uint256.Int)
+	hNum, _ := uint256.FromBig(header.Number)
+	for _, uncle := range uncles {
+		uNum, _ := uint256.FromBig(uncle.Number)
+		r.AddUint64(uNum, 8)
+		r.Sub(r, hNum)
+		r.Mul(r, blockReward)
+		r.Rsh(r, 3)
+		stateDB.AddBalance(uncle.Coinbase, r, tracing.BalanceIncreaseRewardMineUncle)
+
+		r.Rsh(blockReward, 5)
+		reward.Add(reward, r)
+	}
+	stateDB.AddBalance(header.Coinbase, reward, tracing.BalanceIncreaseRewardMineBlock)
+}
+
+type addBalancer interface {
+	AddBalance(addr common.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) uint256.Int
 }
 
 // --- block hash history tracking ---
