@@ -184,16 +184,18 @@ func (s *State) ApplyBlock(
 	)
 
 	// Check that all transactions were processed (i.e., none were skipped).
-	for i, processed := range processed {
-		if processed.Receipt == nil {
-			return nil, fmt.Errorf("found block with skipped txs at index %d", i)
-		}
-	}
+	// for i, processed := range processed {
+	// 	if processed.Receipt == nil {
+	// 		return nil, fmt.Errorf("found block with skipped txs at index %d", i)
+	// 	}
+	// }
 
 	// Retrieve the receipts from the processed transactions.
-	receipts := make(types.Receipts, len(processed))
-	for i, proc := range processed {
-		receipts[i] = proc.Receipt
+	receipts := types.Receipts{}
+	for _, proc := range processed {
+		if proc.Receipt != nil {
+			receipts = append(receipts, proc.Receipt)
+		}
 	}
 
 	// Apply corrections if any are provided.

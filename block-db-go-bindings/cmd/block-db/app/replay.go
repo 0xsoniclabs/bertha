@@ -335,6 +335,12 @@ func runReplayLoop(
 		// TODO:
 		// - check logs
 
+		if block.Number > 138965 {
+			fmt.Printf("transactions of block %d: %d\n", block.Number, len(block.Transactions))
+			fmt.Printf("receipts of block %d: %d\n", block.Number, len(receipts))
+			fmt.Printf("state root of block %d: %s\n", block.Number, stateRoot)
+		}
+
 		// Check resulting state root.
 		if chain.IsMptConformant() && common.BytesToHash(block.StateRoot) != stateRoot {
 			return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
