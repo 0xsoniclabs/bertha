@@ -96,6 +96,7 @@ impl TryFrom<IdxFullBlock> for Block {
         Ok(Self {
             parent_hash: idx_full_block.block.parent_hash,
             ommers_hash: EMPTY_OMMERS_HASH,
+            ommers: Vec::new(),
             beneficiary: Default::default(),
             state_root: idx_full_block.block.state_root,
             difficulty: idx_full_block.block.difficulty,
@@ -206,6 +207,7 @@ mod tests {
         let block = Block {
             parent_hash: [1; 32],
             ommers_hash: EMPTY_OMMERS_HASH,
+            ommers: Vec::new(),
             beneficiary: Default::default(),
             state_root: [2; 32],
             difficulty: 42,
@@ -257,6 +259,7 @@ mod tests {
         let block = Block {
             parent_hash: [1; 32],
             ommers_hash: EMPTY_OMMERS_HASH,
+            ommers: Vec::new(),
             beneficiary: Default::default(),
             state_root: [2; 32],
             difficulty: 42,

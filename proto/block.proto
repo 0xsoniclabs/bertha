@@ -26,6 +26,30 @@ message Block {
   optional uint64 excess_blob_gas = 17;
   optional bytes parent_beacon_block_root = 18;
   optional bytes requests_hash = 19;
+
+  repeated BlockHeader ommers = 20;
+}
+
+message BlockHeader {
+  bytes parent_hash = 1;
+  bytes ommers_hash = 2;
+  bytes beneficiary = 3;
+  bytes state_root = 4;
+  bytes transactions_root = 5;
+  bytes receipts_root = 6;
+  bytes logs_bloom = 7;
+  uint64 difficulty = 8;
+  uint64 number = 9;
+  uint64 gas_limit = 10;
+  uint64 gas_used = 11;
+  uint64 timestamp = 12;
+  bytes extra_data = 13;
+  bytes prev_randao = 14;
+  bytes nonce = 15;
+  optional bytes base_fee_per_gas = 16;
+  optional bytes withdrawals_root = 17;
+  optional uint64 blob_gas_used = 18;
+  optional uint64 excess_blob_gas = 19;
 }
 
 // Corresponds to bertha_types::Transaction

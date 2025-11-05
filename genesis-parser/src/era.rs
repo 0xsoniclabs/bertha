@@ -28,6 +28,7 @@ pub fn convert_block(block: CompressedSignedBeaconBlock) -> Result<Block, Error>
             Ok(Block {
                 parent_hash: block.parent_hash.0,
                 ommers_hash: EMPTY_OMMERS_HASH,
+                ommers: Vec::new(),
                 beneficiary: block.fee_recipient.0.0,
                 state_root: block.state_root.0,
                 difficulty: u64::default(), // 0 for proof-of-stake
@@ -52,6 +53,7 @@ pub fn convert_block(block: CompressedSignedBeaconBlock) -> Result<Block, Error>
             Ok(Block {
                 parent_hash: block.parent_hash.0,
                 ommers_hash: EMPTY_OMMERS_HASH,
+                ommers: Vec::new(),
                 beneficiary: block.fee_recipient.0.0,
                 state_root: block.state_root.0,
                 difficulty: u64::default(), // 0 for proof-of-stake
@@ -76,6 +78,7 @@ pub fn convert_block(block: CompressedSignedBeaconBlock) -> Result<Block, Error>
             Ok(Block {
                 parent_hash: block.parent_hash.0,
                 ommers_hash: EMPTY_OMMERS_HASH,
+                ommers: Vec::new(),
                 beneficiary: block.fee_recipient.0.0,
                 state_root: block.state_root.0,
                 difficulty: u64::default(), // 0 for proof-of-stake
@@ -101,6 +104,7 @@ pub fn convert_block(block: CompressedSignedBeaconBlock) -> Result<Block, Error>
             Ok(Block {
                 parent_hash: block.parent_hash.0,
                 ommers_hash: EMPTY_OMMERS_HASH,
+                ommers: Vec::new(),
                 beneficiary: block.fee_recipient.0.0,
                 state_root: block.state_root.0,
                 difficulty: u64::default(), // 0 for proof-of-stake

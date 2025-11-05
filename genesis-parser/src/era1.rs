@@ -1,7 +1,7 @@
 use alloy_consensus::{Eip658Value, EthereumTxEnvelope, ReceiptEnvelope, TxEip4844Variant};
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
 use bertha_types::{
-    AccessListEntry, Block, Log, PostStateOrStatus, SetCodeAuthorization, Transaction,
+    AccessListEntry, Block, BlockHeader, Log, PostStateOrStatus, SetCodeAuthorization, Transaction,
     TransactionReceipt, TransactionType, U256,
 };
 use e2store::era1::BlockTuple;
@@ -206,10 +206,8 @@ fn convert_receipts(receipt: ReceiptEnvelope) -> TransactionReceipt {
 /// Converts a [`BlockTuple`] to a [`Block`].
 pub fn convert_block(block: BlockTuple) -> Block {
     let header = block.header.header;
-    let transactions = block
-        .body
-        .body
-        .0
+    let body = block.body.body.0;
+    let transactions = body
         .transactions
         .into_iter()
         .map(|tx| convert_transaction(header.number, tx))
@@ -221,10 +219,36 @@ pub fn convert_block(block: BlockTuple) -> Block {
         .into_iter()
         .map(convert_receipts)
         .collect();
+    let ommers = body
+        .ommers
+        .into_iter()
+        .map(|ommer| BlockHeader {
+            parent_hash: ommer.parent_hash.0,
+            ommers_hash: ommer.ommers_hash.0,
+            beneficiary: ommer.beneficiary.0.0,
+            state_root: ommer.state_root.0,
+            transactions_root: ommer.transactions_root.0,
+            receipts_root: ommer.receipts_root.0,
+            logs_bloom: ommer.logs_bloom.0.0,
+            difficulty: U256::from_be_bytes(&ommer.difficulty.to_be_bytes()),
+            number: ommer.number,
+            gas_limit: ommer.gas_limit,
+            gas_used: ommer.gas_used,
+            timestamp: ommer.timestamp,
+            extra_data: ommer.extra_data.0.to_vec(),
+            prev_randao: ommer.mix_hash.0,
+            nonce: ommer.nonce.0,
+            base_fee_per_gas: ommer.base_fee_per_gas.map(U256::from),
+            withdrawals_root: ommer.withdrawals_root.map(|w| w.0),
+            blob_gas_used: ommer.blob_gas_used,
+            excess_blob_gas: ommer.excess_blob_gas,
+        })
+        .collect();
 
     Block {
         parent_hash: header.parent_hash.0,
         ommers_hash: header.ommers_hash.0,
+        ommers,
         beneficiary: header.beneficiary.0.0,
         state_root: header.state_root.0,
         difficulty: u64::from_le_bytes(header.difficulty.as_le_slice()[..8].try_into().unwrap()),

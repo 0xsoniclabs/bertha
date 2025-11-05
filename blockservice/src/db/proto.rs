@@ -94,6 +94,32 @@ impl From<bertha_types::TransactionReceipt> for TransactionReceipt {
     }
 }
 
+impl From<bertha_types::BlockHeader> for BlockHeader {
+    fn from(value: bertha_types::BlockHeader) -> Self {
+        BlockHeader {
+            parent_hash: value.parent_hash.into(),
+            ommers_hash: value.ommers_hash.into(),
+            beneficiary: value.beneficiary.into(),
+            state_root: value.state_root.into(),
+            transactions_root: value.transactions_root.into(),
+            receipts_root: value.receipts_root.into(),
+            logs_bloom: value.logs_bloom.into(),
+            difficulty: value.difficulty.to_least_significant_u64(),
+            number: value.number,
+            gas_limit: value.gas_limit,
+            gas_used: value.gas_used,
+            timestamp: value.timestamp,
+            extra_data: value.extra_data,
+            prev_randao: value.prev_randao.into(),
+            nonce: value.nonce.into(),
+            base_fee_per_gas: value.base_fee_per_gas.map(|v| v.to_be_bytes().to_vec()),
+            withdrawals_root: value.withdrawals_root.map(Into::into),
+            blob_gas_used: value.blob_gas_used,
+            excess_blob_gas: value.excess_blob_gas,
+        }
+    }
+}
+
 impl From<bertha_types::Block> for Block {
     fn from(value: bertha_types::Block) -> Self {
         let transactions = value
@@ -106,6 +132,7 @@ impl From<bertha_types::Block> for Block {
         Block {
             parent_hash: value.parent_hash.into(),
             ommers_hash: value.ommers_hash.into(),
+            ommers: value.ommers.into_iter().map(From::from).collect(),
             beneficiary: value.beneficiary.into(),
             state_root: value.state_root.into(),
             difficulty: value.difficulty,
@@ -265,6 +292,37 @@ impl TryFrom<TransactionReceipt> for bertha_types::TransactionReceipt {
     }
 }
 
+impl TryFrom<BlockHeader> for bertha_types::BlockHeader {
+    type Error = Error;
+
+    fn try_from(value: BlockHeader) -> Result<Self, Error> {
+        Ok(Self {
+            parent_hash: convert_to_fixed_size(value.parent_hash)?,
+            ommers_hash: convert_to_fixed_size(value.ommers_hash)?,
+            beneficiary: convert_to_fixed_size(value.beneficiary)?,
+            state_root: convert_to_fixed_size(value.state_root)?,
+            transactions_root: convert_to_fixed_size(value.transactions_root)?,
+            receipts_root: convert_to_fixed_size(value.receipts_root)?,
+            logs_bloom: convert_to_fixed_size(value.logs_bloom)?,
+            difficulty: value.difficulty.into(),
+            number: value.number,
+            gas_limit: value.gas_limit,
+            gas_used: value.gas_used,
+            timestamp: value.timestamp,
+            extra_data: value.extra_data,
+            prev_randao: convert_to_fixed_size(value.prev_randao)?,
+            nonce: convert_to_fixed_size(value.nonce)?,
+            base_fee_per_gas: value.base_fee_per_gas.map(convert_to_u256).transpose()?,
+            withdrawals_root: value
+                .withdrawals_root
+                .map(convert_to_fixed_size)
+                .transpose()?,
+            blob_gas_used: value.blob_gas_used,
+            excess_blob_gas: value.excess_blob_gas,
+        })
+    }
+}
+
 impl TryFrom<Block> for bertha_types::Block {
     type Error = Error;
 
@@ -283,6 +341,11 @@ impl TryFrom<Block> for bertha_types::Block {
         Ok(bertha_types::Block {
             parent_hash: convert_to_fixed_size(value.parent_hash)?,
             ommers_hash: convert_to_fixed_size(value.ommers_hash)?,
+            ommers: value
+                .ommers
+                .into_iter()
+                .map(TryFrom::try_from)
+                .collect::<Result<_, _>>()?,
             beneficiary: convert_to_fixed_size(value.beneficiary)?,
             state_root: convert_to_fixed_size(value.state_root)?,
             difficulty: value.difficulty,
@@ -426,6 +489,34 @@ mod tests {
         }
     }
 
+    fn make_block_header(rng: &mut TestRng) -> bertha_types::BlockHeader {
+        let base_fee_per_gas = rng.u256();
+        let withdrawals_root = rng.bytes();
+        let blob_gas_used = rng.u64();
+        let excess_blob_gas = rng.u64();
+        bertha_types::BlockHeader {
+            parent_hash: rng.bytes(),
+            ommers_hash: rng.bytes(),
+            beneficiary: rng.bytes(),
+            state_root: rng.bytes(),
+            transactions_root: rng.bytes(),
+            receipts_root: rng.bytes(),
+            logs_bloom: rng.bytes(),
+            difficulty: rng.u256(),
+            number: rng.u64(),
+            gas_limit: rng.u64(),
+            gas_used: rng.u64(),
+            timestamp: rng.u64(),
+            extra_data: rng.bytes::<128>().into(),
+            prev_randao: rng.bytes(),
+            nonce: rng.bytes::<8>(),
+            base_fee_per_gas: rng.option(base_fee_per_gas),
+            withdrawals_root: rng.option(withdrawals_root),
+            blob_gas_used: rng.option(blob_gas_used),
+            excess_blob_gas: rng.option(excess_blob_gas),
+        }
+    }
+
     fn make_block(rng: &mut TestRng) -> bertha_types::Block {
         let base_fee_per_gas = rng.u256();
         let withdrawals_root: Hash = rng.bytes();
@@ -437,6 +528,7 @@ mod tests {
         bertha_types::Block {
             parent_hash: rng.bytes(),
             ommers_hash: rng.bytes(),
+            ommers: vec![make_block_header(rng), make_block_header(rng)],
             beneficiary: rng.bytes(),
             state_root: rng.bytes(),
             difficulty: rng.u64(),

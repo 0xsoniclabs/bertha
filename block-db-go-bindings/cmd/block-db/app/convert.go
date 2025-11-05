@@ -33,6 +33,35 @@ func ConvertToGethBlock(block *blockdb.Block) (*types.Block, error) {
 	}
 	txHash := types.DeriveSha(transactions, trie.NewStackTrie(nil))
 
+	// Convert the uncles.
+	uncles := []*types.Header{}
+	for _, uncle := range block.Ommers {
+		uncleHeader := &types.Header{
+			ParentHash:       common.BytesToHash(uncle.ParentHash),
+			UncleHash:        common.BytesToHash(uncle.OmmersHash),
+			Coinbase:         common.BytesToAddress(uncle.Beneficiary),
+			Root:             common.BytesToHash(uncle.StateRoot),
+			TxHash:           common.BytesToHash(uncle.TransactionsRoot),
+			ReceiptHash:      common.BytesToHash(uncle.ReceiptsRoot),
+			Bloom:            types.Bloom(uncle.LogsBloom),
+			Difficulty:       new(big.Int).SetUint64(uncle.Difficulty),
+			Number:           new(big.Int).SetUint64(uncle.Number),
+			GasLimit:         uncle.GasLimit,
+			GasUsed:          uncle.GasUsed,
+			Time:             uncle.Timestamp,
+			Extra:            uncle.ExtraData,
+			MixDigest:        common.BytesToHash(uncle.PrevRandao),
+			Nonce:            types.BlockNonce(uncle.Nonce),
+			BaseFee:          new(big.Int).SetBytes(uncle.BaseFeePerGas),
+			WithdrawalsHash:  toOptionalHash(uncle.WithdrawalsRoot),
+			BlobGasUsed:      uncle.BlobGasUsed,
+			ExcessBlobGas:    uncle.ExcessBlobGas,
+			ParentBeaconRoot: nil, // TODO not part of bertha_types::BlockHeader
+			RequestsHash:     nil, // TODO not part of bertha_types::BlockHeader
+		}
+		uncles = append(uncles, uncleHeader)
+	}
+
 	// Convert the receipts.
 	receipts := types.Receipts{}
 	for _, receipt := range block.Receipts {
@@ -77,6 +106,7 @@ func ConvertToGethBlock(block *blockdb.Block) (*types.Block, error) {
 		}).
 		WithBody(types.Body{
 			Transactions: transactions,
+			Uncles:       uncles,
 		}), nil
 }
 

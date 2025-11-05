@@ -20,6 +20,9 @@ pub struct Block {
     pub parent_hash: Hash,
     /// geth: UncleHash, JSON RPC: sha3Uncles
     pub ommers_hash: Hash,
+    /// The ommers (uncles) themselves. This field is not part of the block header. Any may or may
+    /// not be set.
+    pub ommers: Vec<BlockHeader>,
     /// geth: Coinbase, JSON RPC: miner
     pub beneficiary: Address,
     /// geth: Root, JSON RPC: stateRoot
@@ -128,6 +131,7 @@ impl Block {
         Block {
             parent_hash: header.parent_hash,
             ommers_hash: header.ommers_hash,
+            ommers: Vec::new(),
             beneficiary: header.beneficiary,
             state_root: header.state_root,
             difficulty: header.difficulty.to_least_significant_u64(),
@@ -209,6 +213,7 @@ impl From<JsonBlock> for Block {
         Block {
             parent_hash: json_block.parent_hash.0,
             ommers_hash: json_block.sha3_uncles.0,
+            ommers: Vec::new(),
             beneficiary: json_block.miner.0,
             state_root: json_block.state_root.0,
             difficulty: json_block.difficulty.0,
