@@ -50,7 +50,7 @@ fn convert_transaction(
 
             // EIP-155
             let y_parity = if let Some(chain_id) = tx.chain_id
-                && block_number >= FORK_BLKNUM
+                && (chain_id != 1 || block_number >= FORK_BLKNUM)
             {
                 sig.v() as u64 + chain_id * 2 + 35
             } else {
