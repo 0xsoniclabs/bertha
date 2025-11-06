@@ -247,7 +247,19 @@ func (s *State) ApplyBlock(
 	zone.End()
 
 	// Apply block rewards.
-	accumulateRewards(chainConfig, stateDb, block.Header(), block.Uncles())
+	// Derived from https://github.com/0xsoniclabs/go-ethereum/blob/949ae6d396a5798262c0d228a8de0e3fa504e00c/consensus/beacon/consensus.go#L329-L342
+	if block.Number().Uint64() < 1_450_409 { // < for Sepolia, triggered by total difficulty limit (TODO: move to metadata)
+		accumulateRewards(chainConfig, stateDb, block.Header(), block.Uncles())
+	} else {
+		// Withdrawals processing.
+		for _, w := range block.Withdrawals() {
+			// Convert amount from gwei to wei.
+			amount := new(uint256.Int).SetUint64(w.Amount)
+			amount = amount.Mul(amount, uint256.NewInt(params.GWei))
+			stateDb.AddBalance(w.Address, amount, tracing.BalanceIncreaseWithdrawal)
+		}
+		// No block reward which is issued by consensus layer instead.
+	}
 
 	zone = tracy.ZoneBegin("CommitBlock")
 	s.db.EndBlock(block.NumberU64())
@@ -282,6 +294,11 @@ func accumulateRewards(config *params.ChainConfig, stateDB addBalancer, header *
 	if config.IsConstantinople(header.Number) {
 		blockReward = ethash.ConstantinopleBlockReward
 	}
+	/*
+		if header.Number.Uint64() >= 1450409 { // < for Sepolia (TODO: move to metadata)
+			blockReward = uint256.NewInt(0)
+		}
+	*/
 	// Accumulate the rewards for the miner and any included uncles
 	reward := new(uint256.Int).Set(blockReward)
 	r := new(uint256.Int)
