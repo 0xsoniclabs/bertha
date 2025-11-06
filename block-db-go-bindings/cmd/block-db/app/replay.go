@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -319,23 +320,50 @@ func runReplayLoop(
 		copy(prevBlockHash[:], completeBlock.Hash().Bytes())
 
 		// Check the receipts against the expected values in the block.
-		// for i, receipt := range receipts {
-		// 	want := block.Receipts[i]
-		// 	if receipt.Status != want.GetStatus() {
-		// 		return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
-		// 			block.Number, i, want.GetStatus(), receipt.Status)
-		// 	}
-		// 	if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
-		// 		return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
-		// 			block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
-		// 	}
-		// 	// TODO: check all receipt fields if needed.
-		// }
+		for i, receipt := range receipts {
+			want := block.Receipts[i]
+			if receipt.Status != want.GetStatus() {
+				return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
+					block.Number, i, want.GetStatus(), receipt.Status)
+			}
+			if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
+				return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
+					block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
+			}
+			if len(receipt.Logs) != len(want.Logs) {
+				return fmt.Errorf("receipt logs count mismatch for block %d, tx %d: expected %d, got %d",
+					block.Number, i, len(want.Logs), len(receipt.Logs))
+			}
+			for i, got := range receipt.Logs {
+				want := want.Logs[i]
+				if got, want := got.Address, common.Address(want.Address); got != want {
+					return fmt.Errorf("receipt log address mismatch for block %d, tx %d, log %d: expected %x, got %x",
+						block.Number, i, i, want, got)
+				}
+				if len(got.Topics) != len(want.Topics) {
+					return fmt.Errorf("receipt log topics count mismatch for block %d, tx %d, log %d: expected %d, got %d",
+						block.Number, i, i, len(want.Topics), len(got.Topics))
+				}
+				for j, gotTopic := range got.Topics {
+					wantTopic := common.Hash(want.Topics[j])
+					if gotTopic != wantTopic {
+						return fmt.Errorf("receipt log topic mismatch for block %d, tx %d, log %d, topic %d: expected %x, got %x",
+							block.Number, i, i, j, wantTopic, gotTopic)
+					}
+				}
+				if got, want := got.Data, want.Data; !bytes.Equal(got, want) {
+					return fmt.Errorf("receipt log data mismatch for block %d, tx %d, log %d: expected %x, got %x",
+						block.Number, i, i, want, got)
+				}
+			}
+
+			// TODO: check all receipt fields if needed.
+		}
 
 		// TODO:
 		// - check logs
 
-		if block.Number > 138965 {
+		if false && block.Number > 1178593 {
 			fmt.Printf("transactions of block %d: %d\n", block.Number, len(block.Transactions))
 			fmt.Printf("receipts of block %d: %d\n", block.Number, len(receipts))
 			fmt.Printf("state root of block %d: %s\n", block.Number, stateRoot)

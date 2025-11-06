@@ -25,6 +25,12 @@ import (
 	//_ "github.com/0xsoniclabs/carmen/go/experimental"
 )
 
+/*
+func init() {
+	lfvm.RegisterExperimentalInterpreterConfigurations()
+}
+*/
+
 // State is an abstraction of the Chain State Database. It tracks the balances,
 // nonces, codes, and storage states of accounts in the blockchain and provides
 // transaction support for modifying these states.
@@ -142,13 +148,20 @@ func (s *State) ApplyBlock(
 		rules.Upgrades,
 	)
 
+	prevRandao := block.Header().MixDigest
+	if chainConfig.MergeNetsplitBlock.Cmp(block.Number()) > 0 {
+		// Before the Merge, PrevRandao is not used; set to zero. This indicates
+		// to the EVM that the difficulty should be used instead.
+		prevRandao = common.Hash{}
+	}
+
 	evmBlock := &evmcore.EvmBlock{
 		EvmHeader: evmcore.EvmHeader{
 			Number:      block.Number(),
 			ParentHash:  block.ParentHash(),
 			Time:        inter.Timestamp(block.Time() * 1e9),
 			GasLimit:    block.GasLimit(),
-			PrevRandao:  block.Header().MixDigest,
+			PrevRandao:  prevRandao,
 			BaseFee:     block.BaseFee(),
 			BlobBaseFee: big.NewInt(1),
 			Coinbase:    block.Coinbase(),
@@ -159,6 +172,24 @@ func (s *State) ApplyBlock(
 	stateDb := evmstore.CreateCarmenStateDb(s.db)
 
 	vmConfig := opera.GetVmConfig(rules)
+
+	/*
+		if block.NumberU64() == 1 || block.NumberU64() == 1178593 {
+
+			// For transaction processing, Tosca's LFVM is used.
+			factory := tosca.GetInterpreterFactory("lfvm-logging")
+			if factory == nil {
+				panic("LFVM logging interpreter factory not found")
+			}
+			interpreter, err := factory(nil)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create LFVM interpreter: %w", err)
+			}
+			lfvmFactory := geth_adapter.NewGethInterpreterFactory(interpreter)
+
+			vmConfig.Interpreter = lfvmFactory
+		}
+	*/
 
 	// TODO: take these from the metadata; they should be enabled for Sonic
 	// chains, but disabled for Ethereum chains like Sepolia.
@@ -174,13 +205,14 @@ func (s *State) ApplyBlock(
 	zone := tracy.ZoneBegin("TransactionProcessing")
 	s.db.BeginBlock()
 	var usedGas uint64
-	processed := processor.Process(
+	processed := processor.ProcessWithDifficulty(
 		evmBlock,
 		stateDb,
 		vmConfig,
 		gasLimit,
 		&usedGas,
 		nil,
+		block.Difficulty(),
 	)
 
 	// Check that all transactions were processed (i.e., none were skipped).

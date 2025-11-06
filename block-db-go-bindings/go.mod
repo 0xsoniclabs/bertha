@@ -5,7 +5,7 @@ go 1.24.2
 require github.com/linxGnu/grocksdb v1.8.12
 
 require (
-	github.com/0xsoniclabs/carmen/go v0.0.0-20251014092906-75df60dc78cb
+	github.com/0xsoniclabs/carmen/go v0.0.0-20251024091706-e1c5a32d4310
 	github.com/0xsoniclabs/sonic v0.0.0-20251023141423-d6c534d50584
 	github.com/0xsoniclabs/tracy v0.0.0-20251027125423-00a5ab7968fb
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
@@ -101,4 +101,7 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
 
 // Enable local carmen and tracy modules if required for Tracy support.
 //replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
+
 //replace github.com/0xsoniclabs/tracy => ../../tracy
+
+replace github.com/0xsoniclabs/sonic => ../../sonic
