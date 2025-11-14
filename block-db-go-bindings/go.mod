@@ -1,6 +1,6 @@
 module github.com/0xsoniclabs/blockdb
 
-go 1.24.2
+go 1.25.3
 
 require github.com/linxGnu/grocksdb v1.8.12
 

@@ -28,7 +28,7 @@ jobs:
     - name: setup go
       uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
       with:
-        go-version: "1.24.2"
+        go-version: "1.25.3"
     - name: install rocksdb
       uses: awalsh128/cache-apt-pkgs-action@latest
       with:
@@ -56,7 +56,7 @@ jobs:
     - name: setup go
       uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
       with:
-        go-version: "1.24.2"
+        go-version: "1.25.3"
     - name: install rocksdb
       uses: awalsh128/cache-apt-pkgs-action@latest
       with:
@@ -76,7 +76,7 @@ jobs:
     #- name: setup go
       #uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
       #with:
-        #go-version: "1.24.2"
+        #go-version: "1.25.3"
     #- name: install deps
       #run: |
         #sudo apt-get install protobuf-compiler
