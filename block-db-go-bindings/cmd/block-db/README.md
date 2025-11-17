@@ -67,6 +67,12 @@ following command can be used:
 go run --tags enable_tracy ./cmd/block-db replay -g sonic.json -db ../.blockdb -e 100
 ```
 
+This setup is automated in [go-run-with-tracy.sh](../../go-run-with-tracy.sh) which also does the setup to integrate carmen's tracy instrumentation listed below.
+For instance, to run the replay command, the following command can be used:
+```
+./go-run-with-tracy ./cmd/block-db replay -g sonic.json -db ../.blockdb -e 100
+```
+
 ### Integrate Carmen's Tracy Instrumentation
 To integrate support for Carmen's Rust based DB implementations and their
 instrumentation, Carmen's Rust libraries need to be build using an external
