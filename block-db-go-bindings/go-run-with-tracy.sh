@@ -7,6 +7,8 @@
 
 # Exit on error.
 set -e
+# Print all commands before executing.
+set -x
 
 TRACY_DIR=$(pwd)/../../tracy
 CARMEN_RUST_DIR=$(pwd)/../../carmen/rust
