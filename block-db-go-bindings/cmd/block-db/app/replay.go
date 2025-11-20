@@ -50,6 +50,12 @@ var (
 		Usage: "Keep the state database after running the replay",
 	}
 
+	initDbFlag = &cli.StringFlag{
+		Name:  "start-db-dir",
+		Usage: "Path to a state database directory to use to init the state database. The database will be copied to a temporary folder or the directory specified by '--state-db-dir' before replaying.",
+		Value: "",
+	}
+
 	dbSchema = &cli.IntFlag{
 		Name:    "db-schema",
 		Aliases: []string{"schema"},
@@ -85,6 +91,7 @@ func getReplayCommand() *cli.Command {
 			stateDbDirectoryFlag,
 			withArchiveFlag,
 			keepDbFlag,
+			initDbFlag,
 			dbSchema,
 			dbVariant,
 			startBlockFlag,
@@ -100,6 +107,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	blockDbDirectory := c.String(blockDatabaseDirectoryFlag.Name)
 	withArchive := c.Bool(withArchiveFlag.Name)
 	keepDb := c.Bool(keepDbFlag.Name)
+	initDbDir := c.String(initDbFlag.Name)
 	startBlock := c.Uint64(startBlockFlag.Name)
 	endBlock := c.Uint64(endBlockFlag.Name)
 
@@ -108,10 +116,11 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	slog.Info("Loading genesis file", "file", genesisFileName)
 
+	slog.Info("Creating state database", "directory", stateDbDirectory)
 	// Create a temporary directory for the state database
 	if stateDbDirectory == "" {
-		if startBlock > 0 {
-			return fmt.Errorf("state database directory must be specified when starting from a non-genesis block")
+		if startBlock > 0 && initDbDir == "" {
+			return fmt.Errorf("existing state or initial database directory must be specified when starting from a non-genesis block")
 		}
 		stateDbDirectory = os.TempDir()
 		stateDbDirectory, err = os.MkdirTemp(stateDbDirectory, "replay_chain_state_")
@@ -119,7 +128,23 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to create temporary state database directory: %w", err)
 	}
-	slog.Info("Creating state database", "directory", stateDbDirectory)
+	if initDbDir != "" {
+		slog.Info("Copying initial state database", "source_directory", initDbDir, "destination_directory", stateDbDirectory)
+		// Clear out any previous contents of the state DB directory.
+		err = os.RemoveAll(stateDbDirectory)
+		if err != nil {
+			return fmt.Errorf("failed to clear state database directory %q before copying: %w", stateDbDirectory, err)
+		}
+		err = os.MkdirAll(stateDbDirectory, 0700)
+		if err != nil {
+			return fmt.Errorf("failed to create state database directory %q: %w", stateDbDirectory, err)
+		}
+		err = os.CopyFS(stateDbDirectory, os.DirFS(initDbDir))
+		if err != nil {
+			return fmt.Errorf("failed to copy initial state database %q in destination directory %q: %w", initDbDir, stateDbDirectory, err)
+		}
+	}
+
 	if !keepDb {
 		slog.Warn("State database will be deleted after replay (use --keep-db to keep it)")
 		defer func() {
