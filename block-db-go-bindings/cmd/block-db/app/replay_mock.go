@@ -12,6 +12,8 @@ package app
 import (
 	reflect "reflect"
 
+	future "github.com/0xsoniclabs/carmen/go/common/future"
+	result "github.com/0xsoniclabs/carmen/go/common/result"
 	common "github.com/ethereum/go-ethereum/common"
 	types "github.com/ethereum/go-ethereum/core/types"
 	gomock "go.uber.org/mock/gomock"
@@ -42,11 +44,11 @@ func (m *MockChain) EXPECT() *MockChainMockRecorder {
 }
 
 // ApplyBlock mocks base method.
-func (m *MockChain) ApplyBlock(arg0 *types.Block, arg1 Metadata) (types.Receipts, common.Hash, error) {
+func (m *MockChain) ApplyBlock(arg0 *types.Block, arg1 Metadata) (types.Receipts, future.Future[result.Result[common.Hash]], error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ApplyBlock", arg0, arg1)
 	ret0, _ := ret[0].(types.Receipts)
-	ret1, _ := ret[1].(common.Hash)
+	ret1, _ := ret[1].(future.Future[result.Result[common.Hash]])
 	ret2, _ := ret[2].(error)
 	return ret0, ret1, ret2
 }
@@ -55,6 +57,20 @@ func (m *MockChain) ApplyBlock(arg0 *types.Block, arg1 Metadata) (types.Receipts
 func (mr *MockChainMockRecorder) ApplyBlock(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyBlock", reflect.TypeOf((*MockChain)(nil).ApplyBlock), arg0, arg1)
+}
+
+// ChainId mocks base method.
+func (m *MockChain) ChainId() uint64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ChainId")
+	ret0, _ := ret[0].(uint64)
+	return ret0
+}
+
+// ChainId indicates an expected call of ChainId.
+func (mr *MockChainMockRecorder) ChainId() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChainId", reflect.TypeOf((*MockChain)(nil).ChainId))
 }
 
 // IsMptConformant mocks base method.

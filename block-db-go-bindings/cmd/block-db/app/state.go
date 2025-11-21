@@ -8,6 +8,8 @@ import (
 
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/amount"
+	"github.com/0xsoniclabs/carmen/go/common/future"
+	"github.com/0xsoniclabs/carmen/go/common/result"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"
@@ -85,8 +87,14 @@ func (s *State) Close() error {
 }
 
 // GetStateRoot returns the current state root hash of the state database.
-func (s *State) GetStateRoot() common.Hash {
-	return common.Hash(s.db.GetHash())
+func (s *State) GetStateRoot() future.Future[result.Result[common.Hash]] {
+	return future.Then(s.db.GetCommitment(), func(res result.Result[cc.Hash]) result.Result[common.Hash] {
+		value, err := res.Get()
+		if err != nil {
+			return result.Err[common.Hash](err)
+		}
+		return result.Ok(common.Hash(value))
+	})
 }
 
 // ApplyGenesis applies the genesis data from the specified file on this state.
@@ -195,7 +203,7 @@ func (s *State) ApplyBlock(
 	}
 	zone.End()
 
-	zone = tracy.ZoneBegin("CommitBlock")
+	zone = tracy.ZoneBegin("EndBlock")
 	s.db.EndBlock(block.NumberU64())
 	zone.End()
 	return receipts, s.db.Check()
