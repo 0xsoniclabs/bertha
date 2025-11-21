@@ -31,3 +31,6 @@ git apply --reverse --check enable-tracy-carmen.patch 2> /dev/null || git apply 
 
 # Run go with tracy tag.
 go run --tags enable_tracy "$@"
+
+# Undo the patch to keep the git status clean.
+git apply --reverse enable-tracy-carmen.patch
