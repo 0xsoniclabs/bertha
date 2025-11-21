@@ -87,6 +87,7 @@ func getReplayCommand() *cli.Command {
 			keepDbFlag,
 			dbSchema,
 			dbVariant,
+			startBlockFlag,
 			endBlockFlag,
 		},
 	}
@@ -99,6 +100,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	blockDbDirectory := c.String(blockDatabaseDirectoryFlag.Name)
 	withArchive := c.Bool(withArchiveFlag.Name)
 	keepDb := c.Bool(keepDbFlag.Name)
+	startBlock := c.Uint64(startBlockFlag.Name)
 	endBlock := c.Uint64(endBlockFlag.Name)
 
 	schema := carmen.Schema(c.Int(dbSchema.Name))
@@ -108,9 +110,12 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	// Create a temporary directory for the state database
 	if stateDbDirectory == "" {
+		if startBlock > 0 {
+			return fmt.Errorf("state database directory must be specified when starting from a non-genesis block")
+		}
 		stateDbDirectory = os.TempDir()
+		stateDbDirectory, err = os.MkdirTemp(stateDbDirectory, "replay_chain_state_")
 	}
-	stateDbDirectory, err = os.MkdirTemp(stateDbDirectory, "replay_chain_state_")
 	if err != nil {
 		return fmt.Errorf("failed to create temporary state database directory: %w", err)
 	}
@@ -146,12 +151,17 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	}
 	chainId := genesis.ChainId
 
-	// Apply genesis data to the state database.
-	if err := state.ApplyGenesis(genesis); err != nil {
-		return fmt.Errorf("failed to apply genesis data: %w", err)
+	if startBlock == 0 {
+		slog.Info("Starting replay from genesis")
+		// Apply genesis data to the state database.
+		if err := state.ApplyGenesis(genesis); err != nil {
+			return fmt.Errorf("failed to apply genesis data: %w", err)
+		}
+	} else {
+		slog.Info("Starting replay from block", "block_number", startBlock)
 	}
 	stateRoot := state.GetStateRoot()
-	slog.Info("Loaded genesis", "chain_id", chainId, "root_hash", stateRoot)
+	slog.Info("Loaded state", "chain_id", chainId, "root_hash", stateRoot)
 
 	// Open the block database.
 	slog.Info("Opening block database", "directory", blockDbDirectory)
@@ -177,7 +187,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	// ---- Start Replay ----
 
-	blocks := database.GetRange(chainId, 0, endBlock)
+	blocks := database.GetRange(chainId, startBlock, endBlock)
 	chain := &stateChainAdapter{
 		chainId:         chainId,
 		state:           state,
