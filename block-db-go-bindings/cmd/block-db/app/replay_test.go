@@ -70,15 +70,12 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 
 func TestReplay_FailsIfStartBlockIsProvidedWithoutStateDbDir(t *testing.T) {
 	require := require.New(t)
-	getReplayCommand().Run(t.Context(), []string{
+	err := getReplayCommand().Run(t.Context(), []string{
 		"test",
 		"--start-block", "1000",
 	})
 	require.ErrorContains(
-		getReplayCommand().Run(t.Context(), []string{
-			"test",
-			"--start-block", "1000",
-		}),
+		err,
 		"state database directory must be specified when starting from a non-genesis block",
 	)
 }
