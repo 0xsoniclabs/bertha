@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"log/slog"
 	"maps"
@@ -51,7 +52,7 @@ var (
 	}
 
 	initDbFlag = &cli.StringFlag{
-		Name:  "start-db-dir",
+		Name:  "init-db-dir",
 		Usage: "Path to a state database directory to use to init the state database. The database will be copied to a temporary folder or the directory specified by '--state-db-dir' before replaying.",
 		Value: "",
 	}
@@ -130,14 +131,10 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	}
 	if initDbDir != "" {
 		slog.Info("Copying initial state database", "source_directory", initDbDir, "destination_directory", stateDbDirectory)
-		// Clear out any previous contents of the state DB directory.
-		err = os.RemoveAll(stateDbDirectory)
-		if err != nil {
-			return fmt.Errorf("failed to clear state database directory %q before copying: %w", stateDbDirectory, err)
-		}
-		err = os.MkdirAll(stateDbDirectory, 0700)
-		if err != nil {
-			return fmt.Errorf("failed to create state database directory %q: %w", stateDbDirectory, err)
+		if isEmpty, err := IsDirEmpty(stateDbDirectory); err != nil {
+			return fmt.Errorf("failed to check if state database directory %q is empty: %w", stateDbDirectory, err)
+		} else if !isEmpty {
+			return fmt.Errorf("state database directory %q is not empty. Please specify an empty directory to be initialized or use a temporary directory", stateDbDirectory)
 		}
 		err = os.CopyFS(stateDbDirectory, os.DirFS(initDbDir))
 		if err != nil {
@@ -419,4 +416,19 @@ func (a *stateChainAdapter) ApplyBlock(
 
 	// Return the receipts and the resulting state root.
 	return receipts, a.state.GetStateRoot(), nil
+}
+
+// IsDirEmpty checks if a directory is empty.
+func IsDirEmpty(path string) (bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	_, err = f.Readdir(1) // try to read a single entry
+	if err == io.EOF {
+		return true, nil // empty
+	}
+	return false, err // either not empty or some other error
 }
