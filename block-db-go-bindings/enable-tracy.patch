@@ -1,0 +1,12 @@
+diff --git a/block-db-go-bindings/go.mod b/block-db-go-bindings/go.mod
+index 7f8fa62..ae7e278 100644
+--- a/block-db-go-bindings/go.mod
++++ b/block-db-go-bindings/go.mod
+@@ -105,6 +105,6 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
+ 
+ // This line is automatically uncommented by the `go-run-with-tracy.sh` script.
+ //
+-//replace github.com/0xsoniclabs/tracy => ../../tracy
++replace github.com/0xsoniclabs/tracy => ../../tracy
+ 
+ //replace github.com/0xsoniclabs/tosca => ../../tosca

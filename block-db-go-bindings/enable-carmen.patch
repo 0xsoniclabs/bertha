@@ -1,8 +1,8 @@
 diff --git a/block-db-go-bindings/cmd/block-db/app/state.go b/block-db-go-bindings/cmd/block-db/app/state.go
-index d9b10d0..643e3d5 100644
+index 757c1e9..8c239ad 100644
 --- a/block-db-go-bindings/cmd/block-db/app/state.go
 +++ b/block-db-go-bindings/cmd/block-db/app/state.go
-@@ -17,8 +17,9 @@ import (
+@@ -19,8 +19,9 @@ import (
  	"github.com/Fantom-foundation/lachesis-base/inter/idx"
  	"github.com/ethereum/go-ethereum/common"
  	"github.com/ethereum/go-ethereum/core/types"
@@ -14,15 +14,15 @@ index d9b10d0..643e3d5 100644
  
  // State is an abstraction of the Chain State Database. It tracks the balances,
 diff --git a/block-db-go-bindings/go.mod b/block-db-go-bindings/go.mod
-index d8cea2e..7f79e01 100644
+index 7f8fa62..5cadfe4 100644
 --- a/block-db-go-bindings/go.mod
 +++ b/block-db-go-bindings/go.mod
-@@ -100,5 +100,6 @@ replace github.com/ethereum/go-ethereum => github.com/0xsoniclabs/go-ethereum v0
- replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundation/lachesis-base-sonic v0.0.0-20250701061954-44075d09185c
+@@ -101,7 +101,7 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
  
- // Enable local carmen and tracy modules if required for Tracy support.
+ // This line is automatically uncommented by the `go-run-with-tracy.sh` script.
+ //
 -//replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
--//replace github.com/0xsoniclabs/tracy => ../../tracy
 +replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
-+
-+replace github.com/0xsoniclabs/tracy => ../../tracy
+ 
+ // This line is automatically uncommented by the `go-run-with-tracy.sh` script.
+ //

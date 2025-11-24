@@ -65,6 +65,21 @@ jobs:
       working-directory: block-db-go-bindings
       run: go test --count 1 ./...
 
+  carmen-tracy-patch:
+    name: carmen-tracy-patches
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+    - name: setup go
+      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      with:
+        go-version: "1.25.3"
+    - name: check if carmen and tracy patches apply
+      working-directory: block-db-go-bindings
+      run: git apply enable-carmen.patch && git apply enable-tracy.patch
+
   # This is currently disabled because we can not guarantee that the protobuf compiler versions between CI and dev machines do not get out of sync.
   #codegen:
     #name: codegen
