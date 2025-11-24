@@ -99,11 +99,11 @@ replace github.com/ethereum/go-ethereum => github.com/0xsoniclabs/go-ethereum v0
 
 replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundation/lachesis-base-sonic v0.0.0-20250701061954-44075d09185c
 
-// This line is automatically uncommented by the `go-run-with-tracy.sh` script.
+// This line is automatically uncommented by the `go-run-with-carmen.sh` and `go-run-with-carmen-and-tracy.sh` scripts.
 //
 //replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
 
-// This line is automatically uncommented by the `go-run-with-tracy.sh` script.
+// This line is automatically uncommented by the `go-run-with-carmen-and-tracy.sh` script.
 //
 //replace github.com/0xsoniclabs/tracy => ../../tracy
 
