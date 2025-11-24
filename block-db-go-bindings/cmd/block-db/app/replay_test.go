@@ -80,7 +80,7 @@ func TestReplay_FailsIfStartBlockIsProvidedWithoutStateDbDir(t *testing.T) {
 	})
 	require.ErrorContains(
 		err,
-		"state database directory must be specified when starting from a non-genesis block",
+		"existing state or initial database directory must be specified when starting from a non-genesis block",
 	)
 }
 
