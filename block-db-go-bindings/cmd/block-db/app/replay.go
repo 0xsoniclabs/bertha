@@ -7,13 +7,17 @@ import (
 	"iter"
 	"log/slog"
 	"maps"
+	"math/big"
 	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	// _ "[github.com/ianlancetaylor/cgosymbolizer](http://github.com/ianlancetaylor/cgosymbolizer)" // Enable to resolve symbols across cgo calls (this breaks Go symbols)
 	"github.com/0xsoniclabs/blockdb"
+	"github.com/0xsoniclabs/carmen/go/common/future"
+	"github.com/0xsoniclabs/carmen/go/common/result"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	_ "github.com/0xsoniclabs/carmen/go/state/gostate"
 	"github.com/0xsoniclabs/tracy"
@@ -63,6 +67,12 @@ var (
 		Usage:   "Block database variant to use (" + strings.Join(getListOfVariants(), ", ") + ")",
 		Value:   "go-file",
 	}
+
+	usePipelineFlag = &cli.BoolFlag{
+		Name:  "use-pipeline",
+		Usage: "Enable the replay pipeline (default: true)",
+		Value: true,
+	}
 )
 
 // getListOfVariants returns a sorted list of all registered database variants.
@@ -89,6 +99,7 @@ func getReplayCommand() *cli.Command {
 			dbVariant,
 			startBlockFlag,
 			endBlockFlag,
+			usePipelineFlag,
 		},
 	}
 }
@@ -102,6 +113,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	keepDb := c.Bool(keepDbFlag.Name)
 	startBlock := c.Uint64(startBlockFlag.Name)
 	endBlock := c.Uint64(endBlockFlag.Name)
+	usePipeline := c.Bool(usePipelineFlag.Name)
 
 	schema := carmen.Schema(c.Int(dbSchema.Name))
 	variant := carmen.Variant(c.String(dbVariant.Name))
@@ -160,7 +172,10 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	} else {
 		slog.Info("Starting replay from block", "block_number", startBlock)
 	}
-	stateRoot := state.GetStateRoot()
+	stateRoot, err := state.GetStateRoot().Await().Get()
+	if err != nil {
+		return fmt.Errorf("failed to get state root: %w", err)
+	}
 	slog.Info("Loaded state", "chain_id", chainId, "root_hash", stateRoot)
 
 	// Open the block database.
@@ -185,6 +200,15 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		slog.Info(progress.GetSummary())
 	}()
 
+	// Pick the replay method.
+	run := runReplayLoop
+	if usePipeline {
+		slog.Info("Using replay pipeline")
+		run = runReplayPipeline
+	} else {
+		slog.Info("Using simple replay loop")
+	}
+
 	// ---- Start Replay ----
 
 	blocks := database.GetRange(chainId, startBlock, endBlock)
@@ -193,7 +217,8 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		state:           state,
 		isMptConformant: schema == 5,
 	}
-	return runReplayLoop(
+
+	return run(
 		ctx, blocks, chain, metadata, func(block *types.Block) {
 			if info := progress.LogProgress(block); len(info) > 0 {
 				slog.Info(info)
@@ -318,26 +343,8 @@ func runReplayLoop(
 		}
 
 		// Check the receipts against the expected values in the block.
-		for i, receipt := range receipts {
-			want := block.Receipts[i]
-			if receipt.Status != want.GetStatus() {
-				return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, want.GetStatus(), receipt.Status)
-			}
-			if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
-				return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
-			}
-			// TODO: check all receipt fields if needed.
-		}
-
-		// TODO:
-		// - check logs
-
-		// Check resulting state root.
-		if chain.IsMptConformant() && common.BytesToHash(block.StateRoot) != stateRoot {
-			return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
-				block.Number, block.StateRoot, stateRoot)
+		if err := checkBlockResults(chain, block, receipts, stateRoot); err != nil {
+			return err
 		}
 
 		// Report the progress of the replay.
@@ -348,10 +355,189 @@ func runReplayLoop(
 	return nil
 }
 
+// runReplayPipeline processes the blocks from the given iterator using a
+// multi-stage pipeline, applying them to the chain and checking the results
+// against the expected values in the blocks. This is an optimized version of
+// the replay logic that can achieve higher throughput.
+func runReplayPipeline(
+	ctx context.Context,
+	blocks iter.Seq2[*blockdb.Block, error],
+	chain Chain,
+	metadata Metadata,
+	onBlockDone func(block *types.Block),
+) error {
+	const bufferSize = 1024
+
+	// Pipeline stages:
+	//  - decoding of blocks
+	//  - applying blocks to the chain
+	//  - checking results
+
+	// Result of first stage: decoded block
+	type decodedBlock struct {
+		proto *blockdb.Block
+		geth  *types.Block
+	}
+
+	// Result of second stage: applied block results
+	type processResult struct {
+		decoded   *decodedBlock
+		receipts  types.Receipts
+		stateRoot future.Future[result.Result[common.Hash]]
+	}
+
+	// Channels between stages
+	decodedBlocks := make(chan *decodedBlock, bufferSize)
+	results := make(chan *processResult, bufferSize)
+	done := make(chan struct{})
+	abort := make(chan struct{})
+
+	// Utility to collect errors.
+	issue := atomic.Pointer[error]{}
+	reportIssue := func(err error) {
+		issue.Store(&err)
+		close(abort)
+	}
+
+	// Stage 1: Decode blocks
+	go func() {
+		defer close(decodedBlocks)
+		signer := types.LatestSignerForChainID(new(big.Int).SetUint64(chain.ChainId()))
+		for block, err := range blocks {
+			tracy.FrameMark()
+			if err != nil {
+				reportIssue(fmt.Errorf("failed to get next block: %w", err))
+				return
+			}
+			if ctx.Err() != nil {
+				reportIssue(ctx.Err())
+				return
+			}
+			gethBlock, err := ConvertToGethBlock(block)
+			if err != nil {
+				reportIssue(fmt.Errorf("failed to convert block %d: %w", block.Number, err))
+				return
+			}
+
+			// Prefetch transaction signatures to speed up processing.
+			for _, tx := range gethBlock.Transactions() {
+				_, _ = types.Sender(signer, tx) // just pre-fetching
+			}
+
+			decoded := &decodedBlock{
+				proto: block,
+				geth:  gethBlock,
+			}
+
+			select {
+			case decodedBlocks <- decoded:
+				continue
+			case <-abort:
+				return
+			}
+		}
+	}()
+
+	// Stage 2: Apply blocks
+	go func() {
+		defer close(results)
+		for decoded := range decodedBlocks {
+			gethBlock := decoded.geth
+			receipts, stateRootFuture, err := chain.ApplyBlock(gethBlock, metadata)
+			if err != nil {
+				reportIssue(fmt.Errorf("failed to apply block %d: %w", gethBlock.NumberU64(), err))
+				return
+			}
+			result := &processResult{
+				decoded:   decoded,
+				receipts:  receipts,
+				stateRoot: stateRootFuture,
+			}
+			select {
+			case results <- result:
+				continue
+			case <-abort:
+				return
+			}
+		}
+	}()
+
+	// Stage 3: Check results
+	go func() {
+		defer close(done)
+		for result := range results {
+			block := result.decoded.proto
+
+			err := checkBlockResults(chain, block, result.receipts, result.stateRoot)
+			if err != nil {
+				reportIssue(err)
+				return
+			}
+
+			// Report the progress of the replay.
+			if onBlockDone != nil {
+				onBlockDone(result.decoded.geth)
+			}
+		}
+	}()
+	<-done
+
+	err := issue.Load()
+	if err == nil {
+		return nil
+	}
+	return *err
+}
+
+// checkBlockResults checks the results of applying a block against the
+// expected values in the block, including receipt fields and the resulting
+// state root. It is factored out to allow its use in both the simple replay
+// loop and the pipeline version.
+func checkBlockResults(
+	chain Chain,
+	block *blockdb.Block,
+	receipts types.Receipts,
+	stateRootFuture future.Future[result.Result[common.Hash]],
+) error {
+	zone := tracy.ZoneBegin("CheckResults")
+	for i, receipt := range receipts {
+		want := block.Receipts[i]
+		if receipt.Status != want.GetStatus() {
+			return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
+				block.Number, i, want.GetStatus(), receipt.Status)
+		}
+		if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
+			return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
+				block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
+		}
+		// TODO: check all receipt fields if needed.
+	}
+
+	// TODO:
+	// - check logs
+
+	// Check resulting state root.
+	stateRoot, err := stateRootFuture.Await().Get()
+	if err != nil {
+		return fmt.Errorf("failed to get state root after applying block %d: %w", block.Number, err)
+	}
+	if chain.IsMptConformant() && common.BytesToHash(block.StateRoot) != stateRoot {
+		return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
+			block.Number, block.StateRoot, stateRoot)
+	}
+	zone.End()
+	return nil
+}
+
 // Chain is an interface for an evolving block chain.
 type Chain interface {
+	ChainId() uint64
 	IsMptConformant() bool
-	ApplyBlock(*types.Block, Metadata) (types.Receipts, common.Hash, error)
+	ApplyBlock(*types.Block, Metadata) (
+		types.Receipts,
+		future.Future[result.Result[common.Hash]],
+		error,
+	)
 }
 
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
@@ -359,6 +545,10 @@ type stateChainAdapter struct {
 	chainId         uint64
 	state           *State
 	isMptConformant bool
+}
+
+func (a *stateChainAdapter) ChainId() uint64 {
+	return a.chainId
 }
 
 func (a *stateChainAdapter) IsMptConformant() bool {
@@ -370,7 +560,7 @@ func (a *stateChainAdapter) ApplyBlock(
 	metadata Metadata,
 ) (
 	types.Receipts,
-	common.Hash,
+	future.Future[result.Result[common.Hash]],
 	error,
 ) {
 	zoneBlock := tracy.ZoneBegin("ProcessBlock")
@@ -389,7 +579,8 @@ func (a *stateChainAdapter) ApplyBlock(
 		metadata,
 	)
 	if err != nil {
-		return nil, common.Hash{}, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
+		stateRoot := future.Future[result.Result[common.Hash]]{}
+		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
 	}
 
 	// Return the receipts and the resulting state root.

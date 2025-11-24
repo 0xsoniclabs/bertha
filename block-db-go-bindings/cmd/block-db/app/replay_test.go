@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"iter"
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 
 	"github.com/0xsoniclabs/blockdb"
+	"github.com/0xsoniclabs/carmen/go/common/future"
+	"github.com/0xsoniclabs/carmen/go/common/result"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/linxGnu/grocksdb"
@@ -140,7 +144,45 @@ func TestProgressLogger_ProducesASummary(t *testing.T) {
 	)
 }
 
-func TestRunReplayLoop_CanProcessEmptyBlocks(t *testing.T) {
+func TestReplayLoop(t *testing.T) {
+	runTests := func(t *testing.T, run replayer) {
+		tests := map[string]func(*testing.T, replayer){
+			"CanProcessEmptyBlocks":               canProcessEmptyBlocks,
+			"CanProcessNonEmptyBlocks":            canProcessNonEmptyBlocks,
+			"FailsOnFailedBlockRetrieval":         failsOnFailedBlockRetrieval,
+			"FailsOnCancelledContext":             failsOnCancelledContext,
+			"FailsOnBlockConversionError":         failsOnBlockConversionError,
+			"FailsOnBlockApplicationError":        failsOnBlockApplicationError,
+			"FailsOnCommitmentComputationError":   failsOnCommitmentComputationError,
+			"FailsOnWrongReceiptStatus":           failsOnWrongReceiptStatus,
+			"FailsOnWrongReceiptCumulatedGasUsed": failsOnWrongReceiptCumulatedGasUsed,
+			"FailsOnIncorrectStateRootHash":       failsOnIncorrectStateRootHash,
+		}
+		for name, test := range tests {
+			t.Run(name, func(t *testing.T) {
+				test(t, run)
+			})
+		}
+	}
+
+	t.Run("Loop", func(t *testing.T) {
+		runTests(t, runReplayLoop)
+	})
+
+	t.Run("Pipeline", func(t *testing.T) {
+		runTests(t, runReplayPipeline)
+	})
+}
+
+type replayer func(
+	ctx context.Context,
+	blocks iter.Seq2[*blockdb.Block, error],
+	chain Chain,
+	metadata Metadata,
+	onBlockProcessed func(*types.Block),
+) error
+
+func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
 	})
@@ -149,7 +191,8 @@ func TestRunReplayLoop_CanProcessEmptyBlocks(t *testing.T) {
 		require.NoError(t, state.Close())
 	}()
 
-	stateRoot := state.GetStateRoot()
+	stateRoot, err := state.GetStateRoot().Await().Get()
+	require.NoError(t, err)
 
 	// A block history where nothing ever is happening.
 	blocks := []*blockdb.Block{
@@ -165,15 +208,16 @@ func TestRunReplayLoop_CanProcessEmptyBlocks(t *testing.T) {
 
 	iter := newIter(blocks)
 	counter := 0
-	require.NoError(t, runReplayLoop(t.Context(), iter, chain, Metadata{}, func(block *types.Block) {
+	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, func(block *types.Block) {
 		counter++
 	}))
 	require.Equal(t, len(blocks), counter)
 }
 
-func TestRunReplayLoop_CanProcessNonEmptyBlocks(t *testing.T) {
+func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	// A block history with a few transactions.
@@ -214,7 +258,7 @@ func TestRunReplayLoop_CanProcessNonEmptyBlocks(t *testing.T) {
 		call := chain.EXPECT().
 			ApplyBlock(gomock.Any(), gomock.Any()).
 			DoAndReturn(func(b *types.Block, _ Metadata) (
-				[]*types.Receipt, common.Hash, error,
+				[]*types.Receipt, future.Future[result.Result[common.Hash]], error,
 			) {
 				require.Equal(t, ethBlock.NumberU64(), b.NumberU64())
 				// No need to check the full block conversion, since this is
@@ -224,7 +268,7 @@ func TestRunReplayLoop_CanProcessNonEmptyBlocks(t *testing.T) {
 				for i, tx := range ethBlock.Transactions() {
 					require.Equal(t, tx.Nonce(), b.Transactions()[i].Nonce())
 				}
-				return nil, common.BytesToHash(block.StateRoot), nil
+				return nil, future.Immediate(result.Ok(common.BytesToHash(block.StateRoot))), nil
 			})
 
 		if last != nil {
@@ -234,18 +278,26 @@ func TestRunReplayLoop_CanProcessNonEmptyBlocks(t *testing.T) {
 	}
 
 	iter := newIter(blocks)
-	require.NoError(t, runReplayLoop(t.Context(), iter, chain, Metadata{}, nil))
+	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, nil))
 }
 
-func TestRunReplayLoop_FailsOnFailedBlockRetrieval(t *testing.T) {
+func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
+	ctrl := gomock.NewController(t)
+	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+
 	injectedError := fmt.Errorf("injected error")
 	blocks := func(yield func(*blockdb.Block, error) bool) {
 		yield(nil, injectedError)
 	}
-	require.ErrorIs(t, runReplayLoop(t.Context(), blocks, nil, Metadata{}, nil), injectedError)
+	require.ErrorIs(t, run(t.Context(), blocks, chain, Metadata{}, nil), injectedError)
 }
 
-func TestRunReplayLoop_FailsOnCancelledContext(t *testing.T) {
+func failsOnCancelledContext(t *testing.T, run replayer) {
+	ctrl := gomock.NewController(t)
+	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+
 	ctxt, cancel := context.WithCancel(t.Context())
 	cancel()
 
@@ -253,10 +305,14 @@ func TestRunReplayLoop_FailsOnCancelledContext(t *testing.T) {
 		{Number: 0, StateRoot: types.EmptyRootHash[:]},
 	})
 
-	require.ErrorIs(t, runReplayLoop(ctxt, blocks, nil, Metadata{}, nil), context.Canceled)
+	require.ErrorIs(t, run(ctxt, blocks, chain, Metadata{}, nil), context.Canceled)
 }
 
-func TestRunReplayLoop_FailsOnBlockConversionError(t *testing.T) {
+func failsOnBlockConversionError(t *testing.T, run replayer) {
+	ctrl := gomock.NewController(t)
+	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+
 	ctxt := t.Context()
 	blocks := newIter([]*blockdb.Block{{
 		Transactions: []*blockdb.Transaction{{
@@ -264,35 +320,57 @@ func TestRunReplayLoop_FailsOnBlockConversionError(t *testing.T) {
 		}},
 	}})
 	require.ErrorContains(t,
-		runReplayLoop(ctxt, blocks, nil, Metadata{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil),
 		"failed to convert block 0",
 	)
 }
 
-func TestRunReplayLoop_FailsOnBlockApplicationError(t *testing.T) {
+func failsOnBlockApplicationError(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
 
 	injectedError := fmt.Errorf("injected error")
-	chain.EXPECT().ApplyBlock(gomock.Any(), gomock.Any()).Return(nil, common.Hash{}, injectedError)
+	chain.EXPECT().
+		ApplyBlock(gomock.Any(), gomock.Any()).
+		Return(nil, future.Immediate(result.Ok(common.Hash{})), injectedError)
 
 	ctxt := t.Context()
 	blocks := newIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
-		runReplayLoop(ctxt, blocks, chain, Metadata{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil),
 		injectedError,
 	)
 }
 
-func TestRunReplayLoop_FailsOnWrongReceiptStatus(t *testing.T) {
+func failsOnCommitmentComputationError(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+
+	injectedError := fmt.Errorf("injected error")
+	chain.EXPECT().
+		ApplyBlock(gomock.Any(), gomock.Any()).
+		Return(nil, future.Immediate(result.Err[common.Hash](injectedError)), nil)
+
+	ctxt := t.Context()
+	blocks := newIter([]*blockdb.Block{{}})
+	require.ErrorIs(t,
+		run(ctxt, blocks, chain, Metadata{}, nil),
+		injectedError,
+	)
+}
+
+func failsOnWrongReceiptStatus(t *testing.T, run replayer) {
+	ctrl := gomock.NewController(t)
+	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any(), gomock.Any()).
 		Return(
 			types.Receipts{{Status: types.ReceiptStatusFailed}},
-			common.Hash{},
+			future.Immediate(result.Ok(common.Hash{})),
 			nil,
 		)
 
@@ -303,14 +381,15 @@ func TestRunReplayLoop_FailsOnWrongReceiptStatus(t *testing.T) {
 		}},
 	}})
 	require.ErrorContains(t,
-		runReplayLoop(ctxt, blocks, chain, Metadata{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil),
 		"receipt status mismatch",
 	)
 }
 
-func TestRunReplayLoop_FailsOnWrongReceiptCumulatedGasUsed(t *testing.T) {
+func failsOnWrongReceiptCumulatedGasUsed(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any(), gomock.Any()).
@@ -319,7 +398,7 @@ func TestRunReplayLoop_FailsOnWrongReceiptCumulatedGasUsed(t *testing.T) {
 				Status:            types.ReceiptStatusSuccessful,
 				CumulativeGasUsed: 100,
 			}},
-			common.Hash{},
+			future.Immediate(result.Ok(common.Hash{})),
 			nil,
 		)
 
@@ -330,21 +409,22 @@ func TestRunReplayLoop_FailsOnWrongReceiptCumulatedGasUsed(t *testing.T) {
 		}},
 	}})
 	require.ErrorContains(t,
-		runReplayLoop(ctxt, blocks, chain, Metadata{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil),
 		"receipt cumulative gas used mismatch",
 	)
 }
 
-func TestRunReplayLoop_FailsOnIncorrectStateRootHash(t *testing.T) {
+func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any(), gomock.Any()).
 		Return(
 			nil,
-			common.Hash{0x1},
+			future.Immediate(result.Ok(common.Hash{0x1})),
 			nil,
 		)
 
@@ -353,9 +433,63 @@ func TestRunReplayLoop_FailsOnIncorrectStateRootHash(t *testing.T) {
 		StateRoot: common.Hash{0x2}.Bytes(),
 	}})
 	require.ErrorContains(t,
-		runReplayLoop(ctxt, blocks, chain, Metadata{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil),
 		"state root mismatch",
 	)
+}
+
+func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// In this test case, we delay the evaluation of the state root to stall
+		// the pipeline in the third stage. This results in stages 1 and 2 being
+		// stuck trying to send to full channels. We then inject an error in stage
+		// 3 and verify that the other stages are aborted correctly.
+		ctrl := gomock.NewController(t)
+		chain := NewMockChain(ctrl)
+		chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+		chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+
+		promise, firstHash := future.Create[result.Result[common.Hash]]()
+
+		// The first block gets the promise we will only fulfill once all other
+		// stages are blocked.
+		chain.EXPECT().
+			ApplyBlock(gomock.Any(), gomock.Any()).
+			Return(nil, firstHash, nil)
+
+		// All other blocks are processed immediately, to fill up the output
+		// channels of the first two stages.
+		chain.EXPECT().
+			ApplyBlock(gomock.Any(), gomock.Any()).
+			Return(nil, future.Immediate(result.Ok(common.Hash{0x1})), nil).
+			AnyTimes()
+
+		blocks := []*blockdb.Block{}
+		for range 10_000 {
+			blocks = append(blocks, &blockdb.Block{
+				StateRoot: common.Hash{0x0}.Bytes(),
+			})
+		}
+
+		issue := fmt.Errorf("injected error")
+
+		// Start running the replay pipeline.
+		go func() {
+			err := runReplayPipeline(t.Context(), newIter(blocks), chain, Metadata{}, nil)
+			require.ErrorIs(t, err, issue)
+		}()
+
+		// Wait until the first two stages are blocked trying to send to
+		// full channels.
+		synctest.Wait()
+
+		// Inject an error in the third stage by completing the promise
+		// with an error. This error should cause all stages to abort, and the
+		// pipeline to terminate. The abort of the stages is verified by the
+		// synctest bubble environment not allowing any go-routines to be left
+		// running.
+		promise.Fulfill(result.Err[common.Hash](issue))
+	})
 }
 
 func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
