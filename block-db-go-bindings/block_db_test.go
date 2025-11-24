@@ -9,7 +9,40 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func TestOpenDBOpensExistingDb(t *testing.T) {
+type OpenRocksDBFunc func(path string) (RocksDB, error)
+
+func TestOpenRocksDB(t *testing.T) {
+	runTests := func(t *testing.T, runner OpenRocksDBFunc) {
+		tests := map[string]func(*testing.T, OpenRocksDBFunc){
+			"opens existing db":          opensExistingDb,
+			"fails if db does not exist": failsIfDbDoesNotExist,
+		}
+
+		for name, test := range tests {
+			t.Run(name, func(t *testing.T) {
+				test(t, runner)
+			})
+		}
+	}
+
+	t.Run("OpenRocksDBForReading", func(t *testing.T) {
+		runTests(t, OpenRocksDBForReading)
+	})
+
+	t.Run("OpenRocksDBWithOptionsForReading", func(t *testing.T) {
+		runTests(t, func(path string) (RocksDB, error) {
+			return OpenRocksDB(path, true)
+		})
+	})
+
+	t.Run("OpenRocksDBWithOptionsForWriting", func(t *testing.T) {
+		runTests(t, func(path string) (RocksDB, error) {
+			return OpenRocksDB(path, false)
+		})
+	})
+}
+
+func opensExistingDb(t *testing.T, runner OpenRocksDBFunc) {
 	path, err := os.MkdirTemp("", "blockdb-*")
 	require.NoError(t, err, "failed to create temp dir")
 
@@ -17,17 +50,45 @@ func TestOpenDBOpensExistingDb(t *testing.T) {
 	require.NoError(t, err, "failed to create db")
 	writeDB.close()
 
-	db, err := OpenDB(path)
+	db, err := runner(path)
 	require.NoError(t, err, "failed to open db")
 	require.NoError(t, db.Close(), "failed to close db")
 }
 
-func TestOpenDBFailsIfDbDoesNotExist(t *testing.T) {
-	_, err := OpenDB("non-existing-db-path")
+func failsIfDbDoesNotExist(t *testing.T, runner OpenRocksDBFunc) {
+	_, err := runner("non-existing-db-path")
 	require.Error(t, err, "opening db did not return an error although path does not exist")
 }
 
-func TestGetReturnsBlockIfItExists(t *testing.T) {
+func TestOpenRocksDBWithOptionsForWritingOpensDbForWriting(t *testing.T) {
+	path, err := os.MkdirTemp("", "blockdb-*")
+	require.NoError(t, err, "failed to create temp dir")
+
+	writeDB, err := createDB(path)
+	require.NoError(t, err, "failed to create db")
+	writeDB.close()
+
+	db, err := OpenRocksDB(path, false)
+	require.NoError(t, err, "failed to open db")
+	defer func() {
+		require.NoError(t, db.Close(), "failed to close db")
+	}()
+
+	block := &Block{Number: 10}
+	err = db.db.Put(grocksdb.NewDefaultWriteOptions(), computeKey(1, 1), func() []byte {
+		data, err := proto.Marshal(block)
+		require.NoError(t, err, "failed to marshal block")
+		return data
+	}())
+	require.NoError(t, err, "failed to put block into db")
+
+	retrievedBlock, err := db.Get(1, 1)
+	require.NoError(t, err, "failed to get block from db")
+	require.NotNil(t, retrievedBlock, "retrieved block is nil")
+	require.Equal(t, block.Number, retrievedBlock.Number, "retrieved block number does not match")
+}
+
+func TestRockDB_GetReturnsBlockIfItExists(t *testing.T) {
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3}
 
@@ -36,7 +97,7 @@ func TestGetReturnsBlockIfItExists(t *testing.T) {
 
 	// db now contains blocks 1, 2, and 3 for chainId 3
 
-	db, err := OpenDB(path)
+	db, err := OpenRocksDBForReading(path)
 	require.NoError(t, err, "failed to open db")
 	defer func() {
 		require.NoError(t, db.Close(), "failed to close db")
@@ -58,7 +119,7 @@ func TestGetReturnsBlockIfItExists(t *testing.T) {
 	}
 }
 
-func TestGetReturnsErrorIfBlockIsInvalid(t *testing.T) {
+func TestRockDB_GetReturnsErrorIfBlockIsInvalid(t *testing.T) {
 	chainID := uint64(3)
 	blockNumber := uint64(1)
 
@@ -67,7 +128,7 @@ func TestGetReturnsErrorIfBlockIsInvalid(t *testing.T) {
 
 	// db now contains an invalid blocks at blocknumber 1 for chainId 3
 
-	db, err := OpenDB(path)
+	db, err := OpenRocksDBForReading(path)
 	require.NoError(t, err, "failed to open db")
 	defer func() {
 		require.NoError(t, db.Close(), "failed to close db")
@@ -78,7 +139,7 @@ func TestGetReturnsErrorIfBlockIsInvalid(t *testing.T) {
 	require.Nil(t, block, "expected nil block when retrieving an invalid block")
 }
 
-func TestGetReturnsErrorIfBlockDoesNotExist(t *testing.T) {
+func TestRocksDB_GetReturnsErrorIfBlockDoesNotExist(t *testing.T) {
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3}
 
@@ -87,7 +148,7 @@ func TestGetReturnsErrorIfBlockDoesNotExist(t *testing.T) {
 
 	// db now contains blocks 1, 2, and 3 for chainId 3
 
-	db, err := OpenDB(path)
+	db, err := OpenRocksDBForReading(path)
 	require.NoError(t, err, "failed to open db")
 	defer func() {
 		require.NoError(t, db.Close(), "failed to close db")
@@ -107,7 +168,7 @@ func TestGetReturnsErrorIfBlockDoesNotExist(t *testing.T) {
 	}
 }
 
-func TestGetRangeReturnsExistingSubRange(t *testing.T) {
+func TestRocksDB_GetRangeReturnsExistingSubRange(t *testing.T) {
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3, 20}
 
@@ -116,7 +177,7 @@ func TestGetRangeReturnsExistingSubRange(t *testing.T) {
 
 	// db now contains blocks 1, 2, 3 and 20 for chainId 3
 
-	db, err := OpenDB(path)
+	db, err := OpenRocksDBForReading(path)
 	require.NoError(t, err, "failed to open db")
 
 	tests := []struct {
@@ -142,7 +203,7 @@ func TestGetRangeReturnsExistingSubRange(t *testing.T) {
 	}
 }
 
-func TestGetRangeReturnsErrorIfBlockIsInvalid(t *testing.T) {
+func TestRocksDB_GetRangeReturnsErrorIfBlockIsInvalid(t *testing.T) {
 	chainID := uint64(3)
 	blockNumber := uint64(1)
 
@@ -151,7 +212,7 @@ func TestGetRangeReturnsErrorIfBlockIsInvalid(t *testing.T) {
 
 	// db now contains an invalid blocks at blocknumber 1 for chainId 3
 
-	db, err := OpenDB(path)
+	db, err := OpenRocksDBForReading(path)
 	require.NoError(t, err, "failed to open db")
 
 	count := 0
@@ -164,7 +225,7 @@ func TestGetRangeReturnsErrorIfBlockIsInvalid(t *testing.T) {
 		1, chainID, blockNumber, blockNumber, count)
 
 }
-func TestGetRangeRevReturnsExistingSubRangeInReverseOrder(t *testing.T) {
+func TestRocksDB_GetRangeRevReturnsExistingSubRangeInReverseOrder(t *testing.T) {
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3, 20}
 
@@ -173,7 +234,7 @@ func TestGetRangeRevReturnsExistingSubRangeInReverseOrder(t *testing.T) {
 
 	// db now contains blocks 1, 2, 3 and 20 for chainId 3
 
-	db, err := OpenDB(path)
+	db, err := OpenRocksDBForReading(path)
 	require.NoError(t, err, "failed to open db")
 
 	tests := []struct {
@@ -199,7 +260,7 @@ func TestGetRangeRevReturnsExistingSubRangeInReverseOrder(t *testing.T) {
 	}
 }
 
-func TestGetRangeRevReturnsErrorIfBlockIsInvalid(t *testing.T) {
+func TestRocksDB_GetRangeRevReturnsErrorIfBlockIsInvalid(t *testing.T) {
 	chainID := uint64(3)
 	blockNumber := uint64(1)
 
@@ -208,7 +269,7 @@ func TestGetRangeRevReturnsErrorIfBlockIsInvalid(t *testing.T) {
 
 	// db now contains an invalid blocks at blocknumber 1 for chainId 3
 
-	db, err := OpenDB(path)
+	db, err := OpenRocksDBForReading(path)
 	require.NoError(t, err, "failed to open db")
 
 	count := 0
@@ -223,7 +284,7 @@ func TestGetRangeRevReturnsErrorIfBlockIsInvalid(t *testing.T) {
 }
 
 // writeDB is a wrapper around grocksdb.DB that provides methods to write blocks to the database.
-// It is used for testing purposes to fill a database with blocks that can be queried later using the DB type (which only provides read access).
+// It is used for testing purposes to fill a database with blocks that can be queried later using the RocksDB type (which only provides an update function).
 type writeDB struct {
 	db *grocksdb.DB
 }

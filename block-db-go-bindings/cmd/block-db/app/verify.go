@@ -58,7 +58,7 @@ func runVerify(ctx context.Context, c *cli.Command) (err error) {
 	endBlock := c.Uint64(endBlockFlag.Name)
 
 	fmt.Printf("Opening block database in %q ...\n", dir)
-	database, err := blockdb.OpenDB(dir)
+	database, err := blockdb.OpenRocksDBForReading(dir)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}

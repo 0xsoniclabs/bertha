@@ -202,7 +202,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	// Open the block database.
 	slog.Info("Opening block database", "directory", blockDbDirectory)
-	database, err := blockdb.OpenDB(blockDbDirectory)
+	database, err := blockdb.OpenRocksDBForReading(blockDbDirectory)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}

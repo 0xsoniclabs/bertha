@@ -13,28 +13,53 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// DB is a handle to the block database which can be used for point and range queries.
-type DB struct {
+//go:generate mockgen -source=block_db.go -destination=block_db_mock.go -package=blockdb
+
+// BlockDb is an interface to the block database which can be used for point and range queries.
+type BlockDb interface {
+	Get(chainID, blockNumber uint64) (*Block, error)
+	Update(chainID uint64, block *Block) error
+	GetRange(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error]
+	GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error]
+	Close() error
+}
+
+// RocksDB wraps a rocksDB database and provides the `BlockDb` interface.
+type RocksDB struct {
 	db            *grocksdb.DB
 	secondaryPath string
 }
 
-// OpenDB opens the database for reading.
-func OpenDB(path string) (DB, error) {
+// OpenRocksDB opens the database. If read_only is true, it opens the database in read-only mode.
+func OpenRocksDB(path string, read_only bool) (RocksDB, error) {
+	if read_only {
+		return OpenRocksDBForReading(path)
+	}
+	options := grocksdb.NewDefaultOptions()
+	options.SetCreateIfMissing(false)
+	db, err := grocksdb.OpenDb(options, path)
+	if err != nil {
+		return RocksDB{}, err
+	}
+	return RocksDB{db: db}, nil
+}
+
+// OpenRocksDBForReading opens the database for reading.
+func OpenRocksDBForReading(path string) (RocksDB, error) {
 	secondaryPath, err := os.MkdirTemp("", "blockdb-secondary-*")
 	if err != nil {
-		return DB{}, err
+		return RocksDB{}, err
 	}
 	options := grocksdb.NewDefaultOptions()
 	db, err := grocksdb.OpenDbAsSecondary(options, path, secondaryPath)
 	if err != nil {
-		return DB{}, err
+		return RocksDB{}, err
 	}
-	return DB{db: db, secondaryPath: secondaryPath}, nil
+	return RocksDB{db: db, secondaryPath: secondaryPath}, nil
 }
 
 // Close closes the database.
-func (db DB) Close() error {
+func (db RocksDB) Close() error {
 	if db.db != nil {
 		db.db.Close()
 	}
@@ -55,7 +80,7 @@ func computeKey(chainID, blockNumber uint64) []byte {
 
 // Get retrieves a single block by chain ID and block number.
 // If the block does not exist, it returns nil.
-func (db DB) Get(chainID, blockNumber uint64) (*Block, error) {
+func (db RocksDB) Get(chainID, blockNumber uint64) (*Block, error) {
 	key := computeKey(chainID, blockNumber)
 
 	readOptions := grocksdb.NewDefaultReadOptions()
@@ -76,12 +101,26 @@ func (db DB) Get(chainID, blockNumber uint64) (*Block, error) {
 	return &block, nil
 }
 
+// Update inserts or updates a block by chain ID and block number.
+func (db RocksDB) Update(chainID uint64, block *Block) error {
+	key := computeKey(chainID, block.Number)
+
+	writeOptions := grocksdb.NewDefaultWriteOptions()
+	defer writeOptions.Destroy()
+
+	value, err := proto.Marshal(block)
+	if err != nil {
+		return err
+	}
+	return db.db.Put(writeOptions, key, value)
+}
+
 // GetRange retrieves multiple blocks by chain ID and block number.
 // This function returns an iterator that yields blocks in the specified range.
 // If there are no blocks in the range in the database, the iterator will not yield any blocks.
 // If parsing the block fails, the block will be nil and an error is returned.
 // The iterator needs to be used in a range loop because otherwise the inner iterator will not be closed properly.
-func (db DB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error] {
+func (db RocksDB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error] {
 	startKey := computeKey(chainID, startBlockNumber)
 
 	readOptions := grocksdb.NewDefaultReadOptions()
@@ -116,7 +155,7 @@ func (db DB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq
 // If there are no blocks in the range in the database, the iterator will not yield any blocks.
 // If parsing the block fails, the block will be nil and an error is returned.
 // The iterator needs to be used in a range loop because otherwise the inner iterator will not be closed properly.
-func (db DB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error] {
+func (db RocksDB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error] {
 	endKey := computeKey(chainID, endBlockNumber)
 
 	readOptions := grocksdb.NewDefaultReadOptions()
