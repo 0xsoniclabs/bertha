@@ -11,6 +11,9 @@ use crate::{
 /// For example, it does not include fields such as `gas_used`, `transaction_root` and `logs_bloom`,
 /// since these can all be computed from the contained transactions and receipts.
 ///
+/// Moreover, it contains additional state root fields for alternative experimental data structures
+/// which are not currently part of Ethereum.
+///
 /// Fields are named according to the Ethereum Yellow Paper (Shanghai version).
 /// Go-ethereum and JSON RPC names, where they differ, are indicated through doc comments on each
 /// field.
@@ -57,6 +60,10 @@ pub struct Block {
 
     /// Added by EIP-7685
     pub requests_hash: Option<Hash>,
+
+    // State roots for experimental data structures
+    pub verkle_state_root: Option<Hash>,
+    pub binary_state_root: Option<Hash>,
 }
 
 impl Block {
@@ -145,6 +152,8 @@ impl Block {
             excess_blob_gas: header.excess_blob_gas,
             parent_beacon_block_root: None,
             requests_hash: None,
+            verkle_state_root: None,
+            binary_state_root: None,
         }
     }
 }
@@ -226,6 +235,8 @@ impl From<JsonBlock> for Block {
             excess_blob_gas: json_block.excess_blob_gas.map(|v| v.0),
             parent_beacon_block_root: json_block.parent_beacon_block_root.map(|v| v.0),
             requests_hash: json_block.requests_hash.map(|v| v.0),
+            verkle_state_root: None,
+            binary_state_root: None,
         }
     }
 }

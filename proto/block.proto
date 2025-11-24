@@ -26,6 +26,10 @@ message Block {
   optional uint64 excess_blob_gas = 17;
   optional bytes parent_beacon_block_root = 18;
   optional bytes requests_hash = 19;
+
+  // State roots for alternative tree data structures
+  optional bytes verkle_state_root = 20;
+  optional bytes binary_state_root = 21;
 }
 
 // Corresponds to bertha_types::Transaction

@@ -113,6 +113,8 @@ impl TryFrom<IdxFullBlock> for Block {
             excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
             requests_hash: None,
+            verkle_state_root: None,
+            binary_state_root: None,
         })
     }
 }
@@ -226,6 +228,8 @@ mod tests {
             excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
             requests_hash: None,
+            verkle_state_root: None,
+            binary_state_root: None,
         };
 
         assert_eq!(Block::try_from(idx_full_block).unwrap(), block);
@@ -279,6 +283,8 @@ mod tests {
             excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
             requests_hash: None,
+            verkle_state_root: None,
+            binary_state_root: None,
         };
 
         let idx_full_block = IdxFullBlock {

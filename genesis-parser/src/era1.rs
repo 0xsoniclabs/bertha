@@ -242,5 +242,7 @@ pub fn convert_block(block: BlockTuple) -> Block {
         excess_blob_gas: header.excess_blob_gas,
         parent_beacon_block_root: header.parent_beacon_block_root.map(|r| r.0),
         requests_hash: header.requests_hash.map(|h| h.0),
+        verkle_state_root: None,
+        binary_state_root: None,
     }
 }

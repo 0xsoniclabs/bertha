@@ -124,7 +124,11 @@ impl From<bertha_types::Block> for Block {
             blob_gas_used: value.blob_gas_used,
             excess_blob_gas: value.excess_blob_gas,
             parent_beacon_block_root: value.parent_beacon_block_root.map(Into::into),
+
             requests_hash: value.requests_hash.map(Into::into),
+
+            verkle_state_root: value.verkle_state_root.map(Into::into),
+            binary_state_root: value.binary_state_root.map(Into::into),
         }
     }
 }
@@ -308,6 +312,15 @@ impl TryFrom<Block> for bertha_types::Block {
                 .map(convert_to_fixed_size)
                 .transpose()?,
             requests_hash: value.requests_hash.map(convert_to_fixed_size).transpose()?,
+
+            verkle_state_root: value
+                .verkle_state_root
+                .map(convert_to_fixed_size)
+                .transpose()?,
+            binary_state_root: value
+                .binary_state_root
+                .map(convert_to_fixed_size)
+                .transpose()?,
         })
     }
 }
@@ -433,6 +446,8 @@ mod tests {
         let excess_blob_gas = rng.u64();
         let parent_beacon_block_root: Hash = rng.bytes();
         let requests_hash: Hash = rng.bytes();
+        let verkle_state_root: Hash = rng.bytes();
+        let binary_state_root: Hash = rng.bytes();
 
         bertha_types::Block {
             parent_hash: rng.bytes(),
@@ -462,6 +477,9 @@ mod tests {
             excess_blob_gas: rng.option(excess_blob_gas),
             parent_beacon_block_root: rng.option(parent_beacon_block_root),
             requests_hash: rng.option(requests_hash),
+
+            verkle_state_root: rng.option(verkle_state_root),
+            binary_state_root: rng.option(binary_state_root),
         }
     }
 
