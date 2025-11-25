@@ -45,6 +45,8 @@ pub fn convert_block(block: CompressedSignedBeaconBlock) -> Result<Block, Error>
                 excess_blob_gas: Option::default(),
                 parent_beacon_block_root: Some(blk.message.parent_root.0),
                 requests_hash: Option::default(),
+                verkle_state_root: None,
+                binary_state_root: None,
             })
         }
         SignedBeaconBlock::Capella(blk) => {
@@ -69,6 +71,8 @@ pub fn convert_block(block: CompressedSignedBeaconBlock) -> Result<Block, Error>
                 excess_blob_gas: Option::default(),
                 parent_beacon_block_root: Some(blk.message.parent_root.0),
                 requests_hash: Option::default(),
+                verkle_state_root: None,
+                binary_state_root: None,
             })
         }
         SignedBeaconBlock::Deneb(blk) => {
@@ -93,6 +97,8 @@ pub fn convert_block(block: CompressedSignedBeaconBlock) -> Result<Block, Error>
                 excess_blob_gas: Option::default(),
                 parent_beacon_block_root: Some(blk.message.parent_root.0),
                 requests_hash: Option::default(),
+                verkle_state_root: None,
+                binary_state_root: None,
             })
         }
         SignedBeaconBlock::Electra(blk) => {
@@ -118,6 +124,8 @@ pub fn convert_block(block: CompressedSignedBeaconBlock) -> Result<Block, Error>
                 excess_blob_gas: Some(block.excess_blob_gas),
                 parent_beacon_block_root: Some(blk.message.parent_root.0),
                 requests_hash: Some(execution_requests.requests_hash().0),
+                verkle_state_root: None,
+                binary_state_root: None,
             })
         }
     }
