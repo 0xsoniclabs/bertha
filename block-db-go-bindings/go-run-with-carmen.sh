@@ -16,9 +16,12 @@ trap 'git apply --reverse enable-carmen.patch &> /dev/null' EXIT
 CARMEN_RUST_DIR=$(pwd)/../../carmen/rust
 BLOCK_DB_GO_BINDINGS_DIR=$(pwd)
 
+# Additional Carmen features
+#CARMEN_STORAGE_STATS="--features storage-stats"
+
 # Build carmen.
 cd $CARMEN_RUST_DIR
-cargo build --release
+cargo build --release $CARMEN_STORAGE_STATS
 
 # Override the go carmen dependencies to use local modified versions.
 # Check if the diff can be applied cleanly in reverse. In this case it is already applied.
