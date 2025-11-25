@@ -30,7 +30,7 @@ type RocksDB struct {
 	secondaryPath string
 }
 
-// OpenRocksDBForWriting opens the database. If read_only is true, it opens the database in read-only mode.
+// OpenRocksDBForWriting opens the database.
 func OpenRocksDBForWriting(path string) (RocksDB, error) {
 	options := grocksdb.NewDefaultOptions()
 	options.SetCreateIfMissing(false)
