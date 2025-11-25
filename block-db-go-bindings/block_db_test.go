@@ -36,7 +36,7 @@ func TestOpenRocksDB(t *testing.T) {
 		runTests(t, OpenRocksDBForReading)
 	})
 
-	t.Run("OpenRocksDBWithOptionsForReading", func(t *testing.T) {
+	t.Run("OpenRocksDBForWriting", func(t *testing.T) {
 		runTests(t, OpenRocksDBForWriting)
 	})
 }
