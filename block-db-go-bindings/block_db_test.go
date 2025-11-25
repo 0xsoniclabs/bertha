@@ -14,8 +14,8 @@ type OpenRocksDBFunc func(path string) (RocksDB, error)
 func TestOpenRocksDB(t *testing.T) {
 	runTests := func(t *testing.T, runner OpenRocksDBFunc) {
 		tests := map[string]func(*testing.T, OpenRocksDBFunc){
-			"opens existing db":                                         opensExistingDb,
-			"fails if db does not exist":                                failsIfDbDoesNotExist,
+			"opens existing db":                                         opensExistingDB,
+			"fails if db does not exist":                                failsIfDBDoesNotExist,
 			"get returns block if it exists":                            getReturnsBlockIfItExists,
 			"get returns error if block is invalid":                     getReturnsErrorIfBlockIsInvalid,
 			"get returns error if block does not exist":                 getReturnsErrorIfBlockDoesNotExist,
@@ -41,7 +41,7 @@ func TestOpenRocksDB(t *testing.T) {
 	})
 }
 
-func opensExistingDb(t *testing.T, dbOpener OpenRocksDBFunc) {
+func opensExistingDB(t *testing.T, dbOpener OpenRocksDBFunc) {
 	path, err := os.MkdirTemp("", "blockdb-*")
 	require.NoError(t, err, "failed to create temp dir")
 
@@ -54,7 +54,7 @@ func opensExistingDb(t *testing.T, dbOpener OpenRocksDBFunc) {
 	require.NoError(t, db.Close(), "failed to close db")
 }
 
-func failsIfDbDoesNotExist(t *testing.T, dbOpener OpenRocksDBFunc) {
+func failsIfDBDoesNotExist(t *testing.T, dbOpener OpenRocksDBFunc) {
 	_, err := dbOpener("non-existing-db-path")
 	require.Error(t, err, "opening db did not return an error although path does not exist")
 

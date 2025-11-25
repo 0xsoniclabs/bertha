@@ -15,8 +15,8 @@ import (
 
 //go:generate mockgen -source=block_db.go -destination=block_db_mock.go -package=blockdb
 
-// BlockDb is an interface to the block database which can be used for point and range queries.
-type BlockDb interface {
+// BlockDB is an interface to the block database which can be used for point and range queries.
+type BlockDB interface {
 	Get(chainID, blockNumber uint64) (*Block, error)
 	Update(chainID uint64, block *Block) error
 	GetRange(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error]
