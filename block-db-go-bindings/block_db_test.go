@@ -9,40 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-type OpenRocksDBFunc func(path string) (RocksDB, error)
-
-func TestOpenRocksDB(t *testing.T) {
-	runTests := func(t *testing.T, runner OpenRocksDBFunc) {
-		tests := map[string]func(*testing.T, OpenRocksDBFunc){
-			"opens existing db":          opensExistingDb,
-			"fails if db does not exist": failsIfDbDoesNotExist,
-		}
-
-		for name, test := range tests {
-			t.Run(name, func(t *testing.T) {
-				test(t, runner)
-			})
-		}
-	}
-
-	t.Run("OpenRocksDBForReading", func(t *testing.T) {
-		runTests(t, OpenRocksDBForReading)
-	})
-
-	t.Run("OpenRocksDBWithOptionsForReading", func(t *testing.T) {
-		runTests(t, func(path string) (RocksDB, error) {
-			return OpenRocksDB(path, true)
-		})
-	})
-
-	t.Run("OpenRocksDBWithOptionsForWriting", func(t *testing.T) {
-		runTests(t, func(path string) (RocksDB, error) {
-			return OpenRocksDB(path, false)
-		})
-	})
-}
-
-func opensExistingDb(t *testing.T, runner OpenRocksDBFunc) {
+func TestOpenDBOpensExistingDb(t *testing.T) {
 	path, err := os.MkdirTemp("", "blockdb-*")
 	require.NoError(t, err, "failed to create temp dir")
 
@@ -50,13 +17,20 @@ func opensExistingDb(t *testing.T, runner OpenRocksDBFunc) {
 	require.NoError(t, err, "failed to create db")
 	writeDB.close()
 
-	db, err := runner(path)
+	db, err := OpenRocksDBForReading(path)
+	require.NoError(t, err, "failed to open db")
+	require.NoError(t, db.Close(), "failed to close db")
+
+	db, err = OpenRocksDBForWriting(path)
 	require.NoError(t, err, "failed to open db")
 	require.NoError(t, db.Close(), "failed to close db")
 }
 
-func failsIfDbDoesNotExist(t *testing.T, runner OpenRocksDBFunc) {
-	_, err := runner("non-existing-db-path")
+func TestOpenDBFailsIfDbDoesNotExist(t *testing.T) {
+	_, err := OpenRocksDBForReading("non-existing-db-path")
+	require.Error(t, err, "opening db did not return an error although path does not exist")
+
+	_, err = OpenRocksDBForWriting("non-existing-db-path")
 	require.Error(t, err, "opening db did not return an error although path does not exist")
 }
 
@@ -68,19 +42,14 @@ func TestOpenRocksDBWithOptionsForWritingOpensDbForWriting(t *testing.T) {
 	require.NoError(t, err, "failed to create db")
 	writeDB.close()
 
-	db, err := OpenRocksDB(path, false)
+	db, err := OpenRocksDBForWriting(path)
 	require.NoError(t, err, "failed to open db")
 	defer func() {
 		require.NoError(t, db.Close(), "failed to close db")
 	}()
 
-	block := &Block{Number: 10}
-	err = db.db.Put(grocksdb.NewDefaultWriteOptions(), computeKey(1, 1), func() []byte {
-		data, err := proto.Marshal(block)
-		require.NoError(t, err, "failed to marshal block")
-		return data
-	}())
-	require.NoError(t, err, "failed to put block into db")
+	block := &Block{Number: 1}
+	require.NoError(t, db.Update(1, block))
 
 	retrievedBlock, err := db.Get(1, 1)
 	require.NoError(t, err, "failed to get block from db")
