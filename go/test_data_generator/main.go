@@ -298,7 +298,7 @@ func dumpBlocks(data []BlockWithReceipts) string {
 }
 
 // formatAndPrintRustCode formats the given Rust code using rustfmt and prints it to stdout.
-// NOTE: It assumes that a `rustgfmt.toml` file is present in the root directory of the project (../../).
+// NOTE: It assumes that a `rustfmt.toml` file is present in the root directory of the project (../../).
 func formatAndPrintRustCode(rustCode string) {
 	// Format once with a very high max_width to ensure rustfmt does not skip the type formatting
 	cmd := exec.Command("rustfmt", "+nightly", "--edition", "2024", "--config-path", "../../", "--config", "max_width=100000", "--config", "struct_lit_width=0")

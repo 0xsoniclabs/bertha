@@ -124,7 +124,6 @@ impl From<bertha_types::Block> for Block {
             blob_gas_used: value.blob_gas_used,
             excess_blob_gas: value.excess_blob_gas,
             parent_beacon_block_root: value.parent_beacon_block_root.map(Into::into),
-
             requests_hash: value.requests_hash.map(Into::into),
 
             verkle_state_root: value.verkle_state_root.map(Into::into),
