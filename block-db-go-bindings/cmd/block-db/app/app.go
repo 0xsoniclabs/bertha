@@ -16,6 +16,7 @@ func Run(args []string) error {
 }
 
 func getApp() *cli.Command {
+	var tracyEnabled bool
 	var profiler *profiler
 	var diagnostic *diagnostic
 	return &cli.Command{
@@ -32,6 +33,7 @@ func getApp() *cli.Command {
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
 			tracy.StartupProfiler()
+			tracyEnabled = true
 			if cmd.Bool(diagnosticsFlag.Name) {
 				diagnostic = StartDiagnostics(slog.Default(), cmd.Uint16(diagnosticsPortFlag.Name))
 			}
@@ -61,7 +63,9 @@ func getApp() *cli.Command {
 			if diagnostic != nil {
 				return diagnostic.Stop()
 			}
-			tracy.ShutdownProfiler()
+			if tracyEnabled {
+				tracy.ShutdownProfiler()
+			}
 			return nil
 		},
 	}
