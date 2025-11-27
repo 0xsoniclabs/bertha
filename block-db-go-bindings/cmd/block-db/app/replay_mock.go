@@ -86,3 +86,17 @@ func (mr *MockChainMockRecorder) IsMptConformant() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsMptConformant", reflect.TypeOf((*MockChain)(nil).IsMptConformant))
 }
+
+// IsVerkleConformant mocks base method.
+func (m *MockChain) IsVerkleConformant() bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsVerkleConformant")
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// IsVerkleConformant indicates an expected call of IsVerkleConformant.
+func (mr *MockChainMockRecorder) IsVerkleConformant() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsVerkleConformant", reflect.TypeOf((*MockChain)(nil).IsVerkleConformant))
+}

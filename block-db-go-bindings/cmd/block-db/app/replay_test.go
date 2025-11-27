@@ -179,6 +179,8 @@ type replayer func(
 	blocks iter.Seq2[*blockdb.Block, error],
 	chain Chain,
 	metadata Metadata,
+	database blockdb.BlockDB,
+	replayFlags ReplayLoopFlags,
 	onBlockProcessed func(*types.Block),
 ) error
 
@@ -208,7 +210,7 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 
 	iter := newIter(blocks)
 	counter := 0
-	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, func(block *types.Block) {
+	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, nil, ReplayLoopFlags{}, func(block *types.Block) {
 		counter++
 	}))
 	require.Equal(t, len(blocks), counter)
@@ -278,7 +280,7 @@ func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 	}
 
 	iter := newIter(blocks)
-	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, nil))
+	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, nil, ReplayLoopFlags{}, nil))
 }
 
 func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
@@ -290,7 +292,7 @@ func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
 	blocks := func(yield func(*blockdb.Block, error) bool) {
 		yield(nil, injectedError)
 	}
-	require.ErrorIs(t, run(t.Context(), blocks, chain, Metadata{}, nil), injectedError)
+	require.ErrorIs(t, run(t.Context(), blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil), injectedError)
 }
 
 func failsOnCancelledContext(t *testing.T, run replayer) {
@@ -305,7 +307,7 @@ func failsOnCancelledContext(t *testing.T, run replayer) {
 		{Number: 0, StateRoot: types.EmptyRootHash[:]},
 	})
 
-	require.ErrorIs(t, run(ctxt, blocks, chain, Metadata{}, nil), context.Canceled)
+	require.ErrorIs(t, run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil), context.Canceled)
 }
 
 func failsOnBlockConversionError(t *testing.T, run replayer) {
@@ -320,7 +322,7 @@ func failsOnBlockConversionError(t *testing.T, run replayer) {
 		}},
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, Metadata{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil),
 		"failed to convert block 0",
 	)
 }
@@ -338,7 +340,7 @@ func failsOnBlockApplicationError(t *testing.T, run replayer) {
 	ctxt := t.Context()
 	blocks := newIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
-		run(ctxt, blocks, chain, Metadata{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil),
 		injectedError,
 	)
 }
@@ -356,7 +358,7 @@ func failsOnCommitmentComputationError(t *testing.T, run replayer) {
 	ctxt := t.Context()
 	blocks := newIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
-		run(ctxt, blocks, chain, Metadata{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil),
 		injectedError,
 	)
 }
@@ -381,7 +383,7 @@ func failsOnWrongReceiptStatus(t *testing.T, run replayer) {
 		}},
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, Metadata{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil),
 		"receipt status mismatch",
 	)
 }
@@ -409,7 +411,7 @@ func failsOnWrongReceiptCumulatedGasUsed(t *testing.T, run replayer) {
 		}},
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, Metadata{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil),
 		"receipt cumulative gas used mismatch",
 	)
 }
@@ -433,7 +435,7 @@ func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 		StateRoot: common.Hash{0x2}.Bytes(),
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, Metadata{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil),
 		"state root mismatch",
 	)
 }
@@ -475,7 +477,7 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 
 		// Start running the replay pipeline.
 		go func() {
-			err := runReplayPipeline(t.Context(), newIter(blocks), chain, Metadata{}, nil)
+			err := runReplayPipeline(t.Context(), newIter(blocks), chain, Metadata{}, nil, ReplayLoopFlags{}, nil)
 			require.ErrorIs(t, err, issue)
 		}()
 
@@ -518,4 +520,136 @@ func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
 	_, _, err = chain.ApplyBlock(block, Metadata{})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "failed to apply block")
+}
+
+func Test_getExpectedStateRoot_ReturnsCorrectStateRoot(t *testing.T) {
+	require := require.New(t)
+
+	chainId := uint64(123)
+
+	dir := t.TempDir()
+	state, err := NewState(StateParameters{
+		Directory: dir,
+	})
+	require.NoError(err)
+	defer func() {
+		require.NoError(state.Close())
+	}()
+
+	block := &blockdb.Block{
+		Number:          0,
+		StateRoot:       common.HexToHash("0xdeadbeef").Bytes(),
+		VerkleStateRoot: common.HexToHash("0xabad1dea").Bytes(),
+	}
+
+	expectedStateRoot := getExpectedStateRoot(&stateChainAdapter{
+		chainId: chainId,
+		state:   state,
+		schema:  5,
+	}, block)
+	require.Equal(common.HexToHash("0xdeadbeef"), expectedStateRoot)
+
+	expectedStateRoot = getExpectedStateRoot(&stateChainAdapter{
+		chainId: chainId,
+		state:   state,
+		schema:  6,
+	}, block)
+	require.Equal(common.HexToHash("0xabad1dea"), expectedStateRoot)
+}
+
+func Test_updateStateRoot_UpdatesCorrectStateRoot(t *testing.T) {
+	require := require.New(t)
+
+	chainId := uint64(123)
+
+	dir := t.TempDir()
+	state, err := NewState(StateParameters{
+		Directory: dir,
+	})
+	require.NoError(err)
+	defer func() {
+		require.NoError(state.Close())
+	}()
+
+	block := &blockdb.Block{
+		Number:    0,
+		StateRoot: common.HexToHash("0xdeadbeef").Bytes(),
+	}
+
+	updateStateRoot(&stateChainAdapter{
+		chainId: chainId,
+		state:   state,
+		schema:  5,
+	}, block, common.HexToHash("0xfeedface"))
+
+	require.Equal(common.HexToHash("0xfeedface").Bytes(), block.StateRoot)
+
+	block = &blockdb.Block{
+		Number:          0,
+		VerkleStateRoot: common.HexToHash("0xabad1dea").Bytes(),
+	}
+
+	updateStateRoot(&stateChainAdapter{
+		chainId: chainId,
+		state:   state,
+		schema:  6,
+	}, block, common.HexToHash("0xfacefeed"))
+
+	require.Equal(common.HexToHash("0xfacefeed").Bytes(), block.VerkleStateRoot)
+}
+
+func Test_checkBlockResults_OverwritesStateRoot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	chainId := uint64(12)
+	oldStateRoot := common.HexToHash("0xdeadbeef")
+	newStateRoot := common.HexToHash("0xfeedface")
+	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(chainId).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+
+	block := &blockdb.Block{
+		Number:    0,
+		StateRoot: oldStateRoot.Bytes(),
+	}
+
+	blockWithUpdatedStateRoot := &blockdb.Block{
+		Number:    0,
+		StateRoot: newStateRoot.Bytes(),
+	}
+
+	blockDb := blockdb.NewMockDBInterface(ctrl)
+	blockDb.EXPECT().
+		Update(chainId, blockWithUpdatedStateRoot).
+		Return(nil)
+
+	replayFlags := ReplayLoopFlags{
+		overwriteStateRoot: New(true, true),
+	}
+
+	err := checkBlockResults(
+		chain,
+		block,
+		types.Receipts{},
+		future.Immediate(result.Ok(newStateRoot)),
+		blockDb,
+		&replayFlags,
+	)
+	require.NoError(t, err)
+}
+
+func Test_FlagWithConfirmation(t *testing.T) {
+	require := require.New(t)
+
+	flag := New(true, false)
+	require.True(flag.IsEnabled())
+	require.False(flag.IsConfirmed())
+
+	flag.Confirm()
+	require.True(flag.IsConfirmed())
+
+	flag.Disable()
+	require.False(flag.IsEnabled())
+	require.True(flag.IsConfirmed())
 }

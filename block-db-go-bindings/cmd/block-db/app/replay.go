@@ -80,6 +80,18 @@ var (
 		Usage: "Enable the replay pipeline (default: true)",
 		Value: true,
 	}
+
+	overwriteStateRoot = &cli.BoolFlag{
+		Name:  "overwrite-state-roots",
+		Usage: "Overwrite the state roots in the block database with the ones computed from the state",
+		Value: false,
+	}
+
+	confirmAllPromptsFlag = &cli.BoolFlag{
+		Name:  "y",
+		Usage: "Automatically confirm all prompts",
+		Value: false,
+	}
 )
 
 // getListOfVariants returns a sorted list of all registered database variants.
@@ -108,6 +120,8 @@ func getReplayCommand() *cli.Command {
 			startBlockFlag,
 			endBlockFlag,
 			usePipelineFlag,
+			overwriteStateRoot,
+			confirmAllPromptsFlag,
 		},
 	}
 }
@@ -123,6 +137,8 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	startBlock := c.Uint64(startBlockFlag.Name)
 	endBlock := c.Uint64(endBlockFlag.Name)
 	usePipeline := c.Bool(usePipelineFlag.Name)
+	overwriteStateRoot := c.Bool(overwriteStateRoot.Name)
+	confirmAllPrompts := c.Bool(confirmAllPromptsFlag.Name)
 
 	schema := carmen.Schema(c.Int(dbSchema.Name))
 	variant := carmen.Variant(c.String(dbVariant.Name))
@@ -202,7 +218,13 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	// Open the block database.
 	slog.Info("Opening block database", "directory", blockDbDirectory)
-	database, err := blockdb.OpenRocksDBForReading(blockDbDirectory)
+	var database blockdb.BlockDB
+	if overwriteStateRoot {
+		slog.Info("State root overwriting enabled")
+		database, err = blockdb.OpenRocksDBForWriting(blockDbDirectory)
+	} else {
+		database, err = blockdb.OpenRocksDBForReading(blockDbDirectory)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
@@ -235,13 +257,17 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	blocks := database.GetRange(chainId, startBlock, endBlock)
 	chain := &stateChainAdapter{
-		chainId:         chainId,
-		state:           state,
-		isMptConformant: schema == 5,
+		chainId: chainId,
+		state:   state,
+		schema:  schema,
+	}
+
+	replayLoopFlags := ReplayLoopFlags{
+		overwriteStateRoot: New(overwriteStateRoot, confirmAllPrompts),
 	}
 
 	return run(
-		ctx, blocks, chain, metadata, func(block *types.Block) {
+		ctx, blocks, chain, metadata, database, replayLoopFlags, func(block *types.Block) {
 			if info := progress.LogProgress(block); len(info) > 0 {
 				slog.Info(info)
 			}
@@ -342,6 +368,8 @@ func runReplayLoop(
 	blocks iter.Seq2[*blockdb.Block, error],
 	chain Chain,
 	metadata Metadata,
+	blockDB blockdb.BlockDB,
+	replayLoopFlags ReplayLoopFlags,
 	onBlockDone func(block *types.Block),
 ) error {
 	for block, err := range blocks {
@@ -365,7 +393,7 @@ func runReplayLoop(
 		}
 
 		// Check the receipts against the expected values in the block.
-		if err := checkBlockResults(chain, block, receipts, stateRoot); err != nil {
+		if err := checkBlockResults(chain, block, receipts, stateRoot, blockDB, &replayLoopFlags); err != nil {
 			return err
 		}
 
@@ -386,6 +414,8 @@ func runReplayPipeline(
 	blocks iter.Seq2[*blockdb.Block, error],
 	chain Chain,
 	metadata Metadata,
+	blockDB blockdb.BlockDB,
+	replayLoopFlags ReplayLoopFlags,
 	onBlockDone func(block *types.Block),
 ) error {
 	const bufferSize = 1024
@@ -490,7 +520,7 @@ func runReplayPipeline(
 		for result := range results {
 			block := result.decoded.proto
 
-			err := checkBlockResults(chain, block, result.receipts, result.stateRoot)
+			err := checkBlockResults(chain, block, result.receipts, result.stateRoot, blockDB, &replayLoopFlags)
 			if err != nil {
 				reportIssue(err)
 				return
@@ -520,8 +550,11 @@ func checkBlockResults(
 	block *blockdb.Block,
 	receipts types.Receipts,
 	stateRootFuture future.Future[result.Result[common.Hash]],
+	blockDB blockdb.BlockDB,
+	replayLoopFlags *ReplayLoopFlags,
 ) error {
 	zone := tracy.ZoneBegin("CheckResults")
+	overwriteStateRoot := &replayLoopFlags.overwriteStateRoot
 	for i, receipt := range receipts {
 		want := block.Receipts[i]
 		if receipt.Status != want.GetStatus() {
@@ -539,14 +572,42 @@ func checkBlockResults(
 	// - check logs
 
 	// Check resulting state root.
-	stateRoot, err := stateRootFuture.Await().Get()
+	computedStateRoot, err := stateRootFuture.Await().Get()
 	if err != nil {
 		return fmt.Errorf("failed to get state root after applying block %d: %w", block.Number, err)
 	}
-	if chain.IsMptConformant() && common.BytesToHash(block.StateRoot) != stateRoot {
-		return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
-			block.Number, block.StateRoot, stateRoot)
+	expectedStateRoot := getExpectedStateRoot(chain, block)
+
+	if overwriteStateRoot.IsEnabled() {
+		if !overwriteStateRoot.IsConfirmed() && expectedStateRoot != (common.Hash{}) && expectedStateRoot != computedStateRoot {
+			slog.Warn("Block has existing state root", "block_number", block.Number, "existing", expectedStateRoot, "new", computedStateRoot)
+			fmt.Printf("Are you sure you want to overwrite the existing state root (y/n)? ")
+			var response string
+			fmt.Scanln(&response)
+			if strings.ToLower(strings.TrimSpace(response)) != "y" {
+				slog.Info("State roots overriding disabled from this point onward")
+				overwriteStateRoot.Disable() //disabled by the user
+			} else {
+				slog.Info("Overriding state roots from this point onward")
+				overwriteStateRoot.Confirm() //confirmed by the user
+			}
+		}
+
+		// Double check in case user disabled the overwrite
+		if overwriteStateRoot.IsEnabled() {
+			updateStateRoot(chain, block, computedStateRoot)
+			err = blockDB.Update(chain.ChainId(), block)
+			if err != nil {
+				return fmt.Errorf("failed to update block %d in database: %w", block.Number, err)
+			}
+		}
 	}
+
+	if !overwriteStateRoot.IsEnabled() && expectedStateRoot != (common.Hash{}) && computedStateRoot != expectedStateRoot {
+		return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
+			block.Number, expectedStateRoot, computedStateRoot)
+	}
+
 	zone.End()
 	return nil
 }
@@ -555,6 +616,7 @@ func checkBlockResults(
 type Chain interface {
 	ChainId() uint64
 	IsMptConformant() bool
+	IsVerkleConformant() bool
 	ApplyBlock(*types.Block, Metadata) (
 		types.Receipts,
 		future.Future[result.Result[common.Hash]],
@@ -564,9 +626,9 @@ type Chain interface {
 
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
 type stateChainAdapter struct {
-	chainId         uint64
-	state           *State
-	isMptConformant bool
+	chainId uint64
+	state   *State
+	schema  carmen.Schema
 }
 
 func (a *stateChainAdapter) ChainId() uint64 {
@@ -574,7 +636,11 @@ func (a *stateChainAdapter) ChainId() uint64 {
 }
 
 func (a *stateChainAdapter) IsMptConformant() bool {
-	return a.isMptConformant
+	return a.schema == 5
+}
+
+func (a *stateChainAdapter) IsVerkleConformant() bool {
+	return a.schema == 6
 }
 
 func (a *stateChainAdapter) ApplyBlock(
@@ -609,6 +675,26 @@ func (a *stateChainAdapter) ApplyBlock(
 	return receipts, a.state.GetStateRoot(), nil
 }
 
+// getExpectedStateRoot returns the expected state root for the given block, based on the chain type.
+func getExpectedStateRoot(chain Chain, block *blockdb.Block) common.Hash {
+	var stateRoot []byte
+	if chain.IsMptConformant() {
+		stateRoot = block.StateRoot
+	} else if chain.IsVerkleConformant() {
+		stateRoot = block.VerkleStateRoot
+	}
+	return common.BytesToHash(stateRoot)
+}
+
+// updateStateRoot updates the state root in the block based on the chain type.
+func updateStateRoot(chain Chain, block *blockdb.Block, stateRoot common.Hash) {
+	if chain.IsMptConformant() {
+		block.StateRoot = stateRoot.Bytes()
+	} else if chain.IsVerkleConformant() {
+		block.VerkleStateRoot = stateRoot.Bytes()
+	}
+}
+
 // IsDirEmpty checks if a directory is empty.
 func IsDirEmpty(path string) (bool, error) {
 	f, err := os.Open(path)
@@ -622,4 +708,38 @@ func IsDirEmpty(path string) (bool, error) {
 		return true, nil // empty
 	}
 	return false, err // either not empty or some other error
+}
+
+// ReplayLoopFlags is a utility struct to hold flags to pass to the `replayLoop` functions.
+type ReplayLoopFlags struct {
+	overwriteStateRoot FlagWithConfirmation
+}
+
+// FlagWithConfirmation is a utility struct to hold a boolean flag along with a confirmation flag to track user confirmation.
+type FlagWithConfirmation struct {
+	flag      bool
+	confirmed bool
+}
+
+func New(flag bool, confirmAll bool) FlagWithConfirmation {
+	return FlagWithConfirmation{
+		flag:      flag,
+		confirmed: confirmAll,
+	}
+}
+
+func (f *FlagWithConfirmation) IsEnabled() bool {
+	return f.flag
+}
+
+func (f *FlagWithConfirmation) Disable() {
+	f.flag = false
+}
+
+func (f *FlagWithConfirmation) IsConfirmed() bool {
+	return f.confirmed
+}
+
+func (f *FlagWithConfirmation) Confirm() {
+	f.confirmed = true
 }
