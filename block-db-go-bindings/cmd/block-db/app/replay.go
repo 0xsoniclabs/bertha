@@ -82,8 +82,8 @@ var (
 	}
 
 	overwriteStateRoot = &cli.BoolFlag{
-		Name:  "overwrite-state-root",
-		Usage: "Overwrite the state root in the block database with the one computed from the state",
+		Name:  "overwrite-state-roots",
+		Usage: "Overwrite the state roots in the block database with the ones computed from the state",
 		Value: false,
 	}
 
@@ -581,7 +581,7 @@ func checkBlockResults(
 	if overwriteStateRoot.IsEnabled() {
 		if !overwriteStateRoot.IsConfirmed() && expectedStateRoot != (common.Hash{}) && expectedStateRoot != computedStateRoot {
 			slog.Warn("Block has existing state root", "block_number", block.Number, "existing", expectedStateRoot, "new", computedStateRoot)
-			fmt.Printf("Are you sure you want to override the existing state root (y/n)? ")
+			fmt.Printf("Are you sure you want to overwrite the existing state root (y/n)? ")
 			var response string
 			fmt.Scanln(&response)
 			if strings.ToLower(strings.TrimSpace(response)) != "y" {
@@ -593,7 +593,7 @@ func checkBlockResults(
 			}
 		}
 
-		// Double check in case user disabled the override
+		// Double check in case user disabled the overwrite
 		if overwriteStateRoot.IsEnabled() {
 			updateStateRoot(chain, block, computedStateRoot)
 			err = blockDB.Update(chain.ChainId(), block)

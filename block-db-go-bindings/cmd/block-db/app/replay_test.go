@@ -598,7 +598,7 @@ func Test_updateStateRoot_UpdatesCorrectStateRoot(t *testing.T) {
 	require.Equal(common.HexToHash("0xfacefeed").Bytes(), block.VerkleStateRoot)
 }
 
-func Test_checkBlockResults_OverridesStateRoot(t *testing.T) {
+func Test_checkBlockResults_OverwritesStateRoot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
