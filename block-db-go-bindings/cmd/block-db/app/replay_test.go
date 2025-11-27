@@ -625,8 +625,7 @@ func Test_checkBlockResults_OverridesStateRoot(t *testing.T) {
 		Return(nil)
 
 	replayFlags := ReplayLoopFlags{
-		overrideStateRoot: true,
-		confirmAllPrompts: true,
+		overwriteStateRoot: New(true, true),
 	}
 
 	err := checkBlockResults(
