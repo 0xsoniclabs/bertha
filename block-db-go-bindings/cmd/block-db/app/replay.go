@@ -715,31 +715,31 @@ type ReplayLoopFlags struct {
 	overwriteStateRoot FlagWithConfirmation
 }
 
-// / FlagWithConfirmation is a utility struct to hold a boolean flag along with a confirmation flag to track user confirmation.
+// FlagWithConfirmation is a utility struct to hold a boolean flag along with a confirmation flag to track user confirmation.
 type FlagWithConfirmation struct {
-	flag       bool
-	confirmAll bool
+	flag      bool
+	confirmed bool
 }
 
 func New(flag bool, confirmAll bool) FlagWithConfirmation {
 	return FlagWithConfirmation{
-		flag:       flag,
-		confirmAll: confirmAll,
+		flag:      flag,
+		confirmed: confirmAll,
 	}
 }
 
-func (f FlagWithConfirmation) IsEnabled() bool {
+func (f *FlagWithConfirmation) IsEnabled() bool {
 	return f.flag
 }
 
-func (f FlagWithConfirmation) Disable() {
+func (f *FlagWithConfirmation) Disable() {
 	f.flag = false
 }
 
 func (f *FlagWithConfirmation) IsConfirmed() bool {
-	return f.confirmAll
+	return f.confirmed
 }
 
 func (f *FlagWithConfirmation) Confirm() {
-	f.confirmAll = true
+	f.confirmed = true
 }

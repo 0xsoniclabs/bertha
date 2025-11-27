@@ -638,3 +638,18 @@ func Test_checkBlockResults_OverwritesStateRoot(t *testing.T) {
 	)
 	require.NoError(t, err)
 }
+
+func Test_FlagWithConfirmation(t *testing.T) {
+	require := require.New(t)
+
+	flag := New(true, false)
+	require.True(flag.IsEnabled())
+	require.False(flag.IsConfirmed())
+
+	flag.Confirm()
+	require.True(flag.IsConfirmed())
+
+	flag.Disable()
+	require.False(flag.IsEnabled())
+	require.True(flag.IsConfirmed())
+}
