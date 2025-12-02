@@ -188,6 +188,10 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		}()
 	}
 
+	if snapshotInterval > 0 && strings.Contains(string(variant), "flat") {
+		slog.Warn("Snapshots are currently not supported with flat database variants; consider disabling snapshots or using a different variant")
+	}
+
 	// Open State Database in new directory.
 	params := StateParameters{
 		Directory:   stateDbDirectory,
