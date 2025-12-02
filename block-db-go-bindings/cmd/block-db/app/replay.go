@@ -747,44 +747,43 @@ func (s *SnapshotHandler) ShouldCreateSnapshot(currentBlock uint64) bool {
 // copies the state database directory to a new location, and removes the previous snapshot if it exists.
 func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, error) {
 	stateDBDir := state.stateParameter.Directory
-	if s.blockInterval == 0 {
+	if !s.ShouldCreateSnapshot(currentBlock) {
 		return state, nil
 	}
-	if currentBlock%s.blockInterval == 0 {
-		slog.Info("Creating state database snapshot", "block_number", currentBlock)
-		backupDir := fmt.Sprintf("%s_snapshot_%d", stateDBDir, currentBlock)
-		isEmptyOrMissing, err := IsEmptyOrMissingDir(backupDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to check if snapshot directory is non-existing or empty: %w", err)
-		}
-		if !isEmptyOrMissing {
-			return nil, fmt.Errorf("snapshot directory is not empty: %s", backupDir)
-		}
-		// Close and reopen the state to ensure all data is flushed to disk
-		err = state.Close()
-		if err != nil {
-			return nil, fmt.Errorf("failed to close state database before snapshot: %w", err)
-		}
-		// Create the snapshot by copying the state database directory
-		err = os.CopyFS(backupDir, os.DirFS(stateDBDir))
-		if err != nil {
-			return nil, fmt.Errorf("failed to copy state database for snapshot: %w", err)
-		}
-		// Open the state again
-		state, err = NewState((*state).stateParameter)
-		if err != nil {
-			return nil, fmt.Errorf("failed to reopen state database after snapshot: %w", err)
-		}
-		if s.lastSnapshot != nil {
-			slog.Info("Removing previous state database snapshot", "directory", *s.lastSnapshot)
-			prevBackupDir := fmt.Sprintf("%s_snapshot_%d", stateDBDir, *s.lastSnapshot)
-			err = os.RemoveAll(prevBackupDir)
-			if err != nil {
-				return nil, fmt.Errorf("failed to remove previous state database snapshot: %w", err)
-			}
-		}
-		s.lastSnapshot = &currentBlock
+
+	slog.Info("Creating state database snapshot", "block_number", currentBlock)
+	backupDir := fmt.Sprintf("%s_snapshot_%d", stateDBDir, currentBlock)
+	isEmptyOrMissing, err := IsEmptyOrMissingDir(backupDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if snapshot directory is non-existing or empty: %w", err)
 	}
+	if !isEmptyOrMissing {
+		return nil, fmt.Errorf("snapshot directory is not empty: %s", backupDir)
+	}
+	// Close and reopen the state to ensure all data is flushed to disk
+	err = state.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to close state database before snapshot: %w", err)
+	}
+	// Create the snapshot by copying the state database directory
+	err = os.CopyFS(backupDir, os.DirFS(stateDBDir))
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy state database for snapshot: %w", err)
+	}
+	// Open the state again
+	state, err = NewState((*state).stateParameter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reopen state database after snapshot: %w", err)
+	}
+	if s.lastSnapshot != nil {
+		slog.Info("Removing previous state database snapshot", "directory", *s.lastSnapshot)
+		prevBackupDir := fmt.Sprintf("%s_snapshot_%d", stateDBDir, *s.lastSnapshot)
+		err = os.RemoveAll(prevBackupDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to remove previous state database snapshot: %w", err)
+		}
+	}
+	s.lastSnapshot = &currentBlock
 	return state, nil
 }
 
