@@ -185,7 +185,16 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		defer func() {
 			slog.Info("Removing state database directory", "directory", stateDbDirectory)
 			err = errors.Join(err, os.RemoveAll(stateDbDirectory))
+			backupDir := fmt.Sprintf("%s_snapshot_%d", stateDbDirectory, snapshotInterval)
+			if ctx.Err() == nil || errors.Is(err, context.Canceled) {
+				slog.Info("Removing latest snapshot directory", "directory", backupDir)
+				backupDir := fmt.Sprintf("%s_snapshot_%d", stateDbDirectory, snapshotInterval)
+				err = errors.Join(err, os.RemoveAll(backupDir))
+			} else {
+				slog.Info("Replay terminated with error. The latest snapshot will be kept for inspection", "directory", backupDir)
+			}
 		}()
+
 	}
 
 	if snapshotInterval > 0 && strings.Contains(string(variant), "flat") {
