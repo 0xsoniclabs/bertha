@@ -33,6 +33,7 @@ type State struct {
 	// TODO: replace with Carmen facade
 	db               carmen.StateDB
 	blockHashHistory *blockHashHistory
+	stateParameter   StateParameters
 }
 
 // StateParameters is a configuration struct for creating a new State instance.
@@ -71,7 +72,7 @@ func NewState(params StateParameters) (*State, error) {
 		return nil, fmt.Errorf("failed to create state: %v", err)
 	}
 	db := carmen.CreateCustomStateDBUsing(state, 0)
-	return &State{db: db, blockHashHistory: &blockHashHistory{}}, nil
+	return &State{db: db, blockHashHistory: &blockHashHistory{}, stateParameter: params}, nil
 }
 
 // Close closes the state database and releases any resources associated with it.

@@ -10,8 +10,10 @@ import (
 	"maps"
 	"math/big"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -81,6 +83,13 @@ var (
 		Value: true,
 	}
 
+	snapshotInterval = &cli.Uint64Flag{
+		Name:    "snapshot-interval",
+		Aliases: []string{"si"},
+		Usage:   "Interval of blocks at which to perform database snapshots (0 = disabled)",
+		Value:   500_000,
+	}
+
 	overwriteStateRoot = &cli.BoolFlag{
 		Name:  "overwrite-state-roots",
 		Usage: "Overwrite the state roots in the block database with the ones computed from the state",
@@ -120,6 +129,7 @@ func getReplayCommand() *cli.Command {
 			startBlockFlag,
 			endBlockFlag,
 			usePipelineFlag,
+			snapshotInterval,
 			overwriteStateRoot,
 			confirmAllPromptsFlag,
 		},
@@ -137,14 +147,16 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	startBlock := c.Uint64(startBlockFlag.Name)
 	endBlock := c.Uint64(endBlockFlag.Name)
 	usePipeline := c.Bool(usePipelineFlag.Name)
+	snapshotInterval := c.Uint64(snapshotInterval.Name)
 	overwriteStateRoot := c.Bool(overwriteStateRoot.Name)
 	confirmAllPrompts := c.Bool(confirmAllPromptsFlag.Name)
 
 	schema := carmen.Schema(c.Int(dbSchema.Name))
 	variant := carmen.Variant(c.String(dbVariant.Name))
 
-	slog.Info("Loading genesis file", "file", genesisFileName)
+	snapshotHandler := NewSnapshotHandler(snapshotInterval)
 
+	slog.Info("Loading genesis file", "file", genesisFileName)
 	slog.Info("Creating state database", "directory", stateDbDirectory)
 	// Create a temporary directory for the state database
 	if stateDbDirectory == "" {
@@ -159,7 +171,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	}
 	if initDbDir != "" {
 		slog.Info("Copying initial state database", "source_directory", initDbDir, "destination_directory", stateDbDirectory)
-		if isEmpty, err := IsDirEmpty(stateDbDirectory); err != nil {
+		if isEmpty, err := IsEmptyOrMissingDir(stateDbDirectory); err != nil {
 			return fmt.Errorf("failed to check if state database directory %q is empty: %w", stateDbDirectory, err)
 		} else if !isEmpty {
 			return fmt.Errorf("state database directory %q is not empty. Please specify an empty directory to be initialized or use a temporary directory", stateDbDirectory)
@@ -175,7 +187,41 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		defer func() {
 			slog.Info("Removing state database directory", "directory", stateDbDirectory)
 			err = errors.Join(err, os.RemoveAll(stateDbDirectory))
+			if snapshotHandler.lastSnapshot != nil {
+				backupDir := fmt.Sprintf("%s_snapshot_%d", stateDbDirectory, snapshotHandler.lastSnapshot)
+				if err == nil || errors.Is(err, context.Canceled) {
+					slog.Info("Removing latest snapshot directory", "directory", backupDir)
+					err = errors.Join(err, os.RemoveAll(backupDir))
+				} else {
+					slog.Info(fmt.Sprintf("Replay terminated with error. The latest snapshot will be kept for inspection using '%s' flag", initDbFlag.Name), "directory", backupDir)
+				}
+			}
 		}()
+
+	}
+
+	if snapshotInterval > 0 {
+		matches, err := filepath.Glob(stateDbDirectory + "_snapshot_*")
+		if err != nil {
+			return fmt.Errorf("failed to check existing snapshots in state database directory %q: %w", stateDbDirectory, err)
+		}
+		if len(matches) > 0 {
+			slog.Warn("Existing snapshots found for state database directory", "directory", stateDbDirectory, "snapshots_found", len(matches))
+			if !confirmAllPrompts {
+				fmt.Printf("Do you want to delete the existing snapshots and continue (y/n)? ")
+				var response string
+				fmt.Scanln(&response)
+				if strings.ToLower(strings.TrimSpace(response)) != "y" {
+					slog.Error("Execution aborted by the user")
+					return nil
+				}
+			}
+		}
+
+		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", snapshotInterval)
+		if strings.Contains(string(variant), "flat") {
+			slog.Warn("Snapshots are currently not supported with flat database variants; consider disabling snapshots or using a different variant")
+		}
 	}
 
 	// Open State Database in new directory.
@@ -254,12 +300,12 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	}
 
 	// ---- Start Replay ----
-
 	blocks := database.GetRange(chainId, startBlock, endBlock)
 	chain := &stateChainAdapter{
-		chainId: chainId,
-		state:   state,
-		schema:  schema,
+		chainId:         chainId,
+		state:           state,
+		schema:          schema,
+		snapshotHandler: snapshotHandler,
 	}
 
 	replayLoopFlags := ReplayLoopFlags{
@@ -602,7 +648,6 @@ func checkBlockResults(
 			}
 		}
 	}
-
 	if !overwriteStateRoot.IsEnabled() && expectedStateRoot != (common.Hash{}) && computedStateRoot != expectedStateRoot {
 		return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
 			block.Number, expectedStateRoot, computedStateRoot)
@@ -626,9 +671,11 @@ type Chain interface {
 
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
 type stateChainAdapter struct {
-	chainId uint64
-	state   *State
-	schema  carmen.Schema
+	chainId         uint64
+	state           *State
+	stateRwMutex    sync.Mutex
+	schema          carmen.Schema
+	snapshotHandler *SnapshotHandler
 }
 
 func (a *stateChainAdapter) ChainId() uint64 {
@@ -651,6 +698,9 @@ func (a *stateChainAdapter) ApplyBlock(
 	future.Future[result.Result[common.Hash]],
 	error,
 ) {
+	a.stateRwMutex.Lock()
+	defer a.stateRwMutex.Unlock()
+
 	zoneBlock := tracy.ZoneBegin("ProcessBlock")
 	defer zoneBlock.End()
 
@@ -671,8 +721,16 @@ func (a *stateChainAdapter) ApplyBlock(
 		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
 	}
 
+	stateRoot := a.state.GetStateRoot()
+	if a.snapshotHandler.ShouldCreateSnapshot(block.NumberU64()) {
+		stateRoot = future.Immediate(stateRoot.Await())
+		a.state, err = a.snapshotHandler.Snapshot(block.NumberU64(), a.state)
+		if err != nil {
+			return nil, stateRoot, fmt.Errorf("failed to create snapshot at block %d: %w", block.NumberU64(), err)
+		}
+	}
 	// Return the receipts and the resulting state root.
-	return receipts, a.state.GetStateRoot(), nil
+	return receipts, stateRoot, nil
 }
 
 // getExpectedStateRoot returns the expected state root for the given block, based on the chain type.
@@ -695,19 +753,63 @@ func updateStateRoot(chain Chain, block *blockdb.Block, stateRoot common.Hash) {
 	}
 }
 
-// IsDirEmpty checks if a directory is empty.
-func IsDirEmpty(path string) (bool, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
+// SnapshotHandler is a utility to handle intermediate state database snapshots.
+// It allows to create snapshots at specified block intervals, making sure that only one snapshot is kept at a time.
+type SnapshotHandler struct {
+	blockInterval uint64
+	lastSnapshot  *uint64
+}
 
-	_, err = f.Readdir(1) // try to read a single entry
-	if err == io.EOF {
-		return true, nil // empty
+func NewSnapshotHandler(blockInterval uint64) *SnapshotHandler {
+	return &SnapshotHandler{
+		blockInterval: blockInterval,
+		lastSnapshot:  nil,
 	}
-	return false, err // either not empty or some other error
+}
+
+// ShouldCreateSnapshot returns true if a snapshot should be created at the given block number.
+// A snapshot should be created if the block interval is set and the current block number is bigger than 0 and is a multiple of the interval.
+func (s *SnapshotHandler) ShouldCreateSnapshot(currentBlock uint64) bool {
+	return s.blockInterval > 0 && currentBlock > 0 && currentBlock%s.blockInterval == 0
+}
+
+// Snapshot creates a snapshot of the state database at the given block number.
+// It closes and reopens the state to ensure all data is flushed to disk,
+// copies the state database directory to a new location, and removes the previous snapshot if it exists.
+func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, error) {
+	stateDBDir := state.stateParameter.Directory
+	if !s.ShouldCreateSnapshot(currentBlock) {
+		return state, nil
+	}
+
+	slog.Info("Creating state database snapshot", "block_number", currentBlock)
+	backupDir := fmt.Sprintf("%s_snapshot_%d", stateDBDir, currentBlock)
+	os.RemoveAll(backupDir) // remove existing snapshot if any
+	// Close and reopen the state to ensure all data is flushed to disk
+	err := state.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to close state database before snapshot: %w", err)
+	}
+	// Create the snapshot by copying the state database directory
+	err = os.CopyFS(backupDir, os.DirFS(stateDBDir))
+	if err != nil {
+		return nil, fmt.Errorf("failed to copy state database for snapshot: %w", err)
+	}
+	// Open the state again
+	state, err = NewState((*state).stateParameter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reopen state database after snapshot: %w", err)
+	}
+	if s.lastSnapshot != nil {
+		slog.Info("Removing previous state database snapshot", "directory", *s.lastSnapshot)
+		prevBackupDir := fmt.Sprintf("%s_snapshot_%d", stateDBDir, *s.lastSnapshot)
+		err = os.RemoveAll(prevBackupDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to remove previous state database snapshot: %w", err)
+		}
+	}
+	s.lastSnapshot = &currentBlock
+	return state, nil
 }
 
 // ReplayLoopFlags is a utility struct to hold flags to pass to the `replayLoop` functions.
@@ -742,4 +844,26 @@ func (f *FlagWithConfirmation) IsConfirmed() bool {
 
 func (f *FlagWithConfirmation) Confirm() {
 	f.confirmed = true
+}
+
+// IsEmptyOrMissingDir returns true if a directory is missing or empty.
+func IsEmptyOrMissingDir(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return true, nil // non-existent
+	}
+	if err != nil {
+		return false, err
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+
+	_, err = f.Readdir(1) // try to read a single entry
+	if err == io.EOF {
+		return true, nil // empty
+	}
+	return false, err // either not empty or some other error
 }

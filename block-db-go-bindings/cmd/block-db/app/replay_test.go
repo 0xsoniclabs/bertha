@@ -204,8 +204,9 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	}
 
 	chain := &stateChainAdapter{
-		chainId: 12,
-		state:   state,
+		chainId:         12,
+		state:           state,
+		snapshotHandler: NewSnapshotHandler(0),
 	}
 
 	iter := newIter(blocks)
@@ -637,6 +638,57 @@ func Test_checkBlockResults_OverwritesStateRoot(t *testing.T) {
 		&replayFlags,
 	)
 	require.NoError(t, err)
+}
+
+func Test_SnapshotHandler_ShouldCreateSnapshot(t *testing.T) {
+	require := require.New(t)
+
+	handler := &SnapshotHandler{
+		blockInterval: 1000,
+	}
+
+	require.True(handler.ShouldCreateSnapshot(1000))
+	require.True(handler.ShouldCreateSnapshot(2000))
+	require.False(handler.ShouldCreateSnapshot(1500))
+	require.False(handler.ShouldCreateSnapshot(0))
+}
+
+func Test_SnapshotHandler_SnapshotCreatesAndRemovesSnapshots(t *testing.T) {
+	require := require.New(t)
+
+	dir := t.TempDir()
+	state, err := NewState(StateParameters{
+		Directory: dir,
+	})
+	require.NoError(err)
+	defer func() {
+		require.NoError(state.Close())
+	}()
+
+	handler := &SnapshotHandler{
+		blockInterval: 1000,
+	}
+
+	// Create first snapshot
+	newState, err := handler.Snapshot(1000, state)
+	require.NoError(err)
+	require.NotNil(newState)
+
+	snapshotDir := fmt.Sprintf("%s_snapshot_1000", dir)
+	_, err = os.Stat(snapshotDir)
+	require.NoError(err, "snapshot directory should exist")
+
+	// Create second snapshot, first should be removed
+	newState, err = handler.Snapshot(2000, newState)
+	require.NoError(err)
+	require.NotNil(newState)
+
+	snapshotDir2 := fmt.Sprintf("%s_snapshot_2000", dir)
+	_, err = os.Stat(snapshotDir2)
+	require.NoError(err, "second snapshot directory should exist")
+
+	_, err = os.Stat(snapshotDir)
+	require.True(os.IsNotExist(err), "first snapshot directory should be removed")
 }
 
 func Test_FlagWithConfirmation(t *testing.T) {
