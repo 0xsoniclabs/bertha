@@ -153,8 +153,9 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	schema := carmen.Schema(c.Int(dbSchema.Name))
 	variant := carmen.Variant(c.String(dbVariant.Name))
 
-	slog.Info("Loading genesis file", "file", genesisFileName)
+	snapshotHandler := NewSnapshotHandler(snapshotInterval)
 
+	slog.Info("Loading genesis file", "file", genesisFileName)
 	slog.Info("Creating state database", "directory", stateDbDirectory)
 	// Create a temporary directory for the state database
 	if stateDbDirectory == "" {
@@ -185,19 +186,24 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		defer func() {
 			slog.Info("Removing state database directory", "directory", stateDbDirectory)
 			err = errors.Join(err, os.RemoveAll(stateDbDirectory))
-			backupDir := fmt.Sprintf("%s_snapshot_%d", stateDbDirectory, snapshotInterval)
-			if err == nil {
-				slog.Info("Removing latest snapshot directory", "directory", backupDir)
-				err = errors.Join(err, os.RemoveAll(backupDir))
-			} else {
-				slog.Info(fmt.Sprintf("Replay terminated with error. The latest snapshot will be kept for inspection using '%s' flag", initDbFlag.Name), "directory", backupDir)
+			if snapshotHandler.lastSnapshot != nil {
+				backupDir := fmt.Sprintf("%s_snapshot_%d", stateDbDirectory, snapshotHandler.lastSnapshot)
+				if err == nil {
+					slog.Info("Removing latest snapshot directory", "directory", backupDir)
+					err = errors.Join(err, os.RemoveAll(backupDir))
+				} else {
+					slog.Info(fmt.Sprintf("Replay terminated with error. The latest snapshot will be kept for inspection using '%s' flag", initDbFlag.Name), "directory", backupDir)
+				}
 			}
 		}()
 
 	}
 
-	if snapshotInterval > 0 && strings.Contains(string(variant), "flat") {
-		slog.Warn("Snapshots are currently not supported with flat database variants; consider disabling snapshots or using a different variant")
+	if snapshotInterval > 0 {
+		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", snapshotInterval)
+		if strings.Contains(string(variant), "flat") {
+			slog.Warn("Snapshots are currently not supported with flat database variants; consider disabling snapshots or using a different variant")
+		}
 	}
 
 	// Open State Database in new directory.
@@ -276,13 +282,12 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	}
 
 	// ---- Start Replay ----
-
 	blocks := database.GetRange(chainId, startBlock, endBlock)
 	chain := &stateChainAdapter{
 		chainId:         chainId,
 		state:           state,
 		schema:          schema,
-		snapshotHandler: NewSnapshotHandler(snapshotInterval),
+		snapshotHandler: &snapshotHandler,
 	}
 
 	replayLoopFlags := ReplayLoopFlags{
@@ -652,7 +657,7 @@ type stateChainAdapter struct {
 	state           *State
 	stateRwMutex    sync.Mutex
 	schema          carmen.Schema
-	snapshotHandler SnapshotHandler
+	snapshotHandler *SnapshotHandler
 }
 
 func (a *stateChainAdapter) ChainId() uint64 {
