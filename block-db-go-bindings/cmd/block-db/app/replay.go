@@ -205,14 +205,16 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		if err != nil {
 			return fmt.Errorf("failed to check existing snapshots in state database directory %q: %w", stateDbDirectory, err)
 		}
-		if !confirmAllPrompts && len(matches) > 0 {
-			slog.Warn("Existing snapshots found in state database directory", "directory", stateDbDirectory, "snapshots_found", len(matches))
-			fmt.Printf("Do you want to delete the existing snapshots and continue (y/n)? ")
-			var response string
-			fmt.Scanln(&response)
-			if strings.ToLower(strings.TrimSpace(response)) != "y" {
-				slog.Error("Execution aborted by the user")
-				return nil
+		if len(matches) > 0 {
+			slog.Warn("Existing snapshots found for state database directory", "directory", stateDbDirectory, "snapshots_found", len(matches))
+			if !confirmAllPrompts {
+				fmt.Printf("Do you want to delete the existing snapshots and continue (y/n)? ")
+				var response string
+				fmt.Scanln(&response)
+				if strings.ToLower(strings.TrimSpace(response)) != "y" {
+					slog.Error("Execution aborted by the user")
+					return nil
+				}
 			}
 		}
 
