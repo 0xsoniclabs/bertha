@@ -305,7 +305,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		chainId:         chainId,
 		state:           state,
 		schema:          schema,
-		snapshotHandler: &snapshotHandler,
+		snapshotHandler: snapshotHandler,
 	}
 
 	replayLoopFlags := ReplayLoopFlags{
@@ -760,8 +760,8 @@ type SnapshotHandler struct {
 	lastSnapshot  *uint64
 }
 
-func NewSnapshotHandler(blockInterval uint64) SnapshotHandler {
-	return SnapshotHandler{
+func NewSnapshotHandler(blockInterval uint64) *SnapshotHandler {
+	return &SnapshotHandler{
 		blockInterval: blockInterval,
 		lastSnapshot:  nil,
 	}

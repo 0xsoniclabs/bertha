@@ -204,8 +204,9 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	}
 
 	chain := &stateChainAdapter{
-		chainId: 12,
-		state:   state,
+		chainId:         12,
+		state:           state,
+		snapshotHandler: NewSnapshotHandler(0),
 	}
 
 	iter := newIter(blocks)
