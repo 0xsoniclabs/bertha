@@ -10,6 +10,7 @@ import (
 	"maps"
 	"math/big"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -188,7 +189,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 			err = errors.Join(err, os.RemoveAll(stateDbDirectory))
 			if snapshotHandler.lastSnapshot != nil {
 				backupDir := fmt.Sprintf("%s_snapshot_%d", stateDbDirectory, snapshotHandler.lastSnapshot)
-				if err == nil {
+				if err == nil || errors.Is(err, context.Canceled) {
 					slog.Info("Removing latest snapshot directory", "directory", backupDir)
 					err = errors.Join(err, os.RemoveAll(backupDir))
 				} else {
@@ -200,6 +201,21 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	}
 
 	if snapshotInterval > 0 {
+		matches, err := filepath.Glob(stateDbDirectory + "_snapshot_*")
+		if err != nil {
+			return fmt.Errorf("failed to check existing snapshots in state database directory %q: %w", stateDbDirectory, err)
+		}
+		if !confirmAllPrompts && len(matches) > 0 {
+			slog.Warn("Existing snapshots found in state database directory", "directory", stateDbDirectory, "snapshots_found", len(matches))
+			fmt.Printf("Do you want to delete the existing snapshots and continue (y/n)? ")
+			var response string
+			fmt.Scanln(&response)
+			if strings.ToLower(strings.TrimSpace(response)) != "y" {
+				slog.Error("Execution aborted by the user")
+				return nil
+			}
+		}
+
 		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", snapshotInterval)
 		if strings.Contains(string(variant), "flat") {
 			slog.Warn("Snapshots are currently not supported with flat database variants; consider disabling snapshots or using a different variant")
@@ -766,15 +782,9 @@ func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, e
 
 	slog.Info("Creating state database snapshot", "block_number", currentBlock)
 	backupDir := fmt.Sprintf("%s_snapshot_%d", stateDBDir, currentBlock)
-	isEmptyOrMissing, err := IsEmptyOrMissingDir(backupDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check if snapshot directory is non-existing or empty: %w", err)
-	}
-	if !isEmptyOrMissing {
-		return nil, fmt.Errorf("snapshot directory is not empty: %s", backupDir)
-	}
+	os.RemoveAll(backupDir) // remove existing snapshot if any
 	// Close and reopen the state to ensure all data is flushed to disk
-	err = state.Close()
+	err := state.Close()
 	if err != nil {
 		return nil, fmt.Errorf("failed to close state database before snapshot: %w", err)
 	}
