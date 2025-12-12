@@ -157,7 +157,6 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	snapshotHandler := NewSnapshotHandler(snapshotInterval)
 
 	slog.Info("Loading genesis file", "file", genesisFileName)
-	slog.Info("Creating state database", "directory", stateDbDirectory)
 	// Create a temporary directory for the state database
 	if stateDbDirectory == "" {
 		if startBlock > 0 && initDbDir == "" {
@@ -169,6 +168,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to create temporary state database directory: %w", err)
 	}
+	slog.Info("Creating state database", "directory", stateDbDirectory)
 	if initDbDir != "" {
 		slog.Info("Copying initial state database", "source_directory", initDbDir, "destination_directory", stateDbDirectory)
 		if isEmpty, err := IsEmptyOrMissingDir(stateDbDirectory); err != nil {
