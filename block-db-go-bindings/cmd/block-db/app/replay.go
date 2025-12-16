@@ -235,10 +235,6 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to create state: %w", err)
 	}
-	defer func() {
-		slog.Info("Closing state database", "directory", stateDbDirectory)
-		err = errors.Join(err, state.Close())
-	}()
 
 	// Load genesis data from the specified file.
 	genesis, err := ReadGenesisFromFile(genesisFileName)
@@ -307,6 +303,11 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		schema:          schema,
 		snapshotHandler: snapshotHandler,
 	}
+	// Because snapshots invalidate the state, we need to close it here.
+	defer func() {
+		slog.Info("Closing state database", "directory", stateDbDirectory)
+		err = errors.Join(err, chain.state.Close())
+	}()
 
 	replayLoopFlags := ReplayLoopFlags{
 		overwriteStateRoot: New(overwriteStateRoot, confirmAllPrompts),
