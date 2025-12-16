@@ -147,16 +147,18 @@ func TestProgressLogger_ProducesASummary(t *testing.T) {
 func TestReplayLoop(t *testing.T) {
 	runTests := func(t *testing.T, run replayer) {
 		tests := map[string]func(*testing.T, replayer){
-			"CanProcessEmptyBlocks":               canProcessEmptyBlocks,
-			"CanProcessNonEmptyBlocks":            canProcessNonEmptyBlocks,
-			"FailsOnFailedBlockRetrieval":         failsOnFailedBlockRetrieval,
-			"FailsOnCancelledContext":             failsOnCancelledContext,
-			"FailsOnBlockConversionError":         failsOnBlockConversionError,
-			"FailsOnBlockApplicationError":        failsOnBlockApplicationError,
-			"FailsOnCommitmentComputationError":   failsOnCommitmentComputationError,
-			"FailsOnWrongReceiptStatus":           failsOnWrongReceiptStatus,
-			"FailsOnWrongReceiptCumulatedGasUsed": failsOnWrongReceiptCumulatedGasUsed,
-			"FailsOnIncorrectStateRootHash":       failsOnIncorrectStateRootHash,
+			"CanProcessEmptyBlocks":                         canProcessEmptyBlocks,
+			"CanProcessNonEmptyBlocks":                      canProcessNonEmptyBlocks,
+			"FailsOnFailedBlockRetrieval":                   failsOnFailedBlockRetrieval,
+			"FailsOnCancelledContext":                       failsOnCancelledContext,
+			"FailsOnBlockConversionError":                   failsOnBlockConversionError,
+			"FailsOnBlockApplicationError":                  failsOnBlockApplicationError,
+			"FailsOnCommitmentComputationError":             failsOnCommitmentComputationError,
+			"FailsOnWrongReceiptStatus":                     failsOnWrongReceiptStatus,
+			"FailsOnWrongReceiptCumulatedGasUsed":           failsOnWrongReceiptCumulatedGasUsed,
+			"FailsOnIncorrectStateRootHash":                 failsOnIncorrectStateRootHash,
+			"OverwriteStateRootHash":                        overwriteStateRootHash,
+			"SkipStateRootCheckIfNoStateRootCheckFlagIsSet": skipStateRootCheckIfNoStateRootCheckFlagIsSet,
 		}
 		for name, test := range tests {
 			t.Run(name, func(t *testing.T) {
@@ -437,6 +439,66 @@ func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 	}})
 	require.ErrorContains(t,
 		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil),
+		"state root mismatch",
+	)
+}
+
+func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
+	ctrl := gomock.NewController(t)
+	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+
+	chain.EXPECT().
+		ApplyBlock(gomock.Any(), gomock.Any()).
+		Return(
+			nil,
+			future.Immediate(result.Ok(common.Hash{0x1})),
+			nil,
+		)
+
+	ctxt := t.Context()
+	blocks := newIter([]*blockdb.Block{{
+		StateRoot: common.Hash{0x2}.Bytes(), // different state root
+	}})
+	require.NoError(t,
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{
+			skipStateRootCheck: true,
+		}, nil),
+		"state root mismatch",
+	)
+}
+
+func overwriteStateRootHash(t *testing.T, run replayer) {
+	ctrl := gomock.NewController(t)
+	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+
+	chain.EXPECT().
+		ApplyBlock(gomock.Any(), gomock.Any()).
+		Return(
+			nil,
+			future.Immediate(result.Ok(common.Hash{0x1})),
+			nil,
+		)
+
+	blockDB := blockdb.NewMockDBInterface(ctrl)
+	blockDB.EXPECT().Update(gomock.Any(),
+		&blockdb.Block{
+			Number:    0,
+			StateRoot: common.Hash{0x1}.Bytes(),
+		},
+	).Times(1)
+
+	ctxt := t.Context()
+	blocks := newIter([]*blockdb.Block{{
+		StateRoot: common.Hash{0x2}.Bytes(),
+	}})
+	require.NoError(t,
+		run(ctxt, blocks, chain, Metadata{}, blockDB, ReplayLoopFlags{
+			overwriteStateRoot: New(true, true),
+		}, nil),
 		"state root mismatch",
 	)
 }
