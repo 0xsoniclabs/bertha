@@ -18,7 +18,7 @@ BLOCK_DB_GO_BINDINGS_DIR=$(pwd)
 
 # Build carmen.
 cd $CARMEN_RUST_DIR
-cargo build --release
+cargo build --release $CARMEN_RUST_BUILD_FLAGS
 
 # Override the go carmen dependencies to use local modified versions.
 # Check if the diff can be applied cleanly in reverse. In this case it is already applied.
@@ -28,5 +28,3 @@ git apply --reverse --check enable-carmen.patch 2> /dev/null || git apply enable
 
 # Run go
 go run "$@"
-
-

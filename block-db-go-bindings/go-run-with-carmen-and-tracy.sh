@@ -24,7 +24,7 @@ make
 
 # Build carmen with tracy support.
 cd $CARMEN_RUST_DIR
-TRACY_CLIENT_LIB=TracyClient TRACY_CLIENT_LIB_PATH=$TRACY_DIR/tracy/build cargo build --release --features tracy
+TRACY_CLIENT_LIB=TracyClient TRACY_CLIENT_LIB_PATH=$TRACY_DIR/tracy/build cargo build --release --features tracy $CARMEN_RUST_BUILD_FLAGS
 
 # Override the go tracy and carmen dependencies to use local modified versions.
 # Check if the diff can be applied cleanly in reverse. In this case it is already applied.
