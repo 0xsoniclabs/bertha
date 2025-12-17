@@ -87,13 +87,20 @@ var (
 		Name:    "snapshot-interval",
 		Aliases: []string{"si"},
 		Usage:   "Interval of blocks at which to perform database snapshots (0 = disabled)",
-		Value:   500_000,
+		Value:   0,
 	}
 
 	overwriteStateRoot = &cli.BoolFlag{
 		Name:  "overwrite-state-roots",
 		Usage: "Overwrite the state roots in the block database with the ones computed from the state",
 		Value: false,
+	}
+
+	noStateRootCheck = &cli.BoolFlag{
+		Name:    "no-state-root-check",
+		Aliases: []string{"no-src"},
+		Usage:   "Skip checking the state roots with the ones stored in the block database",
+		Value:   false,
 	}
 
 	confirmAllPromptsFlag = &cli.BoolFlag{
@@ -131,6 +138,7 @@ func getReplayCommand() *cli.Command {
 			usePipelineFlag,
 			snapshotInterval,
 			overwriteStateRoot,
+			noStateRootCheck,
 			confirmAllPromptsFlag,
 		},
 	}
@@ -150,6 +158,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	snapshotInterval := c.Uint64(snapshotInterval.Name)
 	overwriteStateRoot := c.Bool(overwriteStateRoot.Name)
 	confirmAllPrompts := c.Bool(confirmAllPromptsFlag.Name)
+	noStateRootCheck := c.Bool(noStateRootCheck.Name)
 
 	schema := carmen.Schema(c.Int(dbSchema.Name))
 	variant := carmen.Variant(c.String(dbVariant.Name))
@@ -312,6 +321,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	replayLoopFlags := ReplayLoopFlags{
 		overwriteStateRoot: New(overwriteStateRoot, confirmAllPrompts),
+		skipStateRootCheck: noStateRootCheck,
 	}
 
 	return run(
@@ -603,6 +613,8 @@ func checkBlockResults(
 ) error {
 	zone := tracy.ZoneBegin("CheckResults")
 	overwriteStateRoot := &replayLoopFlags.overwriteStateRoot
+	noStateRootCheck := replayLoopFlags.skipStateRootCheck
+
 	for i, receipt := range receipts {
 		want := block.Receipts[i]
 		if receipt.Status != want.GetStatus() {
@@ -650,9 +662,12 @@ func checkBlockResults(
 			}
 		}
 	}
-	if !overwriteStateRoot.IsEnabled() && expectedStateRoot != (common.Hash{}) && computedStateRoot != expectedStateRoot {
-		return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
-			block.Number, expectedStateRoot, computedStateRoot)
+
+	if !noStateRootCheck && !overwriteStateRoot.IsEnabled() && expectedStateRoot != (common.Hash{}) {
+		if computedStateRoot != expectedStateRoot {
+			return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
+				block.Number, expectedStateRoot, computedStateRoot)
+		}
 	}
 
 	zone.End()
@@ -817,6 +832,7 @@ func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, e
 // ReplayLoopFlags is a utility struct to hold flags to pass to the `replayLoop` functions.
 type ReplayLoopFlags struct {
 	overwriteStateRoot FlagWithConfirmation
+	skipStateRootCheck bool
 }
 
 // FlagWithConfirmation is a utility struct to hold a boolean flag along with a confirmation flag to track user confirmation.
