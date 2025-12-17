@@ -1,10 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"iter"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -691,6 +693,8 @@ func Test_checkBlockResults_OverwritesStateRoot(t *testing.T) {
 		overwriteStateRoot: New(true, true),
 	}
 
+	stateRootNotSet := false
+
 	err := checkBlockResults(
 		chain,
 		block,
@@ -698,8 +702,64 @@ func Test_checkBlockResults_OverwritesStateRoot(t *testing.T) {
 		future.Immediate(result.Ok(newStateRoot)),
 		blockDb,
 		&replayFlags,
+		&stateRootNotSet,
 	)
 	require.NoError(t, err)
+}
+
+func Test_checkBlockResults_LogsMessageIfStateRootNotSet(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	chainId := uint64(12)
+	stateRoot := common.HexToHash("0xfeedface")
+	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(chainId).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+
+	block := &blockdb.Block{
+		Number: 0,
+	}
+
+	blockDb := blockdb.NewMockDBInterface(ctrl)
+	replayFlags := ReplayLoopFlags{
+		overwriteStateRoot: New(false, false),
+	}
+
+	// Capture log output
+	var logBuffer bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuffer, nil)))
+
+	stateRootNotSet := false
+
+	err := checkBlockResults(
+		chain,
+		block,
+		types.Receipts{},
+		future.Immediate(result.Ok(stateRoot)),
+		blockDb,
+		&replayFlags,
+		&stateRootNotSet,
+	)
+	require.NoError(t, err)
+	require.Contains(t, logBuffer.String(), "No state root set in the block DB. No checks will be performed")
+
+	// Clear log buffer
+	logBuffer.Reset()
+
+	stateRootNotSet = true
+
+	err = checkBlockResults(
+		chain,
+		block,
+		types.Receipts{},
+		future.Immediate(result.Ok(stateRoot)),
+		blockDb,
+		&replayFlags,
+		&stateRootNotSet,
+	)
+	require.NoError(t, err)
+	require.Empty(t, logBuffer.String())
 }
 
 func Test_SnapshotHandler_ShouldCreateSnapshot(t *testing.T) {

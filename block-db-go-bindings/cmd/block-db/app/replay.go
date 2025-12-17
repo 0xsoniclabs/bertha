@@ -430,6 +430,7 @@ func runReplayLoop(
 	replayLoopFlags ReplayLoopFlags,
 	onBlockDone func(block *types.Block),
 ) error {
+	stateRootNotSet := false
 	for block, err := range blocks {
 		tracy.FrameMark()
 		if err != nil {
@@ -451,7 +452,7 @@ func runReplayLoop(
 		}
 
 		// Check the receipts against the expected values in the block.
-		if err := checkBlockResults(chain, block, receipts, stateRoot, blockDB, &replayLoopFlags); err != nil {
+		if err := checkBlockResults(chain, block, receipts, stateRoot, blockDB, &replayLoopFlags, &stateRootNotSet); err != nil {
 			return err
 		}
 
@@ -575,10 +576,11 @@ func runReplayPipeline(
 	// Stage 3: Check results
 	go func() {
 		defer close(done)
+		stateRootNotSet := false
 		for result := range results {
 			block := result.decoded.proto
 
-			err := checkBlockResults(chain, block, result.receipts, result.stateRoot, blockDB, &replayLoopFlags)
+			err := checkBlockResults(chain, block, result.receipts, result.stateRoot, blockDB, &replayLoopFlags, &stateRootNotSet)
 			if err != nil {
 				reportIssue(err)
 				return
@@ -610,6 +612,7 @@ func checkBlockResults(
 	stateRootFuture future.Future[result.Result[common.Hash]],
 	blockDB blockdb.BlockDB,
 	replayLoopFlags *ReplayLoopFlags,
+	stateRootNotSet *bool,
 ) error {
 	zone := tracy.ZoneBegin("CheckResults")
 	overwriteStateRoot := &replayLoopFlags.overwriteStateRoot
@@ -663,8 +666,13 @@ func checkBlockResults(
 		}
 	}
 
-	if !noStateRootCheck && !overwriteStateRoot.IsEnabled() && expectedStateRoot != (common.Hash{}) {
-		if computedStateRoot != expectedStateRoot {
+	if !noStateRootCheck && !overwriteStateRoot.IsEnabled() {
+		if expectedStateRoot == (common.Hash{}) {
+			if !*stateRootNotSet {
+				slog.Warn("No state root set in the block DB. No checks will be performed", "block_number", block.Number)
+				*stateRootNotSet = true
+			}
+		} else if computedStateRoot != expectedStateRoot {
 			return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
 				block.Number, expectedStateRoot, computedStateRoot)
 		}
