@@ -224,6 +224,13 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		}
 	}
 
+	// Load genesis data from the specified file.
+	genesis, err := ReadGenesisFromFile(genesisFileName)
+	if err != nil {
+		return fmt.Errorf("failed to read genesis file %q: %w", genesisFileName, err)
+	}
+	chainId := genesis.ChainId
+
 	// Open State Database in new directory.
 	params := StateParameters{
 		Directory:   stateDbDirectory,
@@ -231,21 +238,22 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		Schema:      schema,
 		Variant:     variant,
 	}
+
 	state, err := NewState(params)
 	if err != nil {
 		return fmt.Errorf("failed to create state: %w", err)
 	}
+	chain := &stateChainAdapter{
+		chainId:         chainId,
+		state:           state,
+		schema:          schema,
+		snapshotHandler: snapshotHandler,
+	}
+	// Because snapshots invalidate the state, we need to close it here.
 	defer func() {
 		slog.Info("Closing state database", "directory", stateDbDirectory)
-		err = errors.Join(err, state.Close())
+		err = errors.Join(err, chain.state.Close())
 	}()
-
-	// Load genesis data from the specified file.
-	genesis, err := ReadGenesisFromFile(genesisFileName)
-	if err != nil {
-		return fmt.Errorf("failed to read genesis file %q: %w", genesisFileName, err)
-	}
-	chainId := genesis.ChainId
 
 	if startBlock == 0 {
 		slog.Info("Starting replay from genesis")
@@ -301,12 +309,6 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	// ---- Start Replay ----
 	blocks := database.GetRange(chainId, startBlock, endBlock)
-	chain := &stateChainAdapter{
-		chainId:         chainId,
-		state:           state,
-		schema:          schema,
-		snapshotHandler: snapshotHandler,
-	}
 
 	replayLoopFlags := ReplayLoopFlags{
 		overwriteStateRoot: New(overwriteStateRoot, confirmAllPrompts),
