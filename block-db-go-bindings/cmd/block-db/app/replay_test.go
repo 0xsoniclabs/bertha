@@ -1,10 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
 	"iter"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -182,7 +184,7 @@ type replayer func(
 	chain Chain,
 	metadata Metadata,
 	database blockdb.BlockDB,
-	replayFlags ReplayLoopFlags,
+	replayLoopContext ReplayLoopContext,
 	onBlockProcessed func(*types.Block),
 ) error
 
@@ -213,7 +215,7 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 
 	iter := newIter(blocks)
 	counter := 0
-	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, nil, ReplayLoopFlags{}, func(block *types.Block) {
+	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, nil, ReplayLoopContext{}, func(block *types.Block) {
 		counter++
 	}))
 	require.Equal(t, len(blocks), counter)
@@ -283,7 +285,7 @@ func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 	}
 
 	iter := newIter(blocks)
-	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, nil, ReplayLoopFlags{}, nil))
+	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, nil, ReplayLoopContext{}, nil))
 }
 
 func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
@@ -295,7 +297,7 @@ func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
 	blocks := func(yield func(*blockdb.Block, error) bool) {
 		yield(nil, injectedError)
 	}
-	require.ErrorIs(t, run(t.Context(), blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil), injectedError)
+	require.ErrorIs(t, run(t.Context(), blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil), injectedError)
 }
 
 func failsOnCancelledContext(t *testing.T, run replayer) {
@@ -310,7 +312,7 @@ func failsOnCancelledContext(t *testing.T, run replayer) {
 		{Number: 0, StateRoot: types.EmptyRootHash[:]},
 	})
 
-	require.ErrorIs(t, run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil), context.Canceled)
+	require.ErrorIs(t, run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil), context.Canceled)
 }
 
 func failsOnBlockConversionError(t *testing.T, run replayer) {
@@ -325,7 +327,7 @@ func failsOnBlockConversionError(t *testing.T, run replayer) {
 		}},
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
 		"failed to convert block 0",
 	)
 }
@@ -343,7 +345,7 @@ func failsOnBlockApplicationError(t *testing.T, run replayer) {
 	ctxt := t.Context()
 	blocks := newIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
 		injectedError,
 	)
 }
@@ -361,7 +363,7 @@ func failsOnCommitmentComputationError(t *testing.T, run replayer) {
 	ctxt := t.Context()
 	blocks := newIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
 		injectedError,
 	)
 }
@@ -386,7 +388,7 @@ func failsOnWrongReceiptStatus(t *testing.T, run replayer) {
 		}},
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
 		"receipt status mismatch",
 	)
 }
@@ -414,7 +416,7 @@ func failsOnWrongReceiptCumulatedGasUsed(t *testing.T, run replayer) {
 		}},
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
 		"receipt cumulative gas used mismatch",
 	)
 }
@@ -438,7 +440,7 @@ func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 		StateRoot: common.Hash{0x2}.Bytes(),
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{}, nil),
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
 		"state root mismatch",
 	)
 }
@@ -462,7 +464,7 @@ func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 		StateRoot: common.Hash{0x2}.Bytes(), // different state root
 	}})
 	require.NoError(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopFlags{
+		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{
 			skipStateRootCheck: true,
 		}, nil),
 		"state root mismatch",
@@ -496,7 +498,7 @@ func overwriteStateRootHash(t *testing.T, run replayer) {
 		StateRoot: common.Hash{0x2}.Bytes(),
 	}})
 	require.NoError(t,
-		run(ctxt, blocks, chain, Metadata{}, blockDB, ReplayLoopFlags{
+		run(ctxt, blocks, chain, Metadata{}, blockDB, ReplayLoopContext{
 			overwriteStateRoot: New(true, true),
 		}, nil),
 		"state root mismatch",
@@ -540,7 +542,7 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 
 		// Start running the replay pipeline.
 		go func() {
-			err := runReplayPipeline(t.Context(), newIter(blocks), chain, Metadata{}, nil, ReplayLoopFlags{}, nil)
+			err := runReplayPipeline(t.Context(), newIter(blocks), chain, Metadata{}, nil, ReplayLoopContext{}, nil)
 			require.ErrorIs(t, err, issue)
 		}()
 
@@ -687,8 +689,9 @@ func Test_checkBlockResults_OverwritesStateRoot(t *testing.T) {
 		Update(chainId, blockWithUpdatedStateRoot).
 		Return(nil)
 
-	replayFlags := ReplayLoopFlags{
+	replayLoopContext := ReplayLoopContext{
 		overwriteStateRoot: New(true, true),
+		stateRootNotSet:    false,
 	}
 
 	err := checkBlockResults(
@@ -697,9 +700,64 @@ func Test_checkBlockResults_OverwritesStateRoot(t *testing.T) {
 		types.Receipts{},
 		future.Immediate(result.Ok(newStateRoot)),
 		blockDb,
-		&replayFlags,
+		&replayLoopContext,
 	)
 	require.NoError(t, err)
+}
+
+func Test_checkBlockResults_LogsMessageIfStateRootNotSet(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	chainId := uint64(12)
+	stateRoot := common.HexToHash("0xfeedface")
+	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainId().Return(chainId).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+
+	block := &blockdb.Block{
+		Number: 0,
+	}
+
+	blockDb := blockdb.NewMockDBInterface(ctrl)
+	replayLoopContext := ReplayLoopContext{
+		overwriteStateRoot: New(false, false),
+		stateRootNotSet:    false,
+	}
+
+	// Capture log output
+	var logBuffer bytes.Buffer
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logBuffer, nil)))
+
+	err := checkBlockResults(
+		chain,
+		block,
+		types.Receipts{},
+		future.Immediate(result.Ok(stateRoot)),
+		blockDb,
+		&replayLoopContext,
+	)
+	require.NoError(t, err)
+	require.Contains(t, logBuffer.String(), "No state root set in the block DB. No checks will be performed")
+
+	// Clear log buffer
+	logBuffer.Reset()
+
+	replayLoopContext = ReplayLoopContext{
+		overwriteStateRoot: New(false, false),
+		stateRootNotSet:    true,
+	}
+
+	err = checkBlockResults(
+		chain,
+		block,
+		types.Receipts{},
+		future.Immediate(result.Ok(stateRoot)),
+		blockDb,
+		&replayLoopContext,
+	)
+	require.NoError(t, err)
+	require.Empty(t, logBuffer.String())
 }
 
 func Test_SnapshotHandler_ShouldCreateSnapshot(t *testing.T) {
