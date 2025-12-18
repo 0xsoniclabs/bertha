@@ -319,13 +319,14 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	// ---- Start Replay ----
 	blocks := database.GetRange(chainId, startBlock, endBlock)
 
-	replayLoopFlags := ReplayLoopFlags{
+	replayLoopContext := ReplayLoopContext{
 		overwriteStateRoot: New(overwriteStateRoot, confirmAllPrompts),
 		skipStateRootCheck: noStateRootCheck,
+		stateRootNotSet:    false,
 	}
 
 	return run(
-		ctx, blocks, chain, metadata, database, replayLoopFlags, func(block *types.Block) {
+		ctx, blocks, chain, metadata, database, replayLoopContext, func(block *types.Block) {
 			if info := progress.LogProgress(block); len(info) > 0 {
 				slog.Info(info)
 			}
@@ -427,10 +428,9 @@ func runReplayLoop(
 	chain Chain,
 	metadata Metadata,
 	blockDB blockdb.BlockDB,
-	replayLoopFlags ReplayLoopFlags,
+	replayLoopContext ReplayLoopContext,
 	onBlockDone func(block *types.Block),
 ) error {
-	stateRootNotSet := false
 	for block, err := range blocks {
 		tracy.FrameMark()
 		if err != nil {
@@ -452,7 +452,7 @@ func runReplayLoop(
 		}
 
 		// Check the receipts against the expected values in the block.
-		if err := checkBlockResults(chain, block, receipts, stateRoot, blockDB, &replayLoopFlags, &stateRootNotSet); err != nil {
+		if err := checkBlockResults(chain, block, receipts, stateRoot, blockDB, &replayLoopContext); err != nil {
 			return err
 		}
 
@@ -474,7 +474,7 @@ func runReplayPipeline(
 	chain Chain,
 	metadata Metadata,
 	blockDB blockdb.BlockDB,
-	replayLoopFlags ReplayLoopFlags,
+	replayLoopContext ReplayLoopContext,
 	onBlockDone func(block *types.Block),
 ) error {
 	const bufferSize = 1024
@@ -576,11 +576,10 @@ func runReplayPipeline(
 	// Stage 3: Check results
 	go func() {
 		defer close(done)
-		stateRootNotSet := false
 		for result := range results {
 			block := result.decoded.proto
 
-			err := checkBlockResults(chain, block, result.receipts, result.stateRoot, blockDB, &replayLoopFlags, &stateRootNotSet)
+			err := checkBlockResults(chain, block, result.receipts, result.stateRoot, blockDB, &replayLoopContext)
 			if err != nil {
 				reportIssue(err)
 				return
@@ -611,12 +610,11 @@ func checkBlockResults(
 	receipts types.Receipts,
 	stateRootFuture future.Future[result.Result[common.Hash]],
 	blockDB blockdb.BlockDB,
-	replayLoopFlags *ReplayLoopFlags,
-	stateRootNotSet *bool,
+	replayLoopContext *ReplayLoopContext,
 ) error {
 	zone := tracy.ZoneBegin("CheckResults")
-	overwriteStateRoot := &replayLoopFlags.overwriteStateRoot
-	noStateRootCheck := replayLoopFlags.skipStateRootCheck
+	overwriteStateRoot := &replayLoopContext.overwriteStateRoot
+	noStateRootCheck := replayLoopContext.skipStateRootCheck
 
 	for i, receipt := range receipts {
 		want := block.Receipts[i]
@@ -668,9 +666,9 @@ func checkBlockResults(
 
 	if !noStateRootCheck && !overwriteStateRoot.IsEnabled() {
 		if expectedStateRoot == (common.Hash{}) {
-			if !*stateRootNotSet {
+			if !replayLoopContext.stateRootNotSet {
 				slog.Warn("No state root set in the block DB. No checks will be performed", "block_number", block.Number)
-				*stateRootNotSet = true
+				replayLoopContext.stateRootNotSet = true
 			}
 		} else if computedStateRoot != expectedStateRoot {
 			return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
@@ -837,10 +835,11 @@ func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, e
 	return state, nil
 }
 
-// ReplayLoopFlags is a utility struct to hold flags to pass to the `replayLoop` functions.
-type ReplayLoopFlags struct {
+// ReplayLoopContext is a utility struct to hold flags to pass to the `replayLoop` functions.
+type ReplayLoopContext struct {
 	overwriteStateRoot FlagWithConfirmation
 	skipStateRootCheck bool
+	stateRootNotSet    bool
 }
 
 // FlagWithConfirmation is a utility struct to hold a boolean flag along with a confirmation flag to track user confirmation.
