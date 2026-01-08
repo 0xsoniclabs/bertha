@@ -15,6 +15,7 @@ import (
 	"github.com/0xsoniclabs/blockdb"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
+	"github.com/0xsoniclabs/carmen/go/state"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/linxGnu/grocksdb"
@@ -89,7 +90,7 @@ func TestReplay_FailsIfStartBlockIsProvidedWithoutStateDbDir(t *testing.T) {
 func TestProgressLogger_ProducesLogMessagesEvery10kSteps(t *testing.T) {
 	require := require.New(t)
 
-	logger := startProgressLogger()
+	logger := startProgressLogger(nil, "", false)
 
 	block0, err := ConvertToGethBlock(&blockdb.Block{
 		Number:    0,
@@ -113,21 +114,59 @@ func TestProgressLogger_ProducesLogMessagesEvery10kSteps(t *testing.T) {
 	require.NoError(err)
 
 	require.Empty(logger.LogProgress(block0))
+	res, err := logger.LogProgress(block10k)
+	require.NoError(err)
 	require.Regexp(
 		`Processing block 10000 from 1970-01-01 [0-9]{2}:33:20 @ t= 0:00:[0-9]{2}, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime`,
-		logger.LogProgress(block10k),
+		res,
 	)
 	require.Empty(logger.LogProgress(block15k))
+	res, err = logger.LogProgress(block20k)
+	require.NoError(err)
 	require.Regexp(
 		`Processing block 20000 from 1970-01-01 [0-9]{2}:58:20 @ t= 0:00:[0-9]{2}, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime`,
-		logger.LogProgress(block20k),
+		res,
+	)
+}
+
+func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
+	require := require.New(t)
+	ctrl := gomock.NewController(t)
+	dbMock := state.NewMockStateDB(ctrl)
+	dbMock.EXPECT().Flush().Return(nil).Times(1)
+	state := &State{
+		blockHashHistory: nil,
+		db:               dbMock,
+		stateParameter:   StateParameters{},
+	}
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "file1.txt")
+	data := make([]byte, 1024*1024) // Resolution is in MiB
+	err := os.WriteFile(filePath, data, 0644)
+	require.NoError(err)
+
+	block, err := ConvertToGethBlock(&blockdb.Block{
+		Number:       10000,
+		Timestamp:    1000,
+		Transactions: []*blockdb.Transaction{},
+	})
+	require.NoError(err)
+
+	logger := startProgressLogger(state, dir, true)
+	res, err := logger.LogProgress(block)
+	require.NoError(err)
+
+	require.Regexp(
+		`Processing block 10000 from 1970-01-01 [0-9]{2}:[0-9]{2}:[0-9]{2} @ t= 0:00:00, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime, DB size: 1.00 MiB`,
+		res,
 	)
 }
 
 func TestProgressLogger_ProducesASummary(t *testing.T) {
 	require := require.New(t)
 
-	logger := startProgressLogger()
+	logger := startProgressLogger(nil, "", false)
 
 	block, err := ConvertToGethBlock(&blockdb.Block{
 		Number:    0,
