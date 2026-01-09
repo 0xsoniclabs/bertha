@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"iter"
 	"log/slog"
 	"maps"
@@ -103,6 +102,13 @@ var (
 		Value:   false,
 	}
 
+	logDbSize = &cli.BoolFlag{
+		Name:    "log-db-size",
+		Aliases: []string{"lds"},
+		Usage:   "Include the disk size of the database in progress log messages (default = disabled)",
+		Value:   false,
+	}
+
 	confirmAllPromptsFlag = &cli.BoolFlag{
 		Name:  "y",
 		Usage: "Automatically confirm all prompts",
@@ -139,6 +145,7 @@ func getReplayCommand() *cli.Command {
 			snapshotInterval,
 			overwriteStateRoot,
 			noStateRootCheck,
+			logDbSize,
 			confirmAllPromptsFlag,
 		},
 	}
@@ -159,6 +166,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	overwriteStateRoot := c.Bool(overwriteStateRoot.Name)
 	confirmAllPrompts := c.Bool(confirmAllPromptsFlag.Name)
 	noStateRootCheck := c.Bool(noStateRootCheck.Name)
+	logDbSize := c.Bool(logDbSize.Name)
 
 	schema := carmen.Schema(c.Int(dbSchema.Name))
 	variant := carmen.Variant(c.String(dbVariant.Name))
@@ -233,6 +241,10 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		}
 	}
 
+	if logDbSize {
+		slog.Warn("DB size log enabled. This will trigger a flush with every progress report and reduce performance")
+	}
+
 	// Load genesis data from the specified file.
 	genesis, err := ReadGenesisFromFile(genesisFileName)
 	if err != nil {
@@ -302,7 +314,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	}
 
 	// Prepare the progress logger.
-	progress := startProgressLogger()
+	progress := startProgressLogger(state, stateDbDirectory, logDbSize)
 	defer func() {
 		slog.Info(progress.GetSummary())
 	}()
@@ -327,7 +339,12 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	return run(
 		ctx, blocks, chain, metadata, database, replayLoopContext, func(block *types.Block) {
-			if info := progress.LogProgress(block); len(info) > 0 {
+			info, err := progress.LogProgress(block)
+			if err != nil {
+				slog.Error("Failed to log progress", "error", err)
+				return
+			}
+			if len(info) > 0 {
 				slog.Info(info)
 			}
 		},
@@ -339,6 +356,8 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 // progressLogger is a UX helper utility for the replay command producing
 // the main progress log output.
 type progressLogger struct {
+	state                  *State
+	stateDbDirectory       string
 	start                  time.Time
 	lastUpdate             time.Time
 	lastReportedBlockTime  time.Time
@@ -348,17 +367,21 @@ type progressLogger struct {
 	lastTxCounter          uint64
 	lastGasCounter         uint64
 	firstBlockTime         time.Time
+	logDbSize              bool
 }
 
-func startProgressLogger() *progressLogger {
+func startProgressLogger(state *State, stateDbDirectory string, logDbSize bool) *progressLogger {
 	now := time.Now()
 	return &progressLogger{
-		start:      now,
-		lastUpdate: now,
+		state:            state,
+		stateDbDirectory: stateDbDirectory,
+		start:            now,
+		lastUpdate:       now,
+		logDbSize:        logDbSize,
 	}
 }
 
-func (p *progressLogger) LogProgress(block *types.Block) string {
+func (p *progressLogger) LogProgress(block *types.Block) (string, error) {
 	// Keep track of metrics for logging purposes.
 	p.lastProcessedBlockTime = time.Unix(int64(block.Time()), 0)
 	p.txCounter += uint64(len(block.Transactions()))
@@ -368,12 +391,12 @@ func (p *progressLogger) LogProgress(block *types.Block) string {
 	if number == 0 {
 		p.firstBlockTime = p.lastProcessedBlockTime
 		p.lastReportedBlockTime = p.lastProcessedBlockTime
-		return ""
+		return "", nil
 	}
 
 	// Periodically log the progress of the replay.
 	if number%10_000 != 0 {
-		return ""
+		return "", nil
 	}
 
 	currentBlockTime := time.Unix(int64(block.Time()), 0)
@@ -390,8 +413,23 @@ func (p *progressLogger) LogProgress(block *types.Block) string {
 
 	runtime := time.Since(p.start)
 
+	// Optionally log the size of the state database.
+	var sizeStr string
+	if p.logDbSize {
+		err := p.state.db.Flush()
+		if err != nil {
+			return "", fmt.Errorf("failed to flush state database: %w", err)
+		}
+		size, err := DirSize(p.stateDbDirectory)
+		if err != nil {
+			return "", fmt.Errorf("failed to compute state database size: %w", err)
+		}
+
+		sizeStr = fmt.Sprintf(", DB size: %.2f MiB", float64(size)/1024/1024)
+	}
+
 	return fmt.Sprintf(
-		"Processing block %d from %v @ t=%2d:%02d:%02d, %.2f txs/s, %.2f MGas/s, %.2fx realtime",
+		"Processing block %d from %v @ t=%2d:%02d:%02d, %.2f txs/s, %.2f MGas/s, %.2fx realtime%s",
 		number,
 		currentBlockTime.Format(time.DateTime),
 		int(runtime.Hours()),
@@ -400,7 +438,8 @@ func (p *progressLogger) LogProgress(block *types.Block) string {
 		float64(deltaTx)/deltaTime.Seconds(),
 		float64(deltaGas)/deltaTime.Seconds()/1000/1000,
 		deltaBlockTime.Seconds()/deltaTime.Seconds(),
-	)
+		sizeStr,
+	), nil
 }
 
 func (p *progressLogger) GetSummary() string {
@@ -869,26 +908,4 @@ func (f *FlagWithConfirmation) IsConfirmed() bool {
 
 func (f *FlagWithConfirmation) Confirm() {
 	f.confirmed = true
-}
-
-// IsEmptyOrMissingDir returns true if a directory is missing or empty.
-func IsEmptyOrMissingDir(path string) (bool, error) {
-	_, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return true, nil // non-existent
-	}
-	if err != nil {
-		return false, err
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return false, err
-	}
-	defer f.Close()
-
-	_, err = f.Readdir(1) // try to read a single entry
-	if err == io.EOF {
-		return true, nil // empty
-	}
-	return false, err // either not empty or some other error
 }
