@@ -420,23 +420,24 @@ func (p *progressLogger) LogProgress(block *types.Block) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to flush state database: %w", err)
 		}
-		live_size, err := DirSize(p.stateDbDirectory + "/live")
+		liveSize, err := DirSize(filepath.Join(p.stateDbDirectory, "live"))
 		if err != nil {
 			return "", fmt.Errorf("failed to compute live database size: %w", err)
 		}
 
-		sizeStr = fmt.Sprintf(", live DB size: %.2f MiB", float64(live_size)/1024/1024)
+		sizeStr = fmt.Sprintf(", live DB size: %.2f MiB", float64(liveSize)/1024/1024)
 
-		archive_missing, err := IsEmptyOrMissingDir(p.stateDbDirectory + "/archive")
+		archiveDir := filepath.Join(p.stateDbDirectory, "archive")
+		archiveMissing, err := IsEmptyOrMissingDir(archiveDir)
 		if err != nil {
 			return "", fmt.Errorf("failed to check existence of archive database directory: %w", err)
 		}
-		if !archive_missing {
-			archive_size, err := DirSize(p.stateDbDirectory + "/archive")
+		if !archiveMissing {
+			archiveSize, err := DirSize(archiveDir)
 			if err != nil {
 				return "", fmt.Errorf("failed to compute archive database size: %w", err)
 			}
-			sizeStr += fmt.Sprintf(", archive DB size: %.2f MiB", float64(archive_size)/1024/1024)
+			sizeStr += fmt.Sprintf(", archive DB size: %.2f MiB", float64(archiveSize)/1024/1024)
 		} else {
 			sizeStr += ", archive DB size: n/a"
 		}
