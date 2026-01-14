@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math/big"
 	"os"
+	"strings"
 
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/amount"
@@ -57,7 +58,11 @@ func NewState(params StateParameters) (*State, error) {
 
 	archive := carmen.NoArchive
 	if params.WithArchive {
-		archive = carmen.S5Archive
+		if strings.HasPrefix(string(params.Variant), "rust") {
+			archive = "file"
+		} else {
+			archive = carmen.S5Archive
+		}
 	}
 
 	state, err := carmen.NewState(carmen.Parameters{
