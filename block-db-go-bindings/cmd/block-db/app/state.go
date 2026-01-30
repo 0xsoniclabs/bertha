@@ -20,8 +20,9 @@ import (
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+
 	// Uncomment to enable experimental Carmen features.
-	//_ "github.com/0xsoniclabs/carmen/go/experimental"
+	_ "github.com/0xsoniclabs/carmen/go/experimental"
 )
 
 // State is an abstraction of the Chain State Database. It tracks the balances,
@@ -76,6 +77,8 @@ func NewState(params StateParameters) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create state: %v", err)
 	}
+	//state = NewLoggingState(state)
+
 	db := carmen.CreateCustomStateDBUsing(state, 0)
 	return &State{db: db, blockHashHistory: &blockHashHistory{}, stateParameter: params}, nil
 }
