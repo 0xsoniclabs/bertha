@@ -139,6 +139,7 @@ func (s *gethStateDB) HasEmptyStorage(addr cc.Address) (bool, error) {
 
 func (s *gethStateDB) Apply(block uint64, update cc.Update) error {
 
+	oldStateRoot := s.stateRoot
 	// init potentially empty accounts with empty code hash,
 	for _, address := range update.CreatedAccounts {
 		s.db.CreateAccount(common.Address(address))
@@ -194,13 +195,15 @@ func (s *gethStateDB) Apply(block uint64, update cc.Update) error {
 		}
 	}
 
-	// Create a new StateDB for the next block.
 	newDB, err := geth.New(common.Hash(s.stateRoot), s.evmState)
 	if err != nil {
 		return fmt.Errorf("failed to create new StateDB: %w", err)
 	}
 	s.db = newDB
 
+	if oldStateRoot != s.stateRoot {
+		s.db.Database().TrieDB().Dereference(common.Hash(oldStateRoot))
+	}
 	return nil
 }
 
