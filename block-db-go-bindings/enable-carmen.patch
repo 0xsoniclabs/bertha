@@ -1,18 +1,3 @@
-diff --git a/block-db-go-bindings/cmd/block-db/app/state.go b/block-db-go-bindings/cmd/block-db/app/state.go
-index 757c1e9..8c239ad 100644
---- a/block-db-go-bindings/cmd/block-db/app/state.go
-+++ b/block-db-go-bindings/cmd/block-db/app/state.go
-@@ -19,8 +19,9 @@ import (
- 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
- 	"github.com/ethereum/go-ethereum/common"
- 	"github.com/ethereum/go-ethereum/core/types"
-+
- 	// Uncomment to enable experimental Carmen features.
--	//_ "github.com/0xsoniclabs/carmen/go/experimental"
-+	_ "github.com/0xsoniclabs/carmen/go/experimental"
- )
-
- // State is an abstraction of the Chain State Database. It tracks the balances,
 diff --git a/block-db-go-bindings/go.mod b/block-db-go-bindings/go.mod
 index fd58cbf..531a40e 100644
 --- a/block-db-go-bindings/go.mod

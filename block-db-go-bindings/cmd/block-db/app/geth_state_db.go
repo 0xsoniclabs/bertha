@@ -20,6 +20,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/triedb"
+	"github.com/ethereum/go-ethereum/triedb/pathdb"
 )
 
 func init() {
@@ -75,7 +76,9 @@ func _makeGethStateDB(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create a new Level DB, %w", err)
 	}
-	trieDb := triedb.NewDatabase(rawdb.NewDatabase(ldb), &triedb.Config{})
+	trieDb := triedb.NewDatabase(rawdb.NewDatabase(ldb), &triedb.Config{
+		PathDB: pathdb.Defaults,
+	})
 	evmState := geth.NewDatabase(trieDb, nil)
 	if rootHash == (common.Hash{}) {
 		rootHash = types.EmptyRootHash
