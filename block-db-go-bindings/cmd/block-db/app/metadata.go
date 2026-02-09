@@ -34,6 +34,7 @@ func (m Metadata) GetRulesAtBlock(blockNumber uint64) opera.Rules {
 // GetMetadataForChain retrieves the metadata for a given chain ID.
 // TODO: retrieve this data from a Bertha server instead of hardcoding it.
 func GetMetadataForChain(chainId uint64) (Metadata, error) {
+	allegro := opera.GetAllegroUpgrades()
 	switch chainId {
 	case SonicMainNetChainId:
 		corrections, err := GetSonicMainnetCorrections()
@@ -41,13 +42,17 @@ func GetMetadataForChain(chainId uint64) (Metadata, error) {
 			return Metadata{}, err
 		}
 		return Metadata{
+			Upgrades: []opera.UpgradeHeight{
+				// Rule update transaction is part of block 56477897,
+				// followed by an Epoch seal in block 56477967.
+				// The upgrade has affect from and including the following block.
+				{Upgrades: allegro, Height: 56477968},
+			},
 			Corrections: corrections,
-			// No upgrades for Sonic Mainnet as of now.
 		}, nil
 	case AllegroTestNetChainId:
 		// The Allegro Testnet does not need any corrections, but it does have
 		// several network rule upgrades.
-		allegro := opera.GetAllegroUpgrades()
 		allegroSingleProposer := allegro
 		allegroSingleProposer.SingleProposerBlockFormation = true
 		return Metadata{
