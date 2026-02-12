@@ -1,0 +1,614 @@
+{
+    "data": {
+        "stakers": [
+            {
+                "id": "0x30",
+                "isActive": true,
+                "stake": "0x68bd5ddb2aa5ce17108000",
+                "stakerAddress": "0xc9d21b370d7d2a24ee0b08f82323777737a653f6",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic-strategy.png",
+                    "name": "SonicStrategy CSE.SPTZ OTCQB.DBKSF #2"
+                },
+                "delegatedLimit": "0x61fb415d1944f8e4bea51bf",
+                "totalStake": "0x6c21c7e1160d53251dae41",
+                "totalDelegatedLimit": "0x68bd5ddb2aa5ce171080000"
+            },
+            {
+                "id": "0xf",
+                "isActive": true,
+                "stake": "0x14adf4b7320334b9000000",
+                "stakerAddress": "0x80e7a1c8b2ab0ea5f96dcb11ff52a7be09a23a5f",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/tokyo15.jpg",
+                    "name": "Tokyo - MAX APR"
+                },
+                "delegatedLimit": "0xfb0450b85bd0ff19d004cd",
+                "totalStake": "0x4fdafabac4624c762ffb33",
+                "totalDelegatedLimit": "0x14adf4b7320334b90000000"
+            },
+            {
+                "id": "0xe",
+                "isActive": true,
+                "stake": "0x108b2a2c28029094000000",
+                "stakerAddress": "0x3ebfbe0e523d8deb26d6f93cee987d2e974dd4ae",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/hyperblocks.jpg",
+                    "name": "Hyperblocks 2"
+                },
+                "delegatedLimit": "0xbdd5356f0d11ab14d54281",
+                "totalStake": "0x4add6d5373175e2b2abd7f",
+                "totalDelegatedLimit": "0x108b2a2c280290940000000"
+            },
+            {
+                "id": "0x12",
+                "isActive": true,
+                "stake": "0x14adf4b7320334b9000000",
+                "stakerAddress": "0x62e6c2d4c75aeb7f82d2ff192932ef89b0a8cbdb",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/goat1.jpg",
+                    "name": "Sonic Goat 1 - MAX APR"
+                },
+                "delegatedLimit": "0x102be8ceeff8069383199c5",
+                "totalStake": "0x4820be8420b2e257ce663b",
+                "totalDelegatedLimit": "0x14adf4b7320334b90000000"
+            },
+            {
+                "id": "0xd",
+                "isActive": true,
+                "stake": "0x108b2a2c28029094000000",
+                "stakerAddress": "0x0303523ad2ec276d1ce480b59a6585b97d5deabf",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/hyperblocks.jpg",
+                    "name": "Hyperblocks"
+                },
+                "delegatedLimit": "0xc3d8618b229f8c1ae8fd88",
+                "totalStake": "0x44da41375d897d25170278",
+                "totalDelegatedLimit": "0x108b2a2c280290940000000"
+            },
+            {
+                "id": "0x10",
+                "isActive": true,
+                "stake": "0x14adf4b7320334b9000000",
+                "stakerAddress": "0x5a64d67c98841e984b2f17db66835a9546cc013b",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/goat2.jpg",
+                    "name": "Sonic Goat 2 - MAX APR"
+                },
+                "delegatedLimit": "0x1087d6d62fbd5414da0fcba",
+                "totalStake": "0x4261de10245e0a425f0346",
+                "totalDelegatedLimit": "0x14adf4b7320334b90000000"
+            },
+            {
+                "id": "0x11",
+                "isActive": true,
+                "stake": "0x14adf4b7320334b9000000",
+                "stakerAddress": "0x201bf5fe6414460d3fd000708e51ddce32bac9ee",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/london17.jpg",
+                    "name": "London - MAX APR"
+                },
+                "delegatedLimit": "0x114e39cf434e39ad8ad11ed",
+                "totalStake": "0x35fbae7eeb4fb0b752ee13",
+                "totalDelegatedLimit": "0x14adf4b7320334b90000000"
+            },
+            {
+                "id": "0x2a",
+                "isActive": true,
+                "stake": "0x34f086f3b33b684000000",
+                "stakerAddress": "0xf977814e90da44bfa03b6295a0616a897441acec",
+                "stakerInfo": null,
+                "delegatedLimit": "0x31c7d41388c0f97b486fd",
+                "totalStake": "0x31d409b27aaf58a84b7903",
+                "totalDelegatedLimit": "0x34f086f3b33b6840000000"
+            },
+            {
+                "id": "0x2",
+                "isActive": true,
+                "stake": "0x422ca8b0a00a425000000",
+                "stakerAddress": "0x90039b2b26bbcba645c0a2f89982813e12c618fe",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic.svg",
+                    "name": "SonicLabs"
+                },
+                "delegatedLimit": "0x193f6dae6690ded358a73a",
+                "totalStake": "0x28ed3b023979637ca758c6",
+                "totalDelegatedLimit": "0x422ca8b0a00a4250000000"
+            },
+            {
+                "id": "0x1",
+                "isActive": true,
+                "stake": "0x422ca8b0a00a425000000",
+                "stakerAddress": "0xab38a2f75606f6a5c150bbcf71e5f2762aa996fe",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic.svg",
+                    "name": "SonicLabs"
+                },
+                "delegatedLimit": "0x1d4b94bf0544e0b9787fbe",
+                "totalStake": "0x24e113f19ac56196878042",
+                "totalDelegatedLimit": "0x422ca8b0a00a4250000000"
+            },
+            {
+                "id": "0x9",
+                "isActive": true,
+                "stake": "0x422ca8b0a00a425000000",
+                "stakerAddress": "0xbb293d340834a51560089c7f7b6e35b064f2ffeb",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic.svg",
+                    "name": "SonicLabs"
+                },
+                "delegatedLimit": "0x1f70d0103f3dfa8027fdd0",
+                "totalStake": "0x22bbd8a060cc47cfd80230",
+                "totalDelegatedLimit": "0x422ca8b0a00a4250000000"
+            },
+            {
+                "id": "0x2d",
+                "isActive": true,
+                "stake": "0x288c22ef709397e2d7658",
+                "stakerAddress": "0x6c296d89e1bdabe870b817fe8807d318e09b30b5",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic-strategy.png",
+                    "name": "SonicStrategy CSE.SPTZ OTCQB.DBKSF #1"
+                },
+                "delegatedLimit": "0xbcdcf80ed91c169b992d7",
+                "totalStake": "0x1cbe536e8301d6791dd2a9",
+                "totalDelegatedLimit": "0x288c22ef709397e2d76580"
+            },
+            {
+                "id": "0x1e",
+                "isActive": true,
+                "stake": "0x27b4698cff84b27f40000",
+                "stakerAddress": "0xe7a8bbc14c11753a2ab7b6c764e00e34bd251dfd",
+                "stakerInfo": null,
+                "delegatedLimit": "0xb109aee17db1a270ed38e",
+                "totalStake": "0x1ca3ce9ee7a99858312c72",
+                "totalDelegatedLimit": "0x27b4698cff84b27f400000"
+            },
+            {
+                "id": "0x1a",
+                "isActive": true,
+                "stake": "0x1d1de3d2d5c712f000000",
+                "stakerAddress": "0x27628520f84d6681a442afb2e7fc6c60f57361f4",
+                "stakerInfo": null,
+                "delegatedLimit": "0x933de1e6a286647332fb",
+                "totalStake": "0x1c8aa5f0ef248c8b8ccd05",
+                "totalDelegatedLimit": "0x1d1de3d2d5c712f0000000"
+            },
+            {
+                "id": "0xb",
+                "isActive": true,
+                "stake": "0x27b46536c66c8e3000000",
+                "stakerAddress": "0x7eb5bf19fc16ebd94a89cdab3fe621d8fd5aedfd",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/gosonic.png",
+                    "name": "GoSonic 1"
+                },
+                "delegatedLimit": "0xe037d1f665012b4a326fa",
+                "totalStake": "0x19b0e817601c7b7b5cd906",
+                "totalDelegatedLimit": "0x27b46536c66c8e30000000"
+            },
+            {
+                "id": "0x1b",
+                "isActive": true,
+                "stake": "0x1a784333e3abda15d83f1",
+                "stakerAddress": "0x2e8f2e3dff0e124896ba4068a13228b5784a7194",
+                "stakerInfo": null,
+                "delegatedLimit": "0x2b3a2e76e6b181bb76e9d",
+                "totalStake": "0x17c4a04c7540c1fa20d073",
+                "totalDelegatedLimit": "0x1a784333e3abda15d83f10"
+            },
+            {
+                "id": "0x2f",
+                "isActive": true,
+                "stake": "0x190591debe5ba4f82dab7",
+                "stakerAddress": "0xe887312c0595a10ac88e32ebb8e9f660ad9ab7f7",
+                "stakerInfo": null,
+                "delegatedLimit": "0x19f9a75ab0bfa877a7150",
+                "totalStake": "0x1765f769134faa70b33a20",
+                "totalDelegatedLimit": "0x190591debe5ba4f82dab70"
+            },
+            {
+                "id": "0x19",
+                "isActive": true,
+                "stake": "0x13da329b6336471800000",
+                "stakerAddress": "0xb33968166728f013c5338f6856ae28e8b2beca46",
+                "stakerInfo": null,
+                "delegatedLimit": "0xd2bf5ed39edfb5d18774",
+                "totalStake": "0x1307733c8f9767622e788c",
+                "totalDelegatedLimit": "0x13da329b63364718000000"
+            },
+            {
+                "id": "0x15",
+                "isActive": true,
+                "stake": "0x1287626ee52197b000000",
+                "stakerAddress": "0x59beab2b143a91c4c0244e9c7d268248868bf16b",
+                "stakerInfo": {
+                    "logoUrl": "https://res.cloudinary.com/dxqhzbj8a/image/upload/v1736240466/OneStake.svg",
+                    "name": "One Stake"
+                },
+                "delegatedLimit": "0x4120073147f6906d7942",
+                "totalStake": "0x12464267b3d9a11f9286be",
+                "totalDelegatedLimit": "0x1287626ee52197b0000000"
+            },
+            {
+                "id": "0x2c",
+                "isActive": true,
+                "stake": "0xfe1c215e8f838e000000",
+                "stakerAddress": "0x16ea5e653b6227455a27309cde8d0baeb26e13b9",
+                "stakerInfo": null,
+                "delegatedLimit": "0x6bb1a807e9caa1a78",
+                "totalStake": "0xfe1bb5ace77ba4355e588",
+                "totalDelegatedLimit": "0xfe1c215e8f838e0000000"
+            },
+            {
+                "id": "0x4",
+                "isActive": true,
+                "stake": "0x422ca8b0a00a425000000",
+                "stakerAddress": "0xd877363fd4ec6fcc58e40c0436a1e7f7fb04274a",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic.svg",
+                    "name": "SonicLabs"
+                },
+                "delegatedLimit": "0x36675a6c958584a21a2bc4",
+                "totalStake": "0xbc54e440a84bdade5d43c",
+                "totalDelegatedLimit": "0x422ca8b0a00a4250000000"
+            },
+            {
+                "id": "0x1c",
+                "isActive": true,
+                "stake": "0xd3c21aea9d831d51aafa",
+                "stakerAddress": "0xe59c6f9355e31edaa45d39939a5180618e9949d5",
+                "stakerInfo": null,
+                "delegatedLimit": "0x3733274b9b30c5fcc0d6a",
+                "totalStake": "0x9c8ef39f02525754ea236",
+                "totalDelegatedLimit": "0xd3c21aea9d831d51aafa0"
+            },
+            {
+                "id": "0x17",
+                "isActive": true,
+                "stake": "0xa9624399d23a861c78df",
+                "stakerAddress": "0x327f1ed2b3ab8c350835a9c87ec5b798b9d6c48b",
+                "stakerInfo": {
+                    "logoUrl": "https://img.stakely.io/logos/stakely-io-small-logo.png",
+                    "name": "Stakely"
+                },
+                "delegatedLimit": "0xe13013492328b0395f4b",
+                "totalStake": "0x9b4f42654007fb18e2ea5",
+                "totalDelegatedLimit": "0xa9624399d23a861c78df0"
+            },
+            {
+                "id": "0xa",
+                "isActive": true,
+                "stake": "0x422ca8b0a00a425000000",
+                "stakerAddress": "0x9dedd0b4bdb5c55fb067c990a9d45bdec465615e",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic.svg",
+                    "name": "SonicLabs"
+                },
+                "delegatedLimit": "0x388461753f28fef6be401d",
+                "totalStake": "0x9a8473b60e1435941bfe3",
+                "totalDelegatedLimit": "0x422ca8b0a00a4250000000"
+            },
+            {
+                "id": "0x25",
+                "isActive": true,
+                "stake": "0x13da329b6336471800000",
+                "stakerAddress": "0xcafe17cd14e8dfb6ec923e8c47a13f28b511cafe",
+                "stakerInfo": {
+                    "logoUrl": "https://www.nymph.cafe/images/logos/nymphcafe.webp",
+                    "name": "www.nymph.cafe"
+                },
+                "delegatedLimit": "0xc3c313f6ba881cad041e9",
+                "totalStake": "0x79e015bf78dc54d2fbe17",
+                "totalDelegatedLimit": "0x13da329b63364718000000"
+            },
+            {
+                "id": "0xc",
+                "isActive": true,
+                "stake": "0xd3c21bcecceda1000000",
+                "stakerAddress": "0xba70918cedafab03a3ea9adfdd4b1d83a5881c8d",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/gosonic.png",
+                    "name": "GoSonic 2"
+                },
+                "delegatedLimit": "0x5a0711c8b77fe8caed678",
+                "totalStake": "0x79bb0a06156db83512988",
+                "totalDelegatedLimit": "0xd3c21bcecceda10000000"
+            },
+            {
+                "id": "0x1d",
+                "isActive": true,
+                "stake": "0xd3c22718df0f13f68703",
+                "stakerAddress": "0x7903d1053ebdbe1f50783752f3b0d834213a799a",
+                "stakerInfo": {
+                    "logoUrl": "https://raw.githubusercontent.com/neesaty/FantomIndia/master/fantom_logo.jpg",
+                    "name": "SonicIndia - Best Rewards"
+                },
+                "delegatedLimit": "0x5d270c09299b9eb3185aa",
+                "totalStake": "0x769b1b0fb57375436ea86",
+                "totalDelegatedLimit": "0xd3c22718df0f13f687030"
+            },
+            {
+                "id": "0x3",
+                "isActive": true,
+                "stake": "0x422ca8b0a00a425000000",
+                "stakerAddress": "0x15e4b289a07c034c9b0a0900d4c6a3111629a37b",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic.svg",
+                    "name": "SonicLabs"
+                },
+                "delegatedLimit": "0x3b2864ac8a6478b4d901ac",
+                "totalStake": "0x704440415a5c99b26fe54",
+                "totalDelegatedLimit": "0x422ca8b0a00a4250000000"
+            },
+            {
+                "id": "0x7",
+                "isActive": true,
+                "stake": "0x422ca8b0a00a425000000",
+                "stakerAddress": "0xc8b39ed6830db7aaa8d4c304b949402b614ad368",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic.svg",
+                    "name": "SonicLabs"
+                },
+                "delegatedLimit": "0x3b97e32a0d898352c2c51d",
+                "totalStake": "0x694c5869280befd3d3ae3",
+                "totalDelegatedLimit": "0x422ca8b0a00a4250000000"
+            },
+            {
+                "id": "0x6",
+                "isActive": true,
+                "stake": "0x422ca8b0a00a425000000",
+                "stakerAddress": "0x3fde6fecc9044335f1193429c7c74efd7a8094c1",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic.svg",
+                    "name": "SonicLabs"
+                },
+                "delegatedLimit": "0x3c38b7d260d75383ef2ff2",
+                "totalStake": "0x5f3f0de3f32eecc10d00e",
+                "totalDelegatedLimit": "0x422ca8b0a00a4250000000"
+            },
+            {
+                "id": "0x5",
+                "isActive": true,
+                "stake": "0x422ca8b0a00a425000000",
+                "stakerAddress": "0x5f8a6e56cf77d7a1db34e6489d703315cd8e714f",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic.svg",
+                    "name": "SonicLabs"
+                },
+                "delegatedLimit": "0x3c683e779232bc7711220a",
+                "totalStake": "0x5c46a390dd785d8eeddf6",
+                "totalDelegatedLimit": "0x422ca8b0a00a4250000000"
+            },
+            {
+                "id": "0x8",
+                "isActive": true,
+                "stake": "0x422ca8b0a00a425000000",
+                "stakerAddress": "0xa09e5cb7cf15c9d3edbf57a90624f497893f0951",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic.svg",
+                    "name": "SonicLabs"
+                },
+                "delegatedLimit": "0x3ce3e2f326640c220d565d",
+                "totalStake": "0x548c5bd79a6362df2a9a3",
+                "totalDelegatedLimit": "0x422ca8b0a00a4250000000"
+            },
+            {
+                "id": "0x27",
+                "isActive": true,
+                "stake": "0x7e27f179b6bb19cc0000",
+                "stakerAddress": "0xa8b20224f7f2798d70e98c03033fcafa1365a821",
+                "stakerInfo": {
+                    "logoUrl": "https://alphanodes.io/wp-content/uploads/2024/05/Ethernodes.png",
+                    "name": "Ethernodes"
+                },
+                "delegatedLimit": "0x2b089383d7455b57a1403",
+                "totalStake": "0x531f5df5df75be745ebfd",
+                "totalDelegatedLimit": "0x7e27f179b6bb19cc00000"
+            },
+            {
+                "id": "0x2e",
+                "isActive": true,
+                "stake": "0x27b46536c66c8e3000000",
+                "stakerAddress": "0x33bb031191edcac7c10a18fa8376060ee437201c",
+                "stakerInfo": {
+                    "logoUrl": "",
+                    "name": "SODAX: Validator"
+                },
+                "delegatedLimit": "0x22afaaefd3c2ebcc2eb7e3",
+                "totalStake": "0x504ba46f2a9a263d1481d",
+                "totalDelegatedLimit": "0x27b46536c66c8e30000000"
+            },
+            {
+                "id": "0x32",
+                "isActive": true,
+                "stake": "0x4f68ca6d8cd91c6000000",
+                "stakerAddress": "0x64de13c46f627d9c86212050d48756fb65c06d8a",
+                "stakerInfo": {
+                    "logoUrl": "https://raw.githubusercontent.com/Earn-staking/Validator/refs/heads/main/binance-icon.png",
+                    "name": "Binance Staking"
+                },
+                "delegatedLimit": "0x4a723dc6b40b8a9a000000",
+                "totalStake": "0x4f68ca6d8cd91c6000000",
+                "totalDelegatedLimit": "0x4f68ca6d8cd91c60000000"
+            },
+            {
+                "id": "0x1f",
+                "isActive": true,
+                "stake": "0x69e10de76676d0800000",
+                "stakerAddress": "0x10e13f11419165beb0f456ec8a230899e4013bbd",
+                "stakerInfo": {
+                    "logoUrl": "https://raw.githubusercontent.com/beefyfinance/staking/main/beefy.png",
+                    "name": "Beefy"
+                },
+                "delegatedLimit": "0x31f6eae247eadccdf007c",
+                "totalStake": "0x37ea23051e8bf3b20ff84",
+                "totalDelegatedLimit": "0x69e10de76676d08000000"
+            },
+            {
+                "id": "0x23",
+                "isActive": true,
+                "stake": "0x69e10de76676d0800000",
+                "stakerAddress": "0x7aedf94287d13310ffc90ffc1aee0a5fbb8ac560",
+                "stakerInfo": {
+                    "logoUrl": "https://raw.githubusercontent.com/ruby-nodes/media-kit/a804d230532d22b3a3bbb03cd386bc2ae8e613d3/RN_transparent_BlackIcon.png",
+                    "name": "Ruby Nodes"
+                },
+                "delegatedLimit": "0x463fb9b526ba0d0911344",
+                "totalStake": "0x23a154323fbcc376eecbc",
+                "totalDelegatedLimit": "0x69e10de76676d08000000"
+            },
+            {
+                "id": "0x26",
+                "isActive": true,
+                "stake": "0x69e10de76676d0800000",
+                "stakerAddress": "0x212261ce4a1bcb6966a91d51d6b506fffb9da593",
+                "stakerInfo": {
+                    "logoUrl": "https://www.allnodes.com/sonic/allnodes_logo_100x100.png",
+                    "name": "Allnodes"
+                },
+                "delegatedLimit": "0x510788093a609dbe5da0c",
+                "totalStake": "0x18d985de2c1632c1a25f4",
+                "totalDelegatedLimit": "0x69e10de76676d08000000"
+            },
+            {
+                "id": "0x22",
+                "isActive": true,
+                "stake": "0x713a25240dfc17300000",
+                "stakerAddress": "0x0aa7aa665276a96acd25329354feea8f955caf2b",
+                "stakerInfo": {
+                    "logoUrl": "https://cdn.staking.ankr.com/validator/fantom/ankr_logo.png",
+                    "name": "Ankr"
+                },
+                "delegatedLimit": "0x67431f40cf082fad01b40",
+                "totalStake": "0x9f705e33ef3e782fe4c0",
+                "totalDelegatedLimit": "0x713a25240dfc173000000"
+            },
+            {
+                "id": "0x16",
+                "isActive": false,
+                "stake": "0x0",
+                "stakerAddress": "0x4f7b0fe9b83eebc03b0be01963d0f10b71e731ba",
+                "stakerInfo": {
+                    "logoUrl": "https://res.cloudinary.com/dxqhzbj8a/image/upload/v1736302317/Stake_Agent.svg",
+                    "name": "Stake Agent"
+                },
+                "delegatedLimit": "0x0",
+                "totalStake": "0x7d4b1e5cebbeb5cdbbe1",
+                "totalDelegatedLimit": "0x0"
+            },
+            {
+                "id": "0x31",
+                "isActive": true,
+                "stake": "0x7ada3e9d0777762be02b",
+                "stakerAddress": "0xf0c8bbfc62976d222681d423510d37690b1b3ec5",
+                "stakerInfo": null,
+                "delegatedLimit": "0x730c6ac377d2829a22285",
+                "totalStake": "0x7cdd3d98fa4f391be02b",
+                "totalDelegatedLimit": "0x7ada3e9d0777762be02b0"
+            },
+            {
+                "id": "0x2b",
+                "isActive": false,
+                "stake": "0x6a1743b1143caf200000",
+                "stakerAddress": "0x2dd3ca92c7cd3a9aa47f35bcf74b2d15f047faa6",
+                "stakerInfo": null,
+                "delegatedLimit": "0x63381a42e503090040300",
+                "totalStake": "0x6df296e2f39a61fbfd00",
+                "totalDelegatedLimit": "0x6a1743b1143caf2000000"
+            },
+            {
+                "id": "0x18",
+                "isActive": false,
+                "stake": "0x0",
+                "stakerAddress": "0xc81a040aa7e3d82d73e484989402518dc0dd3b6b",
+                "stakerInfo": {
+                    "logoUrl": "https://lloyds.tech/sonic/lloyds.svg",
+                    "name": "LLoyds.tech"
+                },
+                "delegatedLimit": "0x0",
+                "totalStake": "0xede9dd7a386e2a3208f",
+                "totalDelegatedLimit": "0x0"
+            },
+            {
+                "id": "0x21",
+                "isActive": false,
+                "stake": "0x0",
+                "stakerAddress": "0x53453b125c5f40b24523457c1dd48ba76d3006ca",
+                "stakerInfo": null,
+                "delegatedLimit": "0x0",
+                "totalStake": "0x13dc778b4beffbc3781",
+                "totalDelegatedLimit": "0x0"
+            },
+            {
+                "id": "0x28",
+                "isActive": false,
+                "stake": "0x0",
+                "stakerAddress": "0xa7c6598e577ba49aac15fdc618fb6427d780adb3",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/pentoshi-igloo.jpg",
+                    "name": "Pentoshi's Igloo"
+                },
+                "delegatedLimit": "0x0",
+                "totalStake": "0xbb866c5dd6560f8335",
+                "totalDelegatedLimit": "0x0"
+            },
+            {
+                "id": "0x24",
+                "isActive": false,
+                "stake": "0x0",
+                "stakerAddress": "0xbf788a134eacaf4db8da1df9d85b068b1640ec76",
+                "stakerInfo": null,
+                "delegatedLimit": "0x0",
+                "totalStake": "0x21d350de55b27a41c0",
+                "totalDelegatedLimit": "0x0"
+            },
+            {
+                "id": "0x20",
+                "isActive": false,
+                "stake": "0x0",
+                "stakerAddress": "0x86b0f4a446b06ec629eed482d32fe70dbe399e66",
+                "stakerInfo": null,
+                "delegatedLimit": "0x0",
+                "totalStake": "0x66d77b0db62fb85",
+                "totalDelegatedLimit": "0x0"
+            },
+            {
+                "id": "0x29",
+                "isActive": false,
+                "stake": "0x0",
+                "stakerAddress": "0x32ca6882b0c3dcbcbf2c74412d9ccc56c0b5a46e",
+                "stakerInfo": null,
+                "delegatedLimit": "0x0",
+                "totalStake": "0x2c68af0bb140000",
+                "totalDelegatedLimit": "0x0"
+            },
+            {
+                "id": "0x13",
+                "isActive": false,
+                "stake": "0x0",
+                "stakerAddress": "0x378f3603fa0f69514c71d64f86b2f9ab2a736b32",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic.svg",
+                    "name": "Sonic Temporary Guardian"
+                },
+                "delegatedLimit": "0x0",
+                "totalStake": "0x0",
+                "totalDelegatedLimit": "0x0"
+            },
+            {
+                "id": "0x14",
+                "isActive": false,
+                "stake": "0x0",
+                "stakerAddress": "0x7c6d1e2b3fdcb7a961c124104bfc18411a6a3822",
+                "stakerInfo": {
+                    "logoUrl": "https://repository.sonic.soniclabs.com/validator/sonic.svg",
+                    "name": "Sonic Temporary Guardian"
+                },
+                "delegatedLimit": "0x0",
+                "totalStake": "0x0",
+                "totalDelegatedLimit": "0x0"
+            }
+        ]
+    }
+}
