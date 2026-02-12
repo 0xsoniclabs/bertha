@@ -76,9 +76,17 @@ func _makeGethStateDB(
 	if err != nil {
 		return nil, fmt.Errorf("failed to create a new Level DB, %w", err)
 	}
+	pathdbDefaults := pathdb.Defaults
 	trieDb := triedb.NewDatabase(rawdb.NewDatabase(ldb), &triedb.Config{
-		PathDB: pathdb.Defaults,
+		PathDB: &pathdb.Config{
+			StateHistory:        0,
+			EnableStateIndexing: false,
+			TrieCleanSize:       pathdbDefaults.TrieCleanSize,
+			StateCleanSize:      pathdbDefaults.StateCleanSize,
+			WriteBufferSize:     pathdbDefaults.WriteBufferSize,
+		},
 	})
+
 	evmState := geth.NewDatabase(trieDb, nil)
 	if rootHash == (common.Hash{}) {
 		rootHash = types.EmptyRootHash
