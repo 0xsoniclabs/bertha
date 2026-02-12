@@ -25,6 +25,7 @@ func getApp() *cli.Command {
 		Commands: []*cli.Command{
 			getReplayCommand(),
 			getVerifyCommand(),
+			getTxDataExportCommand(),
 		},
 		Flags: []cli.Flag{
 			cpuProfileFlag,
