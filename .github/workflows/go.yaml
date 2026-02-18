@@ -62,6 +62,9 @@ jobs:
         export PATH="${PATH}:$(go env GOPATH)/bin"
         golangci-lint run .
 
+    - name: check license headers
+      run: go run go/scripts/license/add_license_header.go -dir ./ -check
+
   test:
     name: test
     runs-on: ubuntu-latest
