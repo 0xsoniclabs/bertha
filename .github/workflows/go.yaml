@@ -62,10 +62,23 @@ jobs:
         export PATH="${PATH}:$(go env GOPATH)/bin"
         golangci-lint run .
 
+  license-check:
+    name: license check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+    - name: setup go
+      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      with:
+        go-version: "1.25.3"
+    - name: check for weird file
+      run: ls -lah ./block-db-go-bindings/cmd/block-db/app/ && \
+          cat ./block-db-go-bindings/cmd/block-db/app/utils.go 
     - name: check license headers
-      run: ls -lah block-db-go-bindings/cmd/block-db/app/ && \
-       cat block-db-go-bindings/cmd/block-db/app/utils.go && \
-       go run go/scripts/license/add_license_header.go -dir ./ -check
+      run: go run ./go/scripts/license/add_license_header.go -dir ./ -check
+       
 
   test:
     name: test
