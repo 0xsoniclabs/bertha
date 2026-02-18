@@ -63,13 +63,13 @@ func main() {
 		".go":         "//",
 		".yml":        "#",
 		".yaml":       "#",
-		"go.mod":      "//",
-		"Jenkinsfile": "//",
-		"BUILD":       "#",
 		".rs":         "//",
 		".sh":         "#",
 		".proto":      "//",
 		".toml":       "#",
+		"go.mod":      "//",
+		"Jenkinsfile": "//",
+		"BUILD":       "#",
 	}
 	// Process files with specified extensions
 	for ext, prefix := range patterns {
@@ -95,8 +95,8 @@ func processFiles(dir, ext, prefix, license string, checkOnly bool) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
-		// build files should not be checked
-		if shouldIgnore(path, []string{"/build/", "_mock.go", ".pb.go"}) {
+		// build files should not be checked - blockservice is a special config file that should not be checked either
+		if shouldIgnore(path, []string{"/build/", "_mock.go", ".pb.go", "blockservice.toml"}) {
 			return nil
 		}
 		if matchPattern(path, ext) {
