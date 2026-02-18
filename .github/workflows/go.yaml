@@ -63,7 +63,9 @@ jobs:
         golangci-lint run .
 
     - name: check license headers
-      run: go run go/scripts/license/add_license_header.go -dir ./ -check
+      run: ls -lah block-db-go-bindings/cmd/block-db/app/ && \
+       cat block-db-go-bindings/cmd/block-db/app/utils.go && \
+       go run go/scripts/license/add_license_header.go -dir ./ -check
 
   test:
     name: test
