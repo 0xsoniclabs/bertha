@@ -1,6 +1,6 @@
 module github.com/0xsoniclabs/bertha/go/test_data_generator
 
-go 1.24.2
+go 1.26.0
 
 require github.com/ethereum/go-ethereum v1.15.11
 
