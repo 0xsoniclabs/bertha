@@ -72,7 +72,7 @@ jobs:
     - name: setup go
       uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
       with:
-        go-version: "1.25.3"
+        go-version: "1.26.0"
     - name: check license headers
       run: go run ./go/scripts/license/add_license_header.go -dir ./ -check
        
