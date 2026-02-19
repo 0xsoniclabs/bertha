@@ -14,15 +14,14 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-package app
+module github.com/0xsoniclabs/bertha/go/scripts/license
 
-import "github.com/urfave/cli/v3"
+go 1.26
 
-var (
-	blockDatabaseDirectoryFlag = &cli.StringFlag{
-		Name:    "database-dir",
-		Aliases: []string{"db"},
-		Usage:   "Path to the block database directory",
-		Value:   "./.blockdb",
-	}
+require github.com/stretchr/testify v1.11.1
+
+require (
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

@@ -1,3 +1,19 @@
+# Copyright 2026 Sonic Operations Ltd
+# This file is part of the Sonic Client
+#
+# Sonic is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Sonic is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with Sonic. If not, see <http://www.gnu.org/licenses/>.
+
 name: Go
 
 permissions:
@@ -45,6 +61,21 @@ jobs:
       run: |
         export PATH="${PATH}:$(go env GOPATH)/bin"
         golangci-lint run .
+
+  license-check:
+    name: license check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+    - name: setup go
+      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      with:
+        go-version: "1.26.0"
+    - name: check license headers
+      run: go run ./go/scripts/license/add_license_header.go -dir ./ -check
+       
 
   test:
     name: test
