@@ -76,6 +76,8 @@ func NewState(params StateParameters) (*State, error) {
 	if params.WithArchive {
 		if strings.HasPrefix(string(params.Variant), "rust") {
 			archive = "file"
+		} else if strings.HasPrefix(string(params.Variant), "go-geth2") {
+			archive = carmen.LevelDbArchive
 		} else {
 			archive = carmen.S5Archive
 		}
