@@ -174,8 +174,8 @@ func Test_IgnoresShabang(t *testing.T) {
 	contentAfter, err := os.ReadFile(tmpFileName)
 	require.NoError(t, err)
 	contentStr := string(contentAfter)
-	require.Contains(t, contentStr, "#!/bin/bash")
-	require.Contains(t, contentStr[1:], addPrefix(licenseHeader, "#"))
+	require.True(t, strings.HasPrefix(contentStr, "#!/bin/bash"))
+	require.True(t, strings.HasPrefix(contentStr[len("#!/bin/bash\n"):], addPrefix(licenseHeader, "#")))
 
 	// Ignored if the shebang is not the first line
 	tmpFileName2 := filepath.Join(t.TempDir(), "some_script2.sh")
