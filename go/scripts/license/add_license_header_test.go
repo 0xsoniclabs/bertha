@@ -31,17 +31,17 @@ func Test_Recognizes_GethLicense(t *testing.T) {
 
 	gethHeader := `Copyright 2014 The go-ethereum Authors
 				   This file is part of the go-ethereum library.
-				   
+
 				    The go-ethereum library is free software: you can redistribute it and/or modify
 				    it under the terms of the GNU Lesser General Public License as published by
 				    the Free Software Foundation, either version 3 of the License, or
 				    (at your option) any later version.
-				   
+
 				    The go-ethereum library is distributed in the hope that it will be useful,
 				    but WITHOUT ANY WARRANTY; without even the implied warranty of
 				    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 				    GNU Lesser General Public License for more details.
-				   
+
 				    You should have received a copy of the GNU Lesser General Public License
 				    along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.`
 
@@ -162,4 +162,31 @@ func Test_IgnoresMockFile(t *testing.T) {
 	contentAfter, err := os.ReadFile(tmpFileName)
 	require.NoError(t, err)
 	require.Equal(t, string(originalContent), string(contentAfter))
+}
+
+func Test_IgnoresShabang(t *testing.T) {
+	tmpFileName := filepath.Join(t.TempDir(), "some_script.sh")
+	originalContent := []byte("#!/bin/bash\necho Hello World\n")
+	require.NoError(t, os.WriteFile(tmpFileName, originalContent, 0660))
+
+	require.NoError(t, processFiles(tmpFileName, ".sh", "#", licenseHeader, false))
+
+	contentAfter, err := os.ReadFile(tmpFileName)
+	require.NoError(t, err)
+	contentStr := string(contentAfter)
+	require.Contains(t, contentStr, "#!/bin/bash")
+	require.Contains(t, contentStr[1:], addPrefix(licenseHeader, "#"))
+
+	// Ignored if the shebang is not the first line
+	tmpFileName2 := filepath.Join(t.TempDir(), "some_script2.sh")
+	originalContent2 := []byte("echo Hello World\n#!/bin/bash\n")
+	require.NoError(t, os.WriteFile(tmpFileName2, originalContent2, 0660))
+
+	require.NoError(t, processFiles(tmpFileName2, ".sh", "#", licenseHeader, false))
+
+	contentAfter2, err := os.ReadFile(tmpFileName2)
+	require.NoError(t, err)
+	contentStr2 := string(contentAfter2)
+	require.True(t, strings.HasPrefix(contentStr2, addPrefix(licenseHeader, "#")))
+	require.Contains(t, contentStr2, "#!/bin/bash")
 }
