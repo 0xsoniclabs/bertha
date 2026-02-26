@@ -147,7 +147,11 @@ func processFile(file, licenseHeader string, checkOnly bool) error {
 		return nil // skip generated files
 	}
 
+	hasShabang := strings.HasPrefix(string(content), "#!")
 	lines := strings.Split(string(content), "\n")
+	if hasShabang {
+		lines = lines[1:] // skip the shabang line for license header checking
+	}
 	licenseLines := strings.Split(strings.TrimSuffix(licenseHeader, "\n"), "\n")
 	needsUpdate := false
 
@@ -182,7 +186,14 @@ func processFile(file, licenseHeader string, checkOnly bool) error {
 	}
 
 	// Add header
-	newContent := licenseHeader + "\n" + string(content)
+	contentStr := string(content)
+	var newContent string
+	if hasShabang {
+		firstLineEnd := strings.Index(contentStr, "\n") + 1
+		newContent = contentStr[:firstLineEnd] + licenseHeader + "\n" + contentStr[firstLineEnd:]
+	} else {
+		newContent = licenseHeader + "\n" + contentStr
+	}
 	return os.WriteFile(file, []byte(newContent), 0000)
 }
 

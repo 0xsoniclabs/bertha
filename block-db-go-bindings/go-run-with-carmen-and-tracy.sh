@@ -1,3 +1,4 @@
+#!/bin/bash
 # Copyright 2026 Sonic Operations Ltd
 # This file is part of the Sonic Client
 #
@@ -13,8 +14,6 @@
 #
 # You should have received a copy of the GNU Lesser General Public License
 # along with Sonic. If not, see <http://www.gnu.org/licenses/>.
-
-#!/bin/bash
 
 # Script to run go with local carmen modifications and tracy profiling enabled.
 # Usage: ./go-run-with-carmen-and-tracy.sh <go-run-args>
