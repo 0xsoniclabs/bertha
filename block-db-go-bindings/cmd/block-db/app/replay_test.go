@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -284,7 +285,7 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	chain := &stateChainAdapter{
 		chainId:         12,
 		state:           state,
-		snapshotHandler: NewSnapshotHandler(0),
+		snapshotHandler: NewSnapshotHandler(0, 0, math.MaxUint64),
 	}
 
 	iter := newIter(blocks)
@@ -839,12 +840,16 @@ func Test_SnapshotHandler_ShouldCreateSnapshot(t *testing.T) {
 
 	handler := &SnapshotHandler{
 		blockInterval: 1000,
+		startBlock:    100,
+		endBlock:      3000,
 	}
 
 	require.True(handler.ShouldCreateSnapshot(1000))
 	require.True(handler.ShouldCreateSnapshot(2000))
 	require.False(handler.ShouldCreateSnapshot(1500))
 	require.False(handler.ShouldCreateSnapshot(0))
+	require.False(handler.ShouldCreateSnapshot(50))
+	require.False(handler.ShouldCreateSnapshot(4000))
 }
 
 func Test_SnapshotHandler_SnapshotCreatesAndRemovesSnapshots(t *testing.T) {

@@ -23,6 +23,7 @@ import (
 	"iter"
 	"log/slog"
 	"maps"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -105,6 +106,18 @@ var (
 		Value:   0,
 	}
 
+	snapshotStartBlock = &cli.Uint64Flag{
+		Name:  "snapshot-start-block",
+		Usage: "Block number from which to start taking snapshots (default: 0)",
+		Value: 0,
+	}
+
+	snapshotEndBlock = &cli.Uint64Flag{
+		Name:  "snapshot-end-block",
+		Usage: "Block number at which to stop taking snapshots (default: max block)",
+		Value: math.MaxUint64,
+	}
+
 	overwriteStateRoot = &cli.BoolFlag{
 		Name:  "overwrite-state-roots",
 		Usage: "Overwrite the state roots in the block database with the ones computed from the state",
@@ -159,6 +172,8 @@ func getReplayCommand() *cli.Command {
 			endBlockFlag,
 			usePipelineFlag,
 			snapshotInterval,
+			snapshotStartBlock,
+			snapshotEndBlock,
 			overwriteStateRoot,
 			noStateRootCheck,
 			logDbSize,
@@ -183,11 +198,13 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	confirmAllPrompts := c.Bool(confirmAllPromptsFlag.Name)
 	noStateRootCheck := c.Bool(noStateRootCheck.Name)
 	logDbSize := c.Bool(logDbSize.Name)
+	snapshotStartBlock := c.Uint64(snapshotStartBlock.Name)
+	snapshotEndBlock := c.Uint64(snapshotEndBlock.Name)
 
 	schema := carmen.Schema(c.Int(dbSchema.Name))
 	variant := carmen.Variant(c.String(dbVariant.Name))
 
-	snapshotHandler := NewSnapshotHandler(snapshotInterval)
+	snapshotHandler := NewSnapshotHandler(snapshotInterval, snapshotStartBlock, snapshotEndBlock)
 
 	slog.Info("Loading genesis file", "file", genesisFileName)
 	// Create a temporary directory for the state database
@@ -251,7 +268,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 			}
 		}
 
-		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", snapshotInterval)
+		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", snapshotInterval, "start_block", snapshotStartBlock, "end_block", snapshotEndBlock)
 		if strings.Contains(string(variant), "flat") {
 			slog.Warn("Snapshots are currently not supported with flat database variants; consider disabling snapshots or using a different variant")
 		}
@@ -846,24 +863,28 @@ func updateStateRoot(chain Chain, block *blockdb.Block, stateRoot common.Hash) {
 	}
 }
 
-// SnapshotHandler is a utility to handle intermediate state database snapshots.
-// It allows to create snapshots at specified block intervals, making sure that only one snapshot is kept at a time.
+// SnapshotHandler is a utility to handle intermediate state database snapshots, allowing
+// to create snapshots in a specific block interval.
 type SnapshotHandler struct {
 	blockInterval uint64
+	startBlock    uint64
+	endBlock      uint64
 	lastSnapshot  *uint64
 }
 
-func NewSnapshotHandler(blockInterval uint64) *SnapshotHandler {
+func NewSnapshotHandler(blockInterval uint64, startBlock uint64, endBlock uint64) *SnapshotHandler {
 	return &SnapshotHandler{
 		blockInterval: blockInterval,
+		startBlock:    startBlock,
+		endBlock:      endBlock,
 		lastSnapshot:  nil,
 	}
 }
 
 // ShouldCreateSnapshot returns true if a snapshot should be created at the given block number.
-// A snapshot should be created if the block interval is set and the current block number is bigger than 0 and is a multiple of the interval.
+// A snapshot should be created if the block interval is set and the current block number is within the specified interval.
 func (s *SnapshotHandler) ShouldCreateSnapshot(currentBlock uint64) bool {
-	return s.blockInterval > 0 && currentBlock > 0 && currentBlock%s.blockInterval == 0
+	return s.blockInterval > 0 && currentBlock >= s.startBlock && currentBlock <= s.endBlock && currentBlock%s.blockInterval == 0
 }
 
 // Snapshot creates a snapshot of the state database at the given block number.
