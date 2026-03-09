@@ -897,7 +897,8 @@ func NewSnapshotHandler(blockInterval uint64, startBlock uint64, endBlock uint64
 }
 
 // ShouldCreateSnapshot returns true if a snapshot should be created at the given block number.
-// A snapshot should be created if the block interval is set and the current block number is within the specified interval.
+// A snapshot should be created if the block interval is set and the current block number is between
+// the start block height and end block height and a multiple of the specified interval.
 func (s *SnapshotHandler) ShouldCreateSnapshot(currentBlock uint64) bool {
 	return s.blockInterval > 0 && currentBlock >= s.startBlock && currentBlock <= s.endBlock && currentBlock%s.blockInterval == 0
 }
