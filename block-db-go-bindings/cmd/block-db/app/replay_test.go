@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -284,7 +285,7 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	chain := &stateChainAdapter{
 		chainId:         12,
 		state:           state,
-		snapshotHandler: NewSnapshotHandler(0),
+		snapshotHandler: NewSnapshotHandler(0, 0, math.MaxUint64, 1),
 	}
 
 	iter := newIter(blocks)
@@ -839,15 +840,32 @@ func Test_SnapshotHandler_ShouldCreateSnapshot(t *testing.T) {
 
 	handler := &SnapshotHandler{
 		blockInterval: 1000,
+		startBlock:    100,
+		endBlock:      3000,
 	}
 
 	require.True(handler.ShouldCreateSnapshot(1000))
 	require.True(handler.ShouldCreateSnapshot(2000))
 	require.False(handler.ShouldCreateSnapshot(1500))
 	require.False(handler.ShouldCreateSnapshot(0))
+	require.False(handler.ShouldCreateSnapshot(50))
+	require.False(handler.ShouldCreateSnapshot(4000))
 }
 
-func Test_SnapshotHandler_SnapshotCreatesAndRemovesSnapshots(t *testing.T) {
+func Test_NewSnapshotHandler_InitializeSnapshotHandlerCorrectly(t *testing.T) {
+	require := require.New(t)
+
+	handler := NewSnapshotHandler(1000, 100, 3000, 3)
+	require.Equal(uint64(1000), handler.blockInterval)
+	require.Equal(uint64(100), handler.startBlock)
+	require.Equal(uint64(3000), handler.endBlock)
+	require.Equal(len(handler.pastSnapshotList), 3)
+	for _, blockNumber := range handler.pastSnapshotList {
+		require.Nil(blockNumber)
+	}
+}
+
+func Test_SnapshotHandler_CreatesAndRemovesSnapshots(t *testing.T) {
 	require := require.New(t)
 
 	dir := t.TempDir()
@@ -859,30 +877,120 @@ func Test_SnapshotHandler_SnapshotCreatesAndRemovesSnapshots(t *testing.T) {
 		require.NoError(state.Close())
 	}()
 
-	handler := &SnapshotHandler{
-		blockInterval: 1000,
-	}
+	handler := NewSnapshotHandler(1000, 100, 10000, 3)
 
-	// Create first snapshot
 	newState, err := handler.Snapshot(1000, state)
 	require.NoError(err)
 	require.NotNil(newState)
-
-	snapshotDir := fmt.Sprintf("%s_snapshot_1000", dir)
-	_, err = os.Stat(snapshotDir)
-	require.NoError(err, "snapshot directory should exist")
-
-	// Create second snapshot, first should be removed
 	newState, err = handler.Snapshot(2000, newState)
 	require.NoError(err)
 	require.NotNil(newState)
+	newState, err = handler.Snapshot(3000, newState)
+	require.NoError(err)
+	require.NotNil(newState)
 
-	snapshotDir2 := fmt.Sprintf("%s_snapshot_2000", dir)
-	_, err = os.Stat(snapshotDir2)
-	require.NoError(err, "second snapshot directory should exist")
+	_, err = os.Stat(handler.snapshotDir(dir, 1000))
+	require.NoError(err)
+	_, err = os.Stat(handler.snapshotDir(dir, 2000))
+	require.NoError(err)
+	_, err = os.Stat(handler.snapshotDir(dir, 3000))
+	require.NoError(err)
 
-	_, err = os.Stat(snapshotDir)
-	require.True(os.IsNotExist(err), "first snapshot directory should be removed")
+	// Next two snapshots should clear the oldest two ones
+	newState, err = handler.Snapshot(4000, newState)
+	require.NoError(err)
+	require.NotNil(newState)
+	newState, err = handler.Snapshot(5000, newState)
+	require.NoError(err)
+	require.NotNil(newState)
+
+	_, err = os.Stat(handler.snapshotDir(dir, 1000))
+	require.Error(err)
+	_, err = os.Stat(handler.snapshotDir(dir, 2000))
+	require.Error(err)
+	_, err = os.Stat(handler.snapshotDir(dir, 3000))
+	require.NoError(err)
+	_, err = os.Stat(handler.snapshotDir(dir, 4000))
+	require.NoError(err)
+	_, err = os.Stat(handler.snapshotDir(dir, 5000))
+	require.NoError(err)
+}
+
+func Test_SnapshotHandler_GetOldestSnapshotDirReturnsOldestSnapshot(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+
+	state, err := NewState(StateParameters{
+		Directory: dir,
+	})
+	require.NoError(err)
+	defer func() {
+		require.NoError(state.Close())
+	}()
+
+	handler := NewSnapshotHandler(1000, 100, 10000, 3)
+
+	newState, err := handler.Snapshot(1000, state)
+	require.NoError(err)
+	require.NotNil(newState)
+	newState, err = handler.Snapshot(2000, newState)
+	require.NoError(err)
+	require.NotNil(newState)
+	newState, err = handler.Snapshot(3000, newState)
+	require.NoError(err)
+	require.NotNil(newState)
+
+	oldest := handler.GetOldestSnapshotDir(dir)
+	require.Equal(oldest, handler.snapshotDir(dir, 1000))
+
+	newState, err = handler.Snapshot(4000, state)
+	require.NoError(err)
+	require.NotNil(newState)
+	_, err = os.Stat(handler.snapshotDir(dir, 1000))
+	require.Error(err)
+	newOldest := handler.GetOldestSnapshotDir(dir)
+	require.Equal(newOldest, handler.snapshotDir(dir, 2000))
+}
+
+func Test_SnapshotHandler_GetSnapshotDirsReturnsExistingSnapshotList(t *testing.T) {
+	require := require.New(t)
+	dir := t.TempDir()
+
+	state, err := NewState(StateParameters{
+		Directory: dir,
+	})
+	require.NoError(err)
+	defer func() {
+		require.NoError(state.Close())
+	}()
+
+	handler := NewSnapshotHandler(1000, 100, 10000, 3)
+
+	snapshotList := handler.GetSnapshotDirs(dir)
+	require.Empty(snapshotList)
+
+	newState, err := handler.Snapshot(1000, state)
+	require.NoError(err)
+	require.NotNil(newState)
+	newState, err = handler.Snapshot(2000, newState)
+	require.NoError(err)
+	require.NotNil(newState)
+	newState, err = handler.Snapshot(3000, newState)
+	require.NoError(err)
+	require.NotNil(newState)
+
+	snapshotList = handler.GetSnapshotDirs(dir)
+	require.Equal(snapshotList, []string{
+		handler.snapshotDir(dir, 1000),
+		handler.snapshotDir(dir, 2000),
+		handler.snapshotDir(dir, 3000),
+	})
+
+}
+
+func Test_SnapshotHandler_snapshotDirReturnsCorrectName(t *testing.T) {
+	handler := SnapshotHandler{}
+	require.Equal(t, "directory_snapshot_1000", handler.snapshotDir("directory", 1000))
 }
 
 func Test_FlagWithConfirmation(t *testing.T) {

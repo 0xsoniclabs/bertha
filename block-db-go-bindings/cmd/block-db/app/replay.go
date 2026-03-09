@@ -23,6 +23,7 @@ import (
 	"iter"
 	"log/slog"
 	"maps"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -105,6 +106,24 @@ var (
 		Value:   0,
 	}
 
+	snapshotStartBlock = &cli.Uint64Flag{
+		Name:  "snapshot-start-block",
+		Usage: "Block number from which to start taking snapshots (default: 0)",
+		Value: 0,
+	}
+
+	snapshotEndBlock = &cli.Uint64Flag{
+		Name:  "snapshot-end-block",
+		Usage: "Block number at which to stop taking snapshots (default: max block)",
+		Value: math.MaxUint64,
+	}
+
+	snapshotNumToKeep = &cli.Uint64Flag{
+		Name:  "snapshot-num-to-keep",
+		Usage: "Number of snapshots to keep (default: 1)",
+		Value: 1,
+	}
+
 	overwriteStateRoot = &cli.BoolFlag{
 		Name:  "overwrite-state-roots",
 		Usage: "Overwrite the state roots in the block database with the ones computed from the state",
@@ -159,6 +178,9 @@ func getReplayCommand() *cli.Command {
 			endBlockFlag,
 			usePipelineFlag,
 			snapshotInterval,
+			snapshotStartBlock,
+			snapshotEndBlock,
+			snapshotNumToKeep,
 			overwriteStateRoot,
 			noStateRootCheck,
 			logDbSize,
@@ -183,11 +205,14 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	confirmAllPrompts := c.Bool(confirmAllPromptsFlag.Name)
 	noStateRootCheck := c.Bool(noStateRootCheck.Name)
 	logDbSize := c.Bool(logDbSize.Name)
+	snapshotStartBlock := c.Uint64(snapshotStartBlock.Name)
+	snapshotEndBlock := c.Uint64(snapshotEndBlock.Name)
+	snapshotNumToKeep := c.Uint64(snapshotNumToKeep.Name)
 
 	schema := carmen.Schema(c.Int(dbSchema.Name))
 	variant := carmen.Variant(c.String(dbVariant.Name))
 
-	snapshotHandler := NewSnapshotHandler(snapshotInterval)
+	snapshotHandler := NewSnapshotHandler(snapshotInterval, snapshotStartBlock, snapshotEndBlock, snapshotNumToKeep)
 
 	slog.Info("Loading genesis file", "file", genesisFileName)
 	// Create a temporary directory for the state database
@@ -220,13 +245,18 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		defer func() {
 			slog.Info("Removing state database directory", "directory", stateDbDirectory)
 			err = errors.Join(err, os.RemoveAll(stateDbDirectory))
-			if snapshotHandler.lastSnapshot != nil {
-				backupDir := fmt.Sprintf("%s_snapshot_%d", stateDbDirectory, snapshotHandler.lastSnapshot)
+			snapshotDirs := snapshotHandler.GetSnapshotDirs(stateDbDirectory)
+			if len(snapshotDirs) > 0 {
 				if err == nil || errors.Is(err, context.Canceled) {
-					slog.Info("Removing latest snapshot directory", "directory", backupDir)
-					err = errors.Join(err, os.RemoveAll(backupDir))
+					for _, dir := range snapshotDirs {
+						slog.Info("Removing state database snapshot directory", "directory", dir)
+						err = errors.Join(err, os.RemoveAll(dir))
+					}
 				} else {
-					slog.Info(fmt.Sprintf("Replay terminated with error. The latest snapshot will be kept for inspection using '%s' flag", initDbFlag.Name), "directory", backupDir)
+					slog.Info(fmt.Sprintf("Replay terminated with error. The latest snapshots will be kept for inspection using '%s' flag", initDbFlag.Name))
+					for _, dir := range snapshotDirs {
+						slog.Info("Available snapshot", "directory", dir)
+					}
 				}
 			}
 		}()
@@ -251,7 +281,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 			}
 		}
 
-		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", snapshotInterval)
+		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", snapshotInterval, "start_block", snapshotStartBlock, "end_block", snapshotEndBlock, "snapshot to keep", snapshotNumToKeep)
 		if strings.Contains(string(variant), "flat") {
 			slog.Warn("Snapshots are currently not supported with flat database variants; consider disabling snapshots or using a different variant")
 		}
@@ -846,45 +876,65 @@ func updateStateRoot(chain Chain, block *blockdb.Block, stateRoot common.Hash) {
 	}
 }
 
-// SnapshotHandler is a utility to handle intermediate state database snapshots.
-// It allows to create snapshots at specified block intervals, making sure that only one snapshot is kept at a time.
+// SnapshotHandler is a utility to handle intermediate state database snapshots, allowing
+// to create snapshots in a specific block interval.
 type SnapshotHandler struct {
-	blockInterval uint64
-	lastSnapshot  *uint64
+	blockInterval     uint64
+	startBlock        uint64
+	endBlock          uint64
+	pastSnapshotList  []*uint64
+	pastSnapshotIndex uint64
 }
 
-func NewSnapshotHandler(blockInterval uint64) *SnapshotHandler {
+func NewSnapshotHandler(blockInterval uint64, startBlock uint64, endBlock uint64, snapshotToKeep uint64) *SnapshotHandler {
 	return &SnapshotHandler{
-		blockInterval: blockInterval,
-		lastSnapshot:  nil,
+		blockInterval:     blockInterval,
+		startBlock:        startBlock,
+		endBlock:          endBlock,
+		pastSnapshotList:  make([]*uint64, snapshotToKeep, snapshotToKeep),
+		pastSnapshotIndex: 0,
 	}
 }
 
 // ShouldCreateSnapshot returns true if a snapshot should be created at the given block number.
-// A snapshot should be created if the block interval is set and the current block number is bigger than 0 and is a multiple of the interval.
+// A snapshot should be created if the block interval is set and the current block number is between
+// the start block height and end block height and a multiple of the specified interval.
 func (s *SnapshotHandler) ShouldCreateSnapshot(currentBlock uint64) bool {
-	return s.blockInterval > 0 && currentBlock > 0 && currentBlock%s.blockInterval == 0
+	return s.blockInterval > 0 && currentBlock >= s.startBlock && currentBlock <= s.endBlock && currentBlock%s.blockInterval == 0
 }
 
 // Snapshot creates a snapshot of the state database at the given block number.
 // It closes and reopens the state to ensure all data is flushed to disk,
-// copies the state database directory to a new location, and removes the previous snapshot if it exists.
+// copies the state database directory to a new location, and removes a previous snapshot
+// if needed to keep the specified number of snapshots.
 func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, error) {
 	stateDBDir := state.stateParameter.Directory
 	if !s.ShouldCreateSnapshot(currentBlock) {
 		return state, nil
 	}
-
 	slog.Info("Creating state database snapshot", "block_number", currentBlock)
-	backupDir := fmt.Sprintf("%s_snapshot_%d", stateDBDir, currentBlock)
-	os.RemoveAll(backupDir) // remove existing snapshot if any
+
+	// Remove the oldest snapshot if it exists
+	oldestSnapshotDir := s.GetOldestSnapshotDir(stateDBDir)
+	if s.pastSnapshotList[s.pastSnapshotIndex] != nil && oldestSnapshotDir != "" {
+		slog.Info("Removing previous state database snapshot", "directory", oldestSnapshotDir)
+		err := os.RemoveAll(oldestSnapshotDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to remove previous state database snapshot: %w", err)
+		}
+	}
+	s.pastSnapshotList[s.pastSnapshotIndex] = &currentBlock
+	s.pastSnapshotIndex = (s.pastSnapshotIndex + 1) % uint64(len(s.pastSnapshotList))
+
+	// Create the snapshot by copying the state database directory
+	snapshotDir := s.snapshotDir(stateDBDir, currentBlock)
+	os.RemoveAll(snapshotDir) // remove existing snapshot if any
 	// Close and reopen the state to ensure all data is flushed to disk
 	err := state.Close()
 	if err != nil {
 		return nil, fmt.Errorf("failed to close state database before snapshot: %w", err)
 	}
-	// Create the snapshot by copying the state database directory
-	err = os.CopyFS(backupDir, os.DirFS(stateDBDir))
+	err = os.CopyFS(snapshotDir, os.DirFS(stateDBDir))
 	if err != nil {
 		return nil, fmt.Errorf("failed to copy state database for snapshot: %w", err)
 	}
@@ -893,16 +943,36 @@ func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, e
 	if err != nil {
 		return nil, fmt.Errorf("failed to reopen state database after snapshot: %w", err)
 	}
-	if s.lastSnapshot != nil {
-		slog.Info("Removing previous state database snapshot", "directory", *s.lastSnapshot)
-		prevBackupDir := fmt.Sprintf("%s_snapshot_%d", stateDBDir, *s.lastSnapshot)
-		err = os.RemoveAll(prevBackupDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to remove previous state database snapshot: %w", err)
+
+	slog.Info("Snapshot created successfully", "snapshot_directory", snapshotDir)
+	return state, nil
+}
+
+// GetOldestSnapshotDir returns the path to the oldest snapshot created.
+// If there are no snapshots, an empty string is returned.
+func (s *SnapshotHandler) GetOldestSnapshotDir(stateDBDir string) string {
+	for cnt := uint64(0); cnt < uint64(len(s.pastSnapshotList)); cnt++ {
+		i := (s.pastSnapshotIndex + cnt) % uint64(len(s.pastSnapshotList))
+		if s.pastSnapshotList[i] != nil {
+			return s.snapshotDir(stateDBDir, *s.pastSnapshotList[i])
 		}
 	}
-	s.lastSnapshot = &currentBlock
-	return state, nil
+	return ""
+}
+
+// GetSnapshotDirs returns a list of paths to the current existing snapshots.
+func (s *SnapshotHandler) GetSnapshotDirs(stateDBDir string) []string {
+	list := make([]string, 0, len(s.pastSnapshotList))
+	for _, pos := range s.pastSnapshotList {
+		if pos != nil {
+			list = append(list, s.snapshotDir(stateDBDir, *pos))
+		}
+	}
+	return list
+}
+
+func (s *SnapshotHandler) snapshotDir(stateDBDir string, blockNum uint64) string {
+	return fmt.Sprintf("%s_snapshot_%d", stateDBDir, blockNum)
 }
 
 // ReplayLoopContext is a utility struct to hold flags to pass to the `replayLoop` functions.
