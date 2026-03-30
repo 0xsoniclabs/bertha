@@ -368,12 +368,12 @@ func TestHistoryAdapter_ProducesHeaderWithCorrectHashes(t *testing.T) {
 
 	adapter := historyAdapter{history: history}
 
-	header := adapter.GetHeader(common.Hash{}, block)
+	header := adapter.Header(common.Hash{}, block)
 	require.Equal(t, block, header.Number.Uint64())
 	require.Equal(t, current, header.Hash)
 	require.Equal(t, parent, header.ParentHash)
 
-	header = adapter.GetHeader(common.Hash{}, block-1)
+	header = adapter.Header(common.Hash{}, block-1)
 	require.Equal(t, block-1, header.Number.Uint64())
 	require.Equal(t, parent, header.Hash)
 	require.Equal(t, grandParent, header.ParentHash)
