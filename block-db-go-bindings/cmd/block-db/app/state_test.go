@@ -42,6 +42,7 @@ func TestState_CanBeCreatedAndClosed(t *testing.T) {
 			state, err := NewState(StateParameters{
 				Directory:   t.TempDir(),
 				WithArchive: archive,
+				Schema:      5,
 			})
 			require.NoError(t, err)
 			require.NotNil(t, state)
@@ -71,6 +72,7 @@ func TestNewState_CreatesEmptyDatabase(t *testing.T) {
 func TestNewState_FailsWithInvalidDirectory(t *testing.T) {
 	_, err := NewState(StateParameters{
 		Directory: "/invalid/directory/that/does/not/exist",
+		Schema:    5,
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to create state dir")
@@ -85,6 +87,7 @@ func TestNewState_FailsIfDirectoryIsReadOnly(t *testing.T) {
 
 	_, err = NewState(StateParameters{
 		Directory: tempDir,
+		Schema:    5,
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "permission denied")
@@ -93,6 +96,7 @@ func TestNewState_FailsIfDirectoryIsReadOnly(t *testing.T) {
 func TestState_Close_CanBeCalledOnClosedDb(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
+		Schema:    5,
 	})
 	require.NoError(t, err)
 
@@ -153,6 +157,7 @@ func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
 
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
+		Schema:    5,
 	})
 	require.NoError(t, err)
 	defer func() {
@@ -179,6 +184,7 @@ func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
 func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
+		Schema:    5,
 	})
 	require.NoError(t, err)
 	defer func() {
@@ -196,6 +202,7 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
+		Schema:    5,
 	})
 	require.NoError(t, err)
 	defer func() {
@@ -219,6 +226,7 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 func TestState_ApplyBlock_AppliesUpgrades(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
+		Schema:    5,
 	})
 	require.NoError(t, err)
 	defer func() {
@@ -284,6 +292,7 @@ func TestState_ApplyBlock_AppliesUpgrades(t *testing.T) {
 func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
+		Schema:    5,
 	})
 	require.NoError(t, err)
 	defer func() {
@@ -313,6 +322,7 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 func TestState_setBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
+		Schema:    5,
 	})
 	require.NoError(t, err)
 	defer func() {

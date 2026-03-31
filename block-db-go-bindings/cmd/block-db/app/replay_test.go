@@ -266,6 +266,7 @@ type replayer func(
 func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
+		Schema:    5,
 	})
 	require.NoError(t, err)
 	defer func() {
@@ -637,6 +638,7 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
+		Schema:    5,
 	})
 	require.NoError(t, err)
 	defer func() {
@@ -670,6 +672,7 @@ func Test_getExpectedStateRoot_ReturnsCorrectStateRoot(t *testing.T) {
 	dir := t.TempDir()
 	state, err := NewState(StateParameters{
 		Directory: dir,
+		Schema:    5,
 	})
 	require.NoError(err)
 	defer func() {
@@ -705,6 +708,7 @@ func Test_updateStateRoot_UpdatesCorrectStateRoot(t *testing.T) {
 	dir := t.TempDir()
 	state, err := NewState(StateParameters{
 		Directory: dir,
+		Schema:    5,
 	})
 	require.NoError(err)
 	defer func() {
@@ -871,6 +875,7 @@ func Test_SnapshotHandler_CreatesAndRemovesSnapshots(t *testing.T) {
 	dir := t.TempDir()
 	state, err := NewState(StateParameters{
 		Directory: dir,
+		Schema:    5,
 	})
 	require.NoError(err)
 	defer func() {
@@ -922,6 +927,7 @@ func Test_SnapshotHandler_GetOldestSnapshotDirReturnsOldestSnapshot(t *testing.T
 
 	state, err := NewState(StateParameters{
 		Directory: dir,
+		Schema:    5,
 	})
 	require.NoError(err)
 	defer func() {
@@ -943,7 +949,7 @@ func Test_SnapshotHandler_GetOldestSnapshotDirReturnsOldestSnapshot(t *testing.T
 	oldest := handler.GetOldestSnapshotDir(dir)
 	require.Equal(oldest, handler.snapshotDir(dir, 1000))
 
-	newState, err = handler.Snapshot(4000, state)
+	newState, err = handler.Snapshot(4000, newState)
 	require.NoError(err)
 	require.NotNil(newState)
 	_, err = os.Stat(handler.snapshotDir(dir, 1000))
@@ -958,6 +964,7 @@ func Test_SnapshotHandler_GetSnapshotDirsReturnsExistingSnapshotList(t *testing.
 
 	state, err := NewState(StateParameters{
 		Directory: dir,
+		Schema:    5,
 	})
 	require.NoError(err)
 	defer func() {
