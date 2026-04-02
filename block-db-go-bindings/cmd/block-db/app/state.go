@@ -199,15 +199,15 @@ func (s *State) ApplyBlock(
 	)
 
 	// Check that all transactions were processed (i.e., none were skipped).
-	for i, processed := range processed {
+	for i, processed := range processed.ProcessedTransactions {
 		if processed.Receipt == nil {
 			return nil, fmt.Errorf("found block with skipped txs at index %d", i)
 		}
 	}
 
 	// Retrieve the receipts from the processed transactions.
-	receipts := make(types.Receipts, len(processed))
-	for i, proc := range processed {
+	receipts := make(types.Receipts, len(processed.ProcessedTransactions))
+	for i, proc := range processed.ProcessedTransactions {
 		receipts[i] = proc.Receipt
 	}
 
@@ -270,7 +270,7 @@ type historyAdapter struct {
 	history *blockHashHistory
 }
 
-func (h historyAdapter) GetHeader(_ common.Hash, number uint64) *evmcore.EvmHeader {
+func (h historyAdapter) Header(_ common.Hash, number uint64) *evmcore.EvmHeader {
 	// The only information required from the header is the block number, the
 	// block's hash, and the parent hash. Everything else is ignored by the EVM.
 	return &evmcore.EvmHeader{
