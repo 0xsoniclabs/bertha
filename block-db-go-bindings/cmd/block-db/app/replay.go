@@ -531,6 +531,12 @@ func runReplayLoop(
 	replayLoopContext ReplayLoopContext,
 	onBlockDone func(block *types.Block),
 ) error {
+	blockLatencyFile, err := os.Create("block_latency.csv")
+	if err != nil {
+		slog.Error("Failed to create block latency file", "error", err)
+	}
+	blockLatencyFile.WriteString("block,latency\n")
+
 	for block, err := range blocks {
 		tracy.FrameMark()
 		if err != nil {
@@ -546,9 +552,17 @@ func runReplayLoop(
 		}
 
 		// Run the transactions in the block against the state database.
+		start := time.Now()
 		receipts, stateRoot, err := chain.ApplyBlock(gethBlock, metadata)
 		if err != nil {
 			return fmt.Errorf("failed to apply block %d: %w", block.Number, err)
+		}
+		latency := time.Since(start)
+		if blockLatencyFile != nil {
+			_, err := blockLatencyFile.WriteString(fmt.Sprintf("%d,%.3f\n", block.Number, float64(latency.Microseconds())/1000.0))
+			if err != nil {
+				slog.Error("Failed to write block latency", "error", err)
+			}
 		}
 
 		// Check the receipts against the expected values in the block.
