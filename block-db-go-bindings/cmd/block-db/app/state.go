@@ -144,6 +144,96 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 	return s.db.Check()
 }
 
+func (s *State) ApplyBlockRange(
+	chainId uint64,
+	blocks []*types.Block,
+	metadata Metadata,
+) (types.Receipts, error) {
+
+	stateDb := evmstore.CreateCarmenStateDb(s.db)
+	os.OpenFile("state.log", os.O_APPEND|os.O_WRONLY, 0644)
+	zone := tracy.ZoneBegin("TransactionProcessing")
+	s.db.BeginBlock()
+	for _, block := range blocks {
+		chainConfig := opera.CreateTransientEvmChainConfig(
+			chainId,
+			metadata.Upgrades,
+			idx.Block(block.NumberU64()),
+		)
+
+		rules := metadata.GetRulesAtBlock(block.NumberU64())
+
+		processor := evmcore.NewStateProcessor(
+			chainConfig,
+			historyAdapter{history: s.blockHashHistory},
+			rules.Upgrades,
+		)
+
+		evmBlock := &evmcore.EvmBlock{
+			EvmHeader: evmcore.EvmHeader{
+				Number:      block.Number(),
+				ParentHash:  block.ParentHash(),
+				Time:        inter.Timestamp(block.Time() * 1e9),
+				GasLimit:    block.GasLimit(),
+				PrevRandao:  block.Header().MixDigest,
+				BaseFee:     block.BaseFee(),
+				BlobBaseFee: big.NewInt(1),
+			},
+			Transactions: block.Transactions(),
+		}
+
+		vmConfig := opera.GetVmConfig(rules)
+		gasLimit := block.GasLimit()
+		blockNum := block.NumberU64()
+
+		s.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())
+
+		var usedGas uint64
+		processed := processor.Process(
+			evmBlock,
+			stateDb,
+			vmConfig,
+			gasLimit,
+			&usedGas,
+			nil,
+		)
+		blockNum = blockNum - 2 //
+
+		// Check that all transactions were processed (i.e., none were skipped).
+		for i, processed := range processed.ProcessedTransactions {
+			if processed.Receipt == nil {
+				return nil, fmt.Errorf("found block with skipped txs at index %d", i)
+			}
+		}
+
+		// Retrieve the receipts from the processed transactions.
+		receipts := make(types.Receipts, len(processed.ProcessedTransactions))
+		for i, proc := range processed.ProcessedTransactions {
+			receipts[i] = proc.Receipt
+		}
+
+		// Apply corrections if any are provided.
+		if fixes := metadata.Corrections[block.NumberU64()]; len(fixes) > 0 {
+			s.db.BeginTransaction()
+			slog.Info("Applying corrections", "block", block.NumberU64())
+			for addr, acc := range fixes {
+				slog.Info("Correcting account",
+					"address", addr.Hex(),
+					"old_balance", s.db.GetBalance(cc.Address(addr)).ToBig().String(),
+					"new_balance", acc.Balance.ToBig().String(),
+				)
+				s.setBalance(addr, acc.Balance.ToBig())
+			}
+			s.db.EndTransaction()
+		}
+	}
+
+	zone = tracy.ZoneBegin("EndBlock")
+	s.db.EndBlock(blocks[len(blocks)-1].NumberU64())
+	zone.End()
+	return nil, s.db.Check()
+}
+
 // ApplyBlock applies the given block to this state, processing all transactions
 // and updating the state accordingly. It returns the receipts of the transactions
 // in the block, or an error if the block could not be processed.

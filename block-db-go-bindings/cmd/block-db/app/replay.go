@@ -24,13 +24,11 @@ import (
 	"log/slog"
 	"maps"
 	"math"
-	"math/big"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	// _ "[github.com/ianlancetaylor/cgosymbolizer](http://github.com/ianlancetaylor/cgosymbolizer)" // Enable to resolve symbols across cgo calls (this breaks Go symbols)
@@ -199,7 +197,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	initDbDir := c.String(initDbFlag.Name)
 	startBlock := c.Uint64(startBlockFlag.Name)
 	endBlock := c.Uint64(endBlockFlag.Name)
-	usePipeline := c.Bool(usePipelineFlag.Name)
+	// usePipeline := c.Bool(usePipelineFlag.Name)
 	snapshotInterval := c.Uint64(snapshotInterval.Name)
 	overwriteStateRoot := c.Bool(overwriteStateRoot.Name)
 	confirmAllPrompts := c.Bool(confirmAllPromptsFlag.Name)
@@ -367,12 +365,12 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	// Pick the replay method.
 	run := runReplayLoop
-	if usePipeline {
-		slog.Info("Using replay pipeline")
-		run = runReplayPipeline
-	} else {
-		slog.Info("Using simple replay loop")
-	}
+	// if usePipeline {
+	// slog.Info("Using replay pipeline")
+	// run = runReplayPipeline
+	// } else {
+	slog.Info("Using simple replay loop")
+	// }
 
 	// ---- Start Replay ----
 	blocks := database.GetRange(chainId, startBlock, endBlock)
@@ -537,13 +535,18 @@ func runReplayLoop(
 	}
 	blockLatencyFile.WriteString("block,latency\n")
 
+	convertedBlocks := []*types.Block{}
+	var lastBlock *blockdb.Block
+	const BLOCK_GROUP_SIZE = 1000
 	for block, err := range blocks {
-		tracy.FrameMark()
 		if err != nil {
 			return fmt.Errorf("failed to get next block: %w", err)
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if block.Number == 0 {
+			continue
 		}
 
 		gethBlock, err := ConvertToGethBlock(block)
@@ -551,9 +554,16 @@ func runReplayLoop(
 			return fmt.Errorf("failed to convert block %d: %w", block.Number, err)
 		}
 
+		if len(convertedBlocks) < BLOCK_GROUP_SIZE { // Group blocks together
+			convertedBlocks = append(convertedBlocks, gethBlock)
+			lastBlock = block
+			continue
+		}
+
+		tracy.FrameMark()
 		// Run the transactions in the block against the state database.
 		start := time.Now()
-		receipts, stateRoot, err := chain.ApplyBlock(gethBlock, metadata)
+		receipts, stateRoot, err := chain.ApplyBlock(convertedBlocks, metadata)
 		if err != nil {
 			return fmt.Errorf("failed to apply block %d: %w", block.Number, err)
 		}
@@ -566,153 +576,157 @@ func runReplayLoop(
 		}
 
 		// Check the receipts against the expected values in the block.
-		if err := checkBlockResults(chain, block, receipts, stateRoot, blockDB, &replayLoopContext); err != nil {
+		if err := checkBlockResults(chain, lastBlock, receipts, stateRoot, blockDB, &replayLoopContext); err != nil {
 			return err
 		}
 
 		// Report the progress of the replay.
 		if onBlockDone != nil {
-			onBlockDone(gethBlock)
+			onBlockDone(convertedBlocks[len(convertedBlocks)-1])
 		}
+
+		convertedBlocks = convertedBlocks[0:0]
+		convertedBlocks = append(convertedBlocks, gethBlock)
+		lastBlock = block
 	}
 	return nil
 }
 
-// runReplayPipeline processes the blocks from the given iterator using a
-// multi-stage pipeline, applying them to the chain and checking the results
-// against the expected values in the blocks. This is an optimized version of
-// the replay logic that can achieve higher throughput.
-func runReplayPipeline(
-	ctx context.Context,
-	blocks iter.Seq2[*blockdb.Block, error],
-	chain Chain,
-	metadata Metadata,
-	blockDB blockdb.BlockDB,
-	replayLoopContext ReplayLoopContext,
-	onBlockDone func(block *types.Block),
-) error {
-	const bufferSize = 1024
+// // runReplayPipeline processes the blocks from the given iterator using a
+// // multi-stage pipeline, applying them to the chain and checking the results
+// // against the expected values in the blocks. This is an optimized version of
+// // the replay logic that can achieve higher throughput.
+// func runReplayPipeline(
+// 	ctx context.Context,
+// 	blocks iter.Seq2[*blockdb.Block, error],
+// 	chain Chain,
+// 	metadata Metadata,
+// 	blockDB blockdb.BlockDB,
+// 	replayLoopContext ReplayLoopContext,
+// 	onBlockDone func(block *types.Block),
+// ) error {
+// 	const bufferSize = 1024
 
-	// Pipeline stages:
-	//  - decoding of blocks
-	//  - applying blocks to the chain
-	//  - checking results
+// 	// Pipeline stages:
+// 	//  - decoding of blocks
+// 	//  - applying blocks to the chain
+// 	//  - checking results
 
-	// Result of first stage: decoded block
-	type decodedBlock struct {
-		proto *blockdb.Block
-		geth  *types.Block
-	}
+// 	// Result of first stage: decoded block
+// 	type decodedBlock struct {
+// 		proto *blockdb.Block
+// 		geth  *types.Block
+// 	}
 
-	// Result of second stage: applied block results
-	type processResult struct {
-		decoded   *decodedBlock
-		receipts  types.Receipts
-		stateRoot future.Future[result.Result[common.Hash]]
-	}
+// 	// Result of second stage: applied block results
+// 	type processResult struct {
+// 		decoded   *decodedBlock
+// 		receipts  types.Receipts
+// 		stateRoot future.Future[result.Result[common.Hash]]
+// 	}
 
-	// Channels between stages
-	decodedBlocks := make(chan *decodedBlock, bufferSize)
-	results := make(chan *processResult, bufferSize)
-	done := make(chan struct{})
-	abort := make(chan struct{})
+// 	// Channels between stages
+// 	decodedBlocks := make(chan *decodedBlock, bufferSize)
+// 	results := make(chan *processResult, bufferSize)
+// 	done := make(chan struct{})
+// 	abort := make(chan struct{})
 
-	// Utility to collect errors.
-	issue := atomic.Pointer[error]{}
-	reportIssue := func(err error) {
-		issue.Store(&err)
-		close(abort)
-	}
+// 	// Utility to collect errors.
+// 	issue := atomic.Pointer[error]{}
+// 	reportIssue := func(err error) {
+// 		issue.Store(&err)
+// 		close(abort)
+// 	}
 
-	// Stage 1: Decode blocks
-	go func() {
-		defer close(decodedBlocks)
-		signer := types.LatestSignerForChainID(new(big.Int).SetUint64(chain.ChainId()))
-		for block, err := range blocks {
-			tracy.FrameMark()
-			if err != nil {
-				reportIssue(fmt.Errorf("failed to get next block: %w", err))
-				return
-			}
-			if ctx.Err() != nil {
-				reportIssue(ctx.Err())
-				return
-			}
-			gethBlock, err := ConvertToGethBlock(block)
-			if err != nil {
-				reportIssue(fmt.Errorf("failed to convert block %d: %w", block.Number, err))
-				return
-			}
+// 	// Stage 1: Decode blocks
+// 	go func() {
+// 		defer close(decodedBlocks)
+// 		signer := types.LatestSignerForChainID(new(big.Int).SetUint64(chain.ChainId()))
+// 		for block, err := range blocks {
+// 			tracy.FrameMark()
+// 			if err != nil {
+// 				reportIssue(fmt.Errorf("failed to get next block: %w", err))
+// 				return
+// 			}
+// 			if ctx.Err() != nil {
+// 				reportIssue(ctx.Err())
+// 				return
+// 			}
+// 			gethBlock, err := ConvertToGethBlock(block)
+// 			if err != nil {
+// 				reportIssue(fmt.Errorf("failed to convert block %d: %w", block.Number, err))
+// 				return
+// 			}
 
-			// Prefetch transaction signatures to speed up processing.
-			for _, tx := range gethBlock.Transactions() {
-				_, _ = types.Sender(signer, tx) // just pre-fetching
-			}
+// 			// Prefetch transaction signatures to speed up processing.
+// 			for _, tx := range gethBlock.Transactions() {
+// 				_, _ = types.Sender(signer, tx) // just pre-fetching
+// 			}
 
-			decoded := &decodedBlock{
-				proto: block,
-				geth:  gethBlock,
-			}
+// 			decoded := &decodedBlock{
+// 				proto: block,
+// 				geth:  gethBlock,
+// 			}
 
-			select {
-			case decodedBlocks <- decoded:
-				continue
-			case <-abort:
-				return
-			}
-		}
-	}()
+// 			select {
+// 			case decodedBlocks <- decoded:
+// 				continue
+// 			case <-abort:
+// 				return
+// 			}
+// 		}
+// 	}()
 
-	// Stage 2: Apply blocks
-	go func() {
-		defer close(results)
-		for decoded := range decodedBlocks {
-			gethBlock := decoded.geth
-			receipts, stateRootFuture, err := chain.ApplyBlock(gethBlock, metadata)
-			if err != nil {
-				reportIssue(fmt.Errorf("failed to apply block %d: %w", gethBlock.NumberU64(), err))
-				return
-			}
-			result := &processResult{
-				decoded:   decoded,
-				receipts:  receipts,
-				stateRoot: stateRootFuture,
-			}
-			select {
-			case results <- result:
-				continue
-			case <-abort:
-				return
-			}
-		}
-	}()
+// 	// Stage 2: Apply blocks
+// 	go func() {
+// 		defer close(results)
+// 		for decoded := range decodedBlocks {
+// 			gethBlock := decoded.geth
+// 			receipts, stateRootFuture, err := chain.ApplyBlock(gethBlock, metadata)
+// 			if err != nil {
+// 				reportIssue(fmt.Errorf("failed to apply block %d: %w", gethBlock.NumberU64(), err))
+// 				return
+// 			}
+// 			result := &processResult{
+// 				decoded:   decoded,
+// 				receipts:  receipts,
+// 				stateRoot: stateRootFuture,
+// 			}
+// 			select {
+// 			case results <- result:
+// 				continue
+// 			case <-abort:
+// 				return
+// 			}
+// 		}
+// 	}()
 
-	// Stage 3: Check results
-	go func() {
-		defer close(done)
-		for result := range results {
-			block := result.decoded.proto
+// 	// Stage 3: Check results
+// 	go func() {
+// 		defer close(done)
+// 		for result := range results {
+// 			block := result.decoded.proto
 
-			err := checkBlockResults(chain, block, result.receipts, result.stateRoot, blockDB, &replayLoopContext)
-			if err != nil {
-				reportIssue(err)
-				return
-			}
+// 			err := checkBlockResults(chain, block, result.receipts, result.stateRoot, blockDB, &replayLoopContext)
+// 			if err != nil {
+// 				reportIssue(err)
+// 				return
+// 			}
 
-			// Report the progress of the replay.
-			if onBlockDone != nil {
-				onBlockDone(result.decoded.geth)
-			}
-		}
-	}()
-	<-done
+// 			// Report the progress of the replay.
+// 			if onBlockDone != nil {
+// 				onBlockDone(result.decoded.geth)
+// 			}
+// 		}
+// 	}()
+// 	<-done
 
-	err := issue.Load()
-	if err == nil {
-		return nil
-	}
-	return *err
-}
+// 	err := issue.Load()
+// 	if err == nil {
+// 		return nil
+// 	}
+// 	return *err
+// }
 
 // checkBlockResults checks the results of applying a block against the
 // expected values in the block, including receipt fields and the resulting
@@ -799,7 +813,7 @@ type Chain interface {
 	ChainId() uint64
 	IsMptConformant() bool
 	IsVerkleConformant() bool
-	ApplyBlock(*types.Block, Metadata) (
+	ApplyBlock(block []*types.Block, metadata Metadata) (
 		types.Receipts,
 		future.Future[result.Result[common.Hash]],
 		error,
@@ -828,7 +842,7 @@ func (a *stateChainAdapter) IsVerkleConformant() bool {
 }
 
 func (a *stateChainAdapter) ApplyBlock(
-	block *types.Block,
+	block []*types.Block,
 	metadata Metadata,
 ) (
 	types.Receipts,
@@ -843,29 +857,29 @@ func (a *stateChainAdapter) ApplyBlock(
 
 	// Block 0 is skipped since it is equivalent with the genesis data
 	// import. The archive does not accept two blocks with the same number.
-	if block.NumberU64() == 0 {
+	if block[0].NumberU64() == 0 {
 		return nil, a.state.GetStateRoot(), nil
 	}
 
 	// Apply the block to the state database.
-	receipts, err := a.state.ApplyBlock(
+	receipts, err := a.state.ApplyBlockRange(
 		a.chainId,
 		block,
 		metadata,
 	)
 	if err != nil {
 		stateRoot := future.Future[result.Result[common.Hash]]{}
-		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
+		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", 1, err)
 	}
 
 	stateRoot := a.state.GetStateRoot()
-	if a.snapshotHandler.ShouldCreateSnapshot(block.NumberU64()) {
-		stateRoot = future.Immediate(stateRoot.Await())
-		a.state, err = a.snapshotHandler.Snapshot(block.NumberU64(), a.state)
-		if err != nil {
-			return nil, stateRoot, fmt.Errorf("failed to create snapshot at block %d: %w", block.NumberU64(), err)
-		}
-	}
+	// if a.snapshotHandler.ShouldCreateSnapshot(block.NumberU64()) {
+	// 	stateRoot = future.Immediate(stateRoot.Await())
+	// 	a.state, err = a.snapshotHandler.Snapshot(block.NumberU64(), a.state)
+	// 	if err != nil {
+	// 		return nil, stateRoot, fmt.Errorf("failed to create snapshot at block %d: %w", block.NumberU64(), err)
+	// 	}
+	// }
 	// Return the receipts and the resulting state root.
 	return receipts, stateRoot, nil
 }
