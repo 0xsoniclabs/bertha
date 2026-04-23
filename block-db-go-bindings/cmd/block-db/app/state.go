@@ -188,8 +188,21 @@ func (s *State) ApplyBlock(
 
 	zone := tracy.ZoneBegin("TransactionProcessing")
 	s.db.BeginBlock()
+
+	// Process all tx in the block twice
+	snapshot := s.db.InterTxSnapshot()
 	var usedGas uint64
 	processed := processor.Process(
+		evmBlock,
+		stateDb,
+		vmConfig,
+		gasLimit,
+		&usedGas,
+		nil,
+	)
+	s.db.RevertToInterTxSnapshot(snapshot)
+	usedGas = 0
+	processed = processor.Process(
 		evmBlock,
 		stateDb,
 		vmConfig,
