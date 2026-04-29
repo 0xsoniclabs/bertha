@@ -160,7 +160,7 @@ func (s *State) ApplyBlock(
 	)
 	rules := metadata.GetRulesAtBlock(block.NumberU64())
 
-	processor := evmcore.NewStateProcessor(
+	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
 		historyAdapter{history: s.blockHashHistory},
 		rules.Upgrades,
@@ -179,7 +179,7 @@ func (s *State) ApplyBlock(
 		Transactions: block.Transactions(),
 	}
 
-	stateDb := evmstore.CreateCarmenStateDb(s.db)
+	stateDb := evmstore.CreateCarmenStateDb(s.db, nil)
 
 	vmConfig := opera.GetVmConfig(rules)
 	gasLimit := block.GasLimit()
@@ -195,6 +195,7 @@ func (s *State) ApplyBlock(
 		vmConfig,
 		gasLimit,
 		&usedGas,
+		0,
 		nil,
 	)
 
