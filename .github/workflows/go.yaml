@@ -75,7 +75,6 @@ jobs:
         go-version: "1.26.0"
     - name: check license headers
       run: go run ./go/scripts/license/add_license_header.go -dir ./ -check
-       
 
   test:
     name: test
@@ -103,9 +102,18 @@ jobs:
     steps:
     - name: checkout
       uses: actions/checkout@v4
+      with:
+        path: bertha
+    - name: clone Carmen
+      run: git clone --depth 1 https://github.com/0xsoniclabs/carmen
+    - name: clone Tracy
+      run: git clone --depth 1 https://github.com/0xsoniclabs/tracy
     - name: check if carmen and tracy patches apply
-      working-directory: block-db-go-bindings
+      working-directory: bertha/block-db-go-bindings
       run: git apply enable-carmen.patch && git apply enable-tracy.patch
+    - name: check if go module is tidy
+      working-directory: bertha/block-db-go-bindings
+      run: go build -n ./...
 
   # This is currently disabled because we can not guarantee that the protobuf compiler versions between CI and dev machines do not get out of sync.
   #codegen:
