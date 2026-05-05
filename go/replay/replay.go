@@ -21,11 +21,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"iter"
 	"log/slog"
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -42,6 +44,9 @@ import (
 	_ "github.com/0xsoniclabs/carmen/go/state/gostate"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/opera"
+	"github.com/0xsoniclabs/sonic/opera/contracts/driver"
+	"github.com/0xsoniclabs/sonic/opera/contracts/driver/driverpos"
+	"github.com/0xsoniclabs/sonic/utils/signers/internaltx"
 	"github.com/0xsoniclabs/tracy"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
@@ -696,6 +701,13 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 		return nil, a.state.GetStateRoot(), nil
 	}
 
+	// Commit all pending upgrades if the block is an epoch sealing block.
+	if slices.ContainsFunc(block.Transactions(), internaltx.IsInternal) {
+		if err := a.metadataStore.CommitUpgrades(block.NumberU64()); err != nil {
+			return nil, future.Future[result.Result[common.Hash]]{}, fmt.Errorf("failed to commit upgrades at block %d: %v", block.NumberU64(), err)
+		}
+	}
+
 	chainConfig := opera.CreateTransientEvmChainConfig(
 		a.chainID,
 		a.metadataStore.GetUpgrades(),
@@ -713,8 +725,10 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 
 	corrections := a.metadataStore.GetCorrections(block.NumberU64())
 
+	onLog := func(l *types.Log) { onNewLog(a.metadataStore, block.NumberU64(), l) }
+
 	// Apply the block to the state database.
-	receipts, err := a.state.ApplyBlock(block, processor, upgrades, corrections)
+	receipts, err := a.state.ApplyBlock(block, processor, upgrades, corrections, onLog)
 	if err != nil {
 		stateRoot := future.Future[result.Result[common.Hash]]{}
 		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
@@ -921,4 +935,39 @@ func (h historyAdapter) Header(_ common.Hash, number uint64) *evmcore.EvmHeader 
 		Hash:       h.history.GetBlockHash(number),
 		ParentHash: h.history.GetBlockHash(number - 1),
 	}
+}
+
+// --- upgrade handling ---
+
+func onNewLog(metadataStore MetadataStore, blockNumber uint64, l *types.Log) {
+	// https://github.com/0xsoniclabs/sonic/blob/c3816115c9ae51682aa475c715aabbe10e0dcef4/gossip/blockproc/drivermodule/driver_txs.go#L351
+	if l.Address == driver.ContractAddress &&
+		l.Topics[0] == driverpos.Topics.UpdateNetworkRules &&
+		len(l.Data) >= 64 {
+		diff, err := decodeDataBytes(l)
+		if err != nil {
+			slog.Error("Failed to decode UpdateNetworkRules event data", "block", blockNumber, "error", err)
+			return
+		}
+		err = metadataStore.PatchUpgrades(blockNumber, diff)
+		if err != nil {
+			slog.Error("Failed to update rules", "block", blockNumber, "error", err)
+		}
+	}
+}
+
+// https://github.com/0xsoniclabs/sonic/blob/c3816115c9ae51682aa475c715aabbe10e0dcef4/gossip/blockproc/drivermodule/driver_txs.go#L296
+func decodeDataBytes(l *types.Log) ([]byte, error) {
+	if len(l.Data) < 32 {
+		return nil, io.ErrUnexpectedEOF
+	}
+	start := new(big.Int).SetBytes(l.Data[24:32]).Uint64()
+	if start+32 > uint64(len(l.Data)) {
+		return nil, io.ErrUnexpectedEOF
+	}
+	size := new(big.Int).SetBytes(l.Data[start+24 : start+32]).Uint64()
+	if start+32+size > uint64(len(l.Data)) {
+		return nil, io.ErrUnexpectedEOF
+	}
+	return l.Data[start+32 : start+32+size], nil
 }

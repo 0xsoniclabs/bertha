@@ -99,22 +99,87 @@ func TestNewStaticMetadataStore_UnknownChainID_LogsWarningAndReturnsEmptyMetadat
 	require.Empty(t, store.metadata.Corrections)
 }
 
-func TestStaticMetadataStore_StoreUpgrade_VerifiesUpgradeExists(t *testing.T) {
+func TestStaticMetadataStore_PatchUpgrades_ReturnsErrorForInvalidDiff(t *testing.T) {
+	store := &StaticMetadataStore{}
+	err := store.PatchUpgrades(0, []byte("not valid json {{{"))
+	require.Error(t, err)
+}
+
+func TestStaticMetadataStore_PatchUpgrades_AppliesDiffToNextUpgrades(t *testing.T) {
+	store := &StaticMetadataStore{}
+	require.Nil(t, store.nextUpgrades)
+
+	diff := []byte(`{"Upgrades":{}}`)
+	err := store.PatchUpgrades(0, diff)
+	require.NoError(t, err)
+	require.NotNil(t, store.nextUpgrades)
+	// Berlin, London and Sonic are enabled by default.
+	require.True(t, store.nextUpgrades.Berlin)
+	require.True(t, store.nextUpgrades.London)
+	require.True(t, store.nextUpgrades.Sonic)
+
+	diff = []byte(`{"Upgrades":{"Allegro":true}}`)
+	err = store.PatchUpgrades(0, diff)
+	require.NoError(t, err)
+	require.NotNil(t, store.nextUpgrades)
+	require.True(t, store.nextUpgrades.Berlin)
+	require.True(t, store.nextUpgrades.London)
+	require.True(t, store.nextUpgrades.Sonic)
+	require.True(t, store.nextUpgrades.Allegro)
+	require.False(t, store.nextUpgrades.Brio)
+
+	diff = []byte(`{"Upgrades":{"Brio":true}}`)
+	err = store.PatchUpgrades(0, diff)
+	require.NoError(t, err)
+	require.NotNil(t, store.nextUpgrades)
+	require.True(t, store.nextUpgrades.Berlin)
+	require.True(t, store.nextUpgrades.London)
+	require.True(t, store.nextUpgrades.Sonic)
+	require.True(t, store.nextUpgrades.Allegro)
+	require.True(t, store.nextUpgrades.Brio)
+}
+
+func TestStaticMetadataStore_CommitUpgrades_VerifiesUpgradeExists(t *testing.T) {
+	sonicUpgrades := opera.UpgradeHeight{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}, Height: 4}
 	store := &StaticMetadataStore{
 		metadata: Metadata{
 			Upgrades: []opera.UpgradeHeight{
-				{Upgrades: opera.Upgrades{Sonic: true}, Height: 2},
-				{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}, Height: 4},
+				sonicUpgrades,
 			},
 		},
 	}
 
-	// correct upgrade
-	require.NoError(t, store.StoreUpgrade(opera.UpgradeHeight{Upgrades: opera.Upgrades{Sonic: true}, Height: 2}))
-	// incorrect upgrades
-	require.Error(t, store.StoreUpgrade(opera.UpgradeHeight{Upgrades: opera.Upgrades{Sonic: false}, Height: 2}))
-	// incorrect height
-	require.Error(t, store.StoreUpgrade(opera.UpgradeHeight{Upgrades: opera.Upgrades{Sonic: true}, Height: 1}))
+	// correct upgrade and height
+	store.nextUpgrades = &sonicUpgrades.Upgrades
+	require.NoError(t, store.CommitUpgrades(uint64(sonicUpgrades.Height-1)))
+
+	// no upgrade
+	store.nextUpgrades = nil
+	require.NoError(t, store.CommitUpgrades(2))
+
+	// wrong upgrade
+	store.nextUpgrades = &opera.Upgrades{Sonic: false}
+	require.Error(t, store.CommitUpgrades(uint64(sonicUpgrades.Height-1)))
+
+	// wrong height
+	store.nextUpgrades = &sonicUpgrades.Upgrades
+	require.Error(t, store.CommitUpgrades(0))
+}
+
+func TestStaticMetadataStore_CommitUpgrades_ClearsNextUpgradesAfterSuccess(t *testing.T) {
+	store := &StaticMetadataStore{
+		metadata: Metadata{
+			Upgrades: []opera.UpgradeHeight{
+				{Upgrades: opera.Upgrades{Sonic: true}, Height: 2},
+			},
+		},
+	}
+
+	sonicUpgrades := opera.Upgrades{Sonic: true}
+	store.nextUpgrades = &sonicUpgrades
+	require.NoError(t, store.CommitUpgrades(1))
+	// nextUpgrades must be cleared after a successful commit
+	require.Nil(t, store.nextUpgrades)
 }
 
 func TestStaticMetadataStore_GetCorrections_ReturnsCorrections(t *testing.T) {

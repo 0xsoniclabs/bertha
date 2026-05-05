@@ -17,8 +17,10 @@
 package replay
 
 import (
+	"encoding/json"
 	"fmt"
-	"slices"
+	"log/slog"
+	"math/big"
 
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/sonic/opera"
@@ -31,8 +33,13 @@ import (
 // MetadataStore is an interface for storing and retrieving chain upgrade rules
 // and corrections.
 type MetadataStore interface {
-	// StoreUpgrade stores an upgrade that takes effect at the given block height.
-	StoreUpgrade(upgrade opera.UpgradeHeight) error
+	// PatchUpgrades patches the upgrades that will be committed by
+	// CommitUpgrades with the provided json opera.Rules patch.
+	PatchUpgrades(blockNumber uint64, diff []byte) error
+
+	// CommitUpgrades commits the upgrades that have been updated by
+	// PatchUpgrades and will become effective at the next block.
+	CommitUpgrades(blockNumber uint64) error
 
 	// GetUpgrades returns all stored upgrades.
 	GetUpgrades() []opera.UpgradeHeight
@@ -49,13 +56,15 @@ type MetadataStore interface {
 // StaticMetadataStore is a MetadataStore implementation backed by hard-coded
 // data for known chains.
 type StaticMetadataStore struct {
-	metadata Metadata
+	metadata     Metadata
+	nextUpgrades *opera.Upgrades
 }
 
 // NewStaticMetadataStore creates a new StaticMetadataStore with upgrades
 // for the given chain ID.
 func NewStaticMetadataStore(chainID uint64, logger utils.Logger) (*StaticMetadataStore, error) {
 	allegro := opera.GetAllegroUpgrades()
+	allegro.GasSubsidies = true
 	switch chainID {
 	case SonicMainNetChainID:
 		corrections, err := GetSonicMainnetCorrections()
@@ -105,13 +114,62 @@ func NewStaticMetadataStore(chainID uint64, logger utils.Logger) (*StaticMetadat
 	}
 }
 
-// StoreUpgrade verifies that the provided upgrade matches one of the
-// hard-coded upgrade values. Returns an error if it does not match.
-func (s *StaticMetadataStore) StoreUpgrade(upgrade opera.UpgradeHeight) error {
-	if !slices.Contains(s.metadata.Upgrades, upgrade) {
-		return fmt.Errorf("upgrade at height %d does not match any hard-coded values", upgrade.Height)
+func (s *StaticMetadataStore) PatchUpgrades(blockNumber uint64, diff []byte) error {
+	var upgrades opera.Upgrades
+	if s.nextUpgrades != nil {
+		upgrades = *s.nextUpgrades
+	} else {
+		upgrades = s.GetUpgradesAtBlock(blockNumber)
+		// Only Sonic has updates enabled by log messages, and for Sonic,
+		// Berlin, London and Sonic upgrades are enabled from the beginning,
+		// and therefore there are no upgrade heights for them.
+		upgrades.Berlin = true
+		upgrades.London = true
+		upgrades.Sonic = true
 	}
+	originalRules := opera.Rules{
+		Economy:  opera.EconomyRules{MinGasPrice: &big.Int{}, MinBaseFee: &big.Int{}},
+		Upgrades: upgrades,
+	}
+	updatedRules, err := updateRules(originalRules, diff)
+	if err != nil {
+		return fmt.Errorf("failed to update rules: %v", err)
+	}
+	s.nextUpgrades = &updatedRules.Upgrades
 	return nil
+}
+
+func updateRules(src opera.Rules, diff []byte) (opera.Rules, error) {
+	changed := src.Copy()
+	if err := json.Unmarshal(diff, &changed); err != nil {
+		return opera.Rules{}, err
+	}
+
+	// protect readonly fields
+	changed.NetworkID = src.NetworkID
+	changed.Name = src.Name
+
+	return changed, nil
+}
+
+func (s *StaticMetadataStore) CommitUpgrades(blockNumber uint64) error {
+	if s.nextUpgrades == nil {
+		return nil
+	}
+	upgrade := opera.UpgradeHeight{
+		Upgrades: *s.nextUpgrades,
+		Height:   idx.Block(blockNumber + 1), // effective from next block on
+	}
+	s.nextUpgrades = nil
+	// Verify that the upgrade matches one of the hard-coded values
+	for _, existingUpgrade := range s.metadata.Upgrades {
+		if existingUpgrade.Height == upgrade.Height &&
+			existingUpgrade.Upgrades == upgrade.Upgrades {
+			slog.Info("Committed upgrade", "height", upgrade.Height, "upgrades", upgrade.Upgrades)
+			return nil
+		}
+	}
+	return fmt.Errorf("upgrade at height %d does not match any hard-coded values", blockNumber+1)
 }
 
 // GetUpgrades returns all hard-coded upgrades.

@@ -41,6 +41,20 @@ func (m *MockMetadataStore) EXPECT() *MockMetadataStoreMockRecorder {
 	return m.recorder
 }
 
+// CommitUpgrades mocks base method.
+func (m *MockMetadataStore) CommitUpgrades(blockNumber uint64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CommitUpgrades", blockNumber)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// CommitUpgrades indicates an expected call of CommitUpgrades.
+func (mr *MockMetadataStoreMockRecorder) CommitUpgrades(blockNumber any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitUpgrades", reflect.TypeOf((*MockMetadataStore)(nil).CommitUpgrades), blockNumber)
+}
+
 // GetCorrections mocks base method.
 func (m *MockMetadataStore) GetCorrections(blockNumber uint64) map[common.Address]Correction {
 	m.ctrl.T.Helper()
@@ -83,16 +97,16 @@ func (mr *MockMetadataStoreMockRecorder) GetUpgradesAtBlock(blockNumber any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUpgradesAtBlock", reflect.TypeOf((*MockMetadataStore)(nil).GetUpgradesAtBlock), blockNumber)
 }
 
-// StoreUpgrade mocks base method.
-func (m *MockMetadataStore) StoreUpgrade(upgrade opera.UpgradeHeight) error {
+// PatchUpgrades mocks base method.
+func (m *MockMetadataStore) PatchUpgrades(blockNumber uint64, diff []byte) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "StoreUpgrade", upgrade)
+	ret := m.ctrl.Call(m, "PatchUpgrades", blockNumber, diff)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// StoreUpgrade indicates an expected call of StoreUpgrade.
-func (mr *MockMetadataStoreMockRecorder) StoreUpgrade(upgrade any) *gomock.Call {
+// PatchUpgrades indicates an expected call of PatchUpgrades.
+func (mr *MockMetadataStoreMockRecorder) PatchUpgrades(blockNumber, diff any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StoreUpgrade", reflect.TypeOf((*MockMetadataStore)(nil).StoreUpgrade), upgrade)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PatchUpgrades", reflect.TypeOf((*MockMetadataStore)(nil).PatchUpgrades), blockNumber, diff)
 }
