@@ -49,4 +49,4 @@ git apply --reverse --check enable-carmen.patch 2> /dev/null || git apply enable
 git apply --reverse --check enable-tracy.patch 2> /dev/null || git apply enable-tracy.patch
 
 # Run go with tracy tag.
-go run --tags enable_tracy "$@"
+go run --tags "carmen_rust enable_tracy" "$@"
