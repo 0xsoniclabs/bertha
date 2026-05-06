@@ -19,10 +19,13 @@ package app
 import (
 	"context"
 	"log/slog"
+	"math"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
+	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/tracy"
 	"github.com/urfave/cli/v3"
 )
@@ -39,8 +42,43 @@ func getApp() *cli.Command {
 		Name:  "block-db",
 		Usage: "Block Database CLI",
 		Commands: []*cli.Command{
-			getReplayCommand(),
-			getVerifyCommand(),
+			&cli.Command{
+				Name:   "replay",
+				Usage:  "replay the full block chain from the block database",
+				Action: parseReplayArgsAndRunReplay,
+				Flags: []cli.Flag{
+					jsonGenesisFlag,
+					blockDatabaseDirectoryFlag,
+					stateDBDirectoryFlag,
+					initDBFlag,
+					keepDBFlag,
+					withArchiveFlag,
+					dbSchema,
+					dbVariant,
+					startBlockFlag,
+					endBlockFlag,
+					usePipelineFlag,
+					snapshotInterval,
+					snapshotStartBlock,
+					snapshotEndBlock,
+					snapshotNumToKeep,
+					overwriteStateRoot,
+					noStateRootCheck,
+					logDBSize,
+					confirmAllPromptsFlag,
+				},
+			},
+			&cli.Command{
+				Name:   "verify",
+				Usage:  "Verify the block database",
+				Action: parseVerifyArgsAndRunVerify,
+				Flags: []cli.Flag{
+					blockDatabaseDirectoryFlag,
+					chainIDFlag,
+					startBlockFlag,
+					endBlockFlag,
+				},
+			},
 		},
 		Flags: []cli.Flag{
 			cpuProfileFlag,
@@ -85,4 +123,175 @@ func getApp() *cli.Command {
 			return nil
 		},
 	}
+}
+
+var (
+	cpuProfileFlag = &cli.StringFlag{
+		Name:  "cpu-profile",
+		Usage: "write CPU profile to `file`",
+	}
+	diagnosticsFlag = &cli.BoolFlag{
+		Name:  "diagnostics",
+		Usage: "enable diagnostics server (pprof)",
+		Value: false,
+	}
+	diagnosticsPortFlag = &cli.Uint16Flag{
+		Name:  "diagnostics-port",
+		Usage: "port for diagnostics server (pprof)",
+		Value: 6060,
+	}
+
+	blockDatabaseDirectoryFlag = &cli.StringFlag{
+		Name:    "database-dir",
+		Aliases: []string{"db"},
+		Usage:   "Path to the block database directory",
+		Value:   "./.blockdb",
+	}
+
+	chainIDFlag = &cli.Uint64Flag{
+		Name:    "chain-id",
+		Aliases: []string{"c"},
+		Usage:   "Chain ID to verify",
+		Value:   146, // Default to Sonic mainnet chain ID
+	}
+
+	startBlockFlag = &cli.Uint64Flag{
+		Name:    "start-block",
+		Aliases: []string{"s"},
+		Usage:   "Starting block number to verify",
+		Value:   0,
+	}
+	endBlockFlag = &cli.Uint64Flag{
+		Name:    "end-block",
+		Aliases: []string{"e"},
+		Usage:   "Ending block number to verify (inclusive)",
+		Value:   math.MaxUint64, // Default to the maximum block number
+	}
+
+	jsonGenesisFlag = &cli.StringFlag{
+		Name:    "json-genesis",
+		Aliases: []string{"g"},
+		Usage:   "JSON encoded genesis data to use for replaying the blockchain",
+	}
+	stateDBDirectoryFlag = &cli.StringFlag{
+		Name:    "state-db-dir",
+		Aliases: []string{"sdb"},
+		Usage:   "Path to the state database directory (default: OS-defined temporary directory)",
+		Value:   "",
+	}
+	initDBFlag = &cli.StringFlag{
+		Name:  "init-db-dir",
+		Usage: "Path to a state database directory to use to init the state database. The database will be copied to a temporary folder or the directory specified by '--state-db-dir' before replaying.",
+		Value: "",
+	}
+	keepDBFlag = &cli.BoolFlag{
+		Name:  "keep-db",
+		Usage: "Keep the state database after running the replay",
+	}
+
+	withArchiveFlag = &cli.BoolFlag{
+		Name:    "with-archive",
+		Aliases: []string{"a"},
+		Usage:   "Use the archive mode for the state database",
+		Value:   false,
+	}
+	dbSchema = &cli.IntFlag{
+		Name:    "db-schema",
+		Aliases: []string{"schema"},
+		Usage:   "Block database schema version to use",
+		Value:   5,
+	}
+	dbVariant = &cli.StringFlag{
+		Name:    "db-variant",
+		Aliases: []string{"variant"},
+		Usage:   "Block database variant to use (" + strings.Join(getListOfVariants(), ", ") + ")",
+		Value:   "go-file",
+	}
+	usePipelineFlag = &cli.BoolFlag{
+		Name:  "use-pipeline",
+		Usage: "Enable the replay pipeline (default: true)",
+		Value: true,
+	}
+
+	snapshotInterval = &cli.Uint64Flag{
+		Name:    "snapshot-interval",
+		Aliases: []string{"si"},
+		Usage:   "Interval of blocks at which to perform database snapshots (0 = disabled)",
+		Value:   0,
+	}
+	snapshotStartBlock = &cli.Uint64Flag{
+		Name:  "snapshot-start-block",
+		Usage: "Block number from which to start taking snapshots (default: 0)",
+		Value: 0,
+	}
+	snapshotEndBlock = &cli.Uint64Flag{
+		Name:  "snapshot-end-block",
+		Usage: "Block number at which to stop taking snapshots (default: max block)",
+		Value: math.MaxUint64,
+	}
+	snapshotNumToKeep = &cli.Uint64Flag{
+		Name:  "snapshot-num-to-keep",
+		Usage: "Number of snapshots to keep (default: 1)",
+		Value: 1,
+	}
+
+	overwriteStateRoot = &cli.BoolFlag{
+		Name:  "overwrite-state-roots",
+		Usage: "Overwrite the state roots in the block database with the ones computed from the state",
+		Value: false,
+	}
+	noStateRootCheck = &cli.BoolFlag{
+		Name:    "no-state-root-check",
+		Aliases: []string{"no-src"},
+		Usage:   "Skip checking the state roots with the ones stored in the block database",
+		Value:   false,
+	}
+
+	logDBSize = &cli.BoolFlag{
+		Name:    "log-db-size",
+		Aliases: []string{"lds"},
+		Usage:   "Include the disk size of the database in progress log messages (default = disabled)",
+		Value:   false,
+	}
+
+	confirmAllPromptsFlag = &cli.BoolFlag{
+		Name:  "y",
+		Usage: "Automatically confirm all prompts",
+		Value: false,
+	}
+)
+
+func parseReplayArgsAndRunReplay(ctx context.Context, c *cli.Command) error {
+	args := ReplayArgs{
+		JsonGenesisFile:    c.String(jsonGenesisFlag.Name),
+		BlockDBDir:         c.String(blockDatabaseDirectoryFlag.Name),
+		StateDBDir:         c.String(stateDBDirectoryFlag.Name),
+		InitDBDir:          c.String(initDBFlag.Name),
+		KeepDB:             c.Bool(keepDBFlag.Name),
+		WithArchive:        c.Bool(withArchiveFlag.Name),
+		DBSchema:           carmen.Schema(c.Int(dbSchema.Name)),
+		DBVariant:          carmen.Variant(c.String(dbVariant.Name)),
+		UsePipeline:        c.Bool(usePipelineFlag.Name),
+		StartBlock:         c.Uint64(startBlockFlag.Name),
+		EndBlock:           c.Uint64(endBlockFlag.Name),
+		SnapshotInterval:   c.Uint64(snapshotInterval.Name),
+		SnapshotStartBlock: c.Uint64(snapshotStartBlock.Name),
+		SnapshotEndBlock:   c.Uint64(snapshotEndBlock.Name),
+		SnapshotNumToKeep:  c.Uint64(snapshotNumToKeep.Name),
+		OverwriteStateRoot: c.Bool(overwriteStateRoot.Name),
+		NoStateRootCheck:   c.Bool(noStateRootCheck.Name),
+		LogDBSize:          c.Bool(logDBSize.Name),
+		ConfirmAllPrompts:  c.Bool(confirmAllPromptsFlag.Name),
+	}
+	return runReplay(ctx, args)
+}
+
+func parseVerifyArgsAndRunVerify(ctx context.Context, c *cli.Command) error {
+	args := VerifyArgs{
+		DatabaseDir: c.String(blockDatabaseDirectoryFlag.Name),
+		ChainID:     c.Uint64(chainIDFlag.Name),
+		StartBlock:  c.Uint64(startBlockFlag.Name),
+		EndBlock:    c.Uint64(endBlockFlag.Name),
+	}
+	return runVerify(ctx, args)
 }

@@ -21,61 +21,23 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"math"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/schollz/progressbar/v3"
-	"github.com/urfave/cli/v3"
 )
 
-var (
-	chainIDFlag = &cli.Uint64Flag{
-		Name:    "chain-id",
-		Aliases: []string{"c"},
-		Usage:   "Chain ID to verify",
-		Value:   146, // Default to Sonic mainnet chain ID
-	}
-
-	startBlockFlag = &cli.Uint64Flag{
-		Name:    "start-block",
-		Aliases: []string{"s"},
-		Usage:   "Starting block number to verify",
-		Value:   0,
-	}
-
-	endBlockFlag = &cli.Uint64Flag{
-		Name:    "end-block",
-		Aliases: []string{"e"},
-		Usage:   "Ending block number to verify (inclusive)",
-		Value:   math.MaxUint64, // Default to the maximum block number
-	}
-)
-
-func getVerifyCommand() *cli.Command {
-	return &cli.Command{
-		Name:   "verify",
-		Usage:  "Verify the block database",
-		Action: runVerify,
-		Flags: []cli.Flag{
-			blockDatabaseDirectoryFlag,
-			chainIDFlag,
-			startBlockFlag,
-			endBlockFlag,
-		},
-	}
+type VerifyArgs struct {
+	DatabaseDir string
+	ChainID     uint64
+	StartBlock  uint64
+	EndBlock    uint64
 }
 
-func runVerify(ctx context.Context, c *cli.Command) (err error) {
-
-	dir := c.String(blockDatabaseDirectoryFlag.Name)
-	chainID := c.Uint64(chainIDFlag.Name)
-	startBlock := c.Uint64(startBlockFlag.Name)
-	endBlock := c.Uint64(endBlockFlag.Name)
-
-	fmt.Printf("Opening block database in %q ...\n", dir)
-	database, err := blockdb.OpenRocksDBForReading(dir)
+func runVerify(ctx context.Context, args VerifyArgs) (err error) {
+	fmt.Printf("Opening block database in %q ...\n", args.DatabaseDir)
+	database, err := blockdb.OpenRocksDBForReading(args.DatabaseDir)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
@@ -83,18 +45,22 @@ func runVerify(ctx context.Context, c *cli.Command) (err error) {
 		err = errors.Join(err, database.Close())
 	}()
 
-	fmt.Printf("Verifying blocks for chain ID %d from block %d to block %d ...\n", chainID, startBlock, endBlock)
+	fmt.Printf("Verifying blocks for chain ID %d from block %d to block %d ...\n", args.ChainID, args.StartBlock, args.EndBlock)
 
-	numBlocks := int64(endBlock - startBlock)
+	numBlocks := int64(args.EndBlock - args.StartBlock)
 	bar := progressbar.Default(numBlocks, "Verifying blocks")
 
-	return verifyBlocks(ctx, database.GetRangeRev(
-		chainID,
-		startBlock,
-		endBlock,
-	), func(uint64) {
-		_ = bar.Add(1) // Progress bar update errors are ignored
-	})
+	return verifyBlocks(
+		ctx,
+		database.GetRangeRev(
+			args.ChainID,
+			args.StartBlock,
+			args.EndBlock,
+		),
+		func(uint64) {
+			_ = bar.Add(1) // Progress bar update errors are ignored
+		},
+	)
 }
 
 func verifyBlocks(

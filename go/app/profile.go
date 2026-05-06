@@ -21,15 +21,6 @@ import (
 	"log/slog"
 	"os"
 	"runtime/pprof"
-
-	"github.com/urfave/cli/v3"
-)
-
-var (
-	cpuProfileFlag = &cli.StringFlag{
-		Name:  "cpu-profile",
-		Usage: "write CPU profile to `file`",
-	}
 )
 
 // StartCPUProfile starts CPU profiling and writes the profile to the specified

@@ -37,7 +37,7 @@ import (
 
 func TestVerify_RunWithoutParameters_FailsToOpenMissingDb(t *testing.T) {
 	require.ErrorContains(t,
-		getVerifyCommand().Run(t.Context(), []string{"test"}),
+		runVerify(t.Context(), VerifyArgs{}),
 		"failed to open database",
 	)
 }
@@ -45,10 +45,7 @@ func TestVerify_RunWithoutParameters_FailsToOpenMissingDb(t *testing.T) {
 func TestVerify_InvalidDirectory_ReportsAnIssue(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing-db")
 	require.ErrorContains(t,
-		getVerifyCommand().Run(t.Context(), []string{
-			"test",
-			"--database-dir", path,
-		}),
+		runVerify(t.Context(), VerifyArgs{DatabaseDir: path}),
 		"failed to open database",
 	)
 }
@@ -64,10 +61,7 @@ func TestVerify_EmptyDatabase_DoesNotReportIssues(t *testing.T) {
 	db.Close()
 
 	require.NoError(
-		getVerifyCommand().Run(t.Context(), []string{
-			"test",
-			"--database-dir", path,
-		}),
+		runVerify(t.Context(), VerifyArgs{DatabaseDir: path}),
 	)
 }
 
@@ -97,11 +91,7 @@ func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
 	db.Close()
 
 	require.NoError(
-		getVerifyCommand().Run(t.Context(), []string{
-			"test",
-			"--database-dir", path,
-			"--chain-id", "123",
-		}),
+		runVerify(t.Context(), VerifyArgs{DatabaseDir: path, ChainID: 123}),
 	)
 }
 

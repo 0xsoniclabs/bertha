@@ -23,7 +23,6 @@ import (
 	"iter"
 	"log/slog"
 	"maps"
-	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -44,114 +43,31 @@ import (
 	"github.com/0xsoniclabs/tracy"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/urfave/cli/v3"
 )
 
 //go:generate mockgen -source=replay.go -destination=replay_mock.go -package=app
 
-var (
-	jsonGenesisFlag = &cli.StringFlag{
-		Name:    "json-genesis",
-		Aliases: []string{"g"},
-		Usage:   "JSON encoded genesis data to use for replaying the blockchain",
-	}
-
-	stateDBDirectoryFlag = &cli.StringFlag{
-		Name:    "state-db-dir",
-		Aliases: []string{"sdb"},
-		Usage:   "Path to the state database directory (default: OS-defined temporary directory)",
-		Value:   "",
-	}
-
-	withArchiveFlag = &cli.BoolFlag{
-		Name:    "with-archive",
-		Aliases: []string{"a"},
-		Usage:   "Use the archive mode for the state database",
-		Value:   false,
-	}
-
-	keepDBFlag = &cli.BoolFlag{
-		Name:  "keep-db",
-		Usage: "Keep the state database after running the replay",
-	}
-
-	initDBFlag = &cli.StringFlag{
-		Name:  "init-db-dir",
-		Usage: "Path to a state database directory to use to init the state database. The database will be copied to a temporary folder or the directory specified by '--state-db-dir' before replaying.",
-		Value: "",
-	}
-
-	dbSchema = &cli.IntFlag{
-		Name:    "db-schema",
-		Aliases: []string{"schema"},
-		Usage:   "Block database schema version to use",
-		Value:   5,
-	}
-
-	dbVariant = &cli.StringFlag{
-		Name:    "db-variant",
-		Aliases: []string{"variant"},
-		Usage:   "Block database variant to use (" + strings.Join(getListOfVariants(), ", ") + ")",
-		Value:   "go-file",
-	}
-
-	usePipelineFlag = &cli.BoolFlag{
-		Name:  "use-pipeline",
-		Usage: "Enable the replay pipeline (default: true)",
-		Value: true,
-	}
-
-	snapshotInterval = &cli.Uint64Flag{
-		Name:    "snapshot-interval",
-		Aliases: []string{"si"},
-		Usage:   "Interval of blocks at which to perform database snapshots (0 = disabled)",
-		Value:   0,
-	}
-
-	snapshotStartBlock = &cli.Uint64Flag{
-		Name:  "snapshot-start-block",
-		Usage: "Block number from which to start taking snapshots (default: 0)",
-		Value: 0,
-	}
-
-	snapshotEndBlock = &cli.Uint64Flag{
-		Name:  "snapshot-end-block",
-		Usage: "Block number at which to stop taking snapshots (default: max block)",
-		Value: math.MaxUint64,
-	}
-
-	snapshotNumToKeep = &cli.Uint64Flag{
-		Name:  "snapshot-num-to-keep",
-		Usage: "Number of snapshots to keep (default: 1)",
-		Value: 1,
-	}
-
-	overwriteStateRoot = &cli.BoolFlag{
-		Name:  "overwrite-state-roots",
-		Usage: "Overwrite the state roots in the block database with the ones computed from the state",
-		Value: false,
-	}
-
-	noStateRootCheck = &cli.BoolFlag{
-		Name:    "no-state-root-check",
-		Aliases: []string{"no-src"},
-		Usage:   "Skip checking the state roots with the ones stored in the block database",
-		Value:   false,
-	}
-
-	logDBSize = &cli.BoolFlag{
-		Name:    "log-db-size",
-		Aliases: []string{"lds"},
-		Usage:   "Include the disk size of the database in progress log messages (default = disabled)",
-		Value:   false,
-	}
-
-	confirmAllPromptsFlag = &cli.BoolFlag{
-		Name:  "y",
-		Usage: "Automatically confirm all prompts",
-		Value: false,
-	}
-)
+type ReplayArgs struct {
+	JsonGenesisFile    string
+	BlockDBDir         string
+	StateDBDir         string
+	InitDBDir          string
+	KeepDB             bool
+	WithArchive        bool
+	DBSchema           carmen.Schema
+	DBVariant          carmen.Variant
+	UsePipeline        bool
+	StartBlock         uint64
+	EndBlock           uint64
+	SnapshotInterval   uint64
+	SnapshotStartBlock uint64
+	SnapshotEndBlock   uint64
+	SnapshotNumToKeep  uint64
+	OverwriteStateRoot bool
+	NoStateRootCheck   bool
+	LogDBSize          bool
+	ConfirmAllPrompts  bool
+}
 
 // getListOfVariants returns a sorted list of all registered database variants.
 func getListOfVariants() []string {
@@ -162,92 +78,41 @@ func getListOfVariants() []string {
 	return slices.Sorted(maps.Keys(variants))
 }
 
-func getReplayCommand() *cli.Command {
-	return &cli.Command{
-		Name:   "replay",
-		Usage:  "replay the full block chain from the block database",
-		Action: runReplay,
-		Flags: []cli.Flag{
-			jsonGenesisFlag,
-			blockDatabaseDirectoryFlag,
-			stateDBDirectoryFlag,
-			withArchiveFlag,
-			keepDBFlag,
-			initDBFlag,
-			dbSchema,
-			dbVariant,
-			startBlockFlag,
-			endBlockFlag,
-			usePipelineFlag,
-			snapshotInterval,
-			snapshotStartBlock,
-			snapshotEndBlock,
-			snapshotNumToKeep,
-			overwriteStateRoot,
-			noStateRootCheck,
-			logDBSize,
-			confirmAllPromptsFlag,
-		},
-	}
-}
+func runReplay(ctx context.Context, args ReplayArgs) (err error) {
+	snapshotHandler := NewSnapshotHandler(args.SnapshotInterval, args.SnapshotStartBlock, args.SnapshotEndBlock, args.SnapshotNumToKeep)
 
-func runReplay(ctx context.Context, c *cli.Command) (err error) {
-
-	genesisFileName := c.String(jsonGenesisFlag.Name)
-	stateDBDirectory := c.String(stateDBDirectoryFlag.Name)
-	blockDBDirectory := c.String(blockDatabaseDirectoryFlag.Name)
-	withArchive := c.Bool(withArchiveFlag.Name)
-	keepDB := c.Bool(keepDBFlag.Name)
-	initDBDir := c.String(initDBFlag.Name)
-	startBlock := c.Uint64(startBlockFlag.Name)
-	endBlock := c.Uint64(endBlockFlag.Name)
-	usePipeline := c.Bool(usePipelineFlag.Name)
-	snapshotInterval := c.Uint64(snapshotInterval.Name)
-	overwriteStateRoot := c.Bool(overwriteStateRoot.Name)
-	confirmAllPrompts := c.Bool(confirmAllPromptsFlag.Name)
-	noStateRootCheck := c.Bool(noStateRootCheck.Name)
-	logDBSize := c.Bool(logDBSize.Name)
-	snapshotStartBlock := c.Uint64(snapshotStartBlock.Name)
-	snapshotEndBlock := c.Uint64(snapshotEndBlock.Name)
-	snapshotNumToKeep := c.Uint64(snapshotNumToKeep.Name)
-
-	schema := carmen.Schema(c.Int(dbSchema.Name))
-	variant := carmen.Variant(c.String(dbVariant.Name))
-
-	snapshotHandler := NewSnapshotHandler(snapshotInterval, snapshotStartBlock, snapshotEndBlock, snapshotNumToKeep)
-
-	slog.Info("Loading genesis file", "file", genesisFileName)
+	slog.Info("Loading genesis file", "file", args.JsonGenesisFile)
 	// Create a temporary directory for the state database
-	if stateDBDirectory == "" {
-		if startBlock > 0 && initDBDir == "" {
+	if args.StateDBDir == "" {
+		if args.StartBlock > 0 && args.InitDBDir == "" {
 			return fmt.Errorf("existing state or initial database directory must be specified when starting from a non-genesis block")
 		}
-		stateDBDirectory = os.TempDir()
-		stateDBDirectory, err = os.MkdirTemp(stateDBDirectory, "replay_chain_state_")
+		args.StateDBDir = os.TempDir()
+		args.StateDBDir, err = os.MkdirTemp(args.StateDBDir, "replay_chain_state_")
 	}
 	if err != nil {
 		return fmt.Errorf("failed to create temporary state database directory: %w", err)
 	}
-	slog.Info("Creating state database", "directory", stateDBDirectory)
-	if initDBDir != "" {
-		slog.Info("Copying initial state database", "source_directory", initDBDir, "destination_directory", stateDBDirectory)
-		if isEmpty, err := IsEmptyOrMissingDir(stateDBDirectory); err != nil {
-			return fmt.Errorf("failed to check if state database directory %q is empty: %w", stateDBDirectory, err)
+	slog.Info("Creating state database", "directory", args.StateDBDir)
+	if args.InitDBDir != "" {
+		slog.Info("Copying initial state database", "source_directory", args.InitDBDir, "destination_directory", args.StateDBDir)
+		if isEmpty, err := IsEmptyOrMissingDir(args.StateDBDir); err != nil {
+			return fmt.Errorf("failed to check if state database directory %q is empty: %w", args.StateDBDir, err)
 		} else if !isEmpty {
-			return fmt.Errorf("state database directory %q is not empty. Please specify an empty directory to be initialized or use a temporary directory", stateDBDirectory)
+			return fmt.Errorf("state database directory %q is not empty. Please specify an empty directory to be initialized or use a temporary directory", args.StateDBDir)
 		}
-		err = os.CopyFS(stateDBDirectory, os.DirFS(initDBDir))
+		err = os.CopyFS(args.StateDBDir, os.DirFS(args.InitDBDir))
 		if err != nil {
-			return fmt.Errorf("failed to copy initial state database %q in destination directory %q: %w", initDBDir, stateDBDirectory, err)
+			return fmt.Errorf("failed to copy initial state database %q in destination directory %q: %w", args.InitDBDir, args.StateDBDir, err)
 		}
 	}
 
-	if !keepDB {
+	if !args.KeepDB {
 		slog.Warn("State database will be deleted after replay (use --keep-db to keep it)")
 		defer func() {
-			slog.Info("Removing state database directory", "directory", stateDBDirectory)
-			err = errors.Join(err, os.RemoveAll(stateDBDirectory))
-			snapshotDirs := snapshotHandler.GetSnapshotDirs(stateDBDirectory)
+			slog.Info("Removing state database directory", "directory", args.StateDBDir)
+			err = errors.Join(err, os.RemoveAll(args.StateDBDir))
+			snapshotDirs := snapshotHandler.GetSnapshotDirs(args.StateDBDir)
 			if len(snapshotDirs) > 0 {
 				if err == nil || errors.Is(err, context.Canceled) {
 					for _, dir := range snapshotDirs {
@@ -265,14 +130,14 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	}
 
-	if snapshotInterval > 0 {
-		matches, err := filepath.Glob(stateDBDirectory + "_snapshot_*")
+	if args.SnapshotInterval > 0 {
+		matches, err := filepath.Glob(args.StateDBDir + "_snapshot_*")
 		if err != nil {
-			return fmt.Errorf("failed to check existing snapshots in state database directory %q: %w", stateDBDirectory, err)
+			return fmt.Errorf("failed to check existing snapshots in state database directory %q: %w", args.StateDBDir, err)
 		}
 		if len(matches) > 0 {
-			slog.Warn("Existing snapshots found for state database directory", "directory", stateDBDirectory, "snapshots_found", len(matches))
-			if !confirmAllPrompts {
+			slog.Warn("Existing snapshots found for state database directory", "directory", args.StateDBDir, "snapshots_found", len(matches))
+			if !args.ConfirmAllPrompts {
 				fmt.Printf("Do you want to delete the existing snapshots and continue (y/n)? ")
 				var response string
 				if _, err := fmt.Scanln(&response); err != nil {
@@ -286,28 +151,28 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		}
 
 		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", snapshotInterval, "start_block", snapshotStartBlock, "end_block", snapshotEndBlock, "snapshot to keep", snapshotNumToKeep)
-		if strings.Contains(string(variant), "flat") {
+		if strings.Contains(string(args.DBVariant), "flat") {
 			slog.Warn("Snapshots are currently not supported with flat database variants; consider disabling snapshots or using a different variant")
 		}
 	}
 
-	if logDBSize {
+	if args.LogDBSize {
 		slog.Warn("DB size log enabled. This will trigger a flush with every progress report and reduce performance")
 	}
 
 	// Load genesis data from the specified file.
-	genesis, err := ReadGenesisFromFile(genesisFileName)
+	genesis, err := ReadGenesisFromFile(args.JsonGenesisFile)
 	if err != nil {
-		return fmt.Errorf("failed to read genesis file %q: %w", genesisFileName, err)
+		return fmt.Errorf("failed to read genesis file %q: %w", args.JsonGenesisFile, err)
 	}
 	chainID := genesis.ChainID
 
 	// Open State Database in new directory.
 	params := StateParameters{
-		Directory:   stateDBDirectory,
-		WithArchive: withArchive,
-		Schema:      schema,
-		Variant:     variant,
+		Directory:   args.StateDBDir,
+		WithArchive: args.WithArchive,
+		Schema:      args.DBSchema,
+		Variant:     args.DBVariant,
 	}
 
 	state, err := NewState(params)
@@ -317,23 +182,23 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	chain := &stateChainAdapter{
 		chainID:         chainID,
 		state:           state,
-		schema:          schema,
+		schema:          args.DBSchema,
 		snapshotHandler: snapshotHandler,
 	}
 	// Because snapshots invalidate the state, we need to close it here.
 	defer func() {
-		slog.Info("Closing state database", "directory", stateDBDirectory)
+		slog.Info("Closing state database", "directory", args.StateDBDir)
 		err = errors.Join(err, chain.state.Close())
 	}()
 
-	if startBlock == 0 {
+	if args.StartBlock == 0 {
 		slog.Info("Starting replay from genesis")
 		// Apply genesis data to the state database.
 		if err := state.ApplyGenesis(genesis); err != nil {
 			return fmt.Errorf("failed to apply genesis data: %w", err)
 		}
 	} else {
-		slog.Info("Starting replay from block", "block_number", startBlock)
+		slog.Info("Starting replay from block", "block_number", args.StartBlock)
 	}
 	stateRoot, err := state.GetStateRoot().Await().Get()
 	if err != nil {
@@ -342,13 +207,13 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	slog.Info("Loaded state", "chain_id", chainID, "root_hash", stateRoot)
 
 	// Open the block database.
-	slog.Info("Opening block database", "directory", blockDBDirectory)
+	slog.Info("Opening block database", "directory", args.BlockDBDir)
 	var database blockdb.BlockDB
-	if overwriteStateRoot {
+	if args.OverwriteStateRoot {
 		slog.Info("State root overwriting enabled")
-		database, err = blockdb.OpenRocksDBForWriting(blockDBDirectory)
+		database, err = blockdb.OpenRocksDBForWriting(args.BlockDBDir)
 	} else {
-		database, err = blockdb.OpenRocksDBForReading(blockDBDirectory)
+		database, err = blockdb.OpenRocksDBForReading(args.BlockDBDir)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
@@ -364,14 +229,14 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	}
 
 	// Prepare the progress logger.
-	progress := startProgressLogger(state, stateDBDirectory, logDBSize)
+	progress := startProgressLogger(state, args.StateDBDir, args.LogDBSize)
 	defer func() {
 		slog.Info(progress.GetSummary())
 	}()
 
 	// Pick the replay method.
 	run := runReplayLoop
-	if usePipeline {
+	if args.UsePipeline {
 		slog.Info("Using replay pipeline")
 		run = runReplayPipeline
 	} else {
@@ -379,11 +244,11 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	}
 
 	// ---- Start Replay ----
-	blocks := database.GetRange(chainID, startBlock, endBlock)
+	blocks := database.GetRange(chainID, args.StartBlock, args.EndBlock)
 
 	replayLoopContext := ReplayLoopContext{
-		overwriteStateRoot: New(overwriteStateRoot, confirmAllPrompts),
-		skipStateRootCheck: noStateRootCheck,
+		overwriteStateRoot: New(args.OverwriteStateRoot, args.ConfirmAllPrompts),
+		skipStateRootCheck: args.NoStateRootCheck,
 		stateRootNotSet:    false,
 	}
 

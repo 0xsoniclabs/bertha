@@ -23,25 +23,10 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/urfave/cli/v3"
-
 	_ "net/http/pprof"
 )
 
 //go:generate mockgen -source=diagnostics.go -destination=diagnostics_mock.go -package=app
-
-var (
-	diagnosticsFlag = &cli.BoolFlag{
-		Name:  "diagnostics",
-		Usage: "enable diagnostics server (pprof)",
-		Value: false,
-	}
-	diagnosticsPortFlag = &cli.Uint16Flag{
-		Name:  "diagnostics-port",
-		Usage: "port for diagnostics server (pprof)",
-		Value: 6060,
-	}
-)
 
 // diagnostic represents a running diagnostics server.
 type diagnostic struct {

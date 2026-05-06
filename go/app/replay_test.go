@@ -76,29 +76,17 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 	db.Close()
 
 	require.NoError(
-		getReplayCommand().Run(t.Context(), []string{
-			"test",
-			"--db", path,
-			"--json-genesis", genesis,
-		}),
+		runReplay(t.Context(), ReplayArgs{BlockDBDir: path, JsonGenesisFile: genesis}),
 	)
 
 	require.NoError(
-		getReplayCommand().Run(t.Context(), []string{
-			"test",
-			"--db", path,
-			"--json-genesis", genesis,
-			"--with-archive",
-		}),
+		runReplay(t.Context(), ReplayArgs{BlockDBDir: path, JsonGenesisFile: genesis, WithArchive: true}),
 	)
 }
 
 func TestReplay_FailsIfStartBlockIsProvidedWithoutStateDbDir(t *testing.T) {
 	require := require.New(t)
-	err := getReplayCommand().Run(t.Context(), []string{
-		"test",
-		"--start-block", "1000",
-	})
+	err := runReplay(t.Context(), ReplayArgs{StartBlock: 1000})
 	require.ErrorContains(
 		err,
 		"existing state or initial database directory must be specified when starting from a non-genesis block",
