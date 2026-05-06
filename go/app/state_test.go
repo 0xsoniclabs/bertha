@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
+	"github.com/0xsoniclabs/bertha/convert"
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
@@ -191,7 +192,7 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 		require.NoError(t, state.Close())
 	}()
 
-	block, err := ConvertToGethBlock(&blockdb.Block{})
+	block, err := convert.ConvertToGethBlock(&blockdb.Block{})
 	require.NoError(t, err)
 
 	receipts, err := state.ApplyBlock(1, block, Metadata{})
@@ -209,7 +210,7 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 		require.NoError(t, state.Close())
 	}()
 
-	block, err := ConvertToGethBlock(&blockdb.Block{
+	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Transactions: []*blockdb.Transaction{
 			{
 				TransactionType: types.LegacyTxType,
@@ -258,7 +259,7 @@ func TestState_ApplyBlock_AppliesUpgrades(t *testing.T) {
 
 	for blockNr := range 20 {
 		// Apply a block before any upgrades.
-		block, err := ConvertToGethBlock(&blockdb.Block{
+		block, err := convert.ConvertToGethBlock(&blockdb.Block{
 			Number:   uint64(blockNr),
 			GasLimit: 100_000,
 			Transactions: []*blockdb.Transaction{
@@ -299,7 +300,7 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 		require.NoError(t, state.Close())
 	}()
 
-	block, err := ConvertToGethBlock(&blockdb.Block{Number: 17})
+	block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: 17})
 	require.NoError(t, err)
 
 	corrections := Corrections{

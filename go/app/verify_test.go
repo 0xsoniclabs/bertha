@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
+	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/linxGnu/grocksdb"
@@ -184,7 +185,7 @@ func TestVerifyBlock_InvalidHash_ReportsInvalidHash(t *testing.T) {
 
 func TestVerifyBlock_CorrectHash_VerifyPasses(t *testing.T) {
 	block := &blockdb.Block{}
-	gethBlock, err := ConvertToGethBlock(block)
+	gethBlock, err := convert.ConvertToGethBlock(block)
 	require.NoError(t, err)
 
 	hash := gethBlock.Hash()
@@ -218,7 +219,7 @@ func createValidBlocks(t *testing.T, num int) []*blockdb.Block {
 		}
 		blocks[i] = next
 
-		block, err := ConvertToGethBlock(next)
+		block, err := convert.ConvertToGethBlock(next)
 		require.NoError(t, err, "failed to convert block to Geth format")
 		lastHash = block.Hash()
 	}

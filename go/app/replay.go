@@ -36,6 +36,7 @@ import (
 	// _ "[github.com/ianlancetaylor/cgosymbolizer](http://github.com/ianlancetaylor/cgosymbolizer)" // Enable to resolve symbols across cgo calls (this breaks Go symbols)
 
 	"github.com/0xsoniclabs/bertha/blockdb"
+	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
@@ -543,7 +544,7 @@ func runReplayLoop(
 			return ctx.Err()
 		}
 
-		gethBlock, err := ConvertToGethBlock(block)
+		gethBlock, err := convert.ConvertToGethBlock(block)
 		if err != nil {
 			return fmt.Errorf("failed to convert block %d: %w", block.Number, err)
 		}
@@ -627,7 +628,7 @@ func runReplayPipeline(
 				reportIssue(ctx.Err())
 				return
 			}
-			gethBlock, err := ConvertToGethBlock(block)
+			gethBlock, err := convert.ConvertToGethBlock(block)
 			if err != nil {
 				reportIssue(fmt.Errorf("failed to convert block %d: %w", block.Number, err))
 				return

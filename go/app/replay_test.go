@@ -30,6 +30,7 @@ import (
 	"testing/synctest"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
+	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	"github.com/0xsoniclabs/carmen/go/state"
@@ -109,22 +110,22 @@ func TestProgressLogger_ProducesLogMessagesEvery10kSteps(t *testing.T) {
 
 	logger := startProgressLogger(nil, "", false)
 
-	block0, err := ConvertToGethBlock(&blockdb.Block{
+	block0, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:    0,
 		Timestamp: 1000,
 	})
 	require.NoError(err)
-	block10k, err := ConvertToGethBlock(&blockdb.Block{
+	block10k, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:    10_000,
 		Timestamp: 2000,
 	})
 	require.NoError(err)
-	block15k, err := ConvertToGethBlock(&blockdb.Block{
+	block15k, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:    15_000,
 		Timestamp: 2000,
 	})
 	require.NoError(err)
-	block20k, err := ConvertToGethBlock(&blockdb.Block{
+	block20k, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:    20_000,
 		Timestamp: 3500,
 	})
@@ -166,7 +167,7 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 	err := os.WriteFile(filePath, data, 0644)
 	require.NoError(err)
 
-	block, err := ConvertToGethBlock(&blockdb.Block{
+	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:       10000,
 		Timestamp:    1000,
 		Transactions: []*blockdb.Transaction{},
@@ -204,7 +205,7 @@ func TestProgressLogger_ProducesASummary(t *testing.T) {
 
 	logger := startProgressLogger(nil, "", false)
 
-	block, err := ConvertToGethBlock(&blockdb.Block{
+	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:    0,
 		Timestamp: 1000,
 		Transactions: []*blockdb.Transaction{
@@ -335,7 +336,7 @@ func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 	// Check that the blocks are processed in order and correctly forwarded.
 	var last *gomock.Call
 	for _, block := range blocks {
-		ethBlock, err := ConvertToGethBlock(block)
+		ethBlock, err := convert.ConvertToGethBlock(block)
 		require.NoError(t, err, "failed to convert block %d", block.Number)
 
 		call := chain.EXPECT().
@@ -650,7 +651,7 @@ func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
 		state:   state,
 	}
 
-	block, err := ConvertToGethBlock(&blockdb.Block{
+	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number: 1,
 		Transactions: []*blockdb.Transaction{{
 			TransactionType: types.LegacyTxType,

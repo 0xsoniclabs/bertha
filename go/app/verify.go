@@ -24,6 +24,7 @@ import (
 	"math"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
+	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/schollz/progressbar/v3"
 	"github.com/urfave/cli/v3"
@@ -132,7 +133,7 @@ func verifyBlock(
 	hash common.Hash,
 	block *blockdb.Block,
 ) error {
-	gethBlock, err := ConvertToGethBlock(block)
+	gethBlock, err := convert.ConvertToGethBlock(block)
 	if err != nil {
 		return fmt.Errorf("failed to convert block to Ethereum format: %w", err)
 	}
