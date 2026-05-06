@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
+// Package replay allows to replay the block history.
 package replay
 
 import (
@@ -47,7 +48,7 @@ import (
 //go:generate mockgen -source=replay.go -destination=replay_mock.go -package=app
 
 type ReplayArgs struct {
-	JsonGenesisFile    string
+	JSONGenesisFile    string
 	BlockDBDir         string
 	StateDBDir         string
 	InitDBDir          string
@@ -71,7 +72,7 @@ type ReplayArgs struct {
 func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	snapshotHandler := NewSnapshotHandler(args.SnapshotInterval, args.SnapshotStartBlock, args.SnapshotEndBlock, args.SnapshotNumToKeep)
 
-	slog.Info("Loading genesis file", "file", args.JsonGenesisFile)
+	slog.Info("Loading genesis file", "file", args.JSONGenesisFile)
 	// Create a temporary directory for the state database
 	if args.StateDBDir == "" {
 		if args.StartBlock > 0 && args.InitDBDir == "" {
@@ -110,7 +111,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 						err = errors.Join(err, os.RemoveAll(dir))
 					}
 				} else {
-					slog.Info(fmt.Sprintf("Replay terminated with error"))
+					slog.Info("Replay terminated with error")
 					for _, dir := range snapshotDirs {
 						slog.Info("Available snapshot", "directory", dir)
 					}
@@ -151,9 +152,9 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 
 	// Load genesis data from the specified file.
-	genesis, err := ReadGenesisFromFile(args.JsonGenesisFile)
+	genesis, err := ReadGenesisFromFile(args.JSONGenesisFile)
 	if err != nil {
-		return fmt.Errorf("failed to read genesis file %q: %w", args.JsonGenesisFile, err)
+		return fmt.Errorf("failed to read genesis file %q: %w", args.JSONGenesisFile, err)
 	}
 	chainID := genesis.ChainID
 

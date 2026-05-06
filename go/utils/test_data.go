@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Create a sequence of valid blocks with proper parent-child relationships.
+// CreateValidBlocks creates a sequence of valid blocks with proper parent-child relationships.
 // The first block has no parent, and each subsequent block's parent is the
 // previous block.
 func CreateValidBlocks(t *testing.T, num int) []*blockdb.Block {

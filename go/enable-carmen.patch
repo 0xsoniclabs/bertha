@@ -1,7 +1,7 @@
-diff --git a/go/app/state.go b/go/app/state.go
+diff --git a/go/replay/state.go b/go/replay/state.go
 index 3f0c3cf..afdf5f3 100644
---- a/go/app/state.go
-+++ b/go/app/state.go
+--- a/go/replay/state.go
++++ b/go/replay/state.go
 @@ -36,8 +36,9 @@ import (
  	"github.com/Fantom-foundation/lachesis-base/inter/idx"
  	"github.com/ethereum/go-ethereum/common"

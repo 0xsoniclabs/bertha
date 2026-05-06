@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
+// Package verify allows to verify the integrity of the block data in the block database.
 package verify
 
 import (

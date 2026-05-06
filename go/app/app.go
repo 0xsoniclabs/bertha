@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
+// Package app provides the main application logic for the block database CLI.
 package app
 
 import (
@@ -46,7 +47,7 @@ func getApp() *cli.Command {
 		Name:  "block-db",
 		Usage: "Block Database CLI",
 		Commands: []*cli.Command{
-			&cli.Command{
+			{
 				Name:   "replay",
 				Usage:  "replay the full block chain from the block database",
 				Action: parseReplayArgsAndRunReplay,
@@ -72,7 +73,7 @@ func getApp() *cli.Command {
 					confirmAllPromptsFlag,
 				},
 			},
-			&cli.Command{
+			{
 				Name:   "verify",
 				Usage:  "Verify the block database",
 				Action: parseVerifyArgsAndRunVerify,
@@ -276,7 +277,7 @@ func getListOfCarmenVariants() []string {
 
 func parseReplayArgsAndRunReplay(ctx context.Context, c *cli.Command) error {
 	args := replay.ReplayArgs{
-		JsonGenesisFile:    c.String(jsonGenesisFlag.Name),
+		JSONGenesisFile:    c.String(jsonGenesisFlag.Name),
 		BlockDBDir:         c.String(blockDatabaseDirectoryFlag.Name),
 		StateDBDir:         c.String(stateDBDirectoryFlag.Name),
 		InitDBDir:          c.String(initDBFlag.Name),

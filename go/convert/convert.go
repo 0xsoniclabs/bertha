@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
+// Package convert provides utilities for converting block data between bertha
+// and geth formats.
 package convert
 
 import (

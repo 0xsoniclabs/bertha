@@ -77,11 +77,22 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 	db.Close()
 
 	require.NoError(
-		Replay(t.Context(), ReplayArgs{BlockDBDir: path, JsonGenesisFile: genesis}),
+		Replay(t.Context(), ReplayArgs{
+			BlockDBDir:      path,
+			JSONGenesisFile: genesis,
+			DBSchema:        5,
+			DBVariant:       "go-file",
+		}),
 	)
 
 	require.NoError(
-		Replay(t.Context(), ReplayArgs{BlockDBDir: path, JsonGenesisFile: genesis, WithArchive: true}),
+		Replay(t.Context(), ReplayArgs{
+			BlockDBDir:      path,
+			JSONGenesisFile: genesis,
+			WithArchive:     true,
+			DBSchema:        5,
+			DBVariant:       "go-file",
+		}),
 	)
 }
 
