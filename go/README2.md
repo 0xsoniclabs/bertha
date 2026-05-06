@@ -12,20 +12,20 @@ This project is in an early stage. Right now, only two operations are supported:
 To verify the hashes of the blocks in the database, run the following
 command:
 ```
-go run ./cmd verify -db <path-to-database>
+go run ./ verify -db <path-to-database>
 ```
 
 By default, all blocks in the DB are verified. To focus on a sub-range the flags
 `-s` and `-e` can be used to define the start and end of the targeted range. For
 instance,
 ```
-go run ./cmd verify -db <path-to-database> -s 10_000 -e 10_500
+go run ./ verify -db <path-to-database> -s 10_000 -e 10_500
 ```
 validates the blocks between block number 10000 and 10500.
 
 For more details and additional options see the command help.
 ```
-go run ./cmd
+go run ./
 ```
 
 ## State Root Verification
@@ -34,7 +34,7 @@ To verify all state roots listed in blocks, and thus the ability to reproduce
 the history of the chain from the content of the blocks, run the following
 command:
 ```
-go run ./cmd replay -db <path-to-database> --json-genesis <json-genesis-file>
+go run ./ replay -db <path-to-database> --json-genesis <json-genesis-file>
 ```
 The `sonic.json` genesis file can be obtained from the Sonic Genesis File [web
 page](https://genesis.soniclabs.com/).
@@ -64,13 +64,13 @@ instead of the one retrieved from github; (e.g. `replace github.com/0xsoniclabs/
 - build Bertha's Go commands with the `enable_tracy` tag. For instance, to run the replay command with instrumentation enabled, the
 following command can be used:
 ```
-go run --tags enable_tracy ./cmd replay -g sonic.json -db ../.blockdb -e 100
+go run --tags enable_tracy ./ replay -g sonic.json -db ../.blockdb -e 100
 ```
 
 This setup is automated in [go-run-with-tracy.sh](../../go-run-with-tracy.sh) which also does the setup to integrate carmen's tracy instrumentation listed below.
 For instance, to run the replay command, the following command can be used:
 ```
-./go-run-with-tracy ./cmd replay -g sonic.json -db ../.blockdb -e 100
+./go-run-with-tracy ./ replay -g sonic.json -db ../.blockdb -e 100
 ```
 
 ### Integrate Carmen's Tracy Instrumentation
@@ -86,5 +86,5 @@ After replacing Carmen in Bertha's [go.mod](./../../go.mod) file with the manual
 build version of Carmen and importing the experimental package in [state.go](./app/state.go), 
 the following command can be used to replay blocks with enabled Tracy support:
 ```
-go run --tags enable_tracy ./cmd replay -g sonic.json -db ../.blockdb -e 100 --db-schema 6 --db-variant rust-memory
+go run --tags enable_tracy ./ replay -g sonic.json -db ../.blockdb -e 100 --db-schema 6 --db-variant rust-memory
 ```

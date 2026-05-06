@@ -17,7 +17,7 @@
 
 # Script to run go with local carmen modifications and tracy profiling enabled.
 # Usage: ./go-run-with-carmen-and-tracy.sh <go-run-args>
-# e.g. ./go-run-with-carmen-and-tracy.sh ./cmd replay -g sonic.json -db .blockdb --db-schema 6 --db-variant rust-memory
+# e.g. ./go-run-with-carmen-and-tracy.sh ./ replay -g sonic.json -db .blockdb --db-schema 6 --db-variant rust-memory
 # It is assumed that the tracy and carmen repositories are located next to bertha.
 
 # Exit on error.

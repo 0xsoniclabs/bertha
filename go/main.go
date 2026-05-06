@@ -22,7 +22,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/0xsoniclabs/bertha/cmd/app"
+	"github.com/0xsoniclabs/bertha/app"
 )
 
 func main() {
