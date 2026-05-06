@@ -21,7 +21,7 @@ go 1.26.0
 require github.com/linxGnu/grocksdb v1.8.12
 
 require (
-	github.com/0xsoniclabs/carmen/go v0.0.0-20260427113009-ed285bc2e427
+	github.com/0xsoniclabs/carmen/go v0.0.0-20260506064957-f5618320a143
 	github.com/0xsoniclabs/sonic v0.0.0-20260429131030-61b853c31f6b
 	github.com/0xsoniclabs/tracy v0.0.0-20251027125423-00a5ab7968fb
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00

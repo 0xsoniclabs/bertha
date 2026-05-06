@@ -43,4 +43,4 @@ cd $BLOCK_DB_GO_BINDINGS_DIR
 git apply --reverse --check enable-carmen.patch 2> /dev/null || git apply enable-carmen.patch
 
 # Run go
-go run "$@"
+go run --tags carmen_rust "$@"
