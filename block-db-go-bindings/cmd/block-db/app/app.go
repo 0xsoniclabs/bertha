@@ -54,7 +54,7 @@ func getApp() *cli.Command {
 				diagnostic = StartDiagnostics(slog.Default(), cmd.Uint16(diagnosticsPortFlag.Name))
 			}
 			var err error
-			profiler, err = StartCpuProfile(cmd.String(cpuProfileFlag.Name))
+			profiler, err = StartCPUProfile(cmd.String(cpuProfileFlag.Name))
 			if err != nil {
 				return ctx, err
 			}

@@ -54,7 +54,7 @@ var (
 		Usage:   "JSON encoded genesis data to use for replaying the blockchain",
 	}
 
-	stateDbDirectoryFlag = &cli.StringFlag{
+	stateDBDirectoryFlag = &cli.StringFlag{
 		Name:    "state-db-dir",
 		Aliases: []string{"sdb"},
 		Usage:   "Path to the state database directory (default: OS-defined temporary directory)",
@@ -68,12 +68,12 @@ var (
 		Value:   false,
 	}
 
-	keepDbFlag = &cli.BoolFlag{
+	keepDBFlag = &cli.BoolFlag{
 		Name:  "keep-db",
 		Usage: "Keep the state database after running the replay",
 	}
 
-	initDbFlag = &cli.StringFlag{
+	initDBFlag = &cli.StringFlag{
 		Name:  "init-db-dir",
 		Usage: "Path to a state database directory to use to init the state database. The database will be copied to a temporary folder or the directory specified by '--state-db-dir' before replaying.",
 		Value: "",
@@ -137,7 +137,7 @@ var (
 		Value:   false,
 	}
 
-	logDbSize = &cli.BoolFlag{
+	logDBSize = &cli.BoolFlag{
 		Name:    "log-db-size",
 		Aliases: []string{"lds"},
 		Usage:   "Include the disk size of the database in progress log messages (default = disabled)",
@@ -168,10 +168,10 @@ func getReplayCommand() *cli.Command {
 		Flags: []cli.Flag{
 			jsonGenesisFlag,
 			blockDatabaseDirectoryFlag,
-			stateDbDirectoryFlag,
+			stateDBDirectoryFlag,
 			withArchiveFlag,
-			keepDbFlag,
-			initDbFlag,
+			keepDBFlag,
+			initDBFlag,
 			dbSchema,
 			dbVariant,
 			startBlockFlag,
@@ -183,7 +183,7 @@ func getReplayCommand() *cli.Command {
 			snapshotNumToKeep,
 			overwriteStateRoot,
 			noStateRootCheck,
-			logDbSize,
+			logDBSize,
 			confirmAllPromptsFlag,
 		},
 	}
@@ -192,11 +192,11 @@ func getReplayCommand() *cli.Command {
 func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	genesisFileName := c.String(jsonGenesisFlag.Name)
-	stateDbDirectory := c.String(stateDbDirectoryFlag.Name)
-	blockDbDirectory := c.String(blockDatabaseDirectoryFlag.Name)
+	stateDBDirectory := c.String(stateDBDirectoryFlag.Name)
+	blockDBDirectory := c.String(blockDatabaseDirectoryFlag.Name)
 	withArchive := c.Bool(withArchiveFlag.Name)
-	keepDb := c.Bool(keepDbFlag.Name)
-	initDbDir := c.String(initDbFlag.Name)
+	keepDB := c.Bool(keepDBFlag.Name)
+	initDBDir := c.String(initDBFlag.Name)
 	startBlock := c.Uint64(startBlockFlag.Name)
 	endBlock := c.Uint64(endBlockFlag.Name)
 	usePipeline := c.Bool(usePipelineFlag.Name)
@@ -204,7 +204,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	overwriteStateRoot := c.Bool(overwriteStateRoot.Name)
 	confirmAllPrompts := c.Bool(confirmAllPromptsFlag.Name)
 	noStateRootCheck := c.Bool(noStateRootCheck.Name)
-	logDbSize := c.Bool(logDbSize.Name)
+	logDBSize := c.Bool(logDBSize.Name)
 	snapshotStartBlock := c.Uint64(snapshotStartBlock.Name)
 	snapshotEndBlock := c.Uint64(snapshotEndBlock.Name)
 	snapshotNumToKeep := c.Uint64(snapshotNumToKeep.Name)
@@ -216,36 +216,36 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 
 	slog.Info("Loading genesis file", "file", genesisFileName)
 	// Create a temporary directory for the state database
-	if stateDbDirectory == "" {
-		if startBlock > 0 && initDbDir == "" {
+	if stateDBDirectory == "" {
+		if startBlock > 0 && initDBDir == "" {
 			return fmt.Errorf("existing state or initial database directory must be specified when starting from a non-genesis block")
 		}
-		stateDbDirectory = os.TempDir()
-		stateDbDirectory, err = os.MkdirTemp(stateDbDirectory, "replay_chain_state_")
+		stateDBDirectory = os.TempDir()
+		stateDBDirectory, err = os.MkdirTemp(stateDBDirectory, "replay_chain_state_")
 	}
 	if err != nil {
 		return fmt.Errorf("failed to create temporary state database directory: %w", err)
 	}
-	slog.Info("Creating state database", "directory", stateDbDirectory)
-	if initDbDir != "" {
-		slog.Info("Copying initial state database", "source_directory", initDbDir, "destination_directory", stateDbDirectory)
-		if isEmpty, err := IsEmptyOrMissingDir(stateDbDirectory); err != nil {
-			return fmt.Errorf("failed to check if state database directory %q is empty: %w", stateDbDirectory, err)
+	slog.Info("Creating state database", "directory", stateDBDirectory)
+	if initDBDir != "" {
+		slog.Info("Copying initial state database", "source_directory", initDBDir, "destination_directory", stateDBDirectory)
+		if isEmpty, err := IsEmptyOrMissingDir(stateDBDirectory); err != nil {
+			return fmt.Errorf("failed to check if state database directory %q is empty: %w", stateDBDirectory, err)
 		} else if !isEmpty {
-			return fmt.Errorf("state database directory %q is not empty. Please specify an empty directory to be initialized or use a temporary directory", stateDbDirectory)
+			return fmt.Errorf("state database directory %q is not empty. Please specify an empty directory to be initialized or use a temporary directory", stateDBDirectory)
 		}
-		err = os.CopyFS(stateDbDirectory, os.DirFS(initDbDir))
+		err = os.CopyFS(stateDBDirectory, os.DirFS(initDBDir))
 		if err != nil {
-			return fmt.Errorf("failed to copy initial state database %q in destination directory %q: %w", initDbDir, stateDbDirectory, err)
+			return fmt.Errorf("failed to copy initial state database %q in destination directory %q: %w", initDBDir, stateDBDirectory, err)
 		}
 	}
 
-	if !keepDb {
+	if !keepDB {
 		slog.Warn("State database will be deleted after replay (use --keep-db to keep it)")
 		defer func() {
-			slog.Info("Removing state database directory", "directory", stateDbDirectory)
-			err = errors.Join(err, os.RemoveAll(stateDbDirectory))
-			snapshotDirs := snapshotHandler.GetSnapshotDirs(stateDbDirectory)
+			slog.Info("Removing state database directory", "directory", stateDBDirectory)
+			err = errors.Join(err, os.RemoveAll(stateDBDirectory))
+			snapshotDirs := snapshotHandler.GetSnapshotDirs(stateDBDirectory)
 			if len(snapshotDirs) > 0 {
 				if err == nil || errors.Is(err, context.Canceled) {
 					for _, dir := range snapshotDirs {
@@ -253,7 +253,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 						err = errors.Join(err, os.RemoveAll(dir))
 					}
 				} else {
-					slog.Info(fmt.Sprintf("Replay terminated with error. The latest snapshots will be kept for inspection using '%s' flag", initDbFlag.Name))
+					slog.Info(fmt.Sprintf("Replay terminated with error. The latest snapshots will be kept for inspection using '%s' flag", initDBFlag.Name))
 					for _, dir := range snapshotDirs {
 						slog.Info("Available snapshot", "directory", dir)
 					}
@@ -264,16 +264,18 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	}
 
 	if snapshotInterval > 0 {
-		matches, err := filepath.Glob(stateDbDirectory + "_snapshot_*")
+		matches, err := filepath.Glob(stateDBDirectory + "_snapshot_*")
 		if err != nil {
-			return fmt.Errorf("failed to check existing snapshots in state database directory %q: %w", stateDbDirectory, err)
+			return fmt.Errorf("failed to check existing snapshots in state database directory %q: %w", stateDBDirectory, err)
 		}
 		if len(matches) > 0 {
-			slog.Warn("Existing snapshots found for state database directory", "directory", stateDbDirectory, "snapshots_found", len(matches))
+			slog.Warn("Existing snapshots found for state database directory", "directory", stateDBDirectory, "snapshots_found", len(matches))
 			if !confirmAllPrompts {
 				fmt.Printf("Do you want to delete the existing snapshots and continue (y/n)? ")
 				var response string
-				fmt.Scanln(&response)
+				if _, err := fmt.Scanln(&response); err != nil {
+					return fmt.Errorf("failed to read user input: %w", err)
+				}
 				if strings.ToLower(strings.TrimSpace(response)) != "y" {
 					slog.Error("Execution aborted by the user")
 					return nil
@@ -287,7 +289,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		}
 	}
 
-	if logDbSize {
+	if logDBSize {
 		slog.Warn("DB size log enabled. This will trigger a flush with every progress report and reduce performance")
 	}
 
@@ -296,11 +298,11 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to read genesis file %q: %w", genesisFileName, err)
 	}
-	chainId := genesis.ChainId
+	chainID := genesis.ChainID
 
 	// Open State Database in new directory.
 	params := StateParameters{
-		Directory:   stateDbDirectory,
+		Directory:   stateDBDirectory,
 		WithArchive: withArchive,
 		Schema:      schema,
 		Variant:     variant,
@@ -311,14 +313,14 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 		return fmt.Errorf("failed to create state: %w", err)
 	}
 	chain := &stateChainAdapter{
-		chainId:         chainId,
+		chainID:         chainID,
 		state:           state,
 		schema:          schema,
 		snapshotHandler: snapshotHandler,
 	}
 	// Because snapshots invalidate the state, we need to close it here.
 	defer func() {
-		slog.Info("Closing state database", "directory", stateDbDirectory)
+		slog.Info("Closing state database", "directory", stateDBDirectory)
 		err = errors.Join(err, chain.state.Close())
 	}()
 
@@ -335,16 +337,16 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to get state root: %w", err)
 	}
-	slog.Info("Loaded state", "chain_id", chainId, "root_hash", stateRoot)
+	slog.Info("Loaded state", "chain_id", chainID, "root_hash", stateRoot)
 
 	// Open the block database.
-	slog.Info("Opening block database", "directory", blockDbDirectory)
+	slog.Info("Opening block database", "directory", blockDBDirectory)
 	var database blockdb.BlockDB
 	if overwriteStateRoot {
 		slog.Info("State root overwriting enabled")
-		database, err = blockdb.OpenRocksDBForWriting(blockDbDirectory)
+		database, err = blockdb.OpenRocksDBForWriting(blockDBDirectory)
 	} else {
-		database, err = blockdb.OpenRocksDBForReading(blockDbDirectory)
+		database, err = blockdb.OpenRocksDBForReading(blockDBDirectory)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
@@ -354,13 +356,13 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	}()
 
 	// Load metadata for the chain.
-	metadata, err := GetMetadataForChain(chainId)
+	metadata, err := GetMetadataForChain(chainID)
 	if err != nil {
-		return fmt.Errorf("failed to get metadata for chain ID %d: %w", chainId, err)
+		return fmt.Errorf("failed to get metadata for chain ID %d: %w", chainID, err)
 	}
 
 	// Prepare the progress logger.
-	progress := startProgressLogger(state, stateDbDirectory, logDbSize)
+	progress := startProgressLogger(state, stateDBDirectory, logDBSize)
 	defer func() {
 		slog.Info(progress.GetSummary())
 	}()
@@ -375,7 +377,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 	}
 
 	// ---- Start Replay ----
-	blocks := database.GetRange(chainId, startBlock, endBlock)
+	blocks := database.GetRange(chainID, startBlock, endBlock)
 
 	replayLoopContext := ReplayLoopContext{
 		overwriteStateRoot: New(overwriteStateRoot, confirmAllPrompts),
@@ -403,7 +405,7 @@ func runReplay(ctx context.Context, c *cli.Command) (err error) {
 // the main progress log output.
 type progressLogger struct {
 	state                  *State
-	stateDbDirectory       string
+	stateDBDirectory       string
 	start                  time.Time
 	lastUpdate             time.Time
 	lastReportedBlockTime  time.Time
@@ -413,17 +415,17 @@ type progressLogger struct {
 	lastTxCounter          uint64
 	lastGasCounter         uint64
 	firstBlockTime         time.Time
-	logDbSize              bool
+	logDBSize              bool
 }
 
-func startProgressLogger(state *State, stateDbDirectory string, logDbSize bool) *progressLogger {
+func startProgressLogger(state *State, stateDBDirectory string, logDBSize bool) *progressLogger {
 	now := time.Now()
 	return &progressLogger{
 		state:            state,
-		stateDbDirectory: stateDbDirectory,
+		stateDBDirectory: stateDBDirectory,
 		start:            now,
 		lastUpdate:       now,
-		logDbSize:        logDbSize,
+		logDBSize:        logDBSize,
 	}
 }
 
@@ -461,19 +463,19 @@ func (p *progressLogger) LogProgress(block *types.Block) (string, error) {
 
 	// Optionally log the size of the state database.
 	var sizeStr string
-	if p.logDbSize {
+	if p.logDBSize {
 		err := p.state.db.Flush()
 		if err != nil {
 			return "", fmt.Errorf("failed to flush state database: %w", err)
 		}
-		liveSize, err := DirSize(filepath.Join(p.stateDbDirectory, "live"))
+		liveSize, err := DirSize(filepath.Join(p.stateDBDirectory, "live"))
 		if err != nil {
 			return "", fmt.Errorf("failed to compute live database size: %w", err)
 		}
 
 		sizeStr = fmt.Sprintf(", live DB size: %.3f GiB", float64(liveSize)/1024/1024/1024)
 
-		archiveDir := filepath.Join(p.stateDbDirectory, "archive")
+		archiveDir := filepath.Join(p.stateDBDirectory, "archive")
 		archiveMissing, err := IsEmptyOrMissingDir(archiveDir)
 		if err != nil {
 			return "", fmt.Errorf("failed to check existence of archive database directory: %w", err)
@@ -613,7 +615,7 @@ func runReplayPipeline(
 	// Stage 1: Decode blocks
 	go func() {
 		defer close(decodedBlocks)
-		signer := types.LatestSignerForChainID(new(big.Int).SetUint64(chain.ChainId()))
+		signer := types.LatestSignerForChainID(new(big.Int).SetUint64(chain.ChainID()))
 		for block, err := range blocks {
 			tracy.FrameMark()
 			if err != nil {
@@ -744,7 +746,9 @@ func checkBlockResults(
 			slog.Warn("Block has existing state root", "block_number", block.Number, "existing", expectedStateRoot, "new", computedStateRoot)
 			fmt.Printf("Are you sure you want to overwrite the existing state root (y/n)? ")
 			var response string
-			fmt.Scanln(&response)
+			if _, err := fmt.Scanln(&response); err != nil {
+				return fmt.Errorf("failed to read user input: %w", err)
+			}
 			if strings.ToLower(strings.TrimSpace(response)) != "y" {
 				slog.Info("State roots overriding disabled from this point onward")
 				overwriteStateRoot.Disable() //disabled by the user
@@ -757,7 +761,7 @@ func checkBlockResults(
 		// Double check in case user disabled the overwrite
 		if overwriteStateRoot.IsEnabled() {
 			updateStateRoot(chain, block, computedStateRoot)
-			err = blockDB.Update(chain.ChainId(), block)
+			err = blockDB.Update(chain.ChainID(), block)
 			if err != nil {
 				return fmt.Errorf("failed to update block %d in database: %w", block.Number, err)
 			}
@@ -782,7 +786,7 @@ func checkBlockResults(
 
 // Chain is an interface for an evolving block chain.
 type Chain interface {
-	ChainId() uint64
+	ChainID() uint64
 	IsMptConformant() bool
 	IsVerkleConformant() bool
 	ApplyBlock(*types.Block, Metadata) (
@@ -794,15 +798,15 @@ type Chain interface {
 
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
 type stateChainAdapter struct {
-	chainId         uint64
+	chainID         uint64
 	state           *State
 	stateRwMutex    sync.Mutex
 	schema          carmen.Schema
 	snapshotHandler *SnapshotHandler
 }
 
-func (a *stateChainAdapter) ChainId() uint64 {
-	return a.chainId
+func (a *stateChainAdapter) ChainID() uint64 {
+	return a.chainID
 }
 
 func (a *stateChainAdapter) IsMptConformant() bool {
@@ -835,7 +839,7 @@ func (a *stateChainAdapter) ApplyBlock(
 
 	// Apply the block to the state database.
 	receipts, err := a.state.ApplyBlock(
-		a.chainId,
+		a.chainID,
 		block,
 		metadata,
 	)
@@ -891,7 +895,7 @@ func NewSnapshotHandler(blockInterval uint64, startBlock uint64, endBlock uint64
 		blockInterval:     blockInterval,
 		startBlock:        startBlock,
 		endBlock:          endBlock,
-		pastSnapshotList:  make([]*uint64, snapshotToKeep, snapshotToKeep),
+		pastSnapshotList:  make([]*uint64, snapshotToKeep),
 		pastSnapshotIndex: 0,
 	}
 }
@@ -928,7 +932,9 @@ func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, e
 
 	// Create the snapshot by copying the state database directory
 	snapshotDir := s.snapshotDir(stateDBDir, currentBlock)
-	os.RemoveAll(snapshotDir) // remove existing snapshot if any
+	if err := os.RemoveAll(snapshotDir); err != nil { // remove existing snapshot if any
+		return nil, fmt.Errorf("failed to remove existing snapshot directory %q: %w", snapshotDir, err)
+	}
 	// Close and reopen the state to ensure all data is flushed to disk
 	err := state.Close()
 	if err != nil {

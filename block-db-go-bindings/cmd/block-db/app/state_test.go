@@ -83,7 +83,7 @@ func TestNewState_FailsIfDirectoryIsReadOnly(t *testing.T) {
 	tempDir := t.TempDir()
 	err := os.Chmod(tempDir, 0555) // Read-only permissions
 	require.NoError(t, err)
-	defer os.Chmod(tempDir, 0755)
+	defer func() { require.NoError(t, os.Chmod(tempDir, 0755)) }()
 
 	_, err = NewState(StateParameters{
 		Directory: tempDir,
@@ -211,7 +211,7 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 
 	block, err := ConvertToGethBlock(&blockdb.Block{
 		Transactions: []*blockdb.Transaction{
-			&blockdb.Transaction{
+			{
 				TransactionType: types.LegacyTxType,
 				Nonce:           123, // all nonces are 0 in the DB
 			},
@@ -304,7 +304,7 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 
 	corrections := Corrections{
 		17: map[common.Address]Correction{
-			common.Address{1}: {
+			{1}: {
 				Balance: *uint256.NewInt(1000),
 			},
 		},

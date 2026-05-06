@@ -29,7 +29,7 @@ import (
 
 // Genesis is a data structure capturing the genesis state information.
 type Genesis struct {
-	ChainId  uint64
+	ChainID  uint64
 	Accounts []Account
 }
 
@@ -61,7 +61,7 @@ func ParseGenesis(jsonData []byte) (*Genesis, error) {
 	}
 
 	res := &Genesis{
-		ChainId:  genesis.Rules.NetworkID,
+		ChainID:  genesis.Rules.NetworkID,
 		Accounts: nil,
 	}
 	for _, account := range genesis.Accounts {

@@ -55,12 +55,12 @@ jobs:
       working-directory: block-db-go-bindings
       run: |
         export PATH="${PATH}:$(go env GOPATH)/bin"
-        golangci-lint run .
+        golangci-lint run ./...
     - name: golanci go/test_data_generator
       working-directory: go/test_data_generator
       run: |
         export PATH="${PATH}:$(go env GOPATH)/bin"
-        golangci-lint run .
+        golangci-lint run ./...
 
   license-check:
     name: license check

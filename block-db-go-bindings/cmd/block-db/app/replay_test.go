@@ -44,7 +44,7 @@ import (
 func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 	require := require.New(t)
 
-	chainId := uint64(123)
+	chainID := uint64(123)
 
 	dir := t.TempDir()
 	genesis := filepath.Join(dir, "genesis.json")
@@ -63,7 +63,7 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 	writeOptions := grocksdb.NewDefaultWriteOptions()
 	for _, block := range createValidBlocks(t, 10_100) {
 		key := make([]byte, 16)
-		binary.BigEndian.PutUint64(key[:8], chainId)
+		binary.BigEndian.PutUint64(key[:8], chainID)
 		binary.BigEndian.PutUint64(key[8:], uint64(block.Number))
 
 		value, err := proto.Marshal(block)
@@ -159,7 +159,7 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 
 	dir := t.TempDir()
 	liveDir := filepath.Join(dir, "live")
-	os.Mkdir(liveDir, 0700)
+	require.NoError(os.Mkdir(liveDir, 0700))
 
 	filePath := filepath.Join(liveDir, "file1.txt")
 	data := make([]byte, 124*1024*1024)
@@ -183,7 +183,7 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 	)
 
 	archiveDir := filepath.Join(dir, "archive")
-	os.Mkdir(archiveDir, 0700)
+	require.NoError(os.Mkdir(archiveDir, 0700))
 	filePath = filepath.Join(archiveDir, "file2.txt")
 	data = make([]byte, 156*1024*1024)
 	err = os.WriteFile(filePath, data, 0644)
@@ -284,7 +284,7 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	}
 
 	chain := &stateChainAdapter{
-		chainId:         12,
+		chainID:         12,
 		state:           state,
 		snapshotHandler: NewSnapshotHandler(0, 0, math.MaxUint64, 1),
 	}
@@ -300,7 +300,7 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	// A block history with a few transactions.
@@ -367,7 +367,7 @@ func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	injectedError := fmt.Errorf("injected error")
 	blocks := func(yield func(*blockdb.Block, error) bool) {
@@ -379,7 +379,7 @@ func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
 func failsOnCancelledContext(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	ctxt, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -394,7 +394,7 @@ func failsOnCancelledContext(t *testing.T, run replayer) {
 func failsOnBlockConversionError(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	ctxt := t.Context()
 	blocks := newIter([]*blockdb.Block{{
@@ -411,7 +411,7 @@ func failsOnBlockConversionError(t *testing.T, run replayer) {
 func failsOnBlockApplicationError(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	injectedError := fmt.Errorf("injected error")
 	chain.EXPECT().
@@ -429,7 +429,7 @@ func failsOnBlockApplicationError(t *testing.T, run replayer) {
 func failsOnCommitmentComputationError(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	injectedError := fmt.Errorf("injected error")
 	chain.EXPECT().
@@ -447,7 +447,7 @@ func failsOnCommitmentComputationError(t *testing.T, run replayer) {
 func failsOnWrongReceiptStatus(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any(), gomock.Any()).
@@ -472,7 +472,7 @@ func failsOnWrongReceiptStatus(t *testing.T, run replayer) {
 func failsOnWrongReceiptCumulatedGasUsed(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any(), gomock.Any()).
@@ -500,7 +500,7 @@ func failsOnWrongReceiptCumulatedGasUsed(t *testing.T, run replayer) {
 func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	chain.EXPECT().
@@ -524,7 +524,7 @@ func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	chain.EXPECT().
@@ -550,7 +550,7 @@ func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 func overwriteStateRootHash(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	chain.EXPECT().
@@ -589,7 +589,7 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 		// 3 and verify that the other stages are aborted correctly.
 		ctrl := gomock.NewController(t)
 		chain := NewMockChain(ctrl)
-		chain.EXPECT().ChainId().Return(uint64(12)).AnyTimes()
+		chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 		chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 		promise, firstHash := future.Create[result.Result[common.Hash]]()
@@ -646,7 +646,7 @@ func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
 	}()
 
 	chain := &stateChainAdapter{
-		chainId: 12,
+		chainID: 12,
 		state:   state,
 	}
 
@@ -667,7 +667,7 @@ func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
 func Test_getExpectedStateRoot_ReturnsCorrectStateRoot(t *testing.T) {
 	require := require.New(t)
 
-	chainId := uint64(123)
+	chainID := uint64(123)
 
 	dir := t.TempDir()
 	state, err := NewState(StateParameters{
@@ -686,14 +686,14 @@ func Test_getExpectedStateRoot_ReturnsCorrectStateRoot(t *testing.T) {
 	}
 
 	expectedStateRoot := getExpectedStateRoot(&stateChainAdapter{
-		chainId: chainId,
+		chainID: chainID,
 		state:   state,
 		schema:  5,
 	}, block)
 	require.Equal(common.HexToHash("0xdeadbeef"), expectedStateRoot)
 
 	expectedStateRoot = getExpectedStateRoot(&stateChainAdapter{
-		chainId: chainId,
+		chainID: chainID,
 		state:   state,
 		schema:  6,
 	}, block)
@@ -703,7 +703,7 @@ func Test_getExpectedStateRoot_ReturnsCorrectStateRoot(t *testing.T) {
 func Test_updateStateRoot_UpdatesCorrectStateRoot(t *testing.T) {
 	require := require.New(t)
 
-	chainId := uint64(123)
+	chainID := uint64(123)
 
 	dir := t.TempDir()
 	state, err := NewState(StateParameters{
@@ -721,7 +721,7 @@ func Test_updateStateRoot_UpdatesCorrectStateRoot(t *testing.T) {
 	}
 
 	updateStateRoot(&stateChainAdapter{
-		chainId: chainId,
+		chainID: chainID,
 		state:   state,
 		schema:  5,
 	}, block, common.HexToHash("0xfeedface"))
@@ -734,7 +734,7 @@ func Test_updateStateRoot_UpdatesCorrectStateRoot(t *testing.T) {
 	}
 
 	updateStateRoot(&stateChainAdapter{
-		chainId: chainId,
+		chainID: chainID,
 		state:   state,
 		schema:  6,
 	}, block, common.HexToHash("0xfacefeed"))
@@ -746,11 +746,11 @@ func Test_checkBlockResults_OverwritesStateRoot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	chainId := uint64(12)
+	chainID := uint64(12)
 	oldStateRoot := common.HexToHash("0xdeadbeef")
 	newStateRoot := common.HexToHash("0xfeedface")
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainId().Return(chainId).AnyTimes()
+	chain.EXPECT().ChainID().Return(chainID).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	block := &blockdb.Block{
@@ -763,9 +763,9 @@ func Test_checkBlockResults_OverwritesStateRoot(t *testing.T) {
 		StateRoot: newStateRoot.Bytes(),
 	}
 
-	blockDb := blockdb.NewMockDBInterface(ctrl)
-	blockDb.EXPECT().
-		Update(chainId, blockWithUpdatedStateRoot).
+	blockDB := blockdb.NewMockDBInterface(ctrl)
+	blockDB.EXPECT().
+		Update(chainID, blockWithUpdatedStateRoot).
 		Return(nil)
 
 	replayLoopContext := ReplayLoopContext{
@@ -778,7 +778,7 @@ func Test_checkBlockResults_OverwritesStateRoot(t *testing.T) {
 		block,
 		types.Receipts{},
 		future.Immediate(result.Ok(newStateRoot)),
-		blockDb,
+		blockDB,
 		&replayLoopContext,
 	)
 	require.NoError(t, err)
@@ -788,17 +788,17 @@ func Test_checkBlockResults_LogsMessageIfStateRootNotSet(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	chainId := uint64(12)
+	chainID := uint64(12)
 	stateRoot := common.HexToHash("0xfeedface")
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainId().Return(chainId).AnyTimes()
+	chain.EXPECT().ChainID().Return(chainID).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	block := &blockdb.Block{
 		Number: 0,
 	}
 
-	blockDb := blockdb.NewMockDBInterface(ctrl)
+	blockDB := blockdb.NewMockDBInterface(ctrl)
 	replayLoopContext := ReplayLoopContext{
 		overwriteStateRoot: New(false, false),
 		stateRootNotSet:    false,
@@ -813,7 +813,7 @@ func Test_checkBlockResults_LogsMessageIfStateRootNotSet(t *testing.T) {
 		block,
 		types.Receipts{},
 		future.Immediate(result.Ok(stateRoot)),
-		blockDb,
+		blockDB,
 		&replayLoopContext,
 	)
 	require.NoError(t, err)
@@ -832,7 +832,7 @@ func Test_checkBlockResults_LogsMessageIfStateRootNotSet(t *testing.T) {
 		block,
 		types.Receipts{},
 		future.Immediate(result.Ok(stateRoot)),
-		blockDb,
+		blockDB,
 		&replayLoopContext,
 	)
 	require.NoError(t, err)

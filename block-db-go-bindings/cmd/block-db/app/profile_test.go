@@ -29,7 +29,7 @@ func TestStartProfiling_ValidPath_CreatesNewFile(t *testing.T) {
 	path := filepath.Join(dir, "cpu.prof")
 	require.False(t, exists(path))
 
-	profiler, err := StartCpuProfile(path)
+	profiler, err := StartCPUProfile(path)
 	require.NoError(t, err)
 	require.True(t, exists(path))
 
@@ -43,7 +43,7 @@ func TestStartProfiling_InvalidPath_ReturnsAnError(t *testing.T) {
 	path := filepath.Join(dir, "nonexistent", "cpu.prof")
 	require.False(t, exists(path))
 
-	_, err := StartCpuProfile(path)
+	_, err := StartCPUProfile(path)
 	require.Error(t, err)
 	require.False(t, exists(path))
 }
@@ -53,12 +53,12 @@ func TestStartProfiling_StartingASecondProfilerFails(t *testing.T) {
 	path1 := filepath.Join(dir, "cpu1.prof")
 	path2 := filepath.Join(dir, "cpu2.prof")
 
-	profiler1, err := StartCpuProfile(path1)
+	profiler1, err := StartCPUProfile(path1)
 	require.NoError(t, err)
 	require.True(t, exists(path1))
 
 	// Starting a second profiler should fail
-	profiler2, err := StartCpuProfile(path2)
+	profiler2, err := StartCPUProfile(path2)
 	require.Error(t, err)
 	require.Nil(t, profiler2)
 	require.False(t, exists(path2))

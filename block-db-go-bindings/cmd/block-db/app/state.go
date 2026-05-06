@@ -148,13 +148,13 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 // and updating the state accordingly. It returns the receipts of the transactions
 // in the block, or an error if the block could not be processed.
 func (s *State) ApplyBlock(
-	chainId uint64,
+	chainID uint64,
 	block *types.Block,
 	metadata Metadata,
 ) (types.Receipts, error) {
 
 	chainConfig := opera.CreateTransientEvmChainConfig(
-		chainId,
+		chainID,
 		metadata.Upgrades,
 		idx.Block(block.NumberU64()),
 	)
@@ -179,7 +179,7 @@ func (s *State) ApplyBlock(
 		Transactions: block.Transactions(),
 	}
 
-	stateDb := evmstore.CreateCarmenStateDb(s.db, nil)
+	stateDB := evmstore.CreateCarmenStateDb(s.db, nil)
 
 	vmConfig := opera.GetVmConfig(rules)
 	gasLimit := block.GasLimit()
@@ -191,7 +191,7 @@ func (s *State) ApplyBlock(
 	var usedGas uint64
 	processed := processor.Process(
 		evmBlock,
-		stateDb,
+		stateDB,
 		vmConfig,
 		gasLimit,
 		&usedGas,

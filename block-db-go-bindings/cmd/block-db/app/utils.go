@@ -23,8 +23,8 @@ import (
 )
 
 // IsEmptyOrMissingDir returns true if a directory is missing or empty.
-func IsEmptyOrMissingDir(path string) (bool, error) {
-	_, err := os.Stat(path)
+func IsEmptyOrMissingDir(path string) (s bool, err error) {
+	_, err = os.Stat(path)
 	if os.IsNotExist(err) {
 		return true, nil // non-existent
 	}
@@ -35,7 +35,7 @@ func IsEmptyOrMissingDir(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer f.Close()
+	defer func() { err = f.Close() }()
 
 	_, err = f.Readdir(1) // try to read a single entry
 	if err == io.EOF {

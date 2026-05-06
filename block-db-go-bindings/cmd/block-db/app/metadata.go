@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	SonicMainNetChainId   = 146
-	AllegroTestNetChainId = 14601
+	SonicMainNetChainID   = 146
+	AllegroTestNetChainID = 14601
 )
 
 // Metadata holds chain-specific metadata such as upgrades to the EVM rules and
@@ -49,10 +49,10 @@ func (m Metadata) GetRulesAtBlock(blockNumber uint64) opera.Rules {
 
 // GetMetadataForChain retrieves the metadata for a given chain ID.
 // TODO: retrieve this data from a Bertha server instead of hardcoding it.
-func GetMetadataForChain(chainId uint64) (Metadata, error) {
+func GetMetadataForChain(chainID uint64) (Metadata, error) {
 	allegro := opera.GetAllegroUpgrades()
-	switch chainId {
-	case SonicMainNetChainId:
+	switch chainID {
+	case SonicMainNetChainID:
 		corrections, err := GetSonicMainnetCorrections()
 		if err != nil {
 			return Metadata{}, err
@@ -66,7 +66,7 @@ func GetMetadataForChain(chainId uint64) (Metadata, error) {
 			},
 			Corrections: corrections,
 		}, nil
-	case AllegroTestNetChainId:
+	case AllegroTestNetChainID:
 		// The Allegro Testnet does not need any corrections, but it does have
 		// several network rule upgrades.
 		allegroSingleProposer := allegro
@@ -91,7 +91,7 @@ func GetMetadataForChain(chainId uint64) (Metadata, error) {
 			},
 		}, nil
 	default:
-		slog.Warn("no metadata available for chain ID, proceeding without upgrades or corrections", "chainId", chainId)
+		slog.Warn("no metadata available for chain ID, proceeding without upgrades or corrections", "chainId", chainID)
 		return Metadata{}, nil
 	}
 }
