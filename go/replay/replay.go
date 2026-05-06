@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-package app
+package replay
 
 import (
 	"context"
@@ -22,11 +22,9 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
-	"maps"
 	"math/big"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,6 +34,7 @@ import (
 
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
+	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
@@ -69,16 +68,7 @@ type ReplayArgs struct {
 	ConfirmAllPrompts  bool
 }
 
-// getListOfVariants returns a sorted list of all registered database variants.
-func getListOfVariants() []string {
-	variants := map[string]struct{}{}
-	for config := range carmen.GetAllRegisteredStateFactories() {
-		variants[string(config.Variant)] = struct{}{}
-	}
-	return slices.Sorted(maps.Keys(variants))
-}
-
-func runReplay(ctx context.Context, args ReplayArgs) (err error) {
+func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	snapshotHandler := NewSnapshotHandler(args.SnapshotInterval, args.SnapshotStartBlock, args.SnapshotEndBlock, args.SnapshotNumToKeep)
 
 	slog.Info("Loading genesis file", "file", args.JsonGenesisFile)
@@ -96,7 +86,7 @@ func runReplay(ctx context.Context, args ReplayArgs) (err error) {
 	slog.Info("Creating state database", "directory", args.StateDBDir)
 	if args.InitDBDir != "" {
 		slog.Info("Copying initial state database", "source_directory", args.InitDBDir, "destination_directory", args.StateDBDir)
-		if isEmpty, err := IsEmptyOrMissingDir(args.StateDBDir); err != nil {
+		if isEmpty, err := utils.IsEmptyOrMissingDir(args.StateDBDir); err != nil {
 			return fmt.Errorf("failed to check if state database directory %q is empty: %w", args.StateDBDir, err)
 		} else if !isEmpty {
 			return fmt.Errorf("state database directory %q is not empty. Please specify an empty directory to be initialized or use a temporary directory", args.StateDBDir)
@@ -120,7 +110,7 @@ func runReplay(ctx context.Context, args ReplayArgs) (err error) {
 						err = errors.Join(err, os.RemoveAll(dir))
 					}
 				} else {
-					slog.Info(fmt.Sprintf("Replay terminated with error. The latest snapshots will be kept for inspection using '%s' flag", initDBFlag.Name))
+					slog.Info(fmt.Sprintf("Replay terminated with error"))
 					for _, dir := range snapshotDirs {
 						slog.Info("Available snapshot", "directory", dir)
 					}
@@ -150,7 +140,7 @@ func runReplay(ctx context.Context, args ReplayArgs) (err error) {
 			}
 		}
 
-		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", snapshotInterval, "start_block", snapshotStartBlock, "end_block", snapshotEndBlock, "snapshot to keep", snapshotNumToKeep)
+		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", args.SnapshotInterval, "start_block", args.SnapshotStartBlock, "end_block", args.SnapshotEndBlock, "snapshot to keep", args.SnapshotNumToKeep)
 		if strings.Contains(string(args.DBVariant), "flat") {
 			slog.Warn("Snapshots are currently not supported with flat database variants; consider disabling snapshots or using a different variant")
 		}
@@ -335,7 +325,7 @@ func (p *progressLogger) LogProgress(block *types.Block) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("failed to flush state database: %w", err)
 		}
-		liveSize, err := DirSize(filepath.Join(p.stateDBDirectory, "live"))
+		liveSize, err := utils.DirSize(filepath.Join(p.stateDBDirectory, "live"))
 		if err != nil {
 			return "", fmt.Errorf("failed to compute live database size: %w", err)
 		}
@@ -343,12 +333,12 @@ func (p *progressLogger) LogProgress(block *types.Block) (string, error) {
 		sizeStr = fmt.Sprintf(", live DB size: %.3f GiB", float64(liveSize)/1024/1024/1024)
 
 		archiveDir := filepath.Join(p.stateDBDirectory, "archive")
-		archiveMissing, err := IsEmptyOrMissingDir(archiveDir)
+		archiveMissing, err := utils.IsEmptyOrMissingDir(archiveDir)
 		if err != nil {
 			return "", fmt.Errorf("failed to check existence of archive database directory: %w", err)
 		}
 		if !archiveMissing {
-			archiveSize, err := DirSize(archiveDir)
+			archiveSize, err := utils.DirSize(archiveDir)
 			if err != nil {
 				return "", fmt.Errorf("failed to compute archive database size: %w", err)
 			}

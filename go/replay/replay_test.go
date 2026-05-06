@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-package app
+package replay
 
 import (
 	"bytes"
@@ -31,6 +31,7 @@ import (
 
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
+	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	"github.com/0xsoniclabs/carmen/go/state"
@@ -62,7 +63,7 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 	require.NoError(err, "failed to create database")
 
 	writeOptions := grocksdb.NewDefaultWriteOptions()
-	for _, block := range createValidBlocks(t, 10_100) {
+	for _, block := range utils.CreateValidBlocks(t, 10_100) {
 		key := make([]byte, 16)
 		binary.BigEndian.PutUint64(key[:8], chainID)
 		binary.BigEndian.PutUint64(key[8:], uint64(block.Number))
@@ -76,17 +77,17 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 	db.Close()
 
 	require.NoError(
-		runReplay(t.Context(), ReplayArgs{BlockDBDir: path, JsonGenesisFile: genesis}),
+		Replay(t.Context(), ReplayArgs{BlockDBDir: path, JsonGenesisFile: genesis}),
 	)
 
 	require.NoError(
-		runReplay(t.Context(), ReplayArgs{BlockDBDir: path, JsonGenesisFile: genesis, WithArchive: true}),
+		Replay(t.Context(), ReplayArgs{BlockDBDir: path, JsonGenesisFile: genesis, WithArchive: true}),
 	)
 }
 
 func TestReplay_FailsIfStartBlockIsProvidedWithoutStateDbDir(t *testing.T) {
 	require := require.New(t)
-	err := runReplay(t.Context(), ReplayArgs{StartBlock: 1000})
+	err := Replay(t.Context(), ReplayArgs{StartBlock: 1000})
 	require.ErrorContains(
 		err,
 		"existing state or initial database directory must be specified when starting from a non-genesis block",
@@ -278,7 +279,7 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 		snapshotHandler: NewSnapshotHandler(0, 0, math.MaxUint64, 1),
 	}
 
-	iter := newIter(blocks)
+	iter := utils.NewIter(blocks)
 	counter := 0
 	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, nil, ReplayLoopContext{}, func(block *types.Block) {
 		counter++
@@ -349,7 +350,7 @@ func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 		last = call
 	}
 
-	iter := newIter(blocks)
+	iter := utils.NewIter(blocks)
 	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, nil, ReplayLoopContext{}, nil))
 }
 
@@ -373,7 +374,7 @@ func failsOnCancelledContext(t *testing.T, run replayer) {
 	ctxt, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	blocks := newIter([]*blockdb.Block{
+	blocks := utils.NewIter([]*blockdb.Block{
 		{Number: 0, StateRoot: types.EmptyRootHash[:]},
 	})
 
@@ -386,7 +387,7 @@ func failsOnBlockConversionError(t *testing.T, run replayer) {
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	ctxt := t.Context()
-	blocks := newIter([]*blockdb.Block{{
+	blocks := utils.NewIter([]*blockdb.Block{{
 		Transactions: []*blockdb.Transaction{{
 			TransactionType: 99_999, // invalid transaction type
 		}},
@@ -408,7 +409,7 @@ func failsOnBlockApplicationError(t *testing.T, run replayer) {
 		Return(nil, future.Immediate(result.Ok(common.Hash{})), injectedError)
 
 	ctxt := t.Context()
-	blocks := newIter([]*blockdb.Block{{}})
+	blocks := utils.NewIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
 		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
 		injectedError,
@@ -426,7 +427,7 @@ func failsOnCommitmentComputationError(t *testing.T, run replayer) {
 		Return(nil, future.Immediate(result.Err[common.Hash](injectedError)), nil)
 
 	ctxt := t.Context()
-	blocks := newIter([]*blockdb.Block{{}})
+	blocks := utils.NewIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
 		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
 		injectedError,
@@ -447,7 +448,7 @@ func failsOnWrongReceiptStatus(t *testing.T, run replayer) {
 		)
 
 	ctxt := t.Context()
-	blocks := newIter([]*blockdb.Block{{
+	blocks := utils.NewIter([]*blockdb.Block{{
 		Receipts: []*blockdb.TransactionReceipt{{
 			PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
 		}},
@@ -475,7 +476,7 @@ func failsOnWrongReceiptCumulatedGasUsed(t *testing.T, run replayer) {
 		)
 
 	ctxt := t.Context()
-	blocks := newIter([]*blockdb.Block{{
+	blocks := utils.NewIter([]*blockdb.Block{{
 		Receipts: []*blockdb.TransactionReceipt{{
 			PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
 		}},
@@ -501,7 +502,7 @@ func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 		)
 
 	ctxt := t.Context()
-	blocks := newIter([]*blockdb.Block{{
+	blocks := utils.NewIter([]*blockdb.Block{{
 		StateRoot: common.Hash{0x2}.Bytes(),
 	}})
 	require.ErrorContains(t,
@@ -525,7 +526,7 @@ func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 		)
 
 	ctxt := t.Context()
-	blocks := newIter([]*blockdb.Block{{
+	blocks := utils.NewIter([]*blockdb.Block{{
 		StateRoot: common.Hash{0x2}.Bytes(), // different state root
 	}})
 	require.NoError(t,
@@ -559,7 +560,7 @@ func overwriteStateRootHash(t *testing.T, run replayer) {
 	).Times(1)
 
 	ctxt := t.Context()
-	blocks := newIter([]*blockdb.Block{{
+	blocks := utils.NewIter([]*blockdb.Block{{
 		StateRoot: common.Hash{0x2}.Bytes(),
 	}})
 	require.NoError(t,
@@ -607,7 +608,7 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 
 		// Start running the replay pipeline.
 		go func() {
-			err := runReplayPipeline(t.Context(), newIter(blocks), chain, Metadata{}, nil, ReplayLoopContext{}, nil)
+			err := runReplayPipeline(t.Context(), utils.NewIter(blocks), chain, Metadata{}, nil, ReplayLoopContext{}, nil)
 			require.ErrorIs(t, err, issue)
 		}()
 

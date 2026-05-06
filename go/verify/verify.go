@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-package app
+package verify
 
 import (
 	"context"
@@ -35,7 +35,7 @@ type VerifyArgs struct {
 	EndBlock    uint64
 }
 
-func runVerify(ctx context.Context, args VerifyArgs) (err error) {
+func Verify(ctx context.Context, args VerifyArgs) (err error) {
 	fmt.Printf("Opening block database in %q ...\n", args.DatabaseDir)
 	database, err := blockdb.OpenRocksDBForReading(args.DatabaseDir)
 	if err != nil {

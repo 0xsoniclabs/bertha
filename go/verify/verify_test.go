@@ -14,10 +14,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-package app
+package verify
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -28,8 +27,8 @@ import (
 
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
+	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/linxGnu/grocksdb"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
@@ -37,7 +36,7 @@ import (
 
 func TestVerify_RunWithoutParameters_FailsToOpenMissingDb(t *testing.T) {
 	require.ErrorContains(t,
-		runVerify(t.Context(), VerifyArgs{}),
+		Verify(t.Context(), VerifyArgs{}),
 		"failed to open database",
 	)
 }
@@ -45,7 +44,7 @@ func TestVerify_RunWithoutParameters_FailsToOpenMissingDb(t *testing.T) {
 func TestVerify_InvalidDirectory_ReportsAnIssue(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing-db")
 	require.ErrorContains(t,
-		runVerify(t.Context(), VerifyArgs{DatabaseDir: path}),
+		Verify(t.Context(), VerifyArgs{DatabaseDir: path}),
 		"failed to open database",
 	)
 }
@@ -61,7 +60,7 @@ func TestVerify_EmptyDatabase_DoesNotReportIssues(t *testing.T) {
 	db.Close()
 
 	require.NoError(
-		runVerify(t.Context(), VerifyArgs{DatabaseDir: path}),
+		Verify(t.Context(), VerifyArgs{DatabaseDir: path}),
 	)
 }
 
@@ -77,7 +76,7 @@ func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
 	require.NoError(err, "failed to create database")
 
 	writeOptions := grocksdb.NewDefaultWriteOptions()
-	for _, block := range createValidBlocks(t, 10) {
+	for _, block := range utils.CreateValidBlocks(t, 10) {
 		key := make([]byte, 16)
 		binary.BigEndian.PutUint64(key[:8], chainID)
 		binary.BigEndian.PutUint64(key[8:], uint64(block.Number))
@@ -91,26 +90,26 @@ func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
 	db.Close()
 
 	require.NoError(
-		runVerify(t.Context(), VerifyArgs{DatabaseDir: path, ChainID: 123}),
+		Verify(t.Context(), VerifyArgs{DatabaseDir: path, ChainID: 123}),
 	)
 }
 
 func TestVerifyBlocks_ValidBlockHashSequence_DoesNotReportIssues(t *testing.T) {
 	// Create a sequence of valid blocks with proper parent-child relationships.
-	validBlocks := createValidBlocks(t, 10)
+	validBlocks := utils.CreateValidBlocks(t, 10)
 
 	// Blocks are processed in reverse order such that the hash of a block is
 	// collected from the parent-hash field of the successor before checking
 	// the hash of the block itself.
 	slices.Reverse(validBlocks)
 
-	require.NoError(t, verifyBlocks(t.Context(), newIter(validBlocks), nil))
+	require.NoError(t, verifyBlocks(t.Context(), utils.NewIter(validBlocks), nil))
 }
 
 func TestVerifyBlocks_InvalidBlockHash_IssueIsDetected(t *testing.T) {
 	blocks := []*blockdb.Block{{}, {}, {}}
 	require.ErrorContains(t,
-		verifyBlocks(t.Context(), newIter(blocks), nil),
+		verifyBlocks(t.Context(), utils.NewIter(blocks), nil),
 		"lock verification failed for block 0: block hash mismatch",
 	)
 }
@@ -118,7 +117,7 @@ func TestVerifyBlocks_InvalidBlockHash_IssueIsDetected(t *testing.T) {
 func TestVerifyBlocks_NilBlockInput_AbortsWithError(t *testing.T) {
 	blocks := []*blockdb.Block{{}, nil}
 	require.ErrorContains(t,
-		verifyBlocks(t.Context(), newIter(blocks), nil),
+		verifyBlocks(t.Context(), utils.NewIter(blocks), nil),
 		"encountered nil block",
 	)
 }
@@ -149,7 +148,7 @@ func TestVerifyBlocks_CancelledContext_ValidationAbortsWithError(t *testing.T) {
 		}
 	}
 
-	got := verifyBlocks(ctxt, newIter(blocks), progressCounter)
+	got := verifyBlocks(ctxt, utils.NewIter(blocks), progressCounter)
 	want := ctxt.Err()
 	require.Error(t, want, "context should be cancelled")
 	require.ErrorIs(t, got, want)
@@ -180,38 +179,4 @@ func TestVerifyBlock_CorrectHash_VerifyPasses(t *testing.T) {
 
 	hash := gethBlock.Hash()
 	require.NoError(t, verifyBlock(hash, block))
-}
-
-func newIter(blocks []*blockdb.Block) iter.Seq2[*blockdb.Block, error] {
-	return func() iter.Seq2[*blockdb.Block, error] {
-		return func(yield func(*blockdb.Block, error) bool) {
-			for _, block := range blocks {
-				if !yield(block, nil) {
-					break
-				}
-			}
-		}
-	}()
-}
-
-func createValidBlocks(t *testing.T, num int) []*blockdb.Block {
-	t.Helper()
-	// Create a sequence of valid blocks with proper parent-child relationships.
-	// The first block has no parent, and each subsequent block's parent is the
-	// previous block.
-	blocks := make([]*blockdb.Block, num)
-	lastHash := common.Hash{}
-	for i := range num {
-		next := &blockdb.Block{
-			Number:     uint64(i),
-			ParentHash: bytes.Clone(lastHash[:]),
-			StateRoot:  types.EmptyRootHash[:],
-		}
-		blocks[i] = next
-
-		block, err := convert.ConvertToGethBlock(next)
-		require.NoError(t, err, "failed to convert block to Geth format")
-		lastHash = block.Hash()
-	}
-	return blocks
 }

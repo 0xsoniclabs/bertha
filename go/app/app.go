@@ -19,12 +19,16 @@ package app
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"math"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 
+	"github.com/0xsoniclabs/bertha/replay"
+	"github.com/0xsoniclabs/bertha/verify"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/tracy"
 	"github.com/urfave/cli/v3"
@@ -204,7 +208,7 @@ var (
 	dbVariant = &cli.StringFlag{
 		Name:    "db-variant",
 		Aliases: []string{"variant"},
-		Usage:   "Block database variant to use (" + strings.Join(getListOfVariants(), ", ") + ")",
+		Usage:   "Block database variant to use (" + strings.Join(getListOfCarmenVariants(), ", ") + ")",
 		Value:   "go-file",
 	}
 	usePipelineFlag = &cli.BoolFlag{
@@ -261,8 +265,17 @@ var (
 	}
 )
 
+// getListOfCarmenVariants returns a sorted list of all registered database variants.
+func getListOfCarmenVariants() []string {
+	variants := map[string]struct{}{}
+	for config := range carmen.GetAllRegisteredStateFactories() {
+		variants[string(config.Variant)] = struct{}{}
+	}
+	return slices.Sorted(maps.Keys(variants))
+}
+
 func parseReplayArgsAndRunReplay(ctx context.Context, c *cli.Command) error {
-	args := ReplayArgs{
+	args := replay.ReplayArgs{
 		JsonGenesisFile:    c.String(jsonGenesisFlag.Name),
 		BlockDBDir:         c.String(blockDatabaseDirectoryFlag.Name),
 		StateDBDir:         c.String(stateDBDirectoryFlag.Name),
@@ -283,15 +296,15 @@ func parseReplayArgsAndRunReplay(ctx context.Context, c *cli.Command) error {
 		LogDBSize:          c.Bool(logDBSize.Name),
 		ConfirmAllPrompts:  c.Bool(confirmAllPromptsFlag.Name),
 	}
-	return runReplay(ctx, args)
+	return replay.Replay(ctx, args)
 }
 
 func parseVerifyArgsAndRunVerify(ctx context.Context, c *cli.Command) error {
-	args := VerifyArgs{
+	args := verify.VerifyArgs{
 		DatabaseDir: c.String(blockDatabaseDirectoryFlag.Name),
 		ChainID:     c.Uint64(chainIDFlag.Name),
 		StartBlock:  c.Uint64(startBlockFlag.Name),
 		EndBlock:    c.Uint64(endBlockFlag.Name),
 	}
-	return runVerify(ctx, args)
+	return verify.Verify(ctx, args)
 }
