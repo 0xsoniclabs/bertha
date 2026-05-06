@@ -53,7 +53,7 @@ func TestParseGenesis_CanParseValidGenesisData(t *testing.T) {
 	genesis, err := ParseGenesis(genesisData)
 	require.NoError(t, err)
 	require.NotNil(t, genesis)
-	require.Equal(t, uint64(12), genesis.ChainId)
+	require.Equal(t, uint64(12), genesis.ChainID)
 
 	require.Len(t, genesis.Accounts, 2)
 
@@ -90,7 +90,7 @@ func TestParseGenesis_DetectsInvalidCode(t *testing.T) {
 		"Accounts": [
 			{
 				"Code": "not a hex string"
-			}	
+			}
 		]
 	}`))
 	require.ErrorContains(t, err, "failed to decode code")
@@ -106,7 +106,7 @@ func TestReadGenesisFromFile_CanHandleValidJson(t *testing.T) {
 	genesis, err := ReadGenesisFromFile(path)
 	require.NoError(t, err)
 	require.NotNil(t, genesis)
-	require.Equal(t, uint64(12), genesis.ChainId)
+	require.Equal(t, uint64(12), genesis.ChainID)
 }
 
 func TestReadGenesisFromFile_ReportsIoIssues(t *testing.T) {

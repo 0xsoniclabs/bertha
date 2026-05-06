@@ -54,13 +54,13 @@ func TestMetadata_GetRulesAtBlock_ObtainsUpgradesBasedOnBlockNumber(t *testing.T
 }
 
 func TestGetMetadataForChain_SonicChain_ContainsCorrections(t *testing.T) {
-	metadata, err := GetMetadataForChain(SonicMainNetChainId)
+	metadata, err := GetMetadataForChain(SonicMainNetChainID)
 	require.NoError(t, err)
 	require.NotEmpty(t, metadata.Corrections)
 }
 
 func TestGetMetadataForChain_AllegroTestChain_NoCorrectionsButUpgrades(t *testing.T) {
-	metadata, err := GetMetadataForChain(AllegroTestNetChainId)
+	metadata, err := GetMetadataForChain(AllegroTestNetChainID)
 	require.NoError(t, err)
 	require.NotEmpty(t, metadata.Upgrades)
 	require.Empty(t, metadata.Corrections)

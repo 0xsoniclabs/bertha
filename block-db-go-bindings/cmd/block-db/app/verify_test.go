@@ -73,7 +73,7 @@ func TestVerify_EmptyDatabase_DoesNotReportIssues(t *testing.T) {
 func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
 	require := require.New(t)
 
-	chainId := uint64(123)
+	chainID := uint64(123)
 
 	path := filepath.Join(t.TempDir(), "small-db")
 	options := grocksdb.NewDefaultOptions()
@@ -84,7 +84,7 @@ func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
 	writeOptions := grocksdb.NewDefaultWriteOptions()
 	for _, block := range createValidBlocks(t, 10) {
 		key := make([]byte, 16)
-		binary.BigEndian.PutUint64(key[:8], chainId)
+		binary.BigEndian.PutUint64(key[:8], chainID)
 		binary.BigEndian.PutUint64(key[8:], uint64(block.Number))
 
 		value, err := proto.Marshal(block)

@@ -30,7 +30,7 @@ import (
 )
 
 var (
-	chainIdFlag = &cli.Uint64Flag{
+	chainIDFlag = &cli.Uint64Flag{
 		Name:    "chain-id",
 		Aliases: []string{"c"},
 		Usage:   "Chain ID to verify",
@@ -59,7 +59,7 @@ func getVerifyCommand() *cli.Command {
 		Action: runVerify,
 		Flags: []cli.Flag{
 			blockDatabaseDirectoryFlag,
-			chainIdFlag,
+			chainIDFlag,
 			startBlockFlag,
 			endBlockFlag,
 		},
@@ -69,7 +69,7 @@ func getVerifyCommand() *cli.Command {
 func runVerify(ctx context.Context, c *cli.Command) (err error) {
 
 	dir := c.String(blockDatabaseDirectoryFlag.Name)
-	chainId := c.Uint64(chainIdFlag.Name)
+	chainID := c.Uint64(chainIDFlag.Name)
 	startBlock := c.Uint64(startBlockFlag.Name)
 	endBlock := c.Uint64(endBlockFlag.Name)
 
@@ -82,13 +82,13 @@ func runVerify(ctx context.Context, c *cli.Command) (err error) {
 		err = errors.Join(err, database.Close())
 	}()
 
-	fmt.Printf("Verifying blocks for chain ID %d from block %d to block %d ...\n", chainId, startBlock, endBlock)
+	fmt.Printf("Verifying blocks for chain ID %d from block %d to block %d ...\n", chainID, startBlock, endBlock)
 
 	numBlocks := int64(endBlock - startBlock)
 	bar := progressbar.Default(numBlocks, "Verifying blocks")
 
 	return verifyBlocks(ctx, database.GetRangeRev(
-		chainId,
+		chainID,
 		startBlock,
 		endBlock,
 	), func(uint64) {

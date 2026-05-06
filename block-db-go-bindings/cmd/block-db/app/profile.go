@@ -32,10 +32,10 @@ var (
 	}
 )
 
-// StartCpuProfile starts CPU profiling and writes the profile to the specified
+// StartCPUProfile starts CPU profiling and writes the profile to the specified
 // path. If the path is empty, no profiling is started. If no file can be created,
 // at the given path, an error is returned.
-func StartCpuProfile(path string) (*profiler, error) {
+func StartCPUProfile(path string) (*profiler, error) {
 	if path == "" {
 		return nil, nil
 	}

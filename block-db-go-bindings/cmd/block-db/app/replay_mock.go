@@ -59,18 +59,18 @@ func (mr *MockChainMockRecorder) ApplyBlock(arg0, arg1 any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyBlock", reflect.TypeOf((*MockChain)(nil).ApplyBlock), arg0, arg1)
 }
 
-// ChainId mocks base method.
-func (m *MockChain) ChainId() uint64 {
+// ChainID mocks base method.
+func (m *MockChain) ChainID() uint64 {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ChainId")
+	ret := m.ctrl.Call(m, "ChainID")
 	ret0, _ := ret[0].(uint64)
 	return ret0
 }
 
-// ChainId indicates an expected call of ChainId.
-func (mr *MockChainMockRecorder) ChainId() *gomock.Call {
+// ChainID indicates an expected call of ChainID.
+func (mr *MockChainMockRecorder) ChainID() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChainId", reflect.TypeOf((*MockChain)(nil).ChainId))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChainID", reflect.TypeOf((*MockChain)(nil).ChainID))
 }
 
 // IsMptConformant mocks base method.
