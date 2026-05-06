@@ -34,7 +34,8 @@ import (
 	"time"
 
 	// _ "[github.com/ianlancetaylor/cgosymbolizer](http://github.com/ianlancetaylor/cgosymbolizer)" // Enable to resolve symbols across cgo calls (this breaks Go symbols)
-	"github.com/0xsoniclabs/blockdb"
+
+	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	carmen "github.com/0xsoniclabs/carmen/go/state"

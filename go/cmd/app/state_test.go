@@ -22,7 +22,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/0xsoniclabs/blockdb"
+	"github.com/0xsoniclabs/bertha/blockdb"
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"

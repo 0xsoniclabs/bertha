@@ -1,7 +1,7 @@
-diff --git a/block-db-go-bindings/cmd/block-db/app/state.go b/block-db-go-bindings/cmd/block-db/app/state.go
+diff --git a/go/cmd/app/state.go b/go/cmd/app/state.go
 index 3f0c3cf..afdf5f3 100644
---- a/block-db-go-bindings/cmd/block-db/app/state.go
-+++ b/block-db-go-bindings/cmd/block-db/app/state.go
+--- a/go/cmd/app/state.go
++++ b/go/cmd/app/state.go
 @@ -36,8 +36,9 @@ import (
  	"github.com/Fantom-foundation/lachesis-base/inter/idx"
  	"github.com/ethereum/go-ethereum/common"
@@ -11,12 +11,12 @@ index 3f0c3cf..afdf5f3 100644
 -	//_ "github.com/0xsoniclabs/carmen/go/experimental"
 +	_ "github.com/0xsoniclabs/carmen/go/experimental"
  )
- 
+
  // State is an abstraction of the Chain State Database. It tracks the balances,
-diff --git a/block-db-go-bindings/go.mod b/block-db-go-bindings/go.mod
+diff --git a/go/go.mod b/go/go.mod
 index 8994196..99485a8 100644
---- a/block-db-go-bindings/go.mod
-+++ b/block-db-go-bindings/go.mod
+--- a/go/go.mod
++++ b/go/go.mod
 @@ -50,13 +50,13 @@ require (
  	github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06 // indirect
  	github.com/consensys/gnark-crypto v0.18.1 // indirect
@@ -34,11 +34,11 @@ index 8994196..99485a8 100644
  	github.com/fsnotify/fsnotify v1.7.0 // indirect
  	github.com/getsentry/sentry-go v0.29.0 // indirect
 @@ -122,7 +122,7 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
- 
+
  // This line is automatically uncommented by the `go-run-with-carmen.sh` and `go-run-with-carmen-and-tracy.sh` scripts.
  //
 -//replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
 +replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
- 
+
  // This line is automatically uncommented by the `go-run-with-carmen-and-tracy.sh` script.
  //

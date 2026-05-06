@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-module github.com/0xsoniclabs/blockdb
+module github.com/0xsoniclabs/bertha
 
 go 1.26.0
 

@@ -25,14 +25,14 @@ on:
     branches: [ main ]
     paths:
       - '.github/workflows/go.yaml'
-      - 'block-db-go-bindings/**'
-      - 'go/test_data_generator/**'
+      - 'go/**'
+      - 'utils/test_data_generator/**'
   pull_request:
     branches: [ main ]
     paths:
       - '.github/workflows/go.yaml'
-      - 'block-db-go-bindings/**'
-      - 'go/test_data_generator/**'
+      - 'go/**'
+      - 'utils/test_data_generator/**'
 jobs:
   lint:
     name: lint
@@ -51,13 +51,13 @@ jobs:
         packages: librocksdb-dev
     - name: install golangci-lint
       run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.1.6
-    - name: golangci block-db-go-bindings
-      working-directory: block-db-go-bindings
+    - name: golangci go tools
+      working-directory: go
       run: |
         export PATH="${PATH}:$(go env GOPATH)/bin"
         golangci-lint run ./...
-    - name: golanci go/test_data_generator
-      working-directory: go/test_data_generator
+    - name: golanci test_data_generator
+      working-directory: utils/test_data_generator
       run: |
         export PATH="${PATH}:$(go env GOPATH)/bin"
         golangci-lint run ./...
@@ -74,7 +74,7 @@ jobs:
       with:
         go-version: "1.26.0"
     - name: check license headers
-      run: go run ./go/scripts/license/add_license_header.go -dir ./ -check
+      run: go run ./utils/scripts/license/add_license_header.go -dir ./ -check
 
   test:
     name: test
@@ -92,7 +92,7 @@ jobs:
       with:
         packages: librocksdb-dev
     - name: go test
-      working-directory: block-db-go-bindings
+      working-directory: go
       run: go test --count 1 ./...
 
   carmen-tracy-patch:
@@ -109,10 +109,10 @@ jobs:
     - name: clone Tracy
       run: git clone --depth 1 https://github.com/0xsoniclabs/tracy
     - name: check if carmen and tracy patches apply
-      working-directory: bertha/block-db-go-bindings
+      working-directory: bertha/go
       run: git apply enable-carmen.patch && git apply enable-tracy.patch
     - name: check if go module is tidy
-      working-directory: bertha/block-db-go-bindings
+      working-directory: bertha/go
       run: go build -n ./...
 
   # This is currently disabled because we can not guarantee that the protobuf compiler versions between CI and dev machines do not get out of sync.
@@ -132,7 +132,7 @@ jobs:
         #sudo apt-get install protobuf-compiler
         #go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
     #- name: go generate
-      #working-directory: block-db-go-bindings
+      #working-directory: go
       #run: |
         #export PATH="${PATH}:$(go env GOPATH)/bin"
         #go generate .

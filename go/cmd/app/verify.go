@@ -23,7 +23,7 @@ import (
 	"iter"
 	"math"
 
-	"github.com/0xsoniclabs/blockdb"
+	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/schollz/progressbar/v3"
 	"github.com/urfave/cli/v3"

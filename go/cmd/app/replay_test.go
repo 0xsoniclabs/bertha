@@ -29,7 +29,7 @@ import (
 	"testing"
 	"testing/synctest"
 
-	"github.com/0xsoniclabs/blockdb"
+	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	"github.com/0xsoniclabs/carmen/go/state"
@@ -561,7 +561,7 @@ func overwriteStateRootHash(t *testing.T, run replayer) {
 			nil,
 		)
 
-	blockDB := blockdb.NewMockDBInterface(ctrl)
+	blockDB := blockdb.NewMockBlockDB(ctrl)
 	blockDB.EXPECT().Update(gomock.Any(),
 		&blockdb.Block{
 			Number:    0,
@@ -763,7 +763,7 @@ func Test_checkBlockResults_OverwritesStateRoot(t *testing.T) {
 		StateRoot: newStateRoot.Bytes(),
 	}
 
-	blockDB := blockdb.NewMockDBInterface(ctrl)
+	blockDB := blockdb.NewMockBlockDB(ctrl)
 	blockDB.EXPECT().
 		Update(chainID, blockWithUpdatedStateRoot).
 		Return(nil)
@@ -798,7 +798,7 @@ func Test_checkBlockResults_LogsMessageIfStateRootNotSet(t *testing.T) {
 		Number: 0,
 	}
 
-	blockDB := blockdb.NewMockDBInterface(ctrl)
+	blockDB := blockdb.NewMockBlockDB(ctrl)
 	replayLoopContext := ReplayLoopContext{
 		overwriteStateRoot: New(false, false),
 		stateRootNotSet:    false,
