@@ -17,11 +17,126 @@
 package replay
 
 import (
+	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
+	"github.com/ethereum/go-ethereum/common"
 )
+
+//go:generate mockgen -source=metadata.go -destination=metadata_mock.go -package=replay
+
+// MetadataStore is an interface for storing and retrieving chain upgrade rules
+// and corrections.
+type MetadataStore interface {
+	// StoreUpgrade stores an upgrade that takes effect at the given block height.
+	StoreUpgrade(upgrade opera.UpgradeHeight) error
+
+	// GetUpgrades returns all stored upgrades.
+	GetUpgrades() []opera.UpgradeHeight
+
+	// GetRulesAtBlock returns the effective rules at the given block number,
+	// based on all stored upgrades up to and including that block.
+	GetRulesAtBlock(blockNumber uint64) opera.Rules
+
+	// GetCorrections returns the account corrections to be applied at the
+	// given block number, or nil if there are none.
+	GetCorrections(blockNumber uint64) map[common.Address]Correction
+}
+
+// StaticMetadataStore is a MetadataStore implementation backed by hard-coded
+// data for known chains.
+type StaticMetadataStore struct {
+	metadata Metadata
+}
+
+// NewStaticMetadataStore creates a new StaticMetadataStore with upgrades
+// for the given chain ID.
+func NewStaticMetadataStore(chainID uint64) (*StaticMetadataStore, error) {
+	allegro := opera.GetAllegroUpgrades()
+	switch chainID {
+	case SonicMainNetChainID:
+		corrections, err := GetSonicMainnetCorrections()
+		if err != nil {
+			return nil, err
+		}
+		return &StaticMetadataStore{
+			metadata: Metadata{
+				Upgrades: []opera.UpgradeHeight{
+					// Rule update transaction is part of block 56477897,
+					// followed by an Epoch seal in block 56477967.
+					// The upgrade has affect from and including the following block.
+					{Upgrades: allegro, Height: 56477968},
+				},
+				Corrections: corrections,
+			},
+		}, nil
+	case AllegroTestNetChainID:
+		// The Allegro Testnet does not need any corrections, but it does have
+		// several network rule upgrades.
+		allegroSingleProposer := allegro
+		allegroSingleProposer.SingleProposerBlockFormation = true
+		return &StaticMetadataStore{
+			metadata: Metadata{
+				Upgrades: []opera.UpgradeHeight{
+					{Upgrades: allegro, Height: 10517},
+					{Upgrades: allegroSingleProposer, Height: 16848},
+					{Upgrades: allegro, Height: 45517},
+					{Upgrades: allegroSingleProposer, Height: 49189},
+					{Upgrades: allegro, Height: 51558},
+					{Upgrades: allegroSingleProposer, Height: 61156},
+					{Upgrades: allegro, Height: 61595},
+					{Upgrades: allegroSingleProposer, Height: 63080},
+					{Upgrades: allegro, Height: 63374},
+					{Upgrades: allegroSingleProposer, Height: 90410},
+					{Upgrades: allegro, Height: 106861},
+					{Upgrades: allegroSingleProposer, Height: 161033},
+					{Upgrades: allegro, Height: 161900},
+					{Upgrades: allegroSingleProposer, Height: 251426},
+					{Upgrades: allegro, Height: 253299},
+				},
+			},
+		}, nil
+	default:
+		slog.Warn("no metadata available for chain ID, proceeding without upgrades or corrections", "chainId", chainID)
+		return &StaticMetadataStore{}, nil
+	}
+}
+
+// StoreUpgrade verifies that the provided upgrade matches one of the
+// hard-coded upgrade values. Returns an error if it does not match.
+func (s *StaticMetadataStore) StoreUpgrade(upgrade opera.UpgradeHeight) error {
+	if !slices.Contains(s.metadata.Upgrades, upgrade) {
+		return fmt.Errorf("upgrade at height %d does not match any hard-coded values", upgrade.Height)
+	}
+	return nil
+}
+
+// GetUpgrades returns all hard-coded upgrades.
+func (s *StaticMetadataStore) GetUpgrades() []opera.UpgradeHeight {
+	return s.metadata.Upgrades
+}
+
+// GetRulesAtBlock returns the effective rules at the given block number.
+func (s *StaticMetadataStore) GetRulesAtBlock(blockNumber uint64) opera.Rules {
+	rules := opera.Rules{}
+	for _, upgrade := range s.metadata.Upgrades {
+		if upgrade.Height <= idx.Block(blockNumber) {
+			rules.Upgrades = upgrade.Upgrades
+		}
+	}
+	return rules
+}
+
+// GetCorrections returns the account corrections for the given block number.
+func (s *StaticMetadataStore) GetCorrections(blockNumber uint64) map[common.Address]Correction {
+	if corrections, ok := s.metadata.Corrections[blockNumber]; ok {
+		return corrections
+	}
+	return map[common.Address]Correction{}
+}
 
 const (
 	SonicMainNetChainID   = 146
@@ -33,65 +148,4 @@ const (
 type Metadata struct {
 	Upgrades    []opera.UpgradeHeight
 	Corrections Corrections
-}
-
-// GetRulesAtBlock returns the EVM rules that should be applied at the given
-// block number, based on the upgrades specified in the metadata.
-func (m Metadata) GetRulesAtBlock(blockNumber uint64) opera.Rules {
-	rules := opera.Rules{}
-	for _, upgrade := range m.Upgrades {
-		if upgrade.Height <= idx.Block(blockNumber) {
-			rules.Upgrades = upgrade.Upgrades
-		}
-	}
-	return rules
-}
-
-// GetMetadataForChain retrieves the metadata for a given chain ID.
-// TODO: retrieve this data from a Bertha server instead of hardcoding it.
-func GetMetadataForChain(chainID uint64) (Metadata, error) {
-	allegro := opera.GetAllegroUpgrades()
-	switch chainID {
-	case SonicMainNetChainID:
-		corrections, err := GetSonicMainnetCorrections()
-		if err != nil {
-			return Metadata{}, err
-		}
-		return Metadata{
-			Upgrades: []opera.UpgradeHeight{
-				// Rule update transaction is part of block 56477897,
-				// followed by an Epoch seal in block 56477967.
-				// The upgrade has affect from and including the following block.
-				{Upgrades: allegro, Height: 56477968},
-			},
-			Corrections: corrections,
-		}, nil
-	case AllegroTestNetChainID:
-		// The Allegro Testnet does not need any corrections, but it does have
-		// several network rule upgrades.
-		allegroSingleProposer := allegro
-		allegroSingleProposer.SingleProposerBlockFormation = true
-		return Metadata{
-			Upgrades: []opera.UpgradeHeight{
-				{Upgrades: allegro, Height: 10517},
-				{Upgrades: allegroSingleProposer, Height: 16848},
-				{Upgrades: allegro, Height: 45517},
-				{Upgrades: allegroSingleProposer, Height: 49189},
-				{Upgrades: allegro, Height: 51558},
-				{Upgrades: allegroSingleProposer, Height: 61156},
-				{Upgrades: allegro, Height: 61595},
-				{Upgrades: allegroSingleProposer, Height: 63080},
-				{Upgrades: allegro, Height: 63374},
-				{Upgrades: allegroSingleProposer, Height: 90410},
-				{Upgrades: allegro, Height: 106861},
-				{Upgrades: allegroSingleProposer, Height: 161033},
-				{Upgrades: allegro, Height: 161900},
-				{Upgrades: allegroSingleProposer, Height: 251426},
-				{Upgrades: allegro, Height: 253299},
-			},
-		}, nil
-	default:
-		slog.Warn("no metadata available for chain ID, proceeding without upgrades or corrections", "chainId", chainID)
-		return Metadata{}, nil
-	}
 }

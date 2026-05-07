@@ -258,17 +258,18 @@ type replayer func(
 	ctx context.Context,
 	blocks iter.Seq2[*blockdb.Block, error],
 	chain Chain,
-	metadata Metadata,
 	database blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
 	onBlockProcessed func(*types.Block),
 ) error
 
 func canProcessEmptyBlocks(t *testing.T, run replayer) {
-	state, err := NewState(StateParameters{
-		Directory: t.TempDir(),
-		Schema:    5,
-	})
+	chainID := uint64(12)
+	state, err := NewState(
+		StateParameters{Directory: t.TempDir(), Schema: 5},
+		&StaticMetadataStore{},
+		chainID,
+	)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, state.Close())
@@ -285,14 +286,14 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	}
 
 	chain := &stateChainAdapter{
-		chainID:         12,
+		chainID:         chainID,
 		state:           state,
 		snapshotHandler: NewSnapshotHandler(0, 0, math.MaxUint64, 1),
 	}
 
 	iter := utils.NewIter(blocks)
 	counter := 0
-	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, nil, ReplayLoopContext{}, func(block *types.Block) {
+	require.NoError(t, run(t.Context(), iter, chain, nil, ReplayLoopContext{}, func(block *types.Block) {
 		counter++
 	}))
 	require.Equal(t, len(blocks), counter)
@@ -340,8 +341,8 @@ func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 		require.NoError(t, err, "failed to convert block %d", block.Number)
 
 		call := chain.EXPECT().
-			ApplyBlock(gomock.Any(), gomock.Any()).
-			DoAndReturn(func(b *types.Block, _ Metadata) (
+			ApplyBlock(gomock.Any()).
+			DoAndReturn(func(b *types.Block) (
 				[]*types.Receipt, future.Future[result.Result[common.Hash]], error,
 			) {
 				require.Equal(t, ethBlock.NumberU64(), b.NumberU64())
@@ -362,7 +363,7 @@ func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 	}
 
 	iter := utils.NewIter(blocks)
-	require.NoError(t, run(t.Context(), iter, chain, Metadata{}, nil, ReplayLoopContext{}, nil))
+	require.NoError(t, run(t.Context(), iter, chain, nil, ReplayLoopContext{}, nil))
 }
 
 func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
@@ -374,7 +375,7 @@ func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
 	blocks := func(yield func(*blockdb.Block, error) bool) {
 		yield(nil, injectedError)
 	}
-	require.ErrorIs(t, run(t.Context(), blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil), injectedError)
+	require.ErrorIs(t, run(t.Context(), blocks, chain, nil, ReplayLoopContext{}, nil), injectedError)
 }
 
 func failsOnCancelledContext(t *testing.T, run replayer) {
@@ -389,7 +390,7 @@ func failsOnCancelledContext(t *testing.T, run replayer) {
 		{Number: 0, StateRoot: types.EmptyRootHash[:]},
 	})
 
-	require.ErrorIs(t, run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil), context.Canceled)
+	require.ErrorIs(t, run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil), context.Canceled)
 }
 
 func failsOnBlockConversionError(t *testing.T, run replayer) {
@@ -404,7 +405,7 @@ func failsOnBlockConversionError(t *testing.T, run replayer) {
 		}},
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
 		"failed to convert block 0",
 	)
 }
@@ -416,13 +417,13 @@ func failsOnBlockApplicationError(t *testing.T, run replayer) {
 
 	injectedError := fmt.Errorf("injected error")
 	chain.EXPECT().
-		ApplyBlock(gomock.Any(), gomock.Any()).
+		ApplyBlock(gomock.Any()).
 		Return(nil, future.Immediate(result.Ok(common.Hash{})), injectedError)
 
 	ctxt := t.Context()
 	blocks := utils.NewIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
 		injectedError,
 	)
 }
@@ -434,13 +435,13 @@ func failsOnCommitmentComputationError(t *testing.T, run replayer) {
 
 	injectedError := fmt.Errorf("injected error")
 	chain.EXPECT().
-		ApplyBlock(gomock.Any(), gomock.Any()).
+		ApplyBlock(gomock.Any()).
 		Return(nil, future.Immediate(result.Err[common.Hash](injectedError)), nil)
 
 	ctxt := t.Context()
 	blocks := utils.NewIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
 		injectedError,
 	)
 }
@@ -451,7 +452,7 @@ func failsOnWrongReceiptStatus(t *testing.T, run replayer) {
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	chain.EXPECT().
-		ApplyBlock(gomock.Any(), gomock.Any()).
+		ApplyBlock(gomock.Any()).
 		Return(
 			types.Receipts{{Status: types.ReceiptStatusFailed}},
 			future.Immediate(result.Ok(common.Hash{})),
@@ -465,7 +466,7 @@ func failsOnWrongReceiptStatus(t *testing.T, run replayer) {
 		}},
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
 		"receipt status mismatch",
 	)
 }
@@ -476,7 +477,7 @@ func failsOnWrongReceiptCumulatedGasUsed(t *testing.T, run replayer) {
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	chain.EXPECT().
-		ApplyBlock(gomock.Any(), gomock.Any()).
+		ApplyBlock(gomock.Any()).
 		Return(
 			types.Receipts{{
 				Status:            types.ReceiptStatusSuccessful,
@@ -493,7 +494,7 @@ func failsOnWrongReceiptCumulatedGasUsed(t *testing.T, run replayer) {
 		}},
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
 		"receipt cumulative gas used mismatch",
 	)
 }
@@ -505,7 +506,7 @@ func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	chain.EXPECT().
-		ApplyBlock(gomock.Any(), gomock.Any()).
+		ApplyBlock(gomock.Any()).
 		Return(
 			nil,
 			future.Immediate(result.Ok(common.Hash{0x1})),
@@ -517,7 +518,7 @@ func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 		StateRoot: common.Hash{0x2}.Bytes(),
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
 		"state root mismatch",
 	)
 }
@@ -529,7 +530,7 @@ func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	chain.EXPECT().
-		ApplyBlock(gomock.Any(), gomock.Any()).
+		ApplyBlock(gomock.Any()).
 		Return(
 			nil,
 			future.Immediate(result.Ok(common.Hash{0x1})),
@@ -541,7 +542,7 @@ func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 		StateRoot: common.Hash{0x2}.Bytes(), // different state root
 	}})
 	require.NoError(t,
-		run(ctxt, blocks, chain, Metadata{}, nil, ReplayLoopContext{
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{
 			skipStateRootCheck: true,
 		}, nil),
 		"state root mismatch",
@@ -555,7 +556,7 @@ func overwriteStateRootHash(t *testing.T, run replayer) {
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	chain.EXPECT().
-		ApplyBlock(gomock.Any(), gomock.Any()).
+		ApplyBlock(gomock.Any()).
 		Return(
 			nil,
 			future.Immediate(result.Ok(common.Hash{0x1})),
@@ -575,7 +576,7 @@ func overwriteStateRootHash(t *testing.T, run replayer) {
 		StateRoot: common.Hash{0x2}.Bytes(),
 	}})
 	require.NoError(t,
-		run(ctxt, blocks, chain, Metadata{}, blockDB, ReplayLoopContext{
+		run(ctxt, blocks, chain, blockDB, ReplayLoopContext{
 			overwriteStateRoot: New(true, true),
 		}, nil),
 		"state root mismatch",
@@ -598,13 +599,13 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 		// The first block gets the promise we will only fulfill once all other
 		// stages are blocked.
 		chain.EXPECT().
-			ApplyBlock(gomock.Any(), gomock.Any()).
+			ApplyBlock(gomock.Any()).
 			Return(nil, firstHash, nil)
 
 		// All other blocks are processed immediately, to fill up the output
 		// channels of the first two stages.
 		chain.EXPECT().
-			ApplyBlock(gomock.Any(), gomock.Any()).
+			ApplyBlock(gomock.Any()).
 			Return(nil, future.Immediate(result.Ok(common.Hash{0x1})), nil).
 			AnyTimes()
 
@@ -619,7 +620,7 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 
 		// Start running the replay pipeline.
 		go func() {
-			err := runReplayPipeline(t.Context(), utils.NewIter(blocks), chain, Metadata{}, nil, ReplayLoopContext{}, nil)
+			err := runReplayPipeline(t.Context(), utils.NewIter(blocks), chain, nil, ReplayLoopContext{}, nil)
 			require.ErrorIs(t, err, issue)
 		}()
 
@@ -637,17 +638,20 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 }
 
 func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
-	state, err := NewState(StateParameters{
-		Directory: t.TempDir(),
-		Schema:    5,
-	})
+	chainID := uint64(12)
+
+	state, err := NewState(
+		StateParameters{Directory: t.TempDir(), Schema: 5},
+		&StaticMetadataStore{},
+		chainID,
+	)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, state.Close())
 	}()
 
 	chain := &stateChainAdapter{
-		chainID: 12,
+		chainID: chainID,
 		state:   state,
 	}
 
@@ -660,7 +664,7 @@ func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, _, err = chain.ApplyBlock(block, Metadata{})
+	_, _, err = chain.ApplyBlock(block)
 	require.Error(t, err)
 	require.ErrorContains(t, err, "failed to apply block")
 }
@@ -674,7 +678,7 @@ func Test_getExpectedStateRoot_ReturnsCorrectStateRoot(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: dir,
 		Schema:    5,
-	})
+	}, &StaticMetadataStore{}, chainID)
 	require.NoError(err)
 	defer func() {
 		require.NoError(state.Close())
@@ -710,7 +714,7 @@ func Test_updateStateRoot_UpdatesCorrectStateRoot(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: dir,
 		Schema:    5,
-	})
+	}, &StaticMetadataStore{}, chainID)
 	require.NoError(err)
 	defer func() {
 		require.NoError(state.Close())
@@ -874,10 +878,11 @@ func Test_SnapshotHandler_CreatesAndRemovesSnapshots(t *testing.T) {
 	require := require.New(t)
 
 	dir := t.TempDir()
-	state, err := NewState(StateParameters{
-		Directory: dir,
-		Schema:    5,
-	})
+	state, err := NewState(
+		StateParameters{Directory: dir, Schema: 5},
+		&StaticMetadataStore{},
+		1,
+	)
 	require.NoError(err)
 	defer func() {
 		require.NoError(state.Close())
@@ -926,10 +931,11 @@ func Test_SnapshotHandler_GetOldestSnapshotDirReturnsOldestSnapshot(t *testing.T
 	require := require.New(t)
 	dir := t.TempDir()
 
-	state, err := NewState(StateParameters{
-		Directory: dir,
-		Schema:    5,
-	})
+	state, err := NewState(
+		StateParameters{Directory: dir, Schema: 5},
+		&StaticMetadataStore{},
+		1,
+	)
 	require.NoError(err)
 	defer func() {
 		require.NoError(state.Close())
@@ -963,10 +969,11 @@ func Test_SnapshotHandler_GetSnapshotDirsReturnsExistingSnapshotList(t *testing.
 	require := require.New(t)
 	dir := t.TempDir()
 
-	state, err := NewState(StateParameters{
-		Directory: dir,
-		Schema:    5,
-	})
+	state, err := NewState(
+		StateParameters{Directory: dir, Schema: 5},
+		&StaticMetadataStore{},
+		1,
+	)
 	require.NoError(err)
 	defer func() {
 		require.NoError(state.Close())

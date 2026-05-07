@@ -20,21 +20,25 @@ import (
 	"testing"
 
 	"github.com/0xsoniclabs/sonic/opera"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
 
-func TestMetadata_GetRulesAtBlock_ObtainsUpgradesBasedOnBlockNumber(t *testing.T) {
+func TestStaticMetadataStore_GetRulesAtBlock_ObtainsUpgradesBasedOnBlockNumber(t *testing.T) {
 	upgrades := []opera.Upgrades{
 		{Sonic: true},
 		{Sonic: true, Allegro: true},
 		{Sonic: true, SingleProposerBlockFormation: true},
 	}
 
-	metadata := Metadata{
-		Upgrades: []opera.UpgradeHeight{
-			{Upgrades: upgrades[0], Height: 5},
-			{Upgrades: upgrades[1], Height: 7},
-			{Upgrades: upgrades[2], Height: 11},
+	store := &StaticMetadataStore{
+		metadata: Metadata{
+			Upgrades: []opera.UpgradeHeight{
+				{Upgrades: upgrades[0], Height: 5},
+				{Upgrades: upgrades[1], Height: 7},
+				{Upgrades: upgrades[2], Height: 11},
+			},
 		},
 	}
 
@@ -48,27 +52,71 @@ func TestMetadata_GetRulesAtBlock_ObtainsUpgradesBasedOnBlockNumber(t *testing.T
 			expect.Upgrades = upgrades[0]
 		}
 
-		rules := metadata.GetRulesAtBlock(uint64(blockNr))
+		rules := store.GetRulesAtBlock(uint64(blockNr))
 		require.Equal(t, expect, rules, "block number %d", blockNr)
 	}
 }
 
-func TestGetMetadataForChain_SonicChain_ContainsCorrections(t *testing.T) {
-	metadata, err := GetMetadataForChain(SonicMainNetChainID)
+func TestNewStaticMetadataStore_SonicChain_ContainsCorrections(t *testing.T) {
+	store, err := NewStaticMetadataStore(SonicMainNetChainID)
 	require.NoError(t, err)
-	require.NotEmpty(t, metadata.Corrections)
+	require.NotEmpty(t, store.metadata.Corrections)
 }
 
-func TestGetMetadataForChain_AllegroTestChain_NoCorrectionsButUpgrades(t *testing.T) {
-	metadata, err := GetMetadataForChain(AllegroTestNetChainID)
+func TestNewStaticMetadataStore_AllegroTestChain_NoCorrectionsButUpgrades(t *testing.T) {
+	store, err := NewStaticMetadataStore(AllegroTestNetChainID)
 	require.NoError(t, err)
-	require.NotEmpty(t, metadata.Upgrades)
-	require.Empty(t, metadata.Corrections)
+	require.NotEmpty(t, store.GetUpgrades())
+	require.Empty(t, store.metadata.Corrections)
 
 	// Make sure the upgrades are in ascending order.
 	last := 0
-	for _, upgrade := range metadata.Upgrades {
+	for _, upgrade := range store.GetUpgrades() {
 		require.Greater(t, int(upgrade.Height), last)
 		last = int(upgrade.Height)
 	}
+}
+
+func TestNewStaticMetadataStore_UnknownChainID_LogsWarningAndReturnsEmptyMetadata(t *testing.T) {
+	store, err := NewStaticMetadataStore(0)
+	require.NoError(t, err)
+	require.Empty(t, store.metadata.Upgrades)
+	require.Empty(t, store.metadata.Corrections)
+}
+
+func TestStaticMetadataStore_StoreUpgrade_VerifiesUpgradeExists(t *testing.T) {
+	store := &StaticMetadataStore{
+		metadata: Metadata{
+			Upgrades: []opera.UpgradeHeight{
+				{Upgrades: opera.Upgrades{Sonic: true}, Height: 2},
+				{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}, Height: 4},
+			},
+		},
+	}
+
+	// correct upgrade
+	require.NoError(t, store.StoreUpgrade(opera.UpgradeHeight{Upgrades: opera.Upgrades{Sonic: true}, Height: 2}))
+	// incorrect upgrades
+	require.Error(t, store.StoreUpgrade(opera.UpgradeHeight{Upgrades: opera.Upgrades{Sonic: false}, Height: 2}))
+	// incorrect height
+	require.Error(t, store.StoreUpgrade(opera.UpgradeHeight{Upgrades: opera.Upgrades{Sonic: true}, Height: 1}))
+}
+
+func TestStaticMetadataStore_GetCorrections_ReturnsCorrections(t *testing.T) {
+	corrections := Corrections{
+		10: {
+			common.HexToAddress("0x123"): Correction{Balance: uint256.Int{100}},
+		},
+		20: {
+			common.HexToAddress("0x456"): Correction{Balance: uint256.Int{200}},
+		},
+	}
+
+	store := &StaticMetadataStore{
+		metadata: Metadata{Corrections: corrections},
+	}
+
+	require.Equal(t, corrections[10], store.GetCorrections(10))
+	require.Equal(t, corrections[20], store.GetCorrections(20))
+	require.Equal(t, map[common.Address]Correction{}, store.GetCorrections(30))
 }
