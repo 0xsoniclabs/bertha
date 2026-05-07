@@ -163,13 +163,13 @@ var (
 	startBlockFlag = &cli.Uint64Flag{
 		Name:    "start-block",
 		Aliases: []string{"s"},
-		Usage:   "Starting block number to verify",
+		Usage:   "Starting block number",
 		Value:   0,
 	}
 	endBlockFlag = &cli.Uint64Flag{
 		Name:    "end-block",
 		Aliases: []string{"e"},
-		Usage:   "Ending block number to verify (inclusive)",
+		Usage:   "Ending block number (inclusive)",
 		Value:   math.MaxUint64, // Default to the maximum block number
 	}
 
