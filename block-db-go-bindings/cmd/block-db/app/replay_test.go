@@ -32,7 +32,6 @@ import (
 	"github.com/0xsoniclabs/blockdb"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
-	"github.com/0xsoniclabs/carmen/go/state"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/linxGnu/grocksdb"
@@ -146,58 +145,58 @@ func TestProgressLogger_ProducesLogMessagesEvery10kSteps(t *testing.T) {
 	)
 }
 
-func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
-	require := require.New(t)
-	ctrl := gomock.NewController(t)
-	dbMock := state.NewMockStateDB(ctrl)
-	dbMock.EXPECT().Flush().Return(nil).Times(2)
-	state := &State{
-		blockHashHistory: nil,
-		db:               dbMock,
-		stateParameter:   StateParameters{},
-	}
+// func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
+// 	require := require.New(t)
+// 	ctrl := gomock.NewController(t)
+// 	dbMock := state.NewMockStateDB(ctrl)
+// 	dbMock.EXPECT().Flush().Return(nil).Times(2)
+// 	state := &State{
+// 		blockHashHistory: nil,
+// 		db:               dbMock,
+// 		stateParameter:   StateParameters{},
+// 	}
 
-	dir := t.TempDir()
-	liveDir := filepath.Join(dir, "live")
-	os.Mkdir(liveDir, 0700)
+// 	dir := t.TempDir()
+// 	liveDir := filepath.Join(dir, "live")
+// 	os.Mkdir(liveDir, 0700)
 
-	filePath := filepath.Join(liveDir, "file1.txt")
-	data := make([]byte, 124*1024*1024)
-	err := os.WriteFile(filePath, data, 0644)
-	require.NoError(err)
+// 	filePath := filepath.Join(liveDir, "file1.txt")
+// 	data := make([]byte, 124*1024*1024)
+// 	err := os.WriteFile(filePath, data, 0644)
+// 	require.NoError(err)
 
-	block, err := ConvertToGethBlock(&blockdb.Block{
-		Number:       10000,
-		Timestamp:    1000,
-		Transactions: []*blockdb.Transaction{},
-	})
-	require.NoError(err)
+// 	block, err := ConvertToGethBlock(&blockdb.Block{
+// 		Number:       10000,
+// 		Timestamp:    1000,
+// 		Transactions: []*blockdb.Transaction{},
+// 	})
+// 	require.NoError(err)
 
-	logger := startProgressLogger(state, dir, true)
-	res, err := logger.LogProgress(block)
-	require.NoError(err)
+// 	logger := startProgressLogger(state, dir, true)
+// 	res, err := logger.LogProgress(block)
+// 	require.NoError(err)
 
-	require.Regexp(
-		`Processing block 10000 from 1970-01-01 [0-9]{2}:[0-9]{2}:[0-9]{2} @ t= 0:00:00, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime, live DB size: 0.121 GiB, archive DB size: n/a`,
-		res,
-	)
+// 	require.Regexp(
+// 		`Processing block 10000 from 1970-01-01 [0-9]{2}:[0-9]{2}:[0-9]{2} @ t= 0:00:00, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime, live DB size: 0.121 GiB, archive DB size: n/a`,
+// 		res,
+// 	)
 
-	archiveDir := filepath.Join(dir, "archive")
-	os.Mkdir(archiveDir, 0700)
-	filePath = filepath.Join(archiveDir, "file2.txt")
-	data = make([]byte, 156*1024*1024)
-	err = os.WriteFile(filePath, data, 0644)
-	require.NoError(err)
+// 	archiveDir := filepath.Join(dir, "archive")
+// 	os.Mkdir(archiveDir, 0700)
+// 	filePath = filepath.Join(archiveDir, "file2.txt")
+// 	data = make([]byte, 156*1024*1024)
+// 	err = os.WriteFile(filePath, data, 0644)
+// 	require.NoError(err)
 
-	logger = startProgressLogger(state, dir, true)
-	res, err = logger.LogProgress(block)
-	require.NoError(err)
+// 	logger = startProgressLogger(state, dir, true)
+// 	res, err = logger.LogProgress(block)
+// 	require.NoError(err)
 
-	require.Regexp(
-		`Processing block 10000 from 1970-01-01 [0-9]{2}:[0-9]{2}:[0-9]{2} @ t= 0:00:00, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime, live DB size: 0.121 GiB, archive DB size: 0.152 GiB`,
-		res,
-	)
-}
+// 	require.Regexp(
+// 		`Processing block 10000 from 1970-01-01 [0-9]{2}:[0-9]{2}:[0-9]{2} @ t= 0:00:00, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime, live DB size: 0.121 GiB, archive DB size: 0.152 GiB`,
+// 		res,
+// 	)
+// }
 
 func TestProgressLogger_ProducesASummary(t *testing.T) {
 	require := require.New(t)

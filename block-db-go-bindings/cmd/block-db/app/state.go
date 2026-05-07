@@ -36,8 +36,9 @@ import (
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+
 	// Uncomment to enable experimental Carmen features.
-	//_ "github.com/0xsoniclabs/carmen/go/experimental"
+	_ "github.com/0xsoniclabs/carmen/go/experimental"
 )
 
 // State is an abstraction of the Chain State Database. It tracks the balances,
@@ -153,84 +154,93 @@ func (s *State) ApplyBlock(
 	metadata Metadata,
 ) (types.Receipts, error) {
 
-	chainConfig := opera.CreateTransientEvmChainConfig(
-		chainId,
-		metadata.Upgrades,
-		idx.Block(block.NumberU64()),
-	)
-	rules := metadata.GetRulesAtBlock(block.NumberU64())
-
-	processor := evmcore.NewStateProcessorForReplay(
-		chainConfig,
-		historyAdapter{history: s.blockHashHistory},
-		rules.Upgrades,
-	)
-
-	evmBlock := &evmcore.EvmBlock{
-		EvmHeader: evmcore.EvmHeader{
-			Number:      block.Number(),
-			ParentHash:  block.ParentHash(),
-			Time:        inter.Timestamp(block.Time() * 1e9),
-			GasLimit:    block.GasLimit(),
-			PrevRandao:  block.Header().MixDigest,
-			BaseFee:     block.BaseFee(),
-			BlobBaseFee: big.NewInt(1),
-		},
-		Transactions: block.Transactions(),
-	}
-
-	stateDb := evmstore.CreateCarmenStateDb(s.db, nil)
-
-	vmConfig := opera.GetVmConfig(rules)
-	gasLimit := block.GasLimit()
-
-	s.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())
-
-	zone := tracy.ZoneBegin("TransactionProcessing")
-	s.db.BeginBlock()
-	var usedGas uint64
-	processed := processor.Process(
-		evmBlock,
-		stateDb,
-		vmConfig,
-		gasLimit,
-		&usedGas,
-		0, // Tx index offset
-		nil,
-	)
-
-	// Check that all transactions were processed (i.e., none were skipped).
-	for i, processed := range processed.ProcessedTransactions {
-		if processed.Receipt == nil {
-			return nil, fmt.Errorf("found block with skipped txs at index %d", i)
+	var receipts types.Receipts
+	undoList := make([]func(), 0)
+	for i := range 2 {
+		if i == 1 {
+			s.db.RevertLastBlock(undoList)
 		}
-	}
 
-	// Retrieve the receipts from the processed transactions.
-	receipts := make(types.Receipts, len(processed.ProcessedTransactions))
-	for i, proc := range processed.ProcessedTransactions {
-		receipts[i] = proc.Receipt
-	}
+		chainConfig := opera.CreateTransientEvmChainConfig(
+			chainId,
+			metadata.Upgrades,
+			idx.Block(block.NumberU64()),
+		)
+		rules := metadata.GetRulesAtBlock(block.NumberU64())
 
-	// Apply corrections if any are provided.
-	if fixes := metadata.Corrections[block.NumberU64()]; len(fixes) > 0 {
-		s.db.BeginTransaction()
-		slog.Info("Applying corrections", "block", block.NumberU64())
-		for addr, acc := range fixes {
-			slog.Info("Correcting account",
-				"address", addr.Hex(),
-				"old_balance", s.db.GetBalance(cc.Address(addr)).ToBig().String(),
-				"new_balance", acc.Balance.ToBig().String(),
-			)
-			s.setBalance(addr, acc.Balance.ToBig())
+		processor := evmcore.NewStateProcessorForReplay(
+			chainConfig,
+			historyAdapter{history: s.blockHashHistory},
+			rules.Upgrades,
+		)
+
+		evmBlock := &evmcore.EvmBlock{
+			EvmHeader: evmcore.EvmHeader{
+				Number:      block.Number(),
+				ParentHash:  block.ParentHash(),
+				Time:        inter.Timestamp(block.Time() * 1e9),
+				GasLimit:    block.GasLimit(),
+				PrevRandao:  block.Header().MixDigest,
+				BaseFee:     block.BaseFee(),
+				BlobBaseFee: big.NewInt(1),
+			},
+			Transactions: block.Transactions(),
 		}
-		s.db.EndTransaction()
-	}
-	zone.End()
 
-	zone = tracy.ZoneBegin("EndBlock")
-	s.db.EndBlock(block.NumberU64())
-	zone.End()
+		stateDb := evmstore.CreateCarmenStateDb(s.db, nil)
+
+		vmConfig := opera.GetVmConfig(rules)
+		gasLimit := block.GasLimit()
+
+		s.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())
+
+		zone := tracy.ZoneBegin("TransactionProcessing")
+		s.db.BeginBlock()
+		var usedGas uint64
+		processed := processor.Process(
+			evmBlock,
+			stateDb,
+			vmConfig,
+			gasLimit,
+			&usedGas,
+			0, // Tx index offset
+			nil,
+		)
+
+		// Check that all transactions were processed (i.e., none were skipped).
+		for i, processed := range processed.ProcessedTransactions {
+			if processed.Receipt == nil {
+				return nil, fmt.Errorf("found block with skipped txs at index %d", i)
+			}
+		}
+
+		// Retrieve the receipts from the processed transactions.
+		receipts := make(types.Receipts, len(processed.ProcessedTransactions))
+		for i, proc := range processed.ProcessedTransactions {
+			receipts[i] = proc.Receipt
+		}
+
+		// Apply corrections if any are provided.
+		if fixes := metadata.Corrections[block.NumberU64()]; len(fixes) > 0 {
+			s.db.BeginTransaction()
+			slog.Info("Applying corrections", "block", block.NumberU64())
+			for addr, acc := range fixes {
+				slog.Info("Correcting account",
+					"address", addr.Hex(),
+					"old_balance", s.db.GetBalance(cc.Address(addr)).ToBig().String(),
+					"new_balance", acc.Balance.ToBig().String(),
+				)
+				s.setBalance(addr, acc.Balance.ToBig())
+			}
+			s.db.EndTransaction()
+		}
+		zone.End()
+
+		zone = tracy.ZoneBegin("EndBlock")
+		endBlockRes := s.db.EndBlock(block.NumberU64())
+		undoList = endBlockRes.UndoList
+		zone.End()
+	}
 	return receipts, s.db.Check()
 }
 

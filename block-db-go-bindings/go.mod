@@ -29,8 +29,13 @@ require (
 	github.com/holiman/uint256 v1.3.2
 	github.com/schollz/progressbar/v3 v3.18.0
 	github.com/urfave/cli/v3 v3.3.8
-	go.uber.org/mock v0.4.0
+	go.uber.org/mock v0.6.0
 	google.golang.org/protobuf v1.36.11
+)
+
+require (
+	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
+	github.com/ethereum/go-verkle v0.2.3-0.20260102081149-aa0a270c0ed0 // indirect
 )
 
 require (
@@ -122,10 +127,12 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
 
 // This line is automatically uncommented by the `go-run-with-carmen.sh` and `go-run-with-carmen-and-tracy.sh` scripts.
 //
-//replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
+replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
 
 // This line is automatically uncommented by the `go-run-with-carmen-and-tracy.sh` script.
 //
 //replace github.com/0xsoniclabs/tracy => ../../tracy
 
 //replace github.com/0xsoniclabs/tosca => ../../tosca
+
+replace github.com/0xsoniclabs/sonic => ../../sonic

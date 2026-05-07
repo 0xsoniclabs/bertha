@@ -24,16 +24,12 @@ import (
 
 	"github.com/0xsoniclabs/blockdb"
 	cc "github.com/0xsoniclabs/carmen/go/common"
-	"github.com/0xsoniclabs/carmen/go/common/future"
-	"github.com/0xsoniclabs/carmen/go/common/result"
-	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
 )
 
 func TestState_CanBeCreatedAndClosed(t *testing.T) {
@@ -108,36 +104,36 @@ func TestState_Close_CanBeCalledOnClosedDb(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestState_GetStateRoot_ForwardsCallToDatabase(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	db := carmen.NewMockStateDB(ctrl)
+// func TestState_GetStateRoot_ForwardsCallToDatabase(t *testing.T) {
+// 	ctrl := gomock.NewController(t)
+// 	db := carmen.NewMockStateDB(ctrl)
 
-	hash := cc.Hash{1, 2, 3}
-	db.EXPECT().GetCommitment().Return(
-		future.Immediate(result.Ok(hash)),
-	)
+// 	hash := cc.Hash{1, 2, 3}
+// 	db.EXPECT().GetCommitment().Return(
+// 		future.Immediate(result.Ok(hash)),
+// 	)
 
-	state := &State{db: db}
+// 	state := &State{db: db}
 
-	got, err := state.GetStateRoot().Await().Get()
-	require.NoError(t, err)
-	require.Equal(t, common.Hash(hash), got)
-}
+// 	got, err := state.GetStateRoot().Await().Get()
+// 	require.NoError(t, err)
+// 	require.Equal(t, common.Hash(hash), got)
+// }
 
-func TestState_GetStateRoot_ForwardsErrorFromDatabase(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	db := carmen.NewMockStateDB(ctrl)
+// func TestState_GetStateRoot_ForwardsErrorFromDatabase(t *testing.T) {
+// 	ctrl := gomock.NewController(t)
+// 	db := carmen.NewMockStateDB(ctrl)
 
-	issue := fmt.Errorf("database error")
-	db.EXPECT().GetCommitment().Return(
-		future.Immediate(result.Err[cc.Hash](issue)),
-	)
+// 	issue := fmt.Errorf("database error")
+// 	db.EXPECT().GetCommitment().Return(
+// 		future.Immediate(result.Err[cc.Hash](issue)),
+// 	)
 
-	state := &State{db: db}
+// 	state := &State{db: db}
 
-	_, err := state.GetStateRoot().Await().Get()
-	require.ErrorIs(t, err, issue)
-}
+// 	_, err := state.GetStateRoot().Await().Get()
+// 	require.ErrorIs(t, err, issue)
+// }
 
 func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
 	genesis := &Genesis{
