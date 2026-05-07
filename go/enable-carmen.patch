@@ -1,0 +1,44 @@
+diff --git a/go/replay/state.go b/go/replay/state.go
+index 3f0c3cf..afdf5f3 100644
+--- a/go/replay/state.go
++++ b/go/replay/state.go
+@@ -36,8 +36,9 @@ import (
+ 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
+ 	"github.com/ethereum/go-ethereum/common"
+ 	"github.com/ethereum/go-ethereum/core/types"
++
+ 	// Uncomment to enable experimental Carmen features.
+-	//_ "github.com/0xsoniclabs/carmen/go/experimental"
++	_ "github.com/0xsoniclabs/carmen/go/experimental"
+ )
+
+ // State is an abstraction of the Chain State Database. It tracks the balances,
+diff --git a/go/go.mod b/go/go.mod
+index 8994196..99485a8 100644
+--- a/go/go.mod
++++ b/go/go.mod
+@@ -50,13 +50,13 @@ require (
+ 	github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06 // indirect
+ 	github.com/consensys/gnark-crypto v0.18.1 // indirect
+ 	github.com/crate-crypto/go-eth-kzg v1.5.0 // indirect
+-	//github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
++	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
+ 	github.com/deckarep/golang-set/v2 v2.6.0 // indirect
+ 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0 // indirect
+ 	github.com/emicklei/dot v1.6.2 // indirect
+ 	github.com/ethereum/c-kzg-4844/v2 v2.1.6 // indirect
+ 	github.com/ethereum/go-bigmodexpfix v0.0.0-20250911101455-f9e208c548ab // indirect
+-	//github.com/ethereum/go-verkle v0.2.3-0.20260102081149-aa0a270c0ed0 // indirect
++	github.com/ethereum/go-verkle v0.2.3-0.20260102081149-aa0a270c0ed0 // indirect
+ 	github.com/ferranbt/fastssz v0.1.4 // indirect
+ 	github.com/fsnotify/fsnotify v1.7.0 // indirect
+ 	github.com/getsentry/sentry-go v0.29.0 // indirect
+@@ -122,7 +122,7 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
+
+ // This line is automatically uncommented by the `go-run-with-carmen.sh` and `go-run-with-carmen-and-tracy.sh` scripts.
+ //
+-//replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
++replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
+
+ // This line is automatically uncommented by the `go-run-with-carmen-and-tracy.sh` script.
+ //
