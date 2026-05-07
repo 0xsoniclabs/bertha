@@ -121,10 +121,12 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
 
 // This line is automatically uncommented by the `go-run-with-carmen.sh` and `go-run-with-carmen-and-tracy.sh` scripts.
 //
-//replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
+replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
 
 // This line is automatically uncommented by the `go-run-with-tracy.sh` and `go-run-with-carmen-and-tracy.sh` scripts.
 //
 //replace github.com/0xsoniclabs/tracy => ../../tracy
 
 //replace github.com/0xsoniclabs/tosca => ../../tosca
+
+replace github.com/0xsoniclabs/sonic => ../../sonic
