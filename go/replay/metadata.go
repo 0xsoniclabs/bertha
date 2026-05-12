@@ -37,9 +37,9 @@ type MetadataStore interface {
 	// GetUpgrades returns all stored upgrades.
 	GetUpgrades() []opera.UpgradeHeight
 
-	// GetRulesAtBlock returns the effective rules at the given block number,
+	// GetUpgradesAtBlock returns the effective upgrades at the given block number,
 	// based on all stored upgrades up to and including that block.
-	GetRulesAtBlock(blockNumber uint64) opera.Rules
+	GetUpgradesAtBlock(blockNumber uint64) opera.Upgrades
 
 	// GetCorrections returns the account corrections to be applied at the
 	// given block number, or nil if there are none.
@@ -119,15 +119,15 @@ func (s *StaticMetadataStore) GetUpgrades() []opera.UpgradeHeight {
 	return s.metadata.Upgrades
 }
 
-// GetRulesAtBlock returns the effective rules at the given block number.
-func (s *StaticMetadataStore) GetRulesAtBlock(blockNumber uint64) opera.Rules {
-	rules := opera.Rules{}
+// GetUpgradesAtBlock returns the effective upgrades at the given block number.
+func (s *StaticMetadataStore) GetUpgradesAtBlock(blockNumber uint64) opera.Upgrades {
+	upgrades := opera.Upgrades{}
 	for _, upgrade := range s.metadata.Upgrades {
 		if upgrade.Height <= idx.Block(blockNumber) {
-			rules.Upgrades = upgrade.Upgrades
+			upgrades = upgrade.Upgrades
 		}
 	}
-	return rules
+	return upgrades
 }
 
 // GetCorrections returns the account corrections for the given block number.

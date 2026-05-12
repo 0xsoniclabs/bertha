@@ -161,12 +161,12 @@ func (s *State) ApplyBlock(block *types.Block) (types.Receipts, error) {
 		s.metadataStore.GetUpgrades(),
 		idx.Block(block.NumberU64()),
 	)
-	rules := s.metadataStore.GetRulesAtBlock(block.NumberU64())
+	upgrades := s.metadataStore.GetUpgradesAtBlock(block.NumberU64())
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
 		historyAdapter{history: s.blockHashHistory},
-		rules.Upgrades,
+		upgrades,
 	)
 
 	evmBlock := &evmcore.EvmBlock{
@@ -184,7 +184,7 @@ func (s *State) ApplyBlock(block *types.Block) (types.Receipts, error) {
 
 	stateDB := evmstore.CreateCarmenStateDb(s.db, nil)
 
-	vmConfig := opera.GetVmConfig(rules)
+	vmConfig := opera.GetVmConfig(opera.Rules{Upgrades: upgrades})
 	gasLimit := block.GasLimit()
 
 	s.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())

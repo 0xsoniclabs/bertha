@@ -55,20 +55,6 @@ func (mr *MockMetadataStoreMockRecorder) GetCorrections(blockNumber any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCorrections", reflect.TypeOf((*MockMetadataStore)(nil).GetCorrections), blockNumber)
 }
 
-// GetRulesAtBlock mocks base method.
-func (m *MockMetadataStore) GetRulesAtBlock(blockNumber uint64) opera.Rules {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetRulesAtBlock", blockNumber)
-	ret0, _ := ret[0].(opera.Rules)
-	return ret0
-}
-
-// GetRulesAtBlock indicates an expected call of GetRulesAtBlock.
-func (mr *MockMetadataStoreMockRecorder) GetRulesAtBlock(blockNumber any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRulesAtBlock", reflect.TypeOf((*MockMetadataStore)(nil).GetRulesAtBlock), blockNumber)
-}
-
 // GetUpgrades mocks base method.
 func (m *MockMetadataStore) GetUpgrades() []opera.UpgradeHeight {
 	m.ctrl.T.Helper()
@@ -81,6 +67,20 @@ func (m *MockMetadataStore) GetUpgrades() []opera.UpgradeHeight {
 func (mr *MockMetadataStoreMockRecorder) GetUpgrades() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUpgrades", reflect.TypeOf((*MockMetadataStore)(nil).GetUpgrades))
+}
+
+// GetUpgradesAtBlock mocks base method.
+func (m *MockMetadataStore) GetUpgradesAtBlock(blockNumber uint64) opera.Upgrades {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetUpgradesAtBlock", blockNumber)
+	ret0, _ := ret[0].(opera.Upgrades)
+	return ret0
+}
+
+// GetUpgradesAtBlock indicates an expected call of GetUpgradesAtBlock.
+func (mr *MockMetadataStoreMockRecorder) GetUpgradesAtBlock(blockNumber any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUpgradesAtBlock", reflect.TypeOf((*MockMetadataStore)(nil).GetUpgradesAtBlock), blockNumber)
 }
 
 // StoreUpgrade mocks base method.

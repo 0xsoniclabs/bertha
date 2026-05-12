@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStaticMetadataStore_GetRulesAtBlock_ObtainsUpgradesBasedOnBlockNumber(t *testing.T) {
+func TestStaticMetadataStore_GetUpgradesAtBlock_ObtainsUpgradesBasedOnBlockNumber(t *testing.T) {
 	upgrades := []opera.Upgrades{
 		{Sonic: true},
 		{Sonic: true, Allegro: true},
@@ -45,17 +45,17 @@ func TestStaticMetadataStore_GetRulesAtBlock_ObtainsUpgradesBasedOnBlockNumber(t
 	}
 
 	for blockNr := range 20 {
-		expect := opera.Rules{}
+		var expect opera.Upgrades
 		if blockNr >= 11 {
-			expect.Upgrades = upgrades[2]
+			expect = upgrades[2]
 		} else if blockNr >= 7 {
-			expect.Upgrades = upgrades[1]
+			expect = upgrades[1]
 		} else if blockNr >= 5 {
-			expect.Upgrades = upgrades[0]
+			expect = upgrades[0]
 		}
 
-		rules := store.GetRulesAtBlock(uint64(blockNr))
-		require.Equal(t, expect, rules, "block number %d", blockNr)
+		got := store.GetUpgradesAtBlock(uint64(blockNr))
+		require.Equal(t, expect, got, "block number %d", blockNr)
 	}
 }
 

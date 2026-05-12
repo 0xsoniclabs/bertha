@@ -286,8 +286,8 @@ func TestState_ApplyBlock_AppliesUpgrades(t *testing.T) {
 		require.Len(t, receipts, 1)
 		require.Equal(t, types.ReceiptStatusSuccessful, receipts[0].Status)
 
-		rules := metadataStore.GetRulesAtBlock(uint64(blockNr))
-		if rules.Upgrades.SingleProposerBlockFormation {
+		upgrades := metadataStore.GetUpgradesAtBlock(uint64(blockNr))
+		if upgrades.SingleProposerBlockFormation {
 			require.Equal(t, uint64(21_000), receipts[0].GasUsed)
 		} else {
 			require.Greater(t, receipts[0].GasUsed, uint64(21_000))
