@@ -17,7 +17,7 @@
 package blockdb
 
 import (
-	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/linxGnu/grocksdb"
@@ -58,8 +58,7 @@ func TestOpenRocksDB(t *testing.T) {
 }
 
 func opensExistingDB(t *testing.T, dbOpener OpenRocksDBFunc) {
-	path, err := os.MkdirTemp("", "blockdb-*")
-	require.NoError(t, err, "failed to create temp dir")
+	path := t.TempDir()
 
 	writeDB, err := createDB(path)
 	require.NoError(t, err, "failed to create db")
@@ -71,16 +70,16 @@ func opensExistingDB(t *testing.T, dbOpener OpenRocksDBFunc) {
 }
 
 func failsIfDBDoesNotExist(t *testing.T, dbOpener OpenRocksDBFunc) {
-	_, err := dbOpener("non-existing-db-path")
+	path := filepath.Join(t.TempDir(), "non-existing-db-path")
+	_, err := dbOpener(path)
 	require.Error(t, err, "opening db did not return an error although path does not exist")
-
 }
 
 func getReturnsBlockIfItExists(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3}
 
-	path, err := fillDBWithBlocks(chainID, blockNumbers)
+	path, err := fillDBWithBlocks(t, chainID, blockNumbers)
 	require.NoError(t, err, "failed to create db")
 
 	// db now contains blocks 1, 2, and 3 for chainId 3
@@ -111,7 +110,7 @@ func getReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 	blockNumber := uint64(1)
 
-	path, err := fillDBWithInvalidBlock(chainID, blockNumber)
+	path, err := fillDBWithInvalidBlock(t, chainID, blockNumber)
 	require.NoError(t, err, "failed to create db")
 
 	// db now contains an invalid blocks at blocknumber 1 for chainId 3
@@ -131,7 +130,7 @@ func getReturnsErrorIfBlockDoesNotExist(t *testing.T, dbOpener OpenRocksDBFunc) 
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3}
 
-	path, err := fillDBWithBlocks(chainID, blockNumbers)
+	path, err := fillDBWithBlocks(t, chainID, blockNumbers)
 	require.NoError(t, err, "failed to create db")
 
 	// db now contains blocks 1, 2, and 3 for chainId 3
@@ -160,7 +159,7 @@ func getRangeReturnsExistingSubRange(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3, 20}
 
-	path, err := fillDBWithBlocks(chainID, blockNumbers)
+	path, err := fillDBWithBlocks(t, chainID, blockNumbers)
 	require.NoError(t, err, "failed to create db")
 
 	// db now contains blocks 1, 2, 3 and 20 for chainId 3
@@ -195,7 +194,7 @@ func getRangeReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBFunc
 	chainID := uint64(3)
 	blockNumber := uint64(1)
 
-	path, err := fillDBWithInvalidBlock(chainID, blockNumber)
+	path, err := fillDBWithInvalidBlock(t, chainID, blockNumber)
 	require.NoError(t, err, "failed to create db")
 
 	// db now contains an invalid blocks at blocknumber 1 for chainId 3
@@ -217,7 +216,7 @@ func getRangeRevReturnsExistingSubRangeInReverseOrder(t *testing.T, dbOpener Ope
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3, 20}
 
-	path, err := fillDBWithBlocks(chainID, blockNumbers)
+	path, err := fillDBWithBlocks(t, chainID, blockNumbers)
 	require.NoError(t, err, "failed to create db")
 
 	// db now contains blocks 1, 2, 3 and 20 for chainId 3
@@ -252,7 +251,7 @@ func getRangeRevReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBF
 	chainID := uint64(3)
 	blockNumber := uint64(1)
 
-	path, err := fillDBWithInvalidBlock(chainID, blockNumber)
+	path, err := fillDBWithInvalidBlock(t, chainID, blockNumber)
 	require.NoError(t, err, "failed to create db")
 
 	// db now contains an invalid blocks at blocknumber 1 for chainId 3
@@ -272,8 +271,7 @@ func getRangeRevReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBF
 }
 
 func TestRocksDB_Update_CreatesNewBlock(t *testing.T) {
-	path, err := os.MkdirTemp("", "blockdb-*")
-	require.NoError(t, err, "failed to create temp dir")
+	path := t.TempDir()
 
 	writeDB, err := createDB(path)
 	require.NoError(t, err, "failed to create db")
@@ -298,8 +296,7 @@ func TestRocksDB_Update_CreatesNewBlock(t *testing.T) {
 }
 
 func TestRocksDB_Update_OverwritesExistingBlock(t *testing.T) {
-	path, err := os.MkdirTemp("", "blockdb-*")
-	require.NoError(t, err, "failed to create temp dir")
+	path := t.TempDir()
 
 	writeDB, err := createDB(path)
 	require.NoError(t, err, "failed to create db")
@@ -366,11 +363,8 @@ func (db writeDB) putBlock(chainID uint64, block *Block) error {
 	return db.putRaw(key, data)
 }
 
-func fillDBWithBlocks(chainID uint64, blockNumbers []uint64) (string, error) {
-	path, err := os.MkdirTemp("", "blockdb-*")
-	if err != nil {
-		return "", err
-	}
+func fillDBWithBlocks(t *testing.T, chainID uint64, blockNumbers []uint64) (string, error) {
+	path := t.TempDir()
 
 	db, err := createDB(path)
 	if err != nil {
@@ -388,11 +382,8 @@ func fillDBWithBlocks(chainID uint64, blockNumbers []uint64) (string, error) {
 	return path, nil
 }
 
-func fillDBWithInvalidBlock(chainID uint64, blockNumber uint64) (string, error) {
-	path, err := os.MkdirTemp("", "blockdb-*")
-	if err != nil {
-		return "", err
-	}
+func fillDBWithInvalidBlock(t *testing.T, chainID uint64, blockNumber uint64) (string, error) {
+	path := t.TempDir()
 
 	db, err := createDB(path)
 	if err != nil {
