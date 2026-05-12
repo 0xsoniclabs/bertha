@@ -144,6 +144,10 @@ func (db RocksDB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) ite
 		defer it.Close()
 		for it.Valid() {
 			key := it.Key().Data()
+			// Stop if the key is not a valid block key
+			if len(key) != 16 {
+				break
+			}
 			// Stop if we reach a key that has a different chain ID or a key number that is greater than the end block number
 			keyNum := binary.BigEndian.Uint64(key[8:])
 			if !slices.Equal(key[:8], startKey[:8]) || keyNum > endBlockNumber {
@@ -179,6 +183,10 @@ func (db RocksDB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) 
 		defer it.Close()
 		for it.Valid() {
 			key := it.Key().Data()
+			// Stop if the key is not a valid block key
+			if len(key) != 16 {
+				break
+			}
 			// Stop if we reach a key that has a different chain ID or a key number that is less than the start block number
 			keyNum := binary.BigEndian.Uint64(key[8:])
 			if !slices.Equal(key[:8], endKey[:8]) || keyNum < startBlockNumber {
