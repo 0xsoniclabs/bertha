@@ -44,8 +44,8 @@ func getApp() *cli.Command {
 	var profiler *profiler
 	var diagnostic *diagnostic
 	return &cli.Command{
-		Name:  "block-db",
-		Usage: "Block Database CLI",
+		Name:  "bertha",
+		Usage: "Block DB Tools",
 		Commands: []*cli.Command{
 			{
 				Name:   "replay",

@@ -1,4 +1,4 @@
-# Block DB Go Tools
+# Block DB Tools
 
 This package provides a binary providing various Go based utilities for
 performing operations on Block Databases.
@@ -72,10 +72,10 @@ instrumentation codes are disabled.
 
 To enable instrumentation, the following steps are required:
 - check-out Sonic's [tracy](git@github.com:0xsoniclabs/tracy.git) binding library in a new directory
-  - use `--recursive` to check out sub-directories or run `go submodule update --init --recursive`
+  - use `--recursive` to check out sub-directories or run `git submodule update --init --recursive`
   after cloning the library
   - build the Tracy-Client shared library using `make` in the tracy project
-- add a replace to Bertha's [go.mod](./../../go.mod) file to use the manually build `tracy` package
+- add a replace to Bertha's [go.mod](./go.mod) file to use the manually build `tracy` package
 instead of the one retrieved from github; (e.g. `replace github.com/0xsoniclabs/tracy => ../../tracy`)
 - build Bertha's Go commands with the `enable_tracy` tag. For instance, to run the replay command with instrumentation enabled, the
 following command can be used:
@@ -83,10 +83,10 @@ following command can be used:
 go run --tags enable_tracy ./ replay -g sonic.json -db ../.blockdb -e 100
 ```
 
-This setup is automated in [go-run-with-tracy.sh](../../go-run-with-tracy.sh) which also does the setup to integrate carmen's tracy instrumentation listed below.
+This setup is automated in [go-run-with-carmen-and-tracy.sh](./go-run-with-carmen-and-tracy.sh) which also does the setup to integrate carmen's tracy instrumentation listed below.
 For instance, to run the replay command, the following command can be used:
 ```
-./go-run-with-tracy ./ replay -g sonic.json -db ../.blockdb -e 100
+./go-run-with-carmen-and-tracy.sh ./ replay -g sonic.json -db ../.blockdb -e 100
 ```
 
 ### Integrate Carmen's Tracy Instrumentation
