@@ -48,7 +48,7 @@ Subcommand usage (e.g. for `init`)
 $ cargo run --release -- init --help
 ```
 
-**Note: by default, all commands assume that the db directory (`.blockdb`) is in the current directory, however you can specify a different path using `--path PATH`.**
+**Note: by default, all commands assume that the db directory (called `.blockdb`) is in the current directory, however you can specify a different path using `--dir <DIR>`.**
 
 ## Running
 
@@ -77,14 +77,14 @@ cargo run --release -- import-era1 </path/to/era1_directory> [--verify]
 cargo run --release -- import-era </path/to/era_directory>
 ```
 
-Start the gRPC server (by default the port is 8080)
+Start the gRPC server (by default the port is 8080, configured in `blockservice.toml`)
 
 ```sh
-cargo run --release -- start [PORT]
+cargo run --release -- start
 ```
 
 Fetch blocks from a gRPC server
 
 ```sh
-cargo run --release -- fetch 8080
+cargo run --release -- fetch <url> <chain_id>
 ```

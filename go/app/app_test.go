@@ -43,7 +43,7 @@ func TestRun_RunWithoutParameters_PrintsHelp(t *testing.T) {
 	os.Stdout = backup
 	content, err := os.ReadFile(tmp)
 	require.NoError(t, err, "failed to read output file")
-	require.Contains(t, string(content), "Block Database CLI")
+	require.Contains(t, string(content), "Block DB Tools")
 	require.Contains(t, string(content), "USAGE")
 }
 
