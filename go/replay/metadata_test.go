@@ -17,8 +17,10 @@
 package replay
 
 import (
+	"log/slog"
 	"testing"
 
+	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
@@ -78,10 +80,20 @@ func TestNewStaticMetadataStore_AllegroTestChain_NoCorrectionsButUpgrades(t *tes
 }
 
 func TestNewStaticMetadataStore_UnknownChainID_LogsWarningAndReturnsEmptyMetadata(t *testing.T) {
+	handler := &utils.CapturingLogHandler{}
+	old := slog.Default()
+	slog.SetDefault(slog.New(handler))
+	t.Cleanup(func() { slog.SetDefault(old) })
+
 	store, err := NewStaticMetadataStore(0)
 	require.NoError(t, err)
 	require.Empty(t, store.metadata.Upgrades)
 	require.Empty(t, store.metadata.Corrections)
+
+	records := handler.Records()
+	require.Len(t, records, 1)
+	require.Equal(t, slog.LevelWarn, records[0].Level)
+	require.Equal(t, "no metadata available for chain ID, proceeding without upgrades or corrections", records[0].Message)
 }
 
 func TestStaticMetadataStore_StoreUpgrade_VerifiesUpgradeExists(t *testing.T) {
