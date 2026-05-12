@@ -118,5 +118,5 @@ func TestStaticMetadataStore_GetCorrections_ReturnsCorrections(t *testing.T) {
 
 	require.Equal(t, corrections[10], store.GetCorrections(10))
 	require.Equal(t, corrections[20], store.GetCorrections(20))
-	require.Equal(t, map[common.Address]Correction{}, store.GetCorrections(30))
+	require.Nil(t, store.GetCorrections(30))
 }

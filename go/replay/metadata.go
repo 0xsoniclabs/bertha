@@ -132,10 +132,7 @@ func (s *StaticMetadataStore) GetRulesAtBlock(blockNumber uint64) opera.Rules {
 
 // GetCorrections returns the account corrections for the given block number.
 func (s *StaticMetadataStore) GetCorrections(blockNumber uint64) map[common.Address]Correction {
-	if corrections, ok := s.metadata.Corrections[blockNumber]; ok {
-		return corrections
-	}
-	return map[common.Address]Correction{}
+	return s.metadata.Corrections[blockNumber]
 }
 
 const (
