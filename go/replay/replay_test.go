@@ -24,6 +24,7 @@ import (
 	"iter"
 	"log/slog"
 	"math"
+	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,8 +36,10 @@ import (
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	"github.com/0xsoniclabs/carmen/go/state"
+	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/linxGnu/grocksdb"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -153,9 +156,8 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 	dbMock := state.NewMockStateDB(ctrl)
 	dbMock.EXPECT().Flush().Return(nil).Times(2)
 	state := &State{
-		blockHashHistory: nil,
-		db:               dbMock,
-		stateParameter:   StateParameters{},
+		db:             dbMock,
+		stateParameter: StateParameters{},
 	}
 
 	dir := t.TempDir()
@@ -267,8 +269,6 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	chainID := uint64(12)
 	state, err := NewState(
 		StateParameters{Directory: t.TempDir(), Schema: 5},
-		&StaticMetadataStore{},
-		chainID,
 	)
 	require.NoError(t, err)
 	defer func() {
@@ -286,9 +286,11 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	}
 
 	chain := &stateChainAdapter{
-		chainID:         chainID,
-		state:           state,
-		snapshotHandler: NewSnapshotHandler(0, 0, math.MaxUint64, 1),
+		chainID:          chainID,
+		metadataStore:    &StaticMetadataStore{},
+		blockHashHistory: &blockHashHistory{},
+		state:            state,
+		snapshotHandler:  NewSnapshotHandler(0, 0, math.MaxUint64, 1),
 	}
 
 	iter := utils.NewIter(blocks)
@@ -642,8 +644,6 @@ func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
 
 	state, err := NewState(
 		StateParameters{Directory: t.TempDir(), Schema: 5},
-		&StaticMetadataStore{},
-		chainID,
 	)
 	require.NoError(t, err)
 	defer func() {
@@ -651,8 +651,10 @@ func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
 	}()
 
 	chain := &stateChainAdapter{
-		chainID: chainID,
-		state:   state,
+		chainID:          chainID,
+		metadataStore:    &StaticMetadataStore{},
+		blockHashHistory: &blockHashHistory{},
+		state:            state,
 	}
 
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{
@@ -669,6 +671,79 @@ func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
 	require.ErrorContains(t, err, "failed to apply block")
 }
 
+func TestStateChainAdapter_ApplyBlock_AppliesUpgrades(t *testing.T) {
+	// To see an effect of upgrades, this test uses two different rule sets
+	// such that gas costs for a simple transaction with excess gas differ.
+	// If the single proposer block formation is enabled, no fees are charged
+	// for transactions using too high gas limits. If it is disabled, a 10%
+	// excess gas charge is applied.
+	noExcessGasCharges := opera.GetAllegroUpgrades()
+	noExcessGasCharges.SingleProposerBlockFormation = true
+
+	withExcessGasCharges := opera.GetAllegroUpgrades()
+	withExcessGasCharges.SingleProposerBlockFormation = false
+
+	metadataStore := &StaticMetadataStore{
+		metadata: Metadata{
+			Upgrades: []opera.UpgradeHeight{
+				{Height: 5, Upgrades: noExcessGasCharges},
+				{Height: 10, Upgrades: withExcessGasCharges},
+				{Height: 15, Upgrades: noExcessGasCharges},
+			},
+		},
+	}
+
+	chainID := uint64(1)
+	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, state.Close())
+	}()
+
+	chain := &stateChainAdapter{
+		chainID:          chainID,
+		metadataStore:    metadataStore,
+		blockHashHistory: &blockHashHistory{},
+		state:            state,
+		snapshotHandler:  &SnapshotHandler{},
+	}
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	signer := types.LatestSignerForChainID(big.NewInt(1))
+
+	for blockNr := range 20 {
+		block, err := convert.ConvertToGethBlock(&blockdb.Block{
+			Number:   uint64(blockNr + 1), // skip block 0 (genesis)
+			GasLimit: 100_000,
+			Transactions: []*blockdb.Transaction{
+				convert.ToBerthaTransaction(types.MustSignNewTx(
+					key,
+					signer,
+					&types.LegacyTx{
+						Nonce: uint64(blockNr),
+						To:    &common.Address{0},
+						Gas:   50_000, // extra gas beyond 21_000 to check rule effect
+					},
+				)),
+			},
+		})
+		require.NoError(t, err)
+
+		receipts, _, err := chain.ApplyBlock(block)
+		require.NoError(t, err)
+		require.Len(t, receipts, 1)
+		require.Equal(t, types.ReceiptStatusSuccessful, receipts[0].Status)
+
+		upgrades := metadataStore.GetUpgradesAtBlock(uint64(blockNr + 1))
+		if upgrades.SingleProposerBlockFormation {
+			require.Equal(t, uint64(21_000), receipts[0].GasUsed)
+		} else {
+			require.Greater(t, receipts[0].GasUsed, uint64(21_000))
+		}
+	}
+}
+
 func Test_getExpectedStateRoot_ReturnsCorrectStateRoot(t *testing.T) {
 	require := require.New(t)
 
@@ -678,7 +753,7 @@ func Test_getExpectedStateRoot_ReturnsCorrectStateRoot(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: dir,
 		Schema:    5,
-	}, &StaticMetadataStore{}, chainID)
+	})
 	require.NoError(err)
 	defer func() {
 		require.NoError(state.Close())
@@ -714,7 +789,7 @@ func Test_updateStateRoot_UpdatesCorrectStateRoot(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: dir,
 		Schema:    5,
-	}, &StaticMetadataStore{}, chainID)
+	})
 	require.NoError(err)
 	defer func() {
 		require.NoError(state.Close())
@@ -880,8 +955,6 @@ func Test_SnapshotHandler_CreatesAndRemovesSnapshots(t *testing.T) {
 	dir := t.TempDir()
 	state, err := NewState(
 		StateParameters{Directory: dir, Schema: 5},
-		&StaticMetadataStore{},
-		1,
 	)
 	require.NoError(err)
 	defer func() {
@@ -933,8 +1006,6 @@ func Test_SnapshotHandler_GetOldestSnapshotDirReturnsOldestSnapshot(t *testing.T
 
 	state, err := NewState(
 		StateParameters{Directory: dir, Schema: 5},
-		&StaticMetadataStore{},
-		1,
 	)
 	require.NoError(err)
 	defer func() {
@@ -971,8 +1042,6 @@ func Test_SnapshotHandler_GetSnapshotDirsReturnsExistingSnapshotList(t *testing.
 
 	state, err := NewState(
 		StateParameters{Directory: dir, Schema: 5},
-		&StaticMetadataStore{},
-		1,
 	)
 	require.NoError(err)
 	defer func() {
@@ -1021,4 +1090,43 @@ func Test_FlagWithConfirmation(t *testing.T) {
 	flag.Disable()
 	require.False(flag.IsEnabled())
 	require.True(flag.IsConfirmed())
+}
+
+func TestBlockHashHistory_CanSetAndRetrieveHistoricHashes(t *testing.T) {
+	history := &blockHashHistory{}
+	for _, offset := range []uint64{0, 12, 1234} {
+		for i := uint64(0); i < 256; i++ {
+			history.SetBlockHash(i+offset, common.BytesToHash([]byte{byte(i + offset)}))
+		}
+		for i := uint64(0); i < 256; i++ {
+			expected := common.BytesToHash([]byte{byte(i + offset)})
+			actual := history.GetBlockHash(i + offset)
+			require.Equal(t, expected, actual)
+		}
+	}
+}
+
+func TestHistoryAdapter_ProducesHeaderWithCorrectHashes(t *testing.T) {
+	history := &blockHashHistory{}
+
+	blockNum := uint64(12)
+	current := common.Hash{1, 2, 3}
+	parent := common.Hash{4, 5, 6}
+	grandParent := common.Hash{7, 8, 9}
+
+	history.SetBlockHash(blockNum, current)
+	history.SetBlockHash(blockNum-1, parent)
+	history.SetBlockHash(blockNum-2, grandParent)
+
+	adapter := historyAdapter{history: history}
+
+	header := adapter.Header(common.Hash{}, blockNum)
+	require.Equal(t, blockNum, header.Number.Uint64())
+	require.Equal(t, current, header.Hash)
+	require.Equal(t, parent, header.ParentHash)
+
+	header = adapter.Header(common.Hash{}, blockNum-1)
+	require.Equal(t, blockNum-1, header.Number.Uint64())
+	require.Equal(t, parent, header.Hash)
+	require.Equal(t, grandParent, header.ParentHash)
 }

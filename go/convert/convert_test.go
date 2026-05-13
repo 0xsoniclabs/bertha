@@ -124,6 +124,53 @@ func TestConvertToGethBlock_ConvertsBlockToGethBlock(t *testing.T) {
 	require.Equal(t, want.Hash(), got.Hash())
 }
 
+func TestToBerthaTransaction_ConvertsGethTransactionToBerthaTransaction(t *testing.T) {
+	cases := map[string]struct {
+		to         *common.Address
+		expectedTo []byte
+	}{
+		"with recipient": {
+			to:         &common.Address{0x13},
+			expectedTo: []byte{0x13, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+		},
+		"without recipient": {
+			to:         nil,
+			expectedTo: []byte{},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			gethTx := types.NewTx(&types.AccessListTx{
+				Nonce:    10,
+				GasPrice: big.NewInt(11),
+				Gas:      12,
+				To:       tc.to,
+				Value:    big.NewInt(14),
+				Data:     []byte{15},
+				V:        big.NewInt(16),
+				R:        big.NewInt(17),
+				S:        big.NewInt(18),
+			})
+
+			berthaTx := &blockdb.Transaction{
+				TransactionType: 1,
+				Nonce:           10,
+				GasPrice:        big.NewInt(11).Bytes(),
+				GasLimit:        12,
+				To:              tc.expectedTo,
+				Value:           big.NewInt(14).Bytes(),
+				Data:            []byte{15},
+				YParity:         big.NewInt(16).Bytes(),
+				R:               big.NewInt(17).Bytes(),
+				S:               big.NewInt(18).Bytes(),
+			}
+
+			require.Equal(t, berthaTx, ToBerthaTransaction(gethTx))
+		})
+	}
+}
+
 func TestToGethTransaction_NilTransaction_ReturnsError(t *testing.T) {
 	_, err := toGethTransaction(nil)
 	require.ErrorContains(t, err, "cannot convert nil transaction")

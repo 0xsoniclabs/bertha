@@ -3,7 +3,7 @@ index 3f0c3cf..afdf5f3 100644
 --- a/go/replay/state.go
 +++ b/go/replay/state.go
 @@ -36,8 +36,9 @@ import (
- 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
+ 	"github.com/0xsoniclabs/tracy"
  	"github.com/ethereum/go-ethereum/common"
  	"github.com/ethereum/go-ethereum/core/types"
 +
