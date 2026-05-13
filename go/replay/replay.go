@@ -158,7 +158,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 	chainID := genesis.ChainID
 
-	metadataStore, err := NewStaticMetadataStore(chainID)
+	metadataStore, err := NewStaticMetadataStore(chainID, slog.Default())
 	if err != nil {
 		return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
 	}

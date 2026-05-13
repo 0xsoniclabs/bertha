@@ -17,7 +17,6 @@
 package replay
 
 import (
-	"log/slog"
 	"testing"
 
 	"github.com/0xsoniclabs/bertha/utils"
@@ -25,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 )
 
 func TestStaticMetadataStore_GetUpgradesAtBlock_ObtainsUpgradesBasedOnBlockNumber(t *testing.T) {
@@ -60,13 +60,19 @@ func TestStaticMetadataStore_GetUpgradesAtBlock_ObtainsUpgradesBasedOnBlockNumbe
 }
 
 func TestNewStaticMetadataStore_SonicChain_ContainsCorrections(t *testing.T) {
-	store, err := NewStaticMetadataStore(SonicMainNetChainID)
+	ctrl := gomock.NewController(t)
+	logger := utils.NewMockLogger(ctrl)
+
+	store, err := NewStaticMetadataStore(SonicMainNetChainID, logger)
 	require.NoError(t, err)
 	require.NotEmpty(t, store.metadata.Corrections)
 }
 
 func TestNewStaticMetadataStore_AllegroTestChain_NoCorrectionsButUpgrades(t *testing.T) {
-	store, err := NewStaticMetadataStore(AllegroTestNetChainID)
+	ctrl := gomock.NewController(t)
+	logger := utils.NewMockLogger(ctrl)
+
+	store, err := NewStaticMetadataStore(AllegroTestNetChainID, logger)
 	require.NoError(t, err)
 	require.NotEmpty(t, store.GetUpgrades())
 	require.Empty(t, store.metadata.Corrections)
@@ -80,20 +86,17 @@ func TestNewStaticMetadataStore_AllegroTestChain_NoCorrectionsButUpgrades(t *tes
 }
 
 func TestNewStaticMetadataStore_UnknownChainID_LogsWarningAndReturnsEmptyMetadata(t *testing.T) {
-	handler := &utils.CapturingLogHandler{}
-	old := slog.Default()
-	slog.SetDefault(slog.New(handler))
-	t.Cleanup(func() { slog.SetDefault(old) })
+	ctrl := gomock.NewController(t)
+	logger := utils.NewMockLogger(ctrl)
 
-	store, err := NewStaticMetadataStore(0)
+	chainID := uint64(12345)
+
+	logger.EXPECT().Warn("no metadata available for chain ID, proceeding without upgrades or corrections", "chainId", chainID).Times(1)
+
+	store, err := NewStaticMetadataStore(chainID, logger)
 	require.NoError(t, err)
 	require.Empty(t, store.metadata.Upgrades)
 	require.Empty(t, store.metadata.Corrections)
-
-	records := handler.Records()
-	require.Len(t, records, 1)
-	require.Equal(t, slog.LevelWarn, records[0].Level)
-	require.Equal(t, "no metadata available for chain ID, proceeding without upgrades or corrections", records[0].Message)
 }
 
 func TestStaticMetadataStore_StoreUpgrade_VerifiesUpgradeExists(t *testing.T) {

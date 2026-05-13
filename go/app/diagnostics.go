@@ -24,9 +24,9 @@ import (
 	"time"
 
 	_ "net/http/pprof"
-)
 
-//go:generate mockgen -source=diagnostics.go -destination=diagnostics_mock.go -package=app
+	"github.com/0xsoniclabs/bertha/utils"
+)
 
 // diagnostic represents a running diagnostics server.
 type diagnostic struct {
@@ -40,7 +40,7 @@ type diagnostic struct {
 // Also, trace information can be accessed via a HTTP endpoint. For details
 // see https://pkg.go.dev/net/http/pprof.
 func StartDiagnostics(
-	logger _infoLogger,
+	logger utils.Logger,
 	port uint16,
 ) *diagnostic {
 	address := fmt.Sprintf("localhost:%d", port)
@@ -74,10 +74,4 @@ func (d *diagnostic) Stop() error {
 	err := d.server.Shutdown(ctx)
 	<-d.done
 	return err
-}
-
-// _infoLogger is an interface for mocking slog.Logger interactions in unit tests.
-type _infoLogger interface {
-	Info(msg string, keysAndValues ...any)
-	Error(msg string, keysAndValues ...any)
 }
