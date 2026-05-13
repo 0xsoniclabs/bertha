@@ -98,7 +98,25 @@ func ConvertToGethBlock(block *blockdb.Block) (*types.Block, error) {
 		}), nil
 }
 
-// --- Conversion helper functions for various types ---
+func ToBerthaTransaction(tx *types.Transaction) *blockdb.Transaction {
+	to := []byte{}
+	if tx.To() != nil {
+		to = tx.To().Bytes()
+	}
+	v, r, s := tx.RawSignatureValues()
+	return &blockdb.Transaction{
+		TransactionType: uint64(tx.Type()),
+		Nonce:           tx.Nonce(),
+		GasPrice:        tx.GasPrice().Bytes(),
+		GasLimit:        tx.Gas(),
+		To:              to,
+		Value:           tx.Value().Bytes(),
+		Data:            tx.Data(),
+		YParity:         v.Bytes(),
+		R:               r.Bytes(),
+		S:               s.Bytes(),
+	}
+}
 
 func toGethTransaction(tx *blockdb.Transaction) (*types.Transaction, error) {
 	if tx == nil {

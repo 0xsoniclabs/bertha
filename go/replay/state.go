@@ -33,7 +33,6 @@ import (
 	"github.com/0xsoniclabs/sonic/inter"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/tracy"
-	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	// Uncomment to enable experimental Carmen features.
@@ -48,11 +47,8 @@ import (
 // level methods for managing instances in the context of the replay tool.
 type State struct {
 	// TODO: replace with Carmen facade
-	db               carmen.StateDB
-	blockHashHistory *blockHashHistory
-	stateParameter   StateParameters
-	metadataStore    MetadataStore
-	chainID          uint64
+	db             carmen.StateDB
+	stateParameter StateParameters
 }
 
 // StateParameters is a configuration struct for creating a new State instance.
@@ -67,7 +63,7 @@ type StateParameters struct {
 // resulting state database is empty.
 //
 // Successfully created instances must be closed using the Close method.
-func NewState(params StateParameters, metadataStore MetadataStore, chainID uint64) (*State, error) {
+func NewState(params StateParameters) (*State, error) {
 	dir := params.Directory
 	err := os.MkdirAll(dir, 0700)
 	if err != nil {
@@ -98,11 +94,8 @@ func NewState(params StateParameters, metadataStore MetadataStore, chainID uint6
 	}
 	db := carmen.CreateCustomStateDBUsing(state, 0)
 	return &State{
-		db:               db,
-		blockHashHistory: &blockHashHistory{},
-		stateParameter:   params,
-		metadataStore:    metadataStore,
-		chainID:          chainID,
+		db:             db,
+		stateParameter: params,
 	}, nil
 }
 
@@ -155,20 +148,12 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 // ApplyBlock applies the given block to this state, processing all transactions
 // and updating the state accordingly. It returns the receipts of the transactions
 // in the block, or an error if the block could not be processed.
-func (s *State) ApplyBlock(block *types.Block) (types.Receipts, error) {
-	chainConfig := opera.CreateTransientEvmChainConfig(
-		s.chainID,
-		s.metadataStore.GetUpgrades(),
-		idx.Block(block.NumberU64()),
-	)
-	upgrades := s.metadataStore.GetUpgradesAtBlock(block.NumberU64())
-
-	processor := evmcore.NewStateProcessorForReplay(
-		chainConfig,
-		historyAdapter{history: s.blockHashHistory},
-		upgrades,
-	)
-
+func (s *State) ApplyBlock(
+	block *types.Block,
+	processor *evmcore.StateProcessor,
+	upgrades opera.Upgrades,
+	corrections map[common.Address]Correction,
+) (types.Receipts, error) {
 	evmBlock := &evmcore.EvmBlock{
 		EvmHeader: evmcore.EvmHeader{
 			Number:      block.Number(),
@@ -186,8 +171,6 @@ func (s *State) ApplyBlock(block *types.Block) (types.Receipts, error) {
 
 	vmConfig := opera.GetVmConfig(opera.Rules{Upgrades: upgrades})
 	gasLimit := block.GasLimit()
-
-	s.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())
 
 	zone := tracy.ZoneBegin("TransactionProcessing")
 	s.db.BeginBlock()
@@ -216,10 +199,10 @@ func (s *State) ApplyBlock(block *types.Block) (types.Receipts, error) {
 	}
 
 	// Apply corrections if any are provided.
-	if fixes := s.metadataStore.GetCorrections(block.NumberU64()); len(fixes) > 0 {
+	if len(corrections) > 0 {
 		s.db.BeginTransaction()
 		slog.Info("Applying corrections", "block", block.NumberU64())
-		for addr, acc := range fixes {
+		for addr, acc := range corrections {
 			slog.Info("Correcting account",
 				"address", addr.Hex(),
 				"old_balance", s.db.GetBalance(cc.Address(addr)).ToBig().String(),
@@ -247,39 +230,5 @@ func (s *State) setBalance(address common.Address, balance *big.Int) {
 	case 1:
 		diff, _ := amount.NewFromBigInt(new(big.Int).Sub(cur, balance))
 		s.db.SubBalance(addr, diff)
-	}
-}
-
-// --- block hash history tracking ---
-
-// blockHashHistory keeps track of the last 256 block hashes. This is required
-// for the BLOCKHASH opcode in the EVM.
-type blockHashHistory struct {
-	historicHashes [256]common.Hash
-}
-
-func (b *blockHashHistory) GetBlockHash(number uint64) common.Hash {
-	return b.historicHashes[number%256]
-}
-
-func (b *blockHashHistory) SetBlockHash(number uint64, hash common.Hash) {
-	b.historicHashes[number%256] = hash
-}
-
-// --- block hash history adapter ---
-
-// historyAdapter implements the evmcore.DummyChain interface, allowing it to
-// be used with the EVM state processor to serve historic block hashes.
-type historyAdapter struct {
-	history *blockHashHistory
-}
-
-func (h historyAdapter) Header(_ common.Hash, number uint64) *evmcore.EvmHeader {
-	// The only information required from the header is the block number, the
-	// block's hash, and the parent hash. Everything else is ignored by the EVM.
-	return &evmcore.EvmHeader{
-		Number:     big.NewInt(int64(number)),
-		Hash:       h.history.GetBlockHash(number),
-		ParentHash: h.history.GetBlockHash(number - 1),
 	}
 }

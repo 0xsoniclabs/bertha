@@ -40,7 +40,10 @@ import (
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	_ "github.com/0xsoniclabs/carmen/go/state/gostate"
+	"github.com/0xsoniclabs/sonic/evmcore"
+	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/tracy"
+	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 )
@@ -171,15 +174,17 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		Variant:     args.DBVariant,
 	}
 
-	state, err := NewState(params, metadataStore, chainID)
+	state, err := NewState(params)
 	if err != nil {
 		return fmt.Errorf("failed to create state: %w", err)
 	}
 	chain := &stateChainAdapter{
-		chainID:         chainID,
-		state:           state,
-		schema:          args.DBSchema,
-		snapshotHandler: snapshotHandler,
+		chainID:          chainID,
+		metadataStore:    metadataStore,
+		blockHashHistory: &blockHashHistory{},
+		state:            state,
+		schema:           args.DBSchema,
+		snapshotHandler:  snapshotHandler,
 	}
 	// Because snapshots invalidate the state, we need to close it here.
 	defer func() {
@@ -653,11 +658,13 @@ type Chain interface {
 
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
 type stateChainAdapter struct {
-	chainID         uint64
-	state           *State
-	stateRwMutex    sync.Mutex
-	schema          carmen.Schema
-	snapshotHandler *SnapshotHandler
+	chainID          uint64
+	metadataStore    MetadataStore
+	blockHashHistory *blockHashHistory
+	state            *State
+	stateRwMutex     sync.Mutex
+	schema           carmen.Schema
+	snapshotHandler  *SnapshotHandler
 }
 
 func (a *stateChainAdapter) ChainID() uint64 {
@@ -689,8 +696,25 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 		return nil, a.state.GetStateRoot(), nil
 	}
 
+	chainConfig := opera.CreateTransientEvmChainConfig(
+		a.chainID,
+		a.metadataStore.GetUpgrades(),
+		idx.Block(block.NumberU64()),
+	)
+	upgrades := a.metadataStore.GetUpgradesAtBlock(block.NumberU64())
+
+	a.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())
+
+	processor := evmcore.NewStateProcessorForReplay(
+		chainConfig,
+		historyAdapter{history: a.blockHashHistory},
+		upgrades,
+	)
+
+	corrections := a.metadataStore.GetCorrections(block.NumberU64())
+
 	// Apply the block to the state database.
-	receipts, err := a.state.ApplyBlock(block)
+	receipts, err := a.state.ApplyBlock(block, processor, upgrades, corrections)
 	if err != nil {
 		stateRoot := future.Future[result.Result[common.Hash]]{}
 		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
@@ -793,7 +817,7 @@ func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, e
 		return nil, fmt.Errorf("failed to copy state database for snapshot: %w", err)
 	}
 	// Open the state again
-	state, err = NewState(state.stateParameter, state.metadataStore, state.chainID)
+	state, err = NewState(state.stateParameter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reopen state database after snapshot: %w", err)
 	}
@@ -863,4 +887,38 @@ func (f *FlagWithConfirmation) IsConfirmed() bool {
 
 func (f *FlagWithConfirmation) Confirm() {
 	f.confirmed = true
+}
+
+// --- block hash history tracking ---
+
+// blockHashHistory keeps track of the last 256 block hashes. This is required
+// for the BLOCKHASH opcode in the EVM.
+type blockHashHistory struct {
+	historicHashes [256]common.Hash
+}
+
+func (b *blockHashHistory) GetBlockHash(number uint64) common.Hash {
+	return b.historicHashes[number%256]
+}
+
+func (b *blockHashHistory) SetBlockHash(number uint64, hash common.Hash) {
+	b.historicHashes[number%256] = hash
+}
+
+// --- block hash history adapter ---
+
+// historyAdapter implements the evmcore.DummyChain interface, allowing it to
+// be used with the EVM state processor to serve historic block hashes.
+type historyAdapter struct {
+	history *blockHashHistory
+}
+
+func (h historyAdapter) Header(_ common.Hash, number uint64) *evmcore.EvmHeader {
+	// The only information required from the header is the block number, the
+	// block's hash, and the parent hash. Everything else is ignored by the EVM.
+	return &evmcore.EvmHeader{
+		Number:     big.NewInt(int64(number)),
+		Hash:       h.history.GetBlockHash(number),
+		ParentHash: h.history.GetBlockHash(number - 1),
+	}
 }
