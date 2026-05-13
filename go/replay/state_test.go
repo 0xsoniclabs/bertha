@@ -44,7 +44,7 @@ func TestState_CanBeCreatedAndClosed(t *testing.T) {
 				Directory:   t.TempDir(),
 				WithArchive: archive,
 				Schema:      5,
-			})
+			}, &StaticMetadataStore{}, 0)
 			require.NoError(t, err)
 			require.NotNil(t, state)
 
@@ -59,7 +59,7 @@ func TestNewState_CreatesEmptyDatabase(t *testing.T) {
 		Directory: t.TempDir(),
 		Schema:    5,
 		Variant:   "go-file",
-	})
+	}, &StaticMetadataStore{}, 0)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, state.Close())
@@ -74,7 +74,7 @@ func TestNewState_FailsWithInvalidDirectory(t *testing.T) {
 	_, err := NewState(StateParameters{
 		Directory: "/invalid/directory/that/does/not/exist",
 		Schema:    5,
-	})
+	}, &StaticMetadataStore{}, 0)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "failed to create state dir")
 }
@@ -89,7 +89,7 @@ func TestNewState_FailsIfDirectoryIsReadOnly(t *testing.T) {
 	_, err = NewState(StateParameters{
 		Directory: tempDir,
 		Schema:    5,
-	})
+	}, &StaticMetadataStore{}, 0)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "permission denied")
 }
@@ -98,7 +98,7 @@ func TestState_Close_CanBeCalledOnClosedDb(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
 		Schema:    5,
-	})
+	}, &StaticMetadataStore{}, 0)
 	require.NoError(t, err)
 
 	err = state.Close()
@@ -159,7 +159,7 @@ func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
 	state, err := NewState(StateParameters{
 		Directory: t.TempDir(),
 		Schema:    5,
-	})
+	}, &StaticMetadataStore{}, 0)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, state.Close())
@@ -183,10 +183,11 @@ func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
 }
 
 func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
-	state, err := NewState(StateParameters{
-		Directory: t.TempDir(),
-		Schema:    5,
-	})
+	state, err := NewState(
+		StateParameters{Directory: t.TempDir(), Schema: 5},
+		&StaticMetadataStore{},
+		1,
+	)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, state.Close())
@@ -195,16 +196,17 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{})
 	require.NoError(t, err)
 
-	receipts, err := state.ApplyBlock(1, block, Metadata{})
+	receipts, err := state.ApplyBlock(block)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 }
 
 func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
-	state, err := NewState(StateParameters{
-		Directory: t.TempDir(),
-		Schema:    5,
-	})
+	state, err := NewState(
+		StateParameters{Directory: t.TempDir(), Schema: 5},
+		&StaticMetadataStore{},
+		1,
+	)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, state.Close())
@@ -220,20 +222,11 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	_, err = state.ApplyBlock(1, block, Metadata{})
+	_, err = state.ApplyBlock(block)
 	require.ErrorContains(t, err, "skipped txs")
 }
 
 func TestState_ApplyBlock_AppliesUpgrades(t *testing.T) {
-	state, err := NewState(StateParameters{
-		Directory: t.TempDir(),
-		Schema:    5,
-	})
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, state.Close())
-	}()
-
 	// To see an effect of upgrades, this test uses two different rule sets
 	// such that gas costs for a simple transaction with excess gas differ.
 	// If the single proposer block formation is enabled, no fees are charged
@@ -245,13 +238,25 @@ func TestState_ApplyBlock_AppliesUpgrades(t *testing.T) {
 	withExcessGasCharges := opera.GetAllegroUpgrades()
 	withExcessGasCharges.SingleProposerBlockFormation = false
 
-	metadata := Metadata{
-		Upgrades: []opera.UpgradeHeight{
-			{Height: 5, Upgrades: noExcessGasCharges},
-			{Height: 10, Upgrades: withExcessGasCharges},
-			{Height: 15, Upgrades: noExcessGasCharges},
+	metadataStore := &StaticMetadataStore{
+		metadata: Metadata{
+			Upgrades: []opera.UpgradeHeight{
+				{Height: 5, Upgrades: noExcessGasCharges},
+				{Height: 10, Upgrades: withExcessGasCharges},
+				{Height: 15, Upgrades: noExcessGasCharges},
+			},
 		},
 	}
+
+	state, err := NewState(
+		StateParameters{Directory: t.TempDir(), Schema: 5},
+		metadataStore,
+		1,
+	)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, state.Close())
+	}()
 
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -276,13 +281,13 @@ func TestState_ApplyBlock_AppliesUpgrades(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		receipts, err := state.ApplyBlock(1, block, metadata)
+		receipts, err := state.ApplyBlock(block)
 		require.NoError(t, err)
 		require.Len(t, receipts, 1)
 		require.Equal(t, types.ReceiptStatusSuccessful, receipts[0].Status)
 
-		rules := metadata.GetRulesAtBlock(uint64(blockNr))
-		if rules.Upgrades.SingleProposerBlockFormation {
+		upgrades := metadataStore.GetUpgradesAtBlock(uint64(blockNr))
+		if upgrades.SingleProposerBlockFormation {
 			require.Equal(t, uint64(21_000), receipts[0].GasUsed)
 		} else {
 			require.Greater(t, receipts[0].GasUsed, uint64(21_000))
@@ -291,18 +296,6 @@ func TestState_ApplyBlock_AppliesUpgrades(t *testing.T) {
 }
 
 func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
-	state, err := NewState(StateParameters{
-		Directory: t.TempDir(),
-		Schema:    5,
-	})
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, state.Close())
-	}()
-
-	block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: 17})
-	require.NoError(t, err)
-
 	corrections := Corrections{
 		17: map[common.Address]Correction{
 			{1}: {
@@ -311,9 +304,20 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 		},
 	}
 
-	receipts, err := state.ApplyBlock(1, block, Metadata{
-		Corrections: corrections,
-	})
+	state, err := NewState(
+		StateParameters{Directory: t.TempDir(), Schema: 5},
+		&StaticMetadataStore{metadata: Metadata{Corrections: corrections}},
+		1,
+	)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, state.Close())
+	}()
+
+	block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: 17})
+	require.NoError(t, err)
+
+	receipts, err := state.ApplyBlock(block)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 
@@ -321,10 +325,11 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 }
 
 func TestState_setBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
-	state, err := NewState(StateParameters{
-		Directory: t.TempDir(),
-		Schema:    5,
-	})
+	state, err := NewState(
+		StateParameters{Directory: t.TempDir(), Schema: 5},
+		&StaticMetadataStore{},
+		1,
+	)
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, state.Close())

@@ -45,7 +45,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-//go:generate mockgen -source=replay.go -destination=replay_mock.go -package=app
+//go:generate mockgen -source=replay.go -destination=replay_mock.go -package=replay
 
 type ReplayArgs struct {
 	JSONGenesisFile    string
@@ -158,6 +158,11 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 	chainID := genesis.ChainID
 
+	metadataStore, err := NewStaticMetadataStore(chainID)
+	if err != nil {
+		return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
+	}
+
 	// Open State Database in new directory.
 	params := StateParameters{
 		Directory:   args.StateDBDir,
@@ -166,7 +171,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		Variant:     args.DBVariant,
 	}
 
-	state, err := NewState(params)
+	state, err := NewState(params, metadataStore, chainID)
 	if err != nil {
 		return fmt.Errorf("failed to create state: %w", err)
 	}
@@ -213,12 +218,6 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		err = errors.Join(err, database.Close())
 	}()
 
-	// Load metadata for the chain.
-	metadata, err := GetMetadataForChain(chainID)
-	if err != nil {
-		return fmt.Errorf("failed to get metadata for chain ID %d: %w", chainID, err)
-	}
-
 	// Prepare the progress logger.
 	progress := startProgressLogger(state, args.StateDBDir, args.LogDBSize)
 	defer func() {
@@ -244,7 +243,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 
 	return run(
-		ctx, blocks, chain, metadata, database, replayLoopContext, func(block *types.Block) {
+		ctx, blocks, chain, database, replayLoopContext, func(block *types.Block) {
 			info, err := progress.LogProgress(block)
 			if err != nil {
 				slog.Error("Failed to log progress", "error", err)
@@ -386,7 +385,6 @@ func runReplayLoop(
 	ctx context.Context,
 	blocks iter.Seq2[*blockdb.Block, error],
 	chain Chain,
-	metadata Metadata,
 	blockDB blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
 	onBlockDone func(block *types.Block),
@@ -406,7 +404,7 @@ func runReplayLoop(
 		}
 
 		// Run the transactions in the block against the state database.
-		receipts, stateRoot, err := chain.ApplyBlock(gethBlock, metadata)
+		receipts, stateRoot, err := chain.ApplyBlock(gethBlock)
 		if err != nil {
 			return fmt.Errorf("failed to apply block %d: %w", block.Number, err)
 		}
@@ -432,7 +430,6 @@ func runReplayPipeline(
 	ctx context.Context,
 	blocks iter.Seq2[*blockdb.Block, error],
 	chain Chain,
-	metadata Metadata,
 	blockDB blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
 	onBlockDone func(block *types.Block),
@@ -514,7 +511,7 @@ func runReplayPipeline(
 		defer close(results)
 		for decoded := range decodedBlocks {
 			gethBlock := decoded.geth
-			receipts, stateRootFuture, err := chain.ApplyBlock(gethBlock, metadata)
+			receipts, stateRootFuture, err := chain.ApplyBlock(gethBlock)
 			if err != nil {
 				reportIssue(fmt.Errorf("failed to apply block %d: %w", gethBlock.NumberU64(), err))
 				return
@@ -647,7 +644,7 @@ type Chain interface {
 	ChainID() uint64
 	IsMptConformant() bool
 	IsVerkleConformant() bool
-	ApplyBlock(*types.Block, Metadata) (
+	ApplyBlock(*types.Block) (
 		types.Receipts,
 		future.Future[result.Result[common.Hash]],
 		error,
@@ -675,10 +672,7 @@ func (a *stateChainAdapter) IsVerkleConformant() bool {
 	return a.schema == 6
 }
 
-func (a *stateChainAdapter) ApplyBlock(
-	block *types.Block,
-	metadata Metadata,
-) (
+func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	types.Receipts,
 	future.Future[result.Result[common.Hash]],
 	error,
@@ -696,11 +690,7 @@ func (a *stateChainAdapter) ApplyBlock(
 	}
 
 	// Apply the block to the state database.
-	receipts, err := a.state.ApplyBlock(
-		a.chainID,
-		block,
-		metadata,
-	)
+	receipts, err := a.state.ApplyBlock(block)
 	if err != nil {
 		stateRoot := future.Future[result.Result[common.Hash]]{}
 		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
@@ -803,7 +793,7 @@ func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, e
 		return nil, fmt.Errorf("failed to copy state database for snapshot: %w", err)
 	}
 	// Open the state again
-	state, err = NewState((*state).stateParameter)
+	state, err = NewState(state.stateParameter, state.metadataStore, state.chainID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reopen state database after snapshot: %w", err)
 	}

@@ -51,6 +51,8 @@ type State struct {
 	db               carmen.StateDB
 	blockHashHistory *blockHashHistory
 	stateParameter   StateParameters
+	metadataStore    MetadataStore
+	chainID          uint64
 }
 
 // StateParameters is a configuration struct for creating a new State instance.
@@ -65,7 +67,7 @@ type StateParameters struct {
 // resulting state database is empty.
 //
 // Successfully created instances must be closed using the Close method.
-func NewState(params StateParameters) (*State, error) {
+func NewState(params StateParameters, metadataStore MetadataStore, chainID uint64) (*State, error) {
 	dir := params.Directory
 	err := os.MkdirAll(dir, 0700)
 	if err != nil {
@@ -95,7 +97,13 @@ func NewState(params StateParameters) (*State, error) {
 		return nil, fmt.Errorf("failed to create state: %v", err)
 	}
 	db := carmen.CreateCustomStateDBUsing(state, 0)
-	return &State{db: db, blockHashHistory: &blockHashHistory{}, stateParameter: params}, nil
+	return &State{
+		db:               db,
+		blockHashHistory: &blockHashHistory{},
+		stateParameter:   params,
+		metadataStore:    metadataStore,
+		chainID:          chainID,
+	}, nil
 }
 
 // Close closes the state database and releases any resources associated with it.
@@ -147,23 +155,18 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 // ApplyBlock applies the given block to this state, processing all transactions
 // and updating the state accordingly. It returns the receipts of the transactions
 // in the block, or an error if the block could not be processed.
-func (s *State) ApplyBlock(
-	chainID uint64,
-	block *types.Block,
-	metadata Metadata,
-) (types.Receipts, error) {
-
+func (s *State) ApplyBlock(block *types.Block) (types.Receipts, error) {
 	chainConfig := opera.CreateTransientEvmChainConfig(
-		chainID,
-		metadata.Upgrades,
+		s.chainID,
+		s.metadataStore.GetUpgrades(),
 		idx.Block(block.NumberU64()),
 	)
-	rules := metadata.GetRulesAtBlock(block.NumberU64())
+	upgrades := s.metadataStore.GetUpgradesAtBlock(block.NumberU64())
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
 		historyAdapter{history: s.blockHashHistory},
-		rules.Upgrades,
+		upgrades,
 	)
 
 	evmBlock := &evmcore.EvmBlock{
@@ -181,7 +184,7 @@ func (s *State) ApplyBlock(
 
 	stateDB := evmstore.CreateCarmenStateDb(s.db, nil)
 
-	vmConfig := opera.GetVmConfig(rules)
+	vmConfig := opera.GetVmConfig(opera.Rules{Upgrades: upgrades})
 	gasLimit := block.GasLimit()
 
 	s.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())
@@ -213,7 +216,7 @@ func (s *State) ApplyBlock(
 	}
 
 	// Apply corrections if any are provided.
-	if fixes := metadata.Corrections[block.NumberU64()]; len(fixes) > 0 {
+	if fixes := s.metadataStore.GetCorrections(block.NumberU64()); len(fixes) > 0 {
 		s.db.BeginTransaction()
 		slog.Info("Applying corrections", "block", block.NumberU64())
 		for addr, acc := range fixes {
