@@ -18,9 +18,9 @@ package replay
 
 import (
 	"fmt"
-	"log/slog"
 	"slices"
 
+	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
@@ -54,7 +54,7 @@ type StaticMetadataStore struct {
 
 // NewStaticMetadataStore creates a new StaticMetadataStore with upgrades
 // for the given chain ID.
-func NewStaticMetadataStore(chainID uint64) (*StaticMetadataStore, error) {
+func NewStaticMetadataStore(chainID uint64, logger utils.Logger) (*StaticMetadataStore, error) {
 	allegro := opera.GetAllegroUpgrades()
 	switch chainID {
 	case SonicMainNetChainID:
@@ -100,7 +100,7 @@ func NewStaticMetadataStore(chainID uint64) (*StaticMetadataStore, error) {
 			},
 		}, nil
 	default:
-		slog.Warn("no metadata available for chain ID, proceeding without upgrades or corrections", "chainId", chainID)
+		logger.Warn("no metadata available for chain ID, proceeding without upgrades or corrections", "chainId", chainID)
 		return &StaticMetadataStore{}, nil
 	}
 }

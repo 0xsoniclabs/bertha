@@ -16,24 +16,12 @@
 
 package utils
 
-import (
-	"context"
-	"log/slog"
-)
+//go:generate mockgen -source=logger.go -destination=logger_mock.go -package=utils
 
-// CapturingLogHandler is a slog.Handler that captures all log records.
-type CapturingLogHandler struct {
-	records []slog.Record
+// Logger is an interface for mocking slog.Logger interactions in tests.
+type Logger interface {
+	Debug(msg string, keysAndValues ...any)
+	Info(msg string, keysAndValues ...any)
+	Warn(msg string, keysAndValues ...any)
+	Error(msg string, keysAndValues ...any)
 }
-
-func (h *CapturingLogHandler) Records() []slog.Record {
-	return h.records
-}
-
-func (h *CapturingLogHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
-func (h *CapturingLogHandler) Handle(_ context.Context, r slog.Record) error {
-	h.records = append(h.records, r)
-	return nil
-}
-func (h *CapturingLogHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
-func (h *CapturingLogHandler) WithGroup(_ string) slog.Handler      { return h }
