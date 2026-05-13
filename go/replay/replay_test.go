@@ -35,7 +35,6 @@ import (
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
-	"github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -105,122 +104,6 @@ func TestReplay_FailsIfStartBlockIsProvidedWithoutStateDbDir(t *testing.T) {
 	require.ErrorContains(
 		err,
 		"existing state or initial database directory must be specified when starting from a non-genesis block",
-	)
-}
-
-func TestProgressLogger_ProducesLogMessagesEvery10kSteps(t *testing.T) {
-	require := require.New(t)
-
-	logger := startProgressLogger(nil, "", false)
-
-	block0, err := convert.ConvertToGethBlock(&blockdb.Block{
-		Number:    0,
-		Timestamp: 1000,
-	})
-	require.NoError(err)
-	block10k, err := convert.ConvertToGethBlock(&blockdb.Block{
-		Number:    10_000,
-		Timestamp: 2000,
-	})
-	require.NoError(err)
-	block15k, err := convert.ConvertToGethBlock(&blockdb.Block{
-		Number:    15_000,
-		Timestamp: 2000,
-	})
-	require.NoError(err)
-	block20k, err := convert.ConvertToGethBlock(&blockdb.Block{
-		Number:    20_000,
-		Timestamp: 3500,
-	})
-	require.NoError(err)
-
-	require.Empty(logger.LogProgress(block0))
-	res, err := logger.LogProgress(block10k)
-	require.NoError(err)
-	require.Regexp(
-		`Processing block 10000 from 1970-01-01 [0-9]{2}:33:20 @ t= 0:00:[0-9]{2}, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime`,
-		res,
-	)
-	require.Empty(logger.LogProgress(block15k))
-	res, err = logger.LogProgress(block20k)
-	require.NoError(err)
-	require.Regexp(
-		`Processing block 20000 from 1970-01-01 [0-9]{2}:58:20 @ t= 0:00:[0-9]{2}, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime`,
-		res,
-	)
-}
-
-func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
-	require := require.New(t)
-	ctrl := gomock.NewController(t)
-	dbMock := state.NewMockStateDB(ctrl)
-	dbMock.EXPECT().Flush().Return(nil).Times(2)
-	state := &State{
-		db:             dbMock,
-		stateParameter: StateParameters{},
-	}
-
-	dir := t.TempDir()
-	liveDir := filepath.Join(dir, "live")
-	require.NoError(os.Mkdir(liveDir, 0700))
-
-	filePath := filepath.Join(liveDir, "file1.txt")
-	data := make([]byte, 124*1024*1024)
-	err := os.WriteFile(filePath, data, 0644)
-	require.NoError(err)
-
-	block, err := convert.ConvertToGethBlock(&blockdb.Block{
-		Number:       10000,
-		Timestamp:    1000,
-		Transactions: []*blockdb.Transaction{},
-	})
-	require.NoError(err)
-
-	logger := startProgressLogger(state, dir, true)
-	res, err := logger.LogProgress(block)
-	require.NoError(err)
-
-	require.Regexp(
-		`Processing block 10000 from 1970-01-01 [0-9]{2}:[0-9]{2}:[0-9]{2} @ t= 0:00:00, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime, live DB size: 0.121 GiB, archive DB size: n/a`,
-		res,
-	)
-
-	archiveDir := filepath.Join(dir, "archive")
-	require.NoError(os.Mkdir(archiveDir, 0700))
-	filePath = filepath.Join(archiveDir, "file2.txt")
-	data = make([]byte, 156*1024*1024)
-	err = os.WriteFile(filePath, data, 0644)
-	require.NoError(err)
-
-	logger = startProgressLogger(state, dir, true)
-	res, err = logger.LogProgress(block)
-	require.NoError(err)
-
-	require.Regexp(
-		`Processing block 10000 from 1970-01-01 [0-9]{2}:[0-9]{2}:[0-9]{2} @ t= 0:00:00, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime, live DB size: 0.121 GiB, archive DB size: 0.152 GiB`,
-		res,
-	)
-}
-
-func TestProgressLogger_ProducesASummary(t *testing.T) {
-	require := require.New(t)
-
-	logger := startProgressLogger(nil, "", false)
-
-	block, err := convert.ConvertToGethBlock(&blockdb.Block{
-		Number:    0,
-		Timestamp: 1000,
-		Transactions: []*blockdb.Transaction{
-			{TransactionType: types.LegacyTxType, Nonce: 0},
-			{TransactionType: types.LegacyTxType, Nonce: 1},
-		},
-	})
-	require.NoError(err)
-
-	require.Empty(logger.LogProgress(block))
-	require.Regexp(
-		`Replay finished in .*, processed 2 txs \([0-9]+.[0-9]{2} Tx/s\), used 0.000 TGas \([0-9]+.[0-9]{2} MGas/s\), [0-9]+.[0-9]{2}x realtime`,
-		logger.GetSummary(),
 	)
 }
 
@@ -919,164 +802,6 @@ func Test_checkBlockResults_LogsMessageIfStateRootNotSet(t *testing.T) {
 	require.Empty(t, logBuffer.String())
 }
 
-func Test_SnapshotHandler_ShouldCreateSnapshot(t *testing.T) {
-	require := require.New(t)
-
-	handler := &SnapshotHandler{
-		blockInterval: 1000,
-		startBlock:    100,
-		endBlock:      3000,
-	}
-
-	require.True(handler.ShouldCreateSnapshot(1000))
-	require.True(handler.ShouldCreateSnapshot(2000))
-	require.False(handler.ShouldCreateSnapshot(1500))
-	require.False(handler.ShouldCreateSnapshot(0))
-	require.False(handler.ShouldCreateSnapshot(50))
-	require.False(handler.ShouldCreateSnapshot(4000))
-}
-
-func Test_NewSnapshotHandler_InitializeSnapshotHandlerCorrectly(t *testing.T) {
-	require := require.New(t)
-
-	handler := NewSnapshotHandler(1000, 100, 3000, 3)
-	require.Equal(uint64(1000), handler.blockInterval)
-	require.Equal(uint64(100), handler.startBlock)
-	require.Equal(uint64(3000), handler.endBlock)
-	require.Equal(len(handler.pastSnapshotList), 3)
-	for _, blockNumber := range handler.pastSnapshotList {
-		require.Nil(blockNumber)
-	}
-}
-
-func Test_SnapshotHandler_CreatesAndRemovesSnapshots(t *testing.T) {
-	require := require.New(t)
-
-	dir := t.TempDir()
-	state, err := NewState(
-		StateParameters{Directory: dir, Schema: 5},
-	)
-	require.NoError(err)
-	defer func() {
-		require.NoError(state.Close())
-	}()
-
-	handler := NewSnapshotHandler(1000, 100, 10000, 3)
-
-	newState, err := handler.Snapshot(1000, state)
-	require.NoError(err)
-	require.NotNil(newState)
-	newState, err = handler.Snapshot(2000, newState)
-	require.NoError(err)
-	require.NotNil(newState)
-	newState, err = handler.Snapshot(3000, newState)
-	require.NoError(err)
-	require.NotNil(newState)
-
-	_, err = os.Stat(handler.snapshotDir(dir, 1000))
-	require.NoError(err)
-	_, err = os.Stat(handler.snapshotDir(dir, 2000))
-	require.NoError(err)
-	_, err = os.Stat(handler.snapshotDir(dir, 3000))
-	require.NoError(err)
-
-	// Next two snapshots should clear the oldest two ones
-	newState, err = handler.Snapshot(4000, newState)
-	require.NoError(err)
-	require.NotNil(newState)
-	newState, err = handler.Snapshot(5000, newState)
-	require.NoError(err)
-	require.NotNil(newState)
-
-	_, err = os.Stat(handler.snapshotDir(dir, 1000))
-	require.Error(err)
-	_, err = os.Stat(handler.snapshotDir(dir, 2000))
-	require.Error(err)
-	_, err = os.Stat(handler.snapshotDir(dir, 3000))
-	require.NoError(err)
-	_, err = os.Stat(handler.snapshotDir(dir, 4000))
-	require.NoError(err)
-	_, err = os.Stat(handler.snapshotDir(dir, 5000))
-	require.NoError(err)
-}
-
-func Test_SnapshotHandler_GetOldestSnapshotDirReturnsOldestSnapshot(t *testing.T) {
-	require := require.New(t)
-	dir := t.TempDir()
-
-	state, err := NewState(
-		StateParameters{Directory: dir, Schema: 5},
-	)
-	require.NoError(err)
-	defer func() {
-		require.NoError(state.Close())
-	}()
-
-	handler := NewSnapshotHandler(1000, 100, 10000, 3)
-
-	newState, err := handler.Snapshot(1000, state)
-	require.NoError(err)
-	require.NotNil(newState)
-	newState, err = handler.Snapshot(2000, newState)
-	require.NoError(err)
-	require.NotNil(newState)
-	newState, err = handler.Snapshot(3000, newState)
-	require.NoError(err)
-	require.NotNil(newState)
-
-	oldest := handler.GetOldestSnapshotDir(dir)
-	require.Equal(oldest, handler.snapshotDir(dir, 1000))
-
-	newState, err = handler.Snapshot(4000, newState)
-	require.NoError(err)
-	require.NotNil(newState)
-	_, err = os.Stat(handler.snapshotDir(dir, 1000))
-	require.Error(err)
-	newOldest := handler.GetOldestSnapshotDir(dir)
-	require.Equal(newOldest, handler.snapshotDir(dir, 2000))
-}
-
-func Test_SnapshotHandler_GetSnapshotDirsReturnsExistingSnapshotList(t *testing.T) {
-	require := require.New(t)
-	dir := t.TempDir()
-
-	state, err := NewState(
-		StateParameters{Directory: dir, Schema: 5},
-	)
-	require.NoError(err)
-	defer func() {
-		require.NoError(state.Close())
-	}()
-
-	handler := NewSnapshotHandler(1000, 100, 10000, 3)
-
-	snapshotList := handler.GetSnapshotDirs(dir)
-	require.Empty(snapshotList)
-
-	newState, err := handler.Snapshot(1000, state)
-	require.NoError(err)
-	require.NotNil(newState)
-	newState, err = handler.Snapshot(2000, newState)
-	require.NoError(err)
-	require.NotNil(newState)
-	newState, err = handler.Snapshot(3000, newState)
-	require.NoError(err)
-	require.NotNil(newState)
-
-	snapshotList = handler.GetSnapshotDirs(dir)
-	require.Equal(snapshotList, []string{
-		handler.snapshotDir(dir, 1000),
-		handler.snapshotDir(dir, 2000),
-		handler.snapshotDir(dir, 3000),
-	})
-
-}
-
-func Test_SnapshotHandler_snapshotDirReturnsCorrectName(t *testing.T) {
-	handler := SnapshotHandler{}
-	require.Equal(t, "directory_snapshot_1000", handler.snapshotDir("directory", 1000))
-}
-
 func Test_FlagWithConfirmation(t *testing.T) {
 	require := require.New(t)
 
@@ -1106,7 +831,7 @@ func TestBlockHashHistory_CanSetAndRetrieveHistoricHashes(t *testing.T) {
 	}
 }
 
-func TestHistoryAdapter_ProducesHeaderWithCorrectHashes(t *testing.T) {
+func TestBlockHashHistory_ProducesHeaderWithCorrectHashes(t *testing.T) {
 	history := &blockHashHistory{}
 
 	blockNum := uint64(12)
@@ -1118,14 +843,12 @@ func TestHistoryAdapter_ProducesHeaderWithCorrectHashes(t *testing.T) {
 	history.SetBlockHash(blockNum-1, parent)
 	history.SetBlockHash(blockNum-2, grandParent)
 
-	adapter := historyAdapter{history: history}
-
-	header := adapter.Header(common.Hash{}, blockNum)
+	header := history.Header(common.Hash{}, blockNum)
 	require.Equal(t, blockNum, header.Number.Uint64())
 	require.Equal(t, current, header.Hash)
 	require.Equal(t, parent, header.ParentHash)
 
-	header = adapter.Header(common.Hash{}, blockNum-1)
+	header = history.Header(common.Hash{}, blockNum-1)
 	require.Equal(t, blockNum-1, header.Number.Uint64())
 	require.Equal(t, parent, header.Hash)
 	require.Equal(t, grandParent, header.ParentHash)

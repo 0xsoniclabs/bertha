@@ -29,7 +29,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	// _ "[github.com/ianlancetaylor/cgosymbolizer](http://github.com/ianlancetaylor/cgosymbolizer)" // Enable to resolve symbols across cgo calls (this breaks Go symbols)
 
@@ -260,128 +259,6 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		},
 	)
 }
-
-// --- progress logger ---
-
-// progressLogger is a UX helper utility for the replay command producing
-// the main progress log output.
-type progressLogger struct {
-	state                  *State
-	stateDBDirectory       string
-	start                  time.Time
-	lastUpdate             time.Time
-	lastReportedBlockTime  time.Time
-	lastProcessedBlockTime time.Time
-	txCounter              uint64
-	gasCounter             uint64
-	lastTxCounter          uint64
-	lastGasCounter         uint64
-	firstBlockTime         time.Time
-	logDBSize              bool
-}
-
-func startProgressLogger(state *State, stateDBDirectory string, logDBSize bool) *progressLogger {
-	now := time.Now()
-	return &progressLogger{
-		state:            state,
-		stateDBDirectory: stateDBDirectory,
-		start:            now,
-		lastUpdate:       now,
-		logDBSize:        logDBSize,
-	}
-}
-
-func (p *progressLogger) LogProgress(block *types.Block) (string, error) {
-	// Keep track of metrics for logging purposes.
-	p.lastProcessedBlockTime = time.Unix(int64(block.Time()), 0)
-	p.txCounter += uint64(len(block.Transactions()))
-	p.gasCounter += block.GasUsed()
-
-	number := block.NumberU64()
-	if number == 0 {
-		p.firstBlockTime = p.lastProcessedBlockTime
-		p.lastReportedBlockTime = p.lastProcessedBlockTime
-		return "", nil
-	}
-
-	// Periodically log the progress of the replay.
-	if number%10_000 != 0 {
-		return "", nil
-	}
-
-	currentBlockTime := time.Unix(int64(block.Time()), 0)
-	deltaBlockTime := currentBlockTime.Sub(p.lastReportedBlockTime)
-	p.lastReportedBlockTime = currentBlockTime
-	deltaTx := p.txCounter - p.lastTxCounter
-	deltaGas := p.gasCounter - p.lastGasCounter
-	p.lastTxCounter = p.txCounter
-	p.lastGasCounter = p.gasCounter
-
-	now := time.Now()
-	deltaTime := now.Sub(p.lastUpdate)
-	p.lastUpdate = now
-
-	runtime := time.Since(p.start)
-
-	// Optionally log the size of the state database.
-	var sizeStr string
-	if p.logDBSize {
-		err := p.state.db.Flush()
-		if err != nil {
-			return "", fmt.Errorf("failed to flush state database: %w", err)
-		}
-		liveSize, err := utils.DirSize(filepath.Join(p.stateDBDirectory, "live"))
-		if err != nil {
-			return "", fmt.Errorf("failed to compute live database size: %w", err)
-		}
-
-		sizeStr = fmt.Sprintf(", live DB size: %.3f GiB", float64(liveSize)/1024/1024/1024)
-
-		archiveDir := filepath.Join(p.stateDBDirectory, "archive")
-		archiveMissing, err := utils.IsEmptyOrMissingDir(archiveDir)
-		if err != nil {
-			return "", fmt.Errorf("failed to check existence of archive database directory: %w", err)
-		}
-		if !archiveMissing {
-			archiveSize, err := utils.DirSize(archiveDir)
-			if err != nil {
-				return "", fmt.Errorf("failed to compute archive database size: %w", err)
-			}
-			sizeStr += fmt.Sprintf(", archive DB size: %.3f GiB", float64(archiveSize)/1024/1024/1024)
-		} else {
-			sizeStr += ", archive DB size: n/a"
-		}
-	}
-
-	return fmt.Sprintf(
-		"Processing block %d from %v @ t=%2d:%02d:%02d, %.2f txs/s, %.2f MGas/s, %.2fx realtime%s",
-		number,
-		currentBlockTime.Format(time.DateTime),
-		int(runtime.Hours()),
-		int(runtime.Minutes())%60,
-		int(runtime.Seconds())%60,
-		float64(deltaTx)/deltaTime.Seconds(),
-		float64(deltaGas)/deltaTime.Seconds()/1000/1000,
-		deltaBlockTime.Seconds()/deltaTime.Seconds(),
-		sizeStr,
-	), nil
-}
-
-func (p *progressLogger) GetSummary() string {
-	duration := time.Since(p.start)
-	deltaBlockTime := p.lastProcessedBlockTime.Sub(p.firstBlockTime)
-	return fmt.Sprintf(
-		"Replay finished in %v, processed %d txs (%.2f Tx/s), used %.3f TGas (%.2f MGas/s), %.2fx realtime",
-		duration,
-		p.txCounter,
-		float64(p.txCounter)/duration.Seconds(),
-		float64(p.gasCounter)/1e12,
-		float64(p.gasCounter)/duration.Seconds()/1e6,
-		deltaBlockTime.Seconds()/duration.Seconds(),
-	)
-}
-
-// --- block replay logic ---
 
 // runReplayLoop processes the blocks from the given iterator, applying them
 // to the chain and checking the results against the expected values in the
@@ -707,7 +584,7 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
-		historyAdapter{history: a.blockHashHistory},
+		a.blockHashHistory,
 		upgrades,
 	)
 
@@ -752,107 +629,6 @@ func updateStateRoot(chain Chain, block *blockdb.Block, stateRoot common.Hash) {
 	}
 }
 
-// SnapshotHandler is a utility to handle intermediate state database snapshots, allowing
-// to create snapshots in a specific block interval.
-type SnapshotHandler struct {
-	blockInterval     uint64
-	startBlock        uint64
-	endBlock          uint64
-	pastSnapshotList  []*uint64
-	pastSnapshotIndex uint64
-}
-
-func NewSnapshotHandler(blockInterval uint64, startBlock uint64, endBlock uint64, snapshotToKeep uint64) *SnapshotHandler {
-	return &SnapshotHandler{
-		blockInterval:     blockInterval,
-		startBlock:        startBlock,
-		endBlock:          endBlock,
-		pastSnapshotList:  make([]*uint64, snapshotToKeep),
-		pastSnapshotIndex: 0,
-	}
-}
-
-// ShouldCreateSnapshot returns true if a snapshot should be created at the given block number.
-// A snapshot should be created if the block interval is set and the current block number is between
-// the start block height and end block height and a multiple of the specified interval.
-func (s *SnapshotHandler) ShouldCreateSnapshot(currentBlock uint64) bool {
-	return s.blockInterval > 0 && currentBlock >= s.startBlock && currentBlock <= s.endBlock && currentBlock%s.blockInterval == 0
-}
-
-// Snapshot creates a snapshot of the state database at the given block number.
-// It closes and reopens the state to ensure all data is flushed to disk,
-// copies the state database directory to a new location, and removes a previous snapshot
-// if needed to keep the specified number of snapshots.
-func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, error) {
-	stateDBDir := state.stateParameter.Directory
-	if !s.ShouldCreateSnapshot(currentBlock) {
-		return state, nil
-	}
-	slog.Info("Creating state database snapshot", "block_number", currentBlock)
-
-	// Remove the oldest snapshot if it exists
-	oldestSnapshotDir := s.GetOldestSnapshotDir(stateDBDir)
-	if s.pastSnapshotList[s.pastSnapshotIndex] != nil && oldestSnapshotDir != "" {
-		slog.Info("Removing previous state database snapshot", "directory", oldestSnapshotDir)
-		err := os.RemoveAll(oldestSnapshotDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to remove previous state database snapshot: %w", err)
-		}
-	}
-	s.pastSnapshotList[s.pastSnapshotIndex] = &currentBlock
-	s.pastSnapshotIndex = (s.pastSnapshotIndex + 1) % uint64(len(s.pastSnapshotList))
-
-	// Create the snapshot by copying the state database directory
-	snapshotDir := s.snapshotDir(stateDBDir, currentBlock)
-	if err := os.RemoveAll(snapshotDir); err != nil { // remove existing snapshot if any
-		return nil, fmt.Errorf("failed to remove existing snapshot directory %q: %w", snapshotDir, err)
-	}
-	// Close and reopen the state to ensure all data is flushed to disk
-	err := state.Close()
-	if err != nil {
-		return nil, fmt.Errorf("failed to close state database before snapshot: %w", err)
-	}
-	err = os.CopyFS(snapshotDir, os.DirFS(stateDBDir))
-	if err != nil {
-		return nil, fmt.Errorf("failed to copy state database for snapshot: %w", err)
-	}
-	// Open the state again
-	state, err = NewState(state.stateParameter)
-	if err != nil {
-		return nil, fmt.Errorf("failed to reopen state database after snapshot: %w", err)
-	}
-
-	slog.Info("Snapshot created successfully", "snapshot_directory", snapshotDir)
-	return state, nil
-}
-
-// GetOldestSnapshotDir returns the path to the oldest snapshot created.
-// If there are no snapshots, an empty string is returned.
-func (s *SnapshotHandler) GetOldestSnapshotDir(stateDBDir string) string {
-	for cnt := uint64(0); cnt < uint64(len(s.pastSnapshotList)); cnt++ {
-		i := (s.pastSnapshotIndex + cnt) % uint64(len(s.pastSnapshotList))
-		if s.pastSnapshotList[i] != nil {
-			return s.snapshotDir(stateDBDir, *s.pastSnapshotList[i])
-		}
-	}
-	return ""
-}
-
-// GetSnapshotDirs returns a list of paths to the current existing snapshots.
-func (s *SnapshotHandler) GetSnapshotDirs(stateDBDir string) []string {
-	list := make([]string, 0, len(s.pastSnapshotList))
-	for _, pos := range s.pastSnapshotList {
-		if pos != nil {
-			list = append(list, s.snapshotDir(stateDBDir, *pos))
-		}
-	}
-	return list
-}
-
-func (s *SnapshotHandler) snapshotDir(stateDBDir string, blockNum uint64) string {
-	return fmt.Sprintf("%s_snapshot_%d", stateDBDir, blockNum)
-}
-
 // ReplayLoopContext is a utility struct to hold flags to pass to the `replayLoop` functions.
 type ReplayLoopContext struct {
 	overwriteStateRoot FlagWithConfirmation
@@ -893,32 +669,26 @@ func (f *FlagWithConfirmation) Confirm() {
 
 // blockHashHistory keeps track of the last 256 block hashes. This is required
 // for the BLOCKHASH opcode in the EVM.
+// It implements the evmcore.DummyChain interface, allowing it to
+// be used with the EVM state processor to serve historic block hashes.
 type blockHashHistory struct {
 	historicHashes [256]common.Hash
 }
 
-func (b *blockHashHistory) GetBlockHash(number uint64) common.Hash {
-	return b.historicHashes[number%256]
+func (h *blockHashHistory) GetBlockHash(number uint64) common.Hash {
+	return h.historicHashes[number%256]
 }
 
-func (b *blockHashHistory) SetBlockHash(number uint64, hash common.Hash) {
-	b.historicHashes[number%256] = hash
+func (h *blockHashHistory) SetBlockHash(number uint64, hash common.Hash) {
+	h.historicHashes[number%256] = hash
 }
 
-// --- block hash history adapter ---
-
-// historyAdapter implements the evmcore.DummyChain interface, allowing it to
-// be used with the EVM state processor to serve historic block hashes.
-type historyAdapter struct {
-	history *blockHashHistory
-}
-
-func (h historyAdapter) Header(_ common.Hash, number uint64) *evmcore.EvmHeader {
+func (h *blockHashHistory) Header(_ common.Hash, number uint64) *evmcore.EvmHeader {
 	// The only information required from the header is the block number, the
 	// block's hash, and the parent hash. Everything else is ignored by the EVM.
 	return &evmcore.EvmHeader{
 		Number:     big.NewInt(int64(number)),
-		Hash:       h.history.GetBlockHash(number),
-		ParentHash: h.history.GetBlockHash(number - 1),
+		Hash:       h.GetBlockHash(number),
+		ParentHash: h.GetBlockHash(number - 1),
 	}
 }
