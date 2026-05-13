@@ -747,6 +747,11 @@ func TestStateChainAdapter_ApplyBlock_AppliesUpgrades(t *testing.T) {
 }
 
 func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnInternalTx(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	address := crypto.PubkeyToAddress(key.PublicKey)
+	signer := types.LatestSignerForChainID(big.NewInt(1))
+
 	cases := map[string]struct {
 		tx                   *blockdb.Transaction
 		expectCommitUpgrades bool
@@ -754,21 +759,25 @@ func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnInternalT
 		"InternalTx": {
 			// A transaction with empty YParity and R produces V=0, R=0, which
 			// satisfies internaltx.IsInternal.
-			tx: &blockdb.Transaction{
-				TransactionType: types.LegacyTxType,
-				YParity:         []byte{}, // V = 0
-				R:               []byte{}, // R = 0
-				S:               []byte{1},
-			},
+			tx: convert.ToBerthaTransaction(types.NewTx(
+				&types.LegacyTx{
+					Gas:      21000,
+					To:       &common.Address{1},
+					GasPrice: big.NewInt(0),
+					V:        big.NewInt(0),
+					R:        big.NewInt(0),
+				},
+			)),
 			expectCommitUpgrades: true,
 		},
 		"NonInternalTx": {
-			tx: &blockdb.Transaction{
-				TransactionType: types.LegacyTxType,
-				YParity:         []byte{1}, // V = 1
-				R:               []byte{1}, // R = 1
-				S:               []byte{1},
-			},
+			tx: convert.ToBerthaTransaction(types.MustSignNewTx(key, signer,
+				&types.LegacyTx{
+					Gas:      21000,
+					To:       &common.Address{1},
+					GasPrice: big.NewInt(100000),
+				},
+			)),
 			expectCommitUpgrades: false,
 		},
 	}
@@ -784,6 +793,8 @@ func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnInternalT
 				require.NoError(t, state.Close())
 			}()
 
+			state.setBalance(address, big.NewInt(1e18))
+
 			chain := &stateChainAdapter{
 				chainID:          1,
 				metadataStore:    mockMetadataStore,
@@ -793,10 +804,10 @@ func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnInternalT
 			}
 
 			block, err := convert.ConvertToGethBlock(&blockdb.Block{
+				GasLimit:     1e18,
 				Number:       5,
 				Transactions: []*blockdb.Transaction{tc.tx},
-			},
-			)
+			})
 			require.NoError(t, err)
 
 			mockMetadataStore.EXPECT().GetUpgrades()

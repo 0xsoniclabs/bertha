@@ -120,9 +120,9 @@ func (s *StaticMetadataStore) PatchUpgrades(blockNumber uint64, diff []byte) err
 		upgrades = *s.nextUpgrades
 	} else {
 		upgrades = s.GetUpgradesAtBlock(blockNumber)
-		// Only Sonic has updates enabled by log messages, and for Sonic,
-		// Berlin, London and Sonic upgrades are enabled from the beginning,
-		// and therefore there are no upgrade heights for them.
+		// Only Sonic modifies its updates by log messages, and Sonic has the
+		// updates Berlin, London and Sonic enabled from the beginning, and
+		// therefore there are no upgrade heights for them.
 		upgrades.Berlin = true
 		upgrades.London = true
 		upgrades.Sonic = true
