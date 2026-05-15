@@ -338,7 +338,7 @@ mod tests {
             .await;
 
         let chain_configs = vec![ChainConfig {
-            json_rpc: Some(mock_server.uri().to_string()),
+            json_rpc: Some(mock_server.uri()),
             ..ChainConfig::new(1)
         }];
 
@@ -393,11 +393,11 @@ mod tests {
 
         let chain_configs = vec![
             ChainConfig {
-                json_rpc: Some(mock_server.uri().to_string()),
+                json_rpc: Some(mock_server.uri()),
                 ..ChainConfig::new(1)
             },
             ChainConfig {
-                json_rpc: Some(mock_server.uri().to_string()),
+                json_rpc: Some(mock_server.uri()),
                 ..ChainConfig::new(2)
             },
             ChainConfig {
@@ -472,7 +472,7 @@ mod tests {
         let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
 
         let chain_config = ChainConfig {
-            json_rpc: Some(mock_server.uri().to_string()),
+            json_rpc: Some(mock_server.uri()),
             ..ChainConfig::new(chain_id)
         };
 

@@ -15,7 +15,7 @@
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tonic_build::compile_protos("../proto/block.proto")?;
-    tonic_build::compile_protos("../proto/rpc.proto")?;
+    tonic_prost_build::compile_protos("../proto/block.proto")?;
+    tonic_prost_build::compile_protos("../proto/rpc.proto")?;
     Ok(())
 }

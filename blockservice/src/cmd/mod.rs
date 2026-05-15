@@ -170,7 +170,7 @@ pub async fn execute(
 mod tests {
     use std::path::Path;
 
-    use rand::{Rng, SeedableRng, rngs::SmallRng};
+    use rand::{RngExt, SeedableRng, rngs::SmallRng};
 
     use super::*;
     use crate::{

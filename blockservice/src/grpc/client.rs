@@ -109,7 +109,6 @@ impl RpcClient {
 
 #[cfg(test)]
 pub mod tests {
-
     use tokio_stream::StreamExt;
 
     use super::*;
@@ -314,10 +313,7 @@ pub mod tests {
                     }
                 }
             })
-            .returning({
-                let encoded_chain_ranges = encoded_chain_ranges.clone();
-                move |_| Ok(tonic::Response::new(encoded_chain_ranges.clone()))
-            });
+            .returning(move |_| Ok(tonic::Response::new(encoded_chain_ranges.clone())));
 
         let mut rpc_client = get_mock_server_and_client(mock_rpc_server, auth_token).await;
         let result = rpc_client.list(None).await;

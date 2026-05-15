@@ -28,12 +28,12 @@ alloy-rlp = { version = "0.3.11", features = ["derive"] }
 const-hex = "1.14.0"
 
 # hashing & trie & bloom
-sha3 = "0.10.8"
-alloy-trie = "0.9.0"
+sha3 = "0.11.0"
+alloy-trie = "0.9.5"
 ethbloom = "0.14.1"
 
 # big int
-bnum = "0.13.0"
+bnum = "0.14.4"
 
 # error handling
 thiserror = "2.0.12"

@@ -41,12 +41,12 @@ fn convert_authorization_list(
     authorization_list
         .iter()
         .map(|a| SetCodeAuthorization {
-            chain_id: U256::from(a.chain_id().into_limbs()),
+            chain_id: U256::from_le_bytes(a.chain_id().to_le_bytes()),
             address: a.address.0.0,
             nonce: a.nonce,
             y_parity: a.y_parity(),
-            r: U256::from(a.r().into_limbs()),
-            s: U256::from(a.s().into_limbs()),
+            r: U256::from_le_bytes(a.r().to_le_bytes()),
+            s: U256::from_le_bytes(a.s().to_le_bytes()),
         })
         .collect()
 }
@@ -79,7 +79,7 @@ fn convert_transaction(
                 gas_price: tx.gas_price.into(),
                 gas_limit: tx.gas_limit,
                 to: tx.to.into_to().map(|to| to.0.0),
-                value: U256::from(tx.value.into_limbs()),
+                value: U256::from_le_bytes(tx.value.to_le_bytes()),
                 data: tx.input.to_vec(),
                 access_list: Vec::default(),
                 max_fee_per_gas: U256::default(),
@@ -88,8 +88,8 @@ fn convert_transaction(
                 max_fee_per_blob_gas: U256::default(),
                 authorization_list: Vec::default(),
                 y_parity: y_parity.into(),
-                r: U256::from(sig.r().into_limbs()),
-                s: U256::from(sig.s().into_limbs()),
+                r: U256::from_le_bytes(sig.r().to_le_bytes()),
+                s: U256::from_le_bytes(sig.s().to_le_bytes()),
             }
         }
         EthereumTxEnvelope::Eip2930(signed) => {
@@ -102,7 +102,7 @@ fn convert_transaction(
                 gas_price: tx.gas_price.into(),
                 gas_limit: tx.gas_limit,
                 to: tx.to.into_to().map(|to| to.0.0),
-                value: U256::from(tx.value.into_limbs()),
+                value: U256::from_le_bytes(tx.value.to_le_bytes()),
                 data: tx.input.to_vec(),
                 access_list: convert_access_list(&tx.access_list),
                 max_fee_per_gas: U256::default(),
@@ -111,8 +111,8 @@ fn convert_transaction(
                 max_fee_per_blob_gas: U256::default(),
                 authorization_list: Vec::default(),
                 y_parity: sig.v().into(),
-                r: U256::from(sig.r().into_limbs()),
-                s: U256::from(sig.s().into_limbs()),
+                r: U256::from_le_bytes(sig.r().to_le_bytes()),
+                s: U256::from_le_bytes(sig.s().to_le_bytes()),
             }
         }
         EthereumTxEnvelope::Eip1559(signed) => {
@@ -125,7 +125,7 @@ fn convert_transaction(
                 gas_price: U256::default(),
                 gas_limit: tx.gas_limit,
                 to: tx.to.into_to().map(|to| to.0.0),
-                value: U256::from(tx.value.into_limbs()),
+                value: U256::from_le_bytes(tx.value.to_le_bytes()),
                 data: tx.input.to_vec(),
                 access_list: convert_access_list(&tx.access_list),
                 max_fee_per_gas: tx.max_fee_per_gas.into(),
@@ -134,8 +134,8 @@ fn convert_transaction(
                 max_fee_per_blob_gas: U256::default(),
                 authorization_list: Vec::default(),
                 y_parity: sig.v().into(),
-                r: U256::from(sig.r().into_limbs()),
-                s: U256::from(sig.s().into_limbs()),
+                r: U256::from_le_bytes(sig.r().to_le_bytes()),
+                s: U256::from_le_bytes(sig.s().to_le_bytes()),
             }
         }
         EthereumTxEnvelope::Eip4844(signed) => {
@@ -152,7 +152,7 @@ fn convert_transaction(
                 gas_price: U256::default(),
                 gas_limit: tx.gas_limit,
                 to: Some(tx.to.0.0),
-                value: U256::from(tx.value.into_limbs()),
+                value: U256::from_le_bytes(tx.value.to_le_bytes()),
                 data: tx.input.to_vec(),
                 access_list: convert_access_list(&tx.access_list),
                 max_fee_per_gas: tx.max_fee_per_gas.into(),
@@ -161,8 +161,8 @@ fn convert_transaction(
                 max_fee_per_blob_gas: tx.max_fee_per_blob_gas.into(),
                 authorization_list: Vec::default(),
                 y_parity: sig.v().into(),
-                r: U256::from(sig.r().into_limbs()),
-                s: U256::from(sig.s().into_limbs()),
+                r: U256::from_le_bytes(sig.r().to_le_bytes()),
+                s: U256::from_le_bytes(sig.s().to_le_bytes()),
             }
         }
         EthereumTxEnvelope::Eip7702(signed) => {
@@ -175,7 +175,7 @@ fn convert_transaction(
                 gas_price: U256::default(),
                 gas_limit: tx.gas_limit,
                 to: Some(tx.to.0.0),
-                value: U256::from(tx.value.into_limbs()),
+                value: U256::from_le_bytes(tx.value.to_le_bytes()),
                 data: tx.input.to_vec(),
                 access_list: convert_access_list(&tx.access_list),
                 max_fee_per_gas: tx.max_fee_per_gas.into(),
@@ -184,8 +184,8 @@ fn convert_transaction(
                 max_fee_per_blob_gas: U256::default(),
                 authorization_list: convert_authorization_list(&tx.authorization_list),
                 y_parity: sig.v().into(),
-                r: U256::from(sig.r().into_limbs()),
-                s: U256::from(sig.s().into_limbs()),
+                r: U256::from_le_bytes(sig.r().to_le_bytes()),
+                s: U256::from_le_bytes(sig.s().to_le_bytes()),
             }
         }
     }

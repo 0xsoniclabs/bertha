@@ -55,7 +55,7 @@ pub fn convert_block(block: CompressedSignedBeaconBlock) -> Result<Block, Error>
                 nonce: <[u8; 8]>::default(), // 0 for proof-of-stake
                 transactions: parse_transactions(block.transactions)?,
                 receipts: Vec::default(), // .era files don't contain receipts
-                base_fee_per_gas: Some(U256::from(block.base_fee_per_gas.into_limbs())),
+                base_fee_per_gas: Some(U256::from_le_bytes(block.base_fee_per_gas.to_le_bytes())),
                 withdrawals_root: Option::default(),
                 blob_gas_used: Option::default(),
                 excess_blob_gas: Option::default(),
@@ -81,7 +81,7 @@ pub fn convert_block(block: CompressedSignedBeaconBlock) -> Result<Block, Error>
                 nonce: <[u8; 8]>::default(), // 0 for proof-of-stake
                 transactions: parse_transactions(block.transactions)?,
                 receipts: Vec::default(), // .era files don't contain receipts
-                base_fee_per_gas: Some(U256::from(block.base_fee_per_gas.into_limbs())),
+                base_fee_per_gas: Some(U256::from_le_bytes(block.base_fee_per_gas.to_le_bytes())),
                 withdrawals_root: Option::default(),
                 blob_gas_used: Option::default(),
                 excess_blob_gas: Option::default(),
@@ -107,7 +107,7 @@ pub fn convert_block(block: CompressedSignedBeaconBlock) -> Result<Block, Error>
                 nonce: <[u8; 8]>::default(), // 0 for proof-of-stake
                 transactions: parse_transactions(block.transactions)?,
                 receipts: Vec::default(), // .era files don't contain receipts
-                base_fee_per_gas: Some(U256::from(block.base_fee_per_gas.into_limbs())),
+                base_fee_per_gas: Some(U256::from_le_bytes(block.base_fee_per_gas.to_le_bytes())),
                 withdrawals_root: Option::default(),
                 blob_gas_used: Option::default(),
                 excess_blob_gas: Option::default(),
@@ -134,7 +134,7 @@ pub fn convert_block(block: CompressedSignedBeaconBlock) -> Result<Block, Error>
                 nonce: <[u8; 8]>::default(), // 0 for proof-of-stake
                 transactions: parse_transactions(block.transactions)?,
                 receipts: Vec::default(), // .era files don't contain receipts
-                base_fee_per_gas: Some(U256::from(block.base_fee_per_gas.into_limbs())),
+                base_fee_per_gas: Some(U256::from_le_bytes(block.base_fee_per_gas.to_le_bytes())),
                 withdrawals_root: Some(execution_requests.withdrawals.tree_hash_root().0),
                 blob_gas_used: Some(block.blob_gas_used),
                 excess_blob_gas: Some(block.excess_blob_gas),

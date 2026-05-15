@@ -299,10 +299,9 @@ mod tests {
                 }],
             };
             let mut mock_server = MockRpcServer::new();
-            mock_server.expect_list().returning({
-                let list_response = list_response.clone();
-                move |_| Ok(tonic::Response::new(list_response.clone()))
-            });
+            mock_server
+                .expect_list()
+                .returning(move |_| Ok(tonic::Response::new(list_response.clone())));
             let server = TestServer::new(mock_server).await;
 
             let mut buf = Vec::new();
@@ -335,10 +334,9 @@ mod tests {
                 }],
             };
             let mut mock_server = MockRpcServer::new();
-            mock_server.expect_list().returning({
-                let list_response = list_response.clone();
-                move |_| Ok(tonic::Response::new(list_response.clone()))
-            });
+            mock_server
+                .expect_list()
+                .returning(move |_| Ok(tonic::Response::new(list_response.clone())));
             let server = TestServer::new(mock_server).await;
 
             let mut buf = Vec::new();
@@ -372,10 +370,9 @@ mod tests {
                 ],
             };
             let mut mock_server = MockRpcServer::new();
-            mock_server.expect_list().returning({
-                let list_response = list_response.clone();
-                move |_| Ok(tonic::Response::new(list_response.clone()))
-            });
+            mock_server
+                .expect_list()
+                .returning(move |_| Ok(tonic::Response::new(list_response.clone())));
             let server = TestServer::new(mock_server).await;
 
             let mut buf = Vec::new();
