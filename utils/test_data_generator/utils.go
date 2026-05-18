@@ -100,7 +100,7 @@ func generateDataWithMaxLengthCombination[T any](
 func SetValueInStruct[T any, K any](data T, fieldName string, value K) bool {
 	dataValue := reflect.ValueOf(data)
 	var f reflect.Value
-	if dataValue.Kind() == reflect.Ptr {
+	if dataValue.Kind() == reflect.Pointer {
 		f = reflect.ValueOf(data).Elem().FieldByName(fieldName)
 	} else {
 		f = reflect.ValueOf(data).FieldByName(fieldName)
@@ -109,8 +109,8 @@ func SetValueInStruct[T any, K any](data T, fieldName string, value K) bool {
 		return false
 	}
 	fieldValue := reflect.ValueOf(value)
-	if f.Kind() != reflect.Ptr {
-		if fieldValue.Kind() == reflect.Ptr {
+	if f.Kind() != reflect.Pointer {
+		if fieldValue.Kind() == reflect.Pointer {
 			if fieldValue.IsNil() {
 				return false
 			}
