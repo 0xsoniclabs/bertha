@@ -23,16 +23,9 @@ permissions:
 on:
   push:
     branches: [ main ]
-    paths:
-      - '.github/workflows/go.yaml'
-      - 'go/**'
-      - 'utils/test_data_generator/**'
   pull_request:
     branches: [ "**" ]
-    paths:
-      - '.github/workflows/go.yaml'
-      - 'go/**'
-      - 'utils/test_data_generator/**'
+
 jobs:
   lint:
     name: lint
