@@ -45,6 +45,7 @@ jobs:
       uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
       with:
         go-version: "1.26.0"
+        cache-dependency-path: go/go.sum
     - name: install rocksdb
       uses: awalsh128/cache-apt-pkgs-action@latest
       with:
@@ -73,6 +74,7 @@ jobs:
       uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
       with:
         go-version: "1.26.0"
+        cache-dependency-path: utils/scripts/license/go.sum
     - name: check license headers
       run: go run ./utils/scripts/license/add_license_header.go -dir ./ -check
 
@@ -87,6 +89,7 @@ jobs:
       uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
       with:
         go-version: "1.26.0"
+        cache-dependency-path: go/go.sum
     - name: install rocksdb
       uses: awalsh128/cache-apt-pkgs-action@latest
       with:
