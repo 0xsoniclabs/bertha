@@ -55,7 +55,7 @@ impl RocksBlockDb {
         let mut db_opts = Self::make_options();
         db_opts.create_if_missing(false);
         Ok(Self {
-            db: rocksdb::DB::open(&Self::make_options(), path).map_err(Error::from)?,
+            db: rocksdb::DB::open(&db_opts, path).map_err(Error::from)?,
             _secondary_path: None,
         })
     }
