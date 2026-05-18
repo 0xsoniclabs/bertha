@@ -455,6 +455,10 @@ func checkBlockResults(
 	overwriteStateRoot := &replayLoopContext.overwriteStateRoot
 	noStateRootCheck := replayLoopContext.skipStateRootCheck
 
+	if len(receipts) != len(block.Receipts) {
+		return fmt.Errorf("number of receipts mismatch for block %d: expected %d, got %d",
+			block.Number, len(block.Receipts), len(receipts))
+	}
 	for i, receipt := range receipts {
 		want := block.Receipts[i]
 		if receipt.Status != want.GetStatus() {
