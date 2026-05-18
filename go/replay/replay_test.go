@@ -38,6 +38,7 @@ import (
 	"github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver"
+	"github.com/0xsoniclabs/sonic/opera/contracts/driver/drivercall"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver/driverpos"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -746,7 +747,7 @@ func TestStateChainAdapter_ApplyBlock_AppliesUpgrades(t *testing.T) {
 	}
 }
 
-func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnInternalTx(t *testing.T) {
+func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnEpochSealingTx(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	address := crypto.PubkeyToAddress(key.PublicKey)
@@ -756,13 +757,16 @@ func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnInternalT
 		tx                   *blockdb.Transaction
 		expectCommitUpgrades bool
 	}{
-		"InternalTx": {
-			// A transaction with empty YParity and R produces V=0, R=0, which
-			// satisfies internaltx.IsInternal.
+		"EpochSealingTx": {
+			// An epoch sealing transaction must be an internal transaction to
+			// the driver contract with the correct data.
+			// Internal transitions must have YParity=0 and R=0 which produces
+			// V=0, R=0, which satisfies internaltx.IsInternal.
 			tx: convert.ToBerthaTransaction(types.NewTx(
 				&types.LegacyTx{
-					Gas:      21000,
-					To:       &common.Address{1},
+					Gas:      25000,
+					To:       &driver.ContractAddress,
+					Data:     drivercall.SealEpoch(nil),
 					GasPrice: big.NewInt(0),
 					V:        big.NewInt(0),
 					R:        big.NewInt(0),
@@ -770,7 +774,7 @@ func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnInternalT
 			)),
 			expectCommitUpgrades: true,
 		},
-		"NonInternalTx": {
+		"NonEpochSealingTx": {
 			tx: convert.ToBerthaTransaction(types.MustSignNewTx(key, signer,
 				&types.LegacyTx{
 					Gas:      21000,

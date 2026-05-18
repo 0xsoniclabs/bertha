@@ -27,7 +27,6 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,8 +44,8 @@ import (
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver"
+	"github.com/0xsoniclabs/sonic/opera/contracts/driver/drivercall"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver/driverpos"
-	"github.com/0xsoniclabs/sonic/utils/signers/internaltx"
 	"github.com/0xsoniclabs/tracy"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
@@ -702,9 +701,13 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	}
 
 	// Commit all pending upgrades if the block is an epoch sealing block.
-	if slices.ContainsFunc(block.Transactions(), internaltx.IsInternal) {
-		if err := a.metadataStore.CommitUpgrades(block.NumberU64()); err != nil {
-			return nil, future.Future[result.Result[common.Hash]]{}, fmt.Errorf("failed to commit upgrades at block %d: %v", block.NumberU64(), err)
+	if block.Transactions().Len() > 0 {
+		_, err := drivercall.ParseSealEpochArgs(block.Transactions()[0])
+		isEpochSealingTx := err == nil
+		if isEpochSealingTx {
+			if err := a.metadataStore.CommitUpgrades(block.NumberU64()); err != nil {
+				return nil, future.Future[result.Result[common.Hash]]{}, fmt.Errorf("failed to commit upgrades at block %d: %v", block.NumberU64(), err)
+			}
 		}
 	}
 
@@ -946,7 +949,7 @@ func onNewLog(metadataStore MetadataStore, blockNumber uint64, l *types.Log) {
 		len(l.Data) >= 64 {
 		diff, err := decodeDataBytes(l)
 		if err != nil {
-			slog.Error("Failed to decode UpdateNetworkRules event data", "block", blockNumber, "error", err)
+			slog.Warn("Failed to decode UpdateNetworkRules event data", "block", blockNumber, "error", err)
 			return
 		}
 		err = metadataStore.PatchUpgrades(blockNumber, diff)
