@@ -201,7 +201,7 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
-		historyAdapter{},
+		&blockHashHistory{},
 		opera.Upgrades{},
 	)
 
@@ -235,7 +235,7 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
-		historyAdapter{},
+		&blockHashHistory{},
 		opera.Upgrades{},
 	)
 
@@ -269,7 +269,7 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
-		historyAdapter{},
+		&blockHashHistory{},
 		opera.Upgrades{},
 	)
 
