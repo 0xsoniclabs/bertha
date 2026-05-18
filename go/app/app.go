@@ -117,10 +117,14 @@ func getApp() *cli.Command {
 		},
 		After: func(_ context.Context, cmd *cli.Command) error {
 			if profiler != nil {
-				return profiler.Stop()
+				if err := profiler.Stop(); err != nil {
+					return err
+				}
 			}
 			if diagnostic != nil {
-				return diagnostic.Stop()
+				if err := diagnostic.Stop(); err != nil {
+					return err
+				}
 			}
 			if tracyEnabled {
 				tracy.ShutdownProfiler()
