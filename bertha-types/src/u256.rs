@@ -21,7 +21,10 @@ use std::{
 };
 
 use alloy_rlp::{Decodable, Encodable};
-use bnum::types::U256 as BnumU256;
+use bnum::{
+    cast::{As, CastFrom},
+    types::U256 as BnumU256,
+};
 
 use super::parse_hex_error::ParseHexError;
 use crate::HexConvert;
@@ -32,26 +35,27 @@ use crate::HexConvert;
 pub struct U256(BnumU256);
 
 impl U256 {
-    pub const ZERO: Self = U256(BnumU256::ZERO);
+    pub const ZERO: Self = U256(BnumU256::MIN);
     pub const MAX: Self = U256(BnumU256::MAX);
 
     /// Constructs a [U256] from a byte array in big-endian order.
-    pub fn from_be_bytes(bytes: &[u8; 32]) -> Self {
-        // The slice is 32 bytes long, so it is safe to unwrap.
-        BnumU256::from_be_slice(bytes).unwrap().into()
+    pub fn from_be_bytes(bytes: [u8; 32]) -> Self {
+        Self(BnumU256::from_be_bytes(bytes))
+    }
+
+    /// Constructs a [U256] from a byte array in little-endian order.
+    pub fn from_le_bytes(bytes: [u8; 32]) -> Self {
+        Self(BnumU256::from_le_bytes(bytes))
     }
 
     /// Returns the big-endian representation of the number as a byte array.
     pub fn to_be_bytes(&self) -> [u8; 32] {
-        let mut bytes = [0u8; 32];
-        let src_bytes = &self.0.to_radix_be(256);
-        bytes[32 - src_bytes.len()..].copy_from_slice(src_bytes);
-        bytes
+        self.0.to_be_bytes()
     }
 
     /// Converts the number to a [u64] using only the least significant 8 bytes.
     pub fn to_least_significant_u64(self) -> u64 {
-        self.0.digits()[0]
+        self.0.as_()
     }
 }
 
@@ -75,10 +79,10 @@ impl Display for U256 {
 
 impl<I> From<I> for U256
 where
-    BnumU256: From<I>,
+    BnumU256: CastFrom<I>,
 {
     fn from(value: I) -> Self {
-        U256(BnumU256::from(value))
+        U256(BnumU256::cast_from(value))
     }
 }
 
@@ -115,14 +119,19 @@ impl Sub for U256 {
 
 impl Encodable for U256 {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        let s = self.0.to_radix_be(256);
-        if s.len() == 1 && s[0] == 0 {
+        if *self == U256::ZERO {
             // Special handling for zero: Encoding a single-element array of zero results in "0x00",
             // whereas encoding the value 0 results in "0x". We need the latter to
             // produce the correct block hash.
             0u64.encode(out);
         } else {
-            s.as_slice().encode(out);
+            let bytes = self.to_be_bytes();
+            let mut s = bytes.as_slice();
+            // Strip leading zeros to get minimal big-endian representation.
+            while s.len() > 1 && s[0] == 0 {
+                s = &s[1..];
+            }
+            s.encode(out);
         }
     }
 }
@@ -144,45 +153,45 @@ mod test {
 
     #[test]
     fn can_be_constructed_from_bnum_type() {
-        let x = U256::from(BnumU256::from(123u8));
-        assert_eq!(x.0, BnumU256::from(123u8));
+        let x = U256::from(BnumU256::cast_from(123u8));
+        assert_eq!(x.0, BnumU256::cast_from(123u8));
     }
 
     #[test]
     fn can_be_constructed_from_unsigned_integer_types() {
         let x = U256::from(1u8);
-        assert_eq!(x, U256::from(BnumU256::from(1u8)));
+        assert_eq!(x, U256::from(BnumU256::cast_from(1u8)));
         assert_eq!(x.to_string(), "1");
         let x = U256::from(2u16);
-        assert_eq!(x, U256::from(BnumU256::from(2u16)));
+        assert_eq!(x, U256::from(BnumU256::cast_from(2u16)));
         assert_eq!(x.to_string(), "2");
         let x = U256::from(3u32);
-        assert_eq!(x, U256::from(BnumU256::from(3u32)));
+        assert_eq!(x, U256::from(BnumU256::cast_from(3u32)));
         assert_eq!(x.to_string(), "3");
         let x = U256::from(4u64);
-        assert_eq!(x, U256::from(BnumU256::from(4u64)));
+        assert_eq!(x, U256::from(BnumU256::cast_from(4u64)));
         assert_eq!(x.to_string(), "4");
         let x = U256::from(5u128);
-        assert_eq!(x, U256::from(BnumU256::from(5u128)));
+        assert_eq!(x, U256::from(BnumU256::cast_from(5u128)));
         assert_eq!(x.to_string(), "5");
     }
 
     #[test]
     fn can_be_constructed_from_hex_string() {
         let x = U256::try_from_hex("0xdeadbeef").unwrap();
-        assert_eq!(x.0, BnumU256::from(3735928559u64));
+        assert_eq!(x.0, BnumU256::cast_from(3735928559u64));
 
         // Even-length hex string
         let x = U256::try_from_hex("0x00").unwrap();
-        assert_eq!(x.0, BnumU256::ZERO);
+        assert_eq!(x.0, BnumU256::cast_from(0u64));
 
         // Odd-length hex string
         let x = U256::try_from_hex("0x0").unwrap();
-        assert_eq!(x.0, BnumU256::ZERO);
+        assert_eq!(x.0, BnumU256::cast_from(0u64));
 
         // Without 0x prefix
         let x = U256::try_from_hex("10").unwrap();
-        assert_eq!(x.0, BnumU256::from(16u8));
+        assert_eq!(x.0, BnumU256::cast_from(16u64));
     }
 
     #[test]
@@ -211,7 +220,7 @@ mod test {
     fn can_be_converted_to_underlying_bnum_type() {
         let x = U256::from(123u8);
         let y: BnumU256 = x.into();
-        assert_eq!(y, BnumU256::from(123u8));
+        assert_eq!(y, BnumU256::cast_from(123u8));
     }
 
     #[test]
@@ -226,7 +235,7 @@ mod test {
         let x = U256::ZERO;
         let bytes = x.to_be_bytes();
         assert_eq!(bytes, [0; 32]);
-        assert_eq!(U256::from_be_bytes(&bytes), x);
+        assert_eq!(U256::from_be_bytes(bytes), x);
 
         let x = U256::from(256u64);
         let bytes = x.to_be_bytes();
@@ -237,7 +246,7 @@ mod test {
                 0, 0, 1, 0
             ]
         );
-        assert_eq!(U256::from_be_bytes(&bytes), x);
+        assert_eq!(U256::from_be_bytes(bytes), x);
 
         let x = U256::from(u64::MAX);
         let bytes = x.to_be_bytes();
@@ -248,7 +257,7 @@ mod test {
                 255, 255, 255, 255, 255, 255
             ]
         );
-        assert_eq!(U256::from_be_bytes(&bytes), x);
+        assert_eq!(U256::from_be_bytes(bytes), x);
 
         let x = U256::MAX;
         let bytes = x.to_be_bytes();
@@ -259,7 +268,7 @@ mod test {
                 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
             ]
         );
-        assert_eq!(U256::from_be_bytes(&bytes), x);
+        assert_eq!(U256::from_be_bytes(bytes), x);
     }
 
     #[test]
@@ -273,7 +282,7 @@ mod test {
         let x = U256::from(1u8);
         let y = U256::from(2u8);
         let z = x + y;
-        assert_eq!(z.unwrap().0, BnumU256::from(3u8));
+        assert_eq!(z.unwrap().0, BnumU256::cast_from(3u8));
     }
 
     #[test]
@@ -289,7 +298,7 @@ mod test {
         let x = U256::from(3u8);
         let y = U256::from(2u8);
         let z = x - y;
-        assert_eq!(z.unwrap().0, BnumU256::from(1u8));
+        assert_eq!(z.unwrap().0, BnumU256::cast_from(1u8));
     }
 
     #[test]
@@ -301,10 +310,10 @@ mod test {
     }
 
     #[test]
-    fn to_least_significant_u64_converts_and_tructated_if_necessary() {
+    fn to_least_significant_u64_converts_and_truncates_if_necessary() {
         let cases = [
             (U256::from(u64::MIN), u64::MIN),
-            (U256::from(u64::MIN + 1), u64::MIN + 1),
+            (U256::from(1), 1),
             (U256::from(u64::MAX - 1), u64::MAX - 1),
             (U256::from(u64::MAX), u64::MAX),
             (U256::from(u64::MAX).add(U256::from(1u64)).unwrap(), 0),

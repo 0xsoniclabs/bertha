@@ -154,7 +154,7 @@ fn convert_to_fixed_size<const N: usize>(data: Vec<u8>) -> Result<[u8; N], Error
 
 fn convert_to_u256(data: Vec<u8>) -> Result<U256, Error> {
     Ok(U256::from_be_bytes(
-        &data.try_into().map_err(|_| Error::TypeConversion)?,
+        data.try_into().map_err(|_| Error::TypeConversion)?,
     ))
 }
 
@@ -343,7 +343,7 @@ impl TryFrom<Block> for bertha_types::Block {
 #[cfg(test)]
 mod tests {
     use bertha_types::{Address, Hash, TransactionType, U256};
-    use rand::{Rng, SeedableRng, rngs::SmallRng};
+    use rand::{RngExt, SeedableRng, rngs::SmallRng};
 
     use super::*;
 
@@ -363,7 +363,7 @@ mod tests {
         }
 
         fn u256(&mut self) -> U256 {
-            U256::from_be_bytes(&self.bytes::<32>())
+            U256::from_be_bytes(self.bytes::<32>())
         }
 
         fn bytes<const N: usize>(&mut self) -> [u8; N] {
