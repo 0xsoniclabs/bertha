@@ -137,6 +137,7 @@ func (db RocksDB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) ite
 	startKey := computeKey(chainID, startBlockNumber)
 
 	readOptions := grocksdb.NewDefaultReadOptions()
+	defer readOptions.Destroy()
 	it := db.db.NewIterator(readOptions)
 	it.Seek(startKey)
 

@@ -39,16 +39,20 @@ func StartCPUProfile(path string) (*profiler, error) {
 	if err := pprof.StartCPUProfile(out); err != nil {
 		return nil, errors.Join(err, os.Remove(path))
 	}
-	return &profiler{path: path}, nil
+	return &profiler{path: path, out: out}, nil
 }
 
 type profiler struct {
 	path string
+	out  *os.File
 }
 
 // Stop stops the CPU profiling and writes the profile to the file specified.
 func (p *profiler) Stop() error {
 	pprof.StopCPUProfile()
+	if err := p.out.Close(); err != nil {
+		return err
+	}
 	slog.Info("CPU profile written", "file", p.path)
 	return nil
 }
