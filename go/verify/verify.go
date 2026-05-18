@@ -48,7 +48,7 @@ func Verify(ctx context.Context, args VerifyArgs) (err error) {
 
 	fmt.Printf("Verifying blocks for chain ID %d from block %d to block %d ...\n", args.ChainID, args.StartBlock, args.EndBlock)
 
-	numBlocks := int64(args.EndBlock - args.StartBlock)
+	numBlocks := int64(args.EndBlock - args.StartBlock + 1)
 	bar := progressbar.Default(numBlocks, "Verifying blocks")
 
 	return verifyBlocks(
