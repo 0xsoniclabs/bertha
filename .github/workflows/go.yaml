@@ -28,7 +28,7 @@ on:
       - 'go/**'
       - 'utils/test_data_generator/**'
   pull_request:
-    branches: [ main ]
+    branches: [ "**" ]
     paths:
       - '.github/workflows/go.yaml'
       - 'go/**'
