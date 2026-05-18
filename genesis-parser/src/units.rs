@@ -198,44 +198,21 @@ mod tests {
         assert!(read_file_header(buf.as_slice()).is_ok());
     }
 
-    #[test]
-    fn check_file_header_fails_with_invalid_header() {
-        // empty buffer = header missing
-        let buf = Vec::new();
+    #[rstest::rstest]
+    #[case::header_missing(Vec::new(), GFileError::HeaderMissing)]
+    #[case::invalid_header(vec![0; 4], GFileError::InvalidHeader { got: [0; 4], expected: HEADER })]
+    #[case::version_missing(HEADER.to_vec(), GFileError::HeaderMissing)]
+    #[case::invalid_version(
+        {let mut b = HEADER.to_vec(); b.extend_from_slice(&[0; 4]); b},
+        GFileError::InvalidFileVersion { got: [0; 4], expected: VERSION }
+    )]
+    fn check_file_header_fails_with_invalid_header(
+        #[case] buf: Vec<u8>,
+        #[case] expected_error: GFileError,
+    ) {
         assert!(matches!(
             read_file_header(buf.as_slice()).unwrap_err(),
-            Error::GFile(GFileError::HeaderMissing)
-        ));
-
-        // invalid header
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&[0, 0, 0, 0]);
-        assert!(matches!(
-            read_file_header(buf.as_slice()).unwrap_err(),
-            Error::GFile(GFileError::InvalidHeader {
-                got: [0, 0, 0, 0],
-                expected: HEADER,
-            })
-        ));
-
-        // version missing
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&HEADER);
-        assert!(matches!(
-            read_file_header(buf.as_slice()).unwrap_err(),
-            Error::GFile(GFileError::HeaderMissing)
-        ));
-
-        // invalid version
-        let mut buf = Vec::new();
-        buf.extend_from_slice(&HEADER);
-        buf.extend_from_slice(&[0, 0, 0, 0]);
-        assert!(matches!(
-            read_file_header(buf.as_slice()).unwrap_err(),
-            Error::GFile(GFileError::InvalidFileVersion {
-                got: [0, 0, 0, 0],
-                expected: VERSION,
-            })
+            Error::GFile(err) if err == expected_error,
         ));
     }
 

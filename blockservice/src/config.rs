@@ -255,7 +255,10 @@ impl ChainConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::test_dir::{Permissions, TestDir};
+    use crate::{
+        test_templates::auth_token,
+        utils::test_dir::{Permissions, TestDir},
+    };
 
     #[test]
     fn embedded_default_config_is_valid() {
@@ -277,26 +280,21 @@ mod tests {
         );
     }
 
-    #[test]
-    fn auth_token_serialization_and_deserialization_succeed_for_valid_and_non_existing_auth_tokens()
-    {
-        // Test cases in the form (line to add to config, expected auth token)
-        let cases = [
-            // valid token
-            (
-                "auth_token = \"my-token\"\n",
-                Some(auth::token_to_metadata_value("my-token").unwrap()),
-            ),
-            // no token
-            ("", None),
-        ];
-        for (toml_token_line, expected_token) in cases {
-            let config_toml = format! {"port = 8080\nchains = []\n{toml_token_line}"};
-            let config = toml::from_str::<Config>(&config_toml).unwrap();
-            assert_eq!(config.auth_token, expected_token);
-            let toml = toml::to_string(&config).unwrap();
-            assert_eq!(config_toml, toml);
-        }
+    #[rstest::rstest]
+    #[case::valid_token(
+        "auth_token = \"my-token\"\n",
+        Some(auth::token_to_metadata_value("my-token").unwrap())
+    )]
+    #[case::no_token("", None)]
+    fn auth_token_serialization_and_deserialization_succeed_for_valid_and_non_existing_auth_tokens(
+        #[case] toml_token_line: &str,
+        #[case] expected_token: Option<MetadataValue<Ascii>>,
+    ) {
+        let config_toml = format! {"port = 8080\nchains = []\n{toml_token_line}"};
+        let config = toml::from_str::<Config>(&config_toml).unwrap();
+        assert_eq!(config.auth_token, expected_token);
+        let toml = toml::to_string(&config).unwrap();
+        assert_eq!(config_toml, toml);
     }
 
     #[test]
@@ -409,19 +407,13 @@ mod tests {
         assert_eq!(config.get_port(), 1234);
     }
 
-    #[test]
-    fn get_auth_token_returns_auth_token() {
-        let cases = [
-            Some(auth::token_to_metadata_value("my-token").unwrap()),
-            None,
-        ];
-        for auth_token in cases {
-            let config = Config {
-                auth_token: auth_token.clone(),
-                ..Config::default()
-            };
-            assert_eq!(config.get_auth_token(), auth_token.as_ref());
-        }
+    #[rstest_reuse::apply(auth_token)]
+    fn get_auth_token_returns_auth_token(auth_token: Option<MetadataValue<Ascii>>) {
+        let config = Config {
+            auth_token: auth_token.clone(),
+            ..Config::default()
+        };
+        assert_eq!(config.get_auth_token(), auth_token.as_ref());
     }
 
     #[test]
@@ -536,44 +528,45 @@ mod tests {
         assert!(non_existent_chain.is_none());
     }
 
-    #[test]
-    fn get_chain_configs_returns_all_chain_configs() {
-        let cases = vec![
-            vec![],
-            vec![ChainConfig::new(1)],
-            vec![ChainConfig::new(1), ChainConfig::new(2)],
-        ];
-        for chain_configs in cases {
-            let config = Config {
-                chains: chain_configs.clone(),
-                ..Config::default()
-            };
-            assert_eq!(config.get_chain_configs(), &chain_configs);
-        }
+    #[rstest::rstest]
+    #[case::empty(vec![])]
+    #[case::one_chain(vec![ChainConfig::new(1)])]
+    #[case::two_chains(vec![ChainConfig::new(1), ChainConfig::new(2)])]
+    fn get_chain_configs_returns_all_chain_configs(#[case] chain_configs: Vec<ChainConfig>) {
+        let config = Config {
+            chains: chain_configs.clone(),
+            ..Config::default()
+        };
+        assert_eq!(config.get_chain_configs(), &chain_configs);
     }
 
-    #[test]
-    fn chain_config_pretty_name_formats_correctly() {
-        let chain = ChainConfig {
+    #[rstest::rstest]
+    #[case::with_name_and_description(
+        ChainConfig {
             name: "Test Chain".to_string(),
             description: "A test blockchain".to_string(),
-            ..ChainConfig::new(1337)
-        };
-        assert_eq!(chain.pretty_name(), "[1337] Test Chain: A test blockchain");
-
-        let chain_no_name = ChainConfig {
-            description: "Unnamed chain".to_string(),
-            ..ChainConfig::new(42)
-        };
-        assert_eq!(chain_no_name.pretty_name(), "[42] (no name): Unnamed chain");
-
-        let chain_no_description = ChainConfig {
-            name: "Test Chain".to_string(),
             ..ChainConfig::new(1)
-        };
-        assert_eq!(
-            chain_no_description.pretty_name(),
-            "[1] Test Chain: (no description)"
-        );
+        },
+        "[1] Test Chain: A test blockchain",
+    )]
+    #[case::without_name(
+        ChainConfig {
+            description: "Unnamed chain".to_string(),
+            ..ChainConfig::new(2)
+        },
+        "[2] (no name): Unnamed chain",
+    )]
+    #[case::without_description(
+        ChainConfig {
+            name: "Test Chain".to_string(),
+            ..ChainConfig::new(3)
+        },
+        "[3] Test Chain: (no description)",
+    )]
+    fn chain_config_pretty_name_formats_correctly(
+        #[case] chain: ChainConfig,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(chain.pretty_name(), expected);
     }
 }

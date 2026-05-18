@@ -61,6 +61,7 @@ pub async fn fetch_state_updates(
 
 #[cfg(test)]
 mod tests {
+    use tonic::metadata::{Ascii, MetadataValue};
 
     use super::*;
     use crate::{
@@ -70,6 +71,7 @@ mod tests {
             proto_rpc,
             test_utils::{MockRpcServer, TestServer},
         },
+        test_templates::auth_token,
         utils::test_dir::{Permissions, TestDir},
     };
 
@@ -208,46 +210,40 @@ mod tests {
         );
     }
 
+    #[rstest_reuse::apply(auth_token)]
     #[tokio::test]
-    async fn provides_auth_token_when_supplied() {
+    async fn provides_auth_token_when_supplied(auth_token: Option<MetadataValue<Ascii>>) {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (mut cfg, _db) = open_app_dir(tmpdir.path(), true).unwrap();
 
-        let cases = vec![
-            Some(auth::token_to_metadata_value("my-token").unwrap()),
-            None,
-        ];
-        for auth_token in cases {
-            cfg.set_auth_token(auth_token.clone()).unwrap();
+        cfg.set_auth_token(auth_token.clone()).unwrap();
 
-            let mut mock_server = MockRpcServer::new();
-            mock_server
-                .expect_get_state_updates()
-                .withf({
-                    let auth_token = auth_token.clone();
-                    move |request| {
-                        if auth_token.is_some() {
-                            let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
-                            auth_token.as_ref() == req_token
-                        } else {
-                            true
-                        }
+        let mut mock_server = MockRpcServer::new();
+        mock_server
+            .expect_get_state_updates()
+            .withf({
+                let auth_token = auth_token.clone();
+                move |request| {
+                    if auth_token.is_some() {
+                        let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
+                        auth_token.as_ref() == req_token
+                    } else {
+                        true
                     }
-                })
-                .returning({
-                    move |_| {
-                        Ok(tonic::Response::new(proto_rpc::StateUpdates {
-                            updates: vec![],
-                        }))
-                    }
-                });
+                }
+            })
+            .returning({
+                move |_| {
+                    Ok(tonic::Response::new(proto_rpc::StateUpdates {
+                        updates: vec![],
+                    }))
+                }
+            });
 
-            let server = TestServer::new(mock_server).await;
-            let mut buf = Vec::new();
-            let result =
-                fetch_state_updates(tmpdir.path(), server.address.clone(), 1, &mut buf).await;
-            assert!(result.is_ok(), "fetch update state should succeed");
-        }
+        let server = TestServer::new(mock_server).await;
+        let mut buf = Vec::new();
+        let result = fetch_state_updates(tmpdir.path(), server.address.clone(), 1, &mut buf).await;
+        assert!(result.is_ok(), "fetch update state should succeed");
     }
 }

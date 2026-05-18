@@ -57,6 +57,7 @@ pub const AUTHORIZATION_HEADER_NAME: &str = "authorization";
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
     use tonic::Code;
 
     use super::*;
@@ -95,62 +96,52 @@ mod tests {
         );
     }
 
-    #[test]
-    fn check_token_intercepts_request_and_validates_token_when_token_is_supplied() {
+    #[rstest]
+    #[case(None, Some("Missing auth token"))]
+    #[case(Some("invalid-token"), Some("Invalid auth token"))]
+    #[case(Some("Bearer my-token"), None)]
+    fn check_token_intercepts_request_and_validates_token_when_token_is_supplied(
+        #[case] header_value: Option<&str>,
+        #[case] expected_error_msg: Option<&str>,
+    ) {
         let token = token_to_metadata_value("my-token").unwrap();
         let check_fn = check_token(Some(token));
+        let mut req = Request::new(());
 
-        {
-            // No token in request
-            let result = check_fn(Request::new(()));
+        if let Some(header_value) = header_value {
+            req.metadata_mut().insert(
+                AUTHORIZATION_HEADER_NAME,
+                MetadataValue::from_str(header_value).unwrap(),
+            );
+        }
+
+        let result = check_fn(req);
+
+        if let Some(expected_error_msg) = expected_error_msg {
             assert!(result.is_err());
             let error = result.unwrap_err();
             assert_eq!(error.code(), Code::Unauthenticated);
-            assert!(error.message().contains("Missing auth token"));
-        }
-        {
-            // Invalid token in request
-            let mut req = Request::new(());
-            req.metadata_mut().insert(
-                AUTHORIZATION_HEADER_NAME,
-                MetadataValue::from_static("invalid-token"),
-            );
-            let result = check_fn(req);
-            assert!(result.is_err());
-            let error = result.unwrap_err();
-            assert_eq!(error.code(), Code::Unauthenticated);
-            assert!(error.message().contains("Invalid auth token"));
-        }
-        {
-            // Valid token in request
-            let mut req = Request::new(());
-            req.metadata_mut().insert(
-                AUTHORIZATION_HEADER_NAME,
-                MetadataValue::from_static("Bearer my-token"),
-            );
-            let result = check_fn(req);
+            assert!(error.message().contains(expected_error_msg));
+        } else {
             assert!(result.is_ok());
         }
     }
 
-    #[test]
-    fn check_token_forwards_request_when_no_token_is_supplied() {
+    #[rstest]
+    #[case::no_token_in_request(None)]
+    #[case::token_in_request(Some("my-token"))]
+    fn check_token_forwards_request_when_no_token_is_supplied(
+        #[case] header_value: Option<&'static str>,
+    ) {
         let check_fn = check_token(None);
-
-        {
-            // No token in request
-            let result = check_fn(Request::new(()));
-            assert!(result.is_ok());
-        }
-        {
-            // Some token in request
-            let mut req = Request::new(());
+        let mut req = Request::new(());
+        if let Some(header_value) = header_value {
             req.metadata_mut().insert(
                 AUTHORIZATION_HEADER_NAME,
-                MetadataValue::from_static("my-token"),
+                MetadataValue::from_static(header_value),
             );
-            let result = check_fn(req);
-            assert!(result.is_ok());
         }
+        let result = check_fn(req);
+        assert!(result.is_ok());
     }
 }

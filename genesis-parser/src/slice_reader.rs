@@ -110,23 +110,23 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn new_checks_buffer_size_is_greater_or_equal_to_min_slice_size() {
-        // buffer size > min slice size
-        let reader = SliceReader::new(std::io::empty(), 2, NonZeroUsize::new(1).unwrap());
-        assert_eq!(reader.buffer_size, 2);
-        assert_eq!(reader.min_slice_size, 1);
-
-        // buffer size == min slice size
-        let reader = SliceReader::new(std::io::empty(), 1, NonZeroUsize::new(1).unwrap());
-        assert_eq!(reader.buffer_size, 1);
-        assert_eq!(reader.min_slice_size, 1);
-
-        // buffer size < min slice size
-        let reader = SliceReader::new(std::io::empty(), 0, NonZeroUsize::new(1).unwrap());
-        // buffer size is set to twice the min slice size
-        assert_eq!(reader.buffer_size, 2);
-        assert_eq!(reader.min_slice_size, 1);
+    #[rstest::rstest]
+    #[case::buffer_size_greater_than_min_slice_size(2, 1, 2, 1)]
+    #[case::buffer_size_equal_to_min_slice_size(1, 1, 1, 1)]
+    #[case::buffer_size_less_than_min_slice_size(0, 1, 2, 1)]
+    fn new_checks_buffer_size_is_greater_or_equal_to_min_slice_size(
+        #[case] buffer_size: usize,
+        #[case] min_slice_size: usize,
+        #[case] expected_buffer_size: usize,
+        #[case] expected_min_slice_size: usize,
+    ) {
+        let reader = SliceReader::new(
+            std::io::empty(),
+            buffer_size,
+            NonZeroUsize::new(min_slice_size).unwrap(),
+        );
+        assert_eq!(reader.buffer_size, expected_buffer_size);
+        assert_eq!(reader.min_slice_size, expected_min_slice_size);
     }
 
     #[test]

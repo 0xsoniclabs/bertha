@@ -176,44 +176,46 @@ mod test {
         assert_eq!(x.to_string(), "5");
     }
 
-    #[test]
-    fn can_be_constructed_from_hex_string() {
-        let x = U256::try_from_hex("0xdeadbeef").unwrap();
-        assert_eq!(x.0, BnumU256::cast_from(3735928559u64));
-
-        // Even-length hex string
-        let x = U256::try_from_hex("0x00").unwrap();
-        assert_eq!(x.0, BnumU256::cast_from(0u64));
-
-        // Odd-length hex string
-        let x = U256::try_from_hex("0x0").unwrap();
-        assert_eq!(x.0, BnumU256::cast_from(0u64));
-
-        // Without 0x prefix
-        let x = U256::try_from_hex("10").unwrap();
-        assert_eq!(x.0, BnumU256::cast_from(16u64));
+    #[rstest::rstest]
+    #[case::zero_odd_length("0x0", U256::ZERO)]
+    #[case::zero_even_length("0x00", U256::ZERO)]
+    #[case::zero_without_prefix("0", U256::ZERO)]
+    #[case::base16("0x10", U256::from(16u64))]
+    #[case::multi_byte("0xabcd", U256::from(43981u64))]
+    fn can_be_constructed_from_hex_string(#[case] hex_str: &str, #[case] expected: U256) {
+        let x = U256::try_from_hex(hex_str).unwrap();
+        assert_eq!(x, expected);
     }
 
-    #[test]
-    fn malformed_hex_string_produces_error() {
-        let x = U256::try_from_hex("0x");
-        assert_eq!(x, Err(ParseHexError::IntError(IntErrorKind::Empty)));
-        assert_eq!(
-            x.unwrap_err().to_string(),
-            "hex string cannot be represented as a number of the target type: IntErrorKind::Empty"
-        );
-
-        let x = U256::try_from_hex("xyz");
-        assert_eq!(x, Err(ParseHexError::InvalidCharacter));
-        assert_eq!(
-            x.unwrap_err().to_string(),
-            "hex string contains invalid character(s)"
-        );
-
-        let x = U256::try_from_hex(
-            "0x10000000000000000000000000000000000000000000000000000000000000000",
-        );
-        assert_eq!(x, Err(ParseHexError::IntError(IntErrorKind::PosOverflow)));
+    #[rstest::rstest]
+    #[case::empty(
+        "",
+        ParseHexError::IntError(IntErrorKind::Empty),
+        "hex string cannot be represented as a number of the target type: IntErrorKind::Empty"
+    )]
+    #[case::only_prefix(
+        "0x",
+        ParseHexError::IntError(IntErrorKind::Empty),
+        "hex string cannot be represented as a number of the target type: IntErrorKind::Empty"
+    )]
+    #[case::invalid_chars(
+        "xyz",
+        ParseHexError::InvalidCharacter,
+        "hex string contains invalid character(s)"
+    )]
+    #[case::overflow(
+        "0x10000000000000000000000000000000000000000000000000000000000000000",
+        ParseHexError::IntError(IntErrorKind::PosOverflow),
+        "hex string cannot be represented as a number of the target type: IntErrorKind::PosOverflow"
+    )]
+    fn malformed_hex_string_produces_error(
+        #[case] input: &str,
+        #[case] expected_err: ParseHexError,
+        #[case] expected_msg: &str,
+    ) {
+        let x = U256::try_from_hex(input);
+        assert_eq!(x, Err(expected_err));
+        assert_eq!(x.unwrap_err().to_string(), expected_msg);
     }
 
     #[test]
@@ -230,44 +232,26 @@ mod test {
         assert_eq!(hex, "0x100");
     }
 
-    #[test]
-    fn can_be_converted_to_and_from_be_bytes() {
-        let x = U256::ZERO;
+    #[rstest::rstest]
+    #[case::zero(
+        U256::ZERO,
+        [0u8; 32],
+    )]
+    #[case::u64_256(
+        U256::from(256u64),
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+    )]
+    #[case::u64_max(
+        U256::from(u64::MAX),
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255],
+    )]
+    #[case::u256_max(
+        U256::MAX,
+        [255u8; 32],
+    )]
+    fn can_be_converted_to_and_from_be_bytes(#[case] x: U256, #[case] expected_bytes: [u8; 32]) {
         let bytes = x.to_be_bytes();
-        assert_eq!(bytes, [0; 32]);
-        assert_eq!(U256::from_be_bytes(bytes), x);
-
-        let x = U256::from(256u64);
-        let bytes = x.to_be_bytes();
-        assert_eq!(
-            bytes,
-            [
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 1, 0
-            ]
-        );
-        assert_eq!(U256::from_be_bytes(bytes), x);
-
-        let x = U256::from(u64::MAX);
-        let bytes = x.to_be_bytes();
-        assert_eq!(
-            bytes,
-            [
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255,
-                255, 255, 255, 255, 255, 255
-            ]
-        );
-        assert_eq!(U256::from_be_bytes(bytes), x);
-
-        let x = U256::MAX;
-        let bytes = x.to_be_bytes();
-        assert_eq!(
-            bytes,
-            [
-                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-                255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255
-            ]
-        );
+        assert_eq!(bytes, expected_bytes);
         assert_eq!(U256::from_be_bytes(bytes), x);
     }
 
@@ -309,53 +293,42 @@ mod test {
         assert_eq!(z, Err(IntErrorKind::NegOverflow));
     }
 
-    #[test]
-    fn to_least_significant_u64_converts_and_truncates_if_necessary() {
-        let cases = [
-            (U256::from(u64::MIN), u64::MIN),
-            (U256::from(1), 1),
-            (U256::from(u64::MAX - 1), u64::MAX - 1),
-            (U256::from(u64::MAX), u64::MAX),
-            (U256::from(u64::MAX).add(U256::from(1u64)).unwrap(), 0),
-            (U256::from(u64::MAX).add(U256::from(2u64)).unwrap(), 1),
-            (
-                U256::from(u64::MAX).add(U256::from(u64::MAX - 1)).unwrap(),
-                u64::MAX - 2,
-            ),
-            (
-                U256::from(u64::MAX).add(U256::from(u64::MAX)).unwrap(),
-                u64::MAX - 1,
-            ),
-        ];
-        for (u256, expected) in cases {
-            assert_eq!(u256.to_least_significant_u64(), expected);
-        }
+    #[rstest::rstest]
+    #[case::min(U256::from(u64::MIN), u64::MIN)]
+    #[case::one(U256::from(1u64), 1u64)]
+    #[case::max_minus_one(U256::from(u64::MAX - 1), u64::MAX - 1)]
+    #[case::max(U256::from(u64::MAX), u64::MAX)]
+    #[case::overflow_to_zero(U256::from(u64::MAX).add(U256::from(1u64)).unwrap(), 0u64)]
+    #[case::overflow_to_one(U256::from(u64::MAX).add(U256::from(2u64)).unwrap(), 1u64)]
+    #[case::overflow_large(
+        U256::from(u64::MAX).add(U256::from(u64::MAX - 1)).unwrap(),
+        u64::MAX - 2
+    )]
+    #[case::overflow_max(
+        U256::from(u64::MAX).add(U256::from(u64::MAX)).unwrap(),
+        u64::MAX - 1
+    )]
+    fn to_least_significant_u64_converts_and_truncates_if_necessary(
+        #[case] u256: U256,
+        #[case] expected: u64,
+    ) {
+        assert_eq!(u256.to_least_significant_u64(), expected);
     }
 
-    #[test]
-    fn can_be_serialized_to_rlp() {
-        let x = U256::try_from_hex("0xdeadbeef").unwrap();
+    #[rstest::rstest]
+    #[case::zero(U256::from(0u8), &[0x80])]
+    #[case::one(U256::from(1u8), &[0x01])]
+    #[case::multibyte(U256::try_from_hex("0xabcd").unwrap(), &[0x82, 0xab, 0xcd])]
+    fn can_be_serialized_to_rlp(#[case] x: U256, #[case] expected_rlp: &[u8]) {
         let rlp = alloy_rlp::encode(x);
-        assert_eq!(rlp, const_hex::decode("84deadbeef").unwrap());
-
-        let x = U256::from(0u8);
-        let rlp = alloy_rlp::encode(x);
-        assert_eq!(rlp, const_hex::decode("80").unwrap());
+        assert_eq!(rlp, expected_rlp);
     }
 
-    #[test]
-    fn can_be_deserialized_from_rlp() {
-        assert_eq!(
-            U256::decode(&mut [0x80].as_slice()).unwrap(),
-            U256::from(0u64)
-        );
-        assert_eq!(
-            U256::decode(&mut [0x01].as_slice()).unwrap(),
-            U256::from(1u64)
-        );
-        assert_eq!(
-            U256::decode(&mut [0x84, 0xde, 0xad, 0xbe, 0xef].as_slice()).unwrap(),
-            U256::from(3735928559u64)
-        );
+    #[rstest::rstest]
+    #[case::zero(&[0x80u8], U256::from(0u64))]
+    #[case::one(&[0x01u8], U256::from(1u64))]
+    #[case::multibyte(&[0x82u8, 0xab, 0xcd], U256::from(43981))]
+    fn can_be_deserialized_from_rlp(#[case] mut input: &[u8], #[case] expected: U256) {
+        assert_eq!(U256::decode(&mut input).unwrap(), expected);
     }
 }

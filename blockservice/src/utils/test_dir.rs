@@ -111,28 +111,29 @@ pub fn set_permissions(dir: &Path, permission: Permissions) -> std::io::Result<(
 #[cfg(test)]
 mod tests {
 
+    use rstest::rstest;
+
     use super::*;
 
-    #[test]
-    fn permissions_mode_returns_correct_mode() {
-        assert_eq!(Permissions::ReadWrite.mode(), 0o777);
-        assert_eq!(Permissions::ReadOnly.mode(), 0o555);
-        assert_eq!(Permissions::WriteOnly.mode(), 0o333);
+    #[rstest]
+    #[case(Permissions::ReadWrite, 0o777)]
+    #[case(Permissions::ReadOnly, 0o555)]
+    #[case(Permissions::WriteOnly, 0o333)]
+    fn permissions_mode_returns_correct_mode(#[case] permission: Permissions, #[case] mode: u32) {
+        assert_eq!(permission.mode(), mode);
     }
 
-    #[test]
-    fn permissions_from_std_fs_permissions_returns_correct_permissions() {
+    #[rstest]
+    #[case(0o777, Permissions::ReadWrite)]
+    #[case(0o555, Permissions::ReadOnly)]
+    #[case(0o333, Permissions::WriteOnly)]
+    fn std_fs_permissions_from_permissions_returns_correct_permissions(
+        #[case] mode: u32,
+        #[case] permission: Permissions,
+    ) {
         assert_eq!(
-            std::fs::Permissions::from_mode(0o777),
-            Permissions::ReadWrite.into()
-        );
-        assert_eq!(
-            std::fs::Permissions::from_mode(0o555),
-            Permissions::ReadOnly.into()
-        );
-        assert_eq!(
-            std::fs::Permissions::from_mode(0o333),
-            Permissions::WriteOnly.into()
+            std::fs::Permissions::from_mode(mode),
+            std::fs::Permissions::from(permission)
         );
     }
 
@@ -184,29 +185,21 @@ mod tests {
         assert!(test_dir.path().exists());
     }
 
-    #[test]
-    fn make_read_only_changes_permissions() {
-        let test_dir = TestDir::try_new(Permissions::ReadOnly).unwrap();
+    #[rstest]
+    #[case(Permissions::ReadOnly)]
+    #[case(Permissions::WriteOnly)]
+    #[case(Permissions::ReadWrite)]
+    fn try_new_sets_permissions(#[case] permission: Permissions) {
+        let test_dir = TestDir::try_new(permission).unwrap();
         let permissions = fs::metadata(test_dir.path()).unwrap().permissions();
-        assert_eq!(permissions.mode() & 0o777, Permissions::ReadOnly.mode());
+        assert_eq!(permissions.mode() & 0o777, permission.mode());
     }
 
-    #[test]
-    fn make_write_only_changes_permissions() {
-        let test_dir = TestDir::try_new(Permissions::WriteOnly).unwrap();
-        let permissions = fs::metadata(test_dir.path()).unwrap().permissions();
-        assert_eq!(permissions.mode() & 0o777, Permissions::WriteOnly.mode());
-    }
-
-    #[test]
-    fn make_read_write_changes_permissions() {
-        let test_dir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let permissions = fs::metadata(test_dir.path()).unwrap().permissions();
-        assert_eq!(permissions.mode() & 0o777, Permissions::ReadWrite.mode());
-    }
-
-    #[test]
-    fn drop_deletes_directory_and_subdirectories() {
+    #[rstest]
+    #[case(Permissions::ReadOnly)]
+    #[case(Permissions::WriteOnly)]
+    #[case(Permissions::ReadWrite)]
+    fn drop_deletes_directory_and_subdirectories(#[case] permission: Permissions) {
         let init_dir = |permission: Permissions| {
             // Create it as read write to be able to create subdirectories
             let test_dir = TestDir::try_new(Permissions::ReadWrite).unwrap();
@@ -217,20 +210,7 @@ mod tests {
             test_dir
         };
 
-        // Read-only permissions
-        let test_dir = init_dir(Permissions::ReadOnly);
-        let path = test_dir.path().to_path_buf();
-        drop(test_dir);
-        assert!(!path.exists());
-
-        // Write-only permissions
-        let test_dir = init_dir(Permissions::WriteOnly);
-        let path = test_dir.path().to_path_buf();
-        drop(test_dir);
-        assert!(!path.exists());
-
-        // Read-write permissions
-        let test_dir = init_dir(Permissions::ReadWrite);
+        let test_dir = init_dir(permission);
         let path = test_dir.path().to_path_buf();
         drop(test_dir);
         assert!(!path.exists());

@@ -31,13 +31,13 @@ pub trait Source: Send + Sync {
     fn get_block_header_with_transactions(
         &self,
         block_number: u64,
-    ) -> impl std::future::Future<Output = Result<BlockHeaderWithTransactions, Error>> + std::marker::Send;
+    ) -> impl Future<Output = Result<BlockHeaderWithTransactions, Error>> + Send;
 
     /// Returns the receipts for the block with the specified block number.
     fn get_block_receipts(
         &self,
         block_number: u64,
-    ) -> impl std::future::Future<Output = Result<Vec<TransactionReceipt>, Error>> + std::marker::Send;
+    ) -> impl Future<Output = Result<Vec<TransactionReceipt>, Error>> + Send;
 }
 
 /// A source which requests data from a remote server using JSON RPC.

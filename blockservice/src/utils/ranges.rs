@@ -155,185 +155,123 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn add_range_adds_new_part_of_range_and_maintains_invariants() {
+    #[rstest::rstest]
+    #[case::add_to_empty(vec![], 0..=1, vec![0..=1])]
+    #[case::add_before_non_adjacent(vec![3..=4], 0..=1, vec![0..=1, 3..=4])]
+    #[case::add_before_adjacent(vec![2..=3], 0..=1, vec![0..=3])]
+    #[case::add_between_non_adjacent(vec![0..=1, 6..=7], 3..=4, vec![0..=1, 3..=4, 6..=7])]
+    #[case::add_between_non_adjacent_left_adjacent_right(vec![0..=1, 5..=6], 3..=4, vec![0..=1, 3..=6])]
+    #[case::add_between_adjacent_left_non_adjacent_right(vec![0..=1, 5..=6], 2..=3, vec![0..=3, 5..=6])]
+    #[case::add_after_non_adjacent(vec![0..=1], 3..=4, vec![0..=1, 3..=4])]
+    #[case::add_after_adjacent(vec![0..=1], 2..=3, vec![0..=3])]
+    #[case::add_contained_non_adjacent(vec![0..=3], 1..=2, vec![0..=3])]
+    #[case::add_contained_left_adjacent(vec![0..=2], 0..=1, vec![0..=2])]
+    #[case::add_contained_right_adjacent(vec![0..=2], 1..=2, vec![0..=2])]
+    #[case::add_contained_equal(vec![0..=1], 0..=1, vec![0..=1])]
+    #[case::add_fills_gap(vec![0..=1, 3..=4], 2..=2, vec![0..=4])]
+    #[case::add_partially_spans_multiple(vec![1..=2, 4..=5], 2..=4, vec![1..=5])]
+    #[case::add_fully_spans_multiple_exact(vec![0..=1, 3..=4], 0..=4, vec![0..=4])]
+    #[case::add_fully_spans_multiple_larger(vec![1..=2, 4..=5], 0..=6, vec![0..=6])]
+    fn add_range_adds_new_part_of_range_and_maintains_invariants(
+        #[case] mut ranges: Vec<BlockRange>,
+        #[case] new_range: BlockRange,
+        #[case] expected: Vec<BlockRange>,
+    ) {
         let mut rng = SmallRng::seed_from_u64(123);
-        // test cases in the form of (existing ranges, new range, expected ranges)
-        let cases = [
-            // add range to empty ranges
-            (vec![], 0..=1, vec![0..=1]),
-            //
-            // add range before all existing ranges (non-adjacent)
-            (vec![3..=4], 0..=1, vec![0..=1, 3..=4]),
-            // add range before all existing ranges (adjacent)
-            (vec![2..=3], 0..=1, vec![0..=3]),
-            //
-            // add range between existing ranges (non-adjacent)
-            (vec![0..=1, 6..=7], 3..=4, vec![0..=1, 3..=4, 6..=7]),
-            // add range between existing ranges (non-adjacent left, adjacent right)
-            (vec![0..=1, 5..=6], 3..=4, vec![0..=1, 3..=6]),
-            // add range between existing ranges (adjacent left, non-adjacent right)
-            (vec![0..=1, 5..=6], 2..=3, vec![0..=3, 5..=6]),
-            //
-            // add range after all existing ranges (non-adjacent)
-            (vec![0..=1], 3..=4, vec![0..=1, 3..=4]),
-            // add range after all existing ranges (adjacent)
-            (vec![0..=1], 2..=3, vec![0..=3]),
-            //
-            // add range contained in existing range: non-adjacent
-            (vec![0..=3], 1..=2, vec![0..=3]),
-            // add range contained in existing range: left adjacent
-            (vec![0..=2], 0..=1, vec![0..=2]),
-            // add range contained in existing range: right adjacent
-            (vec![0..=2], 1..=2, vec![0..=2]),
-            // add range contained in existing range: adjacent
-            (vec![0..=1], 0..=1, vec![0..=1]),
-            //
-            // add range filling gap between existing ranges
-            (vec![0..=1, 3..=4], 2..=2, vec![0..=4]),
-            //
-            // add range partially spanning multiple ranges
-            (vec![1..=2, 4..=5], 2..=4, vec![1..=5]),
-            //
-            // add range fully spanning multiple ranges: span ranges exact
-            (vec![0..=1, 3..=4], 0..=4, vec![0..=4]),
-            // add range fully spanning multiple ranges: span even larger than ranges
-            (vec![1..=2, 4..=5], 0..=6, vec![0..=6]),
-        ];
-        for (mut ranges, new_range, expected) in cases {
-            ranges.add_range(new_range.clone());
-            assert_eq_expected_and_postconditions(&ranges, &expected);
+        ranges.add_range(new_range.clone());
+        assert_eq_expected_and_postconditions(&ranges, &expected);
 
-            shuffle_and_make_overlapping(&mut ranges, &mut rng);
-            ranges.add_range(new_range);
-            assert_eq_expected_and_postconditions(&ranges, &expected);
-        }
+        shuffle_and_make_overlapping(&mut ranges, &mut rng);
+        ranges.add_range(new_range);
+        assert_eq_expected_and_postconditions(&ranges, &expected);
     }
 
-    #[test]
-    fn subtract_range_removes_range_and_maintains_invariants() {
+    #[rstest::rstest]
+    #[case::remove_nonexisting_from_empty(vec![], 0..=1, vec![])]
+    #[case::remove_nonexisting_before(vec![2..=3], 0..=1, vec![2..=3])]
+    #[case::remove_nonexisting_after(vec![0..=1], 2..=3, vec![0..=1])]
+    #[case::remove_start_of_range(vec![0..=3], 0..=1, vec![2..=3])]
+    #[case::remove_end_of_range(vec![0..=3], 2..=3, vec![0..=1])]
+    #[case::remove_middle_of_range(vec![0..=3], 1..=2, vec![0..=0, 3..=3])]
+    #[case::remove_full_range(vec![0..=3], 0..=3, vec![])]
+    #[case::remove_larger_than_range(vec![1..=2], 0..=3, vec![])]
+    #[case::remove_spans_parts_of_multiple(vec![0..=1, 3..=4], 1..=3, vec![0..=0, 4..=4])]
+    #[case::remove_spans_multiple(vec![0..=1, 3..=4], 0..=4, vec![])]
+    #[case::remove_larger_than_multiple(vec![1..=1, 3..=3], 0..=4, vec![])]
+    fn subtract_range_removes_range_and_maintains_invariants(
+        #[case] mut ranges: Vec<BlockRange>,
+        #[case] del_range: BlockRange,
+        #[case] expected: Vec<BlockRange>,
+    ) {
         let mut rng = SmallRng::seed_from_u64(123);
-        // test cases in the form of (existing ranges, range to subtract, expected ranges)
-        let cases = [
-            // remove non-existing range from empty ranges
-            (vec![], 0..=1, vec![]),
-            // remove non-existing range before all existing ranges
-            (vec![2..=3], 0..=1, vec![2..=3]),
-            // remove non-existing range after all existing ranges
-            (vec![0..=1], 2..=3, vec![0..=1]),
-            //
-            // remove start of existing range
-            (vec![0..=3], 0..=1, vec![2..=3]),
-            // remove end of existing range
-            (vec![0..=3], 2..=3, vec![0..=1]),
-            // remove middle of existing range
-            (vec![0..=3], 1..=2, vec![0..=0, 3..=3]),
-            // remove full existing range
-            (vec![0..=3], 0..=3, vec![]),
-            // remove range that is larger than existing range
-            (vec![1..=2], 0..=3, vec![]),
-            //
-            // remove range that spans parts of multiple existing ranges
-            (vec![0..=1, 3..=4], 1..=3, vec![0..=0, 4..=4]),
-            // remove range that spans multiple existing ranges
-            (vec![0..=1, 3..=4], 0..=4, vec![]),
-            // remove range that is larger than multiple existing ranges
-            (vec![1..=1, 3..=3], 0..=4, vec![]),
-        ];
-        for (mut ranges, del_range, expected) in cases {
-            ranges.subtract_range(&del_range);
-            assert_eq_expected_and_postconditions(&ranges, &expected);
+        ranges.subtract_range(&del_range);
+        assert_eq_expected_and_postconditions(&ranges, &expected);
 
-            shuffle_and_make_overlapping(&mut ranges, &mut rng);
-            ranges.subtract_range(&del_range);
-            assert_eq_expected_and_postconditions(&ranges, &expected);
-        }
+        shuffle_and_make_overlapping(&mut ranges, &mut rng);
+        ranges.subtract_range(&del_range);
+        assert_eq_expected_and_postconditions(&ranges, &expected);
     }
 
-    #[test]
-    fn subtract_ranges_computes_correct_difference() {
-        // test cases in the form of (existing range, ranges to subtract, expected ranges)
-        let cases = vec![
-            // Remove nothing
-            (0..=1, vec![], vec![0..=1]),
-            // Remove non-existing range
-            (0..=1, vec![2..=3], vec![0..=1]),
-            // Remove range that covers the whole existing range
-            (0..=1, vec![0..=1], vec![]),
-            // Remove start of existing range
-            (0..=3, vec![0..=2], vec![3..=3]),
-            // Remove end of existing range
-            (0..=3, vec![1..=3], vec![0..=0]),
-            // Remove middle of existing range
-            (0..=3, vec![1..=2], vec![0..=0, 3..=3]),
-            // Remove everything but one block
-            (0..=3, vec![0..=1, 3..=3], vec![2..=2]),
-            // Remove multiple parts of the existing range
-            (0..=4, vec![0..=0, 2..=2, 4..=4], vec![1..=1, 3..=3]),
-        ];
-
+    #[rstest::rstest]
+    #[case::remove_nothing(0..=1, vec![], vec![0..=1])]
+    #[case::remove_nonexisting(0..=1, vec![2..=3], vec![0..=1])]
+    #[case::remove_covers_all(0..=1, vec![0..=1], vec![])]
+    #[case::remove_start(0..=3, vec![0..=2], vec![3..=3])]
+    #[case::remove_end(0..=3, vec![1..=3], vec![0..=0])]
+    #[case::remove_middle(0..=3, vec![1..=2], vec![0..=0, 3..=3])]
+    #[case::remove_all_but_one(0..=3, vec![0..=1, 3..=3], vec![2..=2])]
+    #[case::remove_multiple_parts(0..=4, vec![0..=0, 2..=2, 4..=4], vec![1..=1, 3..=3])]
+    fn subtract_ranges_computes_correct_difference(
+        #[case] range: BlockRange,
+        #[case] mut del: Vec<BlockRange>,
+        #[case] expected: Vec<BlockRange>,
+    ) {
         let mut rng = SmallRng::seed_from_u64(123);
-        for (range, mut del, expected) in cases {
-            let diff = subtract_ranges(range.clone(), &del);
-            assert_eq_expected_and_postconditions(&diff, &expected);
+        let diff = subtract_ranges(range.clone(), &del);
+        assert_eq_expected_and_postconditions(&diff, &expected);
 
-            shuffle_and_make_overlapping(&mut del, &mut rng);
-            let diff = subtract_ranges(range.clone(), &del);
-            assert_eq_expected_and_postconditions(&diff, &expected);
-        }
+        shuffle_and_make_overlapping(&mut del, &mut rng);
+        let diff = subtract_ranges(range.clone(), &del);
+        assert_eq_expected_and_postconditions(&diff, &expected);
     }
 
-    #[test]
-    fn canonicalize_sorts_and_merges_and_removes_empty_ranges() {
-        #[allow(clippy::reversed_empty_ranges)]
-        let cases = [
-            // no ranges
-            (vec![], vec![]),
-            // unsorted ranges
-            (vec![6..=7, 1..=2, 4..=4], vec![1..=2, 4..=4, 6..=7]),
-            // overlapping ranges
-            (vec![1..=2, 2..=3, 3..=4], vec![1..=4]),
-            // adjacent ranges
-            (vec![1..=2, 3..=4, 5..=6], vec![1..=6]),
-            // empty ranges
-            (vec![1..=0], vec![]),
-            // unsorted and overlapping and adjacent and empty ranges
-            (vec![3..=4, 1..=2, 3..=3, 6..=7, 1..=0], vec![1..=4, 6..=7]),
-        ];
-        for (mut ranges, expected) in cases {
-            ranges.canonicalize();
-            assert_eq_expected_and_postconditions(&ranges, &expected);
-        }
+    #[rstest::rstest]
+    #[case::no_ranges(vec![], vec![])]
+    #[case::unsorted(vec![6..=7, 1..=2, 4..=4], vec![1..=2, 4..=4, 6..=7])]
+    #[case::overlapping(vec![1..=2, 2..=3, 3..=4], vec![1..=4])]
+    #[case::adjacent(vec![1..=2, 3..=4, 5..=6], vec![1..=6])]
+    #[allow(clippy::reversed_empty_ranges)]
+    #[case::empty_ranges(vec![1..=0], vec![])]
+    #[allow(clippy::reversed_empty_ranges)]
+    #[case::mixed(vec![3..=4, 1..=2, 3..=3, 6..=7, 1..=0], vec![1..=4, 6..=7])]
+    fn canonicalize_sorts_and_merges_and_removes_empty_ranges(
+        #[case] mut ranges: Vec<BlockRange>,
+        #[case] expected: Vec<BlockRange>,
+    ) {
+        ranges.canonicalize();
+        assert_eq_expected_and_postconditions(&ranges, &expected);
     }
 
-    #[test]
-    fn intersect_ranges_returns_correct_intersections() {
-        // test cases in the form of (target range, candidate ranges, expected intersection)
-        let cases = [
-            // intersection with empty candidates
-            (0..=1, vec![], vec![]),
-            // intersection with non-overlapping candidates
-            (0..=1, vec![2..=3], vec![]),
-            // target range is equal to candidate range
-            (0..=1, vec![0..=1], vec![0..=1]),
-            // target range contains all the candidates
-            (0..=3, vec![1..=2, 2..=3], vec![1..=3]),
-            // target range is contained in a candidate
-            (1..=2, vec![0..=3], vec![1..=2]),
-            // target range overlaps with non-adjacent candidates
-            (1..=5, vec![0..=2, 4..=6], vec![1..=2, 4..=5]),
-        ];
-
+    #[rstest::rstest]
+    #[case::empty_candidates(0..=1, vec![], vec![])]
+    #[case::non_overlapping(0..=1, vec![2..=3], vec![])]
+    #[case::equal(0..=1, vec![0..=1], vec![0..=1])]
+    #[case::contains_all(0..=3, vec![1..=2, 2..=3], vec![1..=3])]
+    #[case::contained_in_candidate(1..=2, vec![0..=3], vec![1..=2])]
+    #[case::overlaps_non_adjacent(1..=5, vec![0..=2, 4..=6], vec![1..=2, 4..=5])]
+    fn intersect_ranges_returns_correct_intersections(
+        #[case] target: BlockRange,
+        #[case] candidates: Vec<BlockRange>,
+        #[case] expected: Vec<BlockRange>,
+    ) {
         let mut rng = SmallRng::seed_from_u64(123);
-        for (target, candidates, expected) in cases {
-            let result = intersect_ranges(target.clone(), &candidates);
-            assert_eq_expected_and_postconditions(&result, &expected);
+        let result = intersect_ranges(target.clone(), &candidates);
+        assert_eq_expected_and_postconditions(&result, &expected);
 
-            let mut shuffled_candidates = candidates.clone();
-            shuffle_and_make_overlapping(&mut shuffled_candidates, &mut rng);
-            let result = intersect_ranges(target, &shuffled_candidates);
-            assert_eq_expected_and_postconditions(&result, &expected);
-        }
+        let mut shuffled_candidates = candidates.clone();
+        shuffle_and_make_overlapping(&mut shuffled_candidates, &mut rng);
+        let result = intersect_ranges(target, &shuffled_candidates);
+        assert_eq_expected_and_postconditions(&result, &expected);
     }
 
     #[track_caller]
