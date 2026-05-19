@@ -403,7 +403,7 @@ mod tests {
     }
 
     #[rstest]
-    // remove hash range 5..=10
+    // The remote hash range is 5..=10
     #[case::after_remote(11, 15)]
     #[case::before_remote(0, 4)]
     #[case::partial_overlap(5, 15)]
