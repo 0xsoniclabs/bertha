@@ -28,7 +28,7 @@ pub enum Error {
     Era(String),
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum GFileError {
     #[error("header missing")]
     HeaderMissing,

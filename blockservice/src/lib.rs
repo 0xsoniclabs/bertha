@@ -27,4 +27,7 @@ mod utils;
 pub use error::Error;
 mod json_rpc;
 
+#[cfg(test)]
+pub(crate) mod test_templates;
+
 pub type BlockRange = RangeInclusive<u64>;

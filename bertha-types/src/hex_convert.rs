@@ -149,144 +149,139 @@ mod tests {
         assert_eq!(a.to_hex(), "0x00000000");
     }
 
-    #[test]
-    fn byte_vec_can_be_constructed_from_hex_string() {
-        let v = Vec::try_from_hex("0x1234").unwrap();
-        assert_eq!(v, [0x12, 0x34]);
-        let v = Vec::try_from_hex("0x").unwrap();
-        assert_eq!(v, [0x0; 0]);
-        let v = Vec::try_from_hex("").unwrap();
-        assert_eq!(v, [0x0; 0]);
+    #[rstest::rstest]
+    #[case::empty("", &[])]
+    #[case::only_prefix("0x", &[])]
+    #[case::multi_byte("0x1234", &[0x12, 0x34])]
+    fn byte_vec_can_be_constructed_from_hex_string(#[case] input: &str, #[case] expected: &[u8]) {
+        let v = Vec::try_from_hex(input).unwrap();
+        assert_eq!(v, expected);
     }
 
-    #[test]
-    fn bytes_vec_from_malformed_hex_string_produces_error() {
-        let err = Vec::try_from_hex("xyzw").unwrap_err();
-        assert_eq!(err, ParseHexError::InvalidCharacter);
-        let err = Vec::try_from_hex("0xxyzw").unwrap_err();
-        assert_eq!(err, ParseHexError::InvalidCharacter);
-        let err = Vec::try_from_hex("0x1").unwrap_err();
-        assert_eq!(err, ParseHexError::OddLength);
+    #[rstest::rstest]
+    #[case::odd_length("0x1", ParseHexError::OddLength)]
+    #[case::invalid_chars_without_prefix("xy", ParseHexError::InvalidCharacter)]
+    #[case::invalid_chars_with_prefix("0xxy", ParseHexError::InvalidCharacter)]
+    fn bytes_vec_from_malformed_hex_string_produces_error(
+        #[case] input: &str,
+        #[case] expected_err: ParseHexError,
+    ) {
+        let err = Vec::try_from_hex(input).unwrap_err();
+        assert_eq!(err, expected_err);
     }
 
-    #[test]
-    fn bytes_vec_can_be_converted_to_hex_string() {
-        let v = vec![0x12, 0x34];
-        assert_eq!(v.to_hex(), "0x1234");
-
-        // String has fixed length
-        let v = vec![0x0, 0x0];
-        assert_eq!(v.to_hex(), "0x0000");
-        let v = vec![0x0, 0x0, 0x0, 0x0];
-        assert_eq!(v.to_hex(), "0x00000000");
+    #[rstest::rstest]
+    #[case::empty(vec![], "0x")]
+    #[case::non_empty(vec![0x12, 0x34], "0x1234")]
+    #[case::zeros_two_bytes(vec![0x0, 0x0], "0x0000")]
+    #[case::zeros_four_bytes(vec![0x0, 0x0, 0x0, 0x0], "0x00000000")]
+    fn bytes_vec_can_be_converted_to_hex_string(#[case] v: Vec<u8>, #[case] expected: &str) {
+        assert_eq!(v.to_hex(), expected);
     }
 
-    #[test]
-    fn u64_can_be_constructed_from_hex_string() {
-        // Even-length hex string
-        let n = u64::try_from_hex("0x00").unwrap();
-        assert_eq!(n, 0u64);
-
-        // Odd-length hex string
-        let n = u64::try_from_hex("0x0").unwrap();
-        assert_eq!(n, 0u64);
-
-        // Without 0x prefix
-        let n = u64::try_from_hex("10").unwrap();
-        assert_eq!(n, 16u64);
-
-        // u64::MAX
-        let n = u64::try_from_hex("0xffffffffffffffff").unwrap();
-        assert_eq!(n, u64::MAX);
+    #[rstest::rstest]
+    #[case::even_length("0x00", 0u64)]
+    #[case::odd_length("0x0", 0u64)]
+    #[case::without_prefix("10", 16u64)]
+    #[case::max("0xffffffffffffffff", u64::MAX)]
+    fn u64_can_be_constructed_from_hex_string(#[case] input: &str, #[case] expected: u64) {
+        let n = u64::try_from_hex(input).unwrap();
+        assert_eq!(n, expected);
     }
 
-    #[test]
-    fn u64_from_malformed_hex_string_produces_error() {
-        let n = u64::try_from_hex("0x").unwrap_err();
-        assert_eq!(n, ParseHexError::IntError(IntErrorKind::Empty));
-        assert_eq!(
-            n.to_string(),
+    #[rstest::rstest]
+    #[case::empty(
+        "0x",
+        ParseHexError::IntError(IntErrorKind::Empty),
+        Some(
             "hex string cannot be represented as a number of the target type: IntErrorKind::Empty"
-        );
-
-        let n = u64::try_from_hex("xyz").unwrap_err();
-        assert_eq!(n, ParseHexError::InvalidCharacter);
-        assert_eq!(n.to_string(), "hex string contains invalid character(s)");
-
-        let n = u64::try_from_hex("0xxyz").unwrap_err();
-        assert_eq!(n, ParseHexError::InvalidCharacter);
-        assert_eq!(n.to_string(), "hex string contains invalid character(s)");
-
-        let n = u64::try_from_hex(
-            const_hex::encode((u128::from(u64::MAX) + 1u128).to_be_bytes()).as_str(),
         )
-        .unwrap_err();
-        assert_eq!(
-            n,
-            crate::parse_hex_error::ParseHexError::IntError(IntErrorKind::PosOverflow)
-        );
+    )]
+    #[case::invalid_chars_with_prefix(
+        "0xxyz",
+        ParseHexError::InvalidCharacter,
+        Some("hex string contains invalid character(s)")
+    )]
+    #[case::invalid_chars_without_prefix(
+        "xyz",
+        ParseHexError::InvalidCharacter,
+        Some("hex string contains invalid character(s)")
+    )]
+    #[case::overflow(
+        "10000000000000000",
+        ParseHexError::IntError(IntErrorKind::PosOverflow),
+        None
+    )]
+    fn u64_from_malformed_hex_string_produces_error(
+        #[case] input: &str,
+        #[case] expected_err: ParseHexError,
+        #[case] expected_msg: Option<&str>,
+    ) {
+        let err = u64::try_from_hex(input).unwrap_err();
+        assert_eq!(err, expected_err);
+        if let Some(msg) = expected_msg {
+            assert_eq!(err.to_string(), msg);
+        }
     }
 
-    #[test]
-    fn u64_can_be_converted_to_hex_string() {
-        assert_eq!(u64::MIN.to_hex(), "0x0");
-        assert_eq!(10u64.to_hex(), "0xa");
-        assert_eq!(16u64.to_hex(), "0x10");
-        assert_eq!(255u64.to_hex(), "0xff");
-        assert_eq!(256u64.to_hex(), "0x100");
-        assert_eq!(u64::MAX.to_hex(), "0xffffffffffffffff");
+    #[rstest::rstest]
+    #[case::min(u64::MIN, "0x0")]
+    #[case::ten(10u64, "0xa")]
+    #[case::sixteen(16u64, "0x10")]
+    #[case::two_fifty_five(255u64, "0xff")]
+    #[case::two_fifty_six(256u64, "0x100")]
+    #[case::max(u64::MAX, "0xffffffffffffffff")]
+    fn u64_can_be_converted_to_hex_string(#[case] n: u64, #[case] expected: &str) {
+        assert_eq!(n.to_hex(), expected);
     }
 
-    #[test]
-    fn u8_can_be_constructed_from_hex_string() {
-        // Even-length hex string
-        let n = u8::try_from_hex("0x00").unwrap();
-        assert_eq!(n, 0u8);
-
-        // Odd-length hex string
-        let n = u8::try_from_hex("0x0").unwrap();
-        assert_eq!(n, 0u8);
-
-        // Without 0x prefix
-        let n = u8::try_from_hex("10").unwrap();
-        assert_eq!(n, 16u8);
-
-        // u8::MAX
-        let n = u8::try_from_hex("0xff").unwrap();
-        assert_eq!(n, u8::MAX);
+    #[rstest::rstest]
+    #[case::even_length("0x00", 0u8)]
+    #[case::odd_length("0x0", 0u8)]
+    #[case::without_prefix("10", 16u8)]
+    #[case::max("0xff", u8::MAX)]
+    fn u8_can_be_constructed_from_hex_string(#[case] input: &str, #[case] expected: u8) {
+        let n = u8::try_from_hex(input).unwrap();
+        assert_eq!(n, expected);
     }
 
-    #[test]
-    fn u8_from_malformed_hex_string_produces_error() {
-        let n = u8::try_from_hex("0x").unwrap_err();
-        assert_eq!(n, ParseHexError::IntError(IntErrorKind::Empty));
-        assert_eq!(
-            n.to_string(),
+    #[rstest::rstest]
+    #[case::empty(
+        "0x",
+        ParseHexError::IntError(IntErrorKind::Empty),
+        Some(
             "hex string cannot be represented as a number of the target type: IntErrorKind::Empty"
-        );
-
-        let n = u8::try_from_hex("xyz").unwrap_err();
-        assert_eq!(n, ParseHexError::InvalidCharacter);
-        assert_eq!(n.to_string(), "hex string contains invalid character(s)");
-
-        let n = u8::try_from_hex("0xxyz").unwrap_err();
-        assert_eq!(n, ParseHexError::InvalidCharacter);
-        assert_eq!(n.to_string(), "hex string contains invalid character(s)");
-
-        let n =
-            u8::try_from_hex(const_hex::encode((u16::from(u8::MAX) + 1u16).to_be_bytes()).as_str())
-                .unwrap_err();
-        assert_eq!(
-            n,
-            crate::parse_hex_error::ParseHexError::IntError(IntErrorKind::PosOverflow)
-        );
+        )
+    )]
+    #[case::invalid_chars_without_prefix(
+        "xy",
+        ParseHexError::InvalidCharacter,
+        Some("hex string contains invalid character(s)")
+    )]
+    #[case::invalid_chars_with_prefix(
+        "0xxy",
+        ParseHexError::InvalidCharacter,
+        Some("hex string contains invalid character(s)")
+    )]
+    #[case::overflow("100", ParseHexError::IntError(IntErrorKind::PosOverflow), None)]
+    fn u8_from_malformed_hex_string_produces_error(
+        #[case] input: &str,
+        #[case] expected_err: ParseHexError,
+        #[case] expected_msg: Option<&str>,
+    ) {
+        let n = u8::try_from_hex(input).unwrap_err();
+        assert_eq!(n, expected_err);
+        if let Some(msg) = expected_msg {
+            assert_eq!(n.to_string(), msg);
+        }
     }
 
-    #[test]
-    fn u8_can_be_converted_to_hex_string() {
-        assert_eq!(u8::MIN.to_hex(), "0x0");
-        assert_eq!(10u8.to_hex(), "0xa");
-        assert_eq!(16u8.to_hex(), "0x10");
-        assert_eq!(u8::MAX.to_hex(), "0xff");
+    #[rstest::rstest]
+    #[case::min(u8::MIN, "0x0")]
+    #[case::ten(10u8, "0xa")]
+    #[case::sixteen(16u8, "0x10")]
+    #[case::max(u8::MAX, "0xff")]
+    fn u8_can_be_converted_to_hex_string(#[case] n: u8, #[case] expected: &str) {
+        assert_eq!(n.to_hex(), expected);
     }
 }

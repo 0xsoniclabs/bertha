@@ -341,106 +341,92 @@ mod tests {
         assert_eq!(db.0.borrow().get(chain_id.to_be_bytes().as_slice()), None);
     }
 
-    #[test]
-    fn blockdb_add_chain_id_to_chain_ids_adds_chain_id_if_not_exists_and_keep_list_sorted() {
+    #[rstest::rstest]
+    #[case::existing_key(vec![1u64, 2u64, 3u64], 1u64, vec![1u64, 2u64, 3u64])]
+    #[case::non_existing_key(vec![1u64, 3u64], 2u64, vec![1u64, 2u64, 3u64])]
+    fn blockdb_add_chain_id_to_chain_ids_adds_chain_id_if_not_exists_and_keep_list_sorted(
+        #[case] initial: Vec<u64>,
+        #[case] to_add: u64,
+        #[case] expected: Vec<u64>,
+    ) {
         let db = StubDb::new();
         db.0.borrow_mut()
-            .insert(0u64.to_be_bytes().to_vec(), make_meta_value([1u64, 3u64]));
-
-        // add non existing key
-        let chain_id: u64 = 2;
-        db.add_chain_id_to_chain_ids(chain_id).unwrap();
+            .insert(0u64.to_be_bytes().to_vec(), make_meta_value(initial));
+        db.add_chain_id_to_chain_ids(to_add).unwrap();
         assert_eq!(
             db.0.borrow().get(0u64.to_be_bytes().as_slice()),
-            Some(&make_meta_value([1, 2, 3]))
-        );
-
-        // add existing key
-        let chain_id: u64 = 1;
-        db.add_chain_id_to_chain_ids(chain_id).unwrap();
-        assert_eq!(
-            db.0.borrow().get(0u64.to_be_bytes().as_slice()),
-            Some(&make_meta_value([1, 2, 3]))
+            Some(&make_meta_value(expected))
         );
     }
 
-    #[test]
-    fn blockdb_remove_chain_id_from_chain_ids_removes_chain_id_if_exists() {
+    #[rstest::rstest]
+    #[case::existing_key(vec![1u64, 2u64, 3u64], 2u64, vec![1u64, 3u64])]
+    #[case::non_existing_key(vec![1u64, 2u64, 3u64], 4u64, vec![1u64, 2u64, 3u64])]
+    fn blockdb_remove_chain_id_from_chain_ids_removes_chain_id_if_exists(
+        #[case] initial: Vec<u64>,
+        #[case] to_remove: u64,
+        #[case] expected: Vec<u64>,
+    ) {
         let db = StubDb::new();
-        db.0.borrow_mut().insert(
-            0u64.to_be_bytes().to_vec(),
-            make_meta_value([1u64, 2u64, 3u64]),
-        );
-
-        // remove non-existing key
-        db.remove_chain_id_from_chain_ids(4).unwrap();
+        db.0.borrow_mut()
+            .insert(0u64.to_be_bytes().to_vec(), make_meta_value(initial));
+        db.remove_chain_id_from_chain_ids(to_remove).unwrap();
         assert_eq!(
             db.0.borrow().get(0u64.to_be_bytes().as_slice()),
-            Some(&make_meta_value([1, 2, 3]))
-        );
-
-        // remove existing key
-        db.remove_chain_id_from_chain_ids(2).unwrap();
-        assert_eq!(
-            db.0.borrow().get(0u64.to_be_bytes().as_slice()),
-            Some(&make_meta_value([1, 3]))
+            Some(&make_meta_value(expected))
         );
     }
 
-    #[test]
-    fn blockdb_add_block_number_to_ranges_adds_block_number_if_not_exists() {
+    #[rstest::rstest]
+    #[case::add_non_existing(vec![0..=1], 3u64, vec![0..=1, 3..=3])]
+    #[case::add_existing(vec![0..=1], 0u64, vec![0..=1])]
+    fn blockdb_add_block_number_to_ranges_adds_block_number_if_not_exists(
+        #[case] ranges: Vec<BlockRange>,
+        #[case] new_key: u64,
+        #[case] expected_ranges: Vec<BlockRange>,
+    ) {
         let chain_id: u64 = 1;
         let db = StubDb::new();
 
         // The corner cases of adding a block number to the ranges are tested in the
         // [crate::utils::ranges], here we only test that the changes are also written.
-        let cases = [
-            // add non-existing block number
-            (vec![0..=1], 3, vec![0..=1, 3..=3]),
-            // add existing block number
-            (vec![0..=1], 0, vec![0..=1]),
-        ];
-        for (ranges, new_key, expected_ranges) in cases {
-            db.0.borrow_mut()
-                .insert(chain_id.to_be_bytes().to_vec(), make_range_value(ranges)); // reset value
-            db.add_block_number_to_ranges(chain_id, new_key).unwrap();
-            assert_eq!(
-                db.0.borrow().get(chain_id.to_be_bytes().as_slice()),
-                Some(&make_range_value(expected_ranges))
-            );
-        }
+        db.0.borrow_mut()
+            .insert(chain_id.to_be_bytes().to_vec(), make_range_value(ranges));
+        db.add_block_number_to_ranges(chain_id, new_key).unwrap();
+        assert_eq!(
+            db.0.borrow().get(chain_id.to_be_bytes().as_slice()),
+            Some(&make_range_value(expected_ranges))
+        );
     }
 
-    #[test]
-    fn blockdb_remove_range_from_ranges_removes_range_if_exists() {
+    #[rstest::rstest]
+    #[case::remove_existing(vec![0..=1], 1..=1, Some(vec![0..=0]))]
+    #[case::remove_last(vec![0..=1], 0..=1, None)]
+    #[case::remove_from_empty(vec![], 0..=1, None)]
+    fn blockdb_remove_range_from_ranges_removes_range_if_exists(
+        #[case] ranges: Vec<BlockRange>,
+        #[case] del_range: BlockRange,
+        #[case] expected_ranges: Option<Vec<BlockRange>>,
+    ) {
         let chain_id: u64 = 1;
         let db = StubDb::new();
 
         // The corner cases of removing a block number from the ranges are tested in the
         // [crate::utils::ranges], here we only test that the changes are also written.
-        let cases = [
-            // remove an existing range
-            (vec![0..=1], 1..=1, Some(vec![0..=0])),
-            // remove the last existing range
-            (vec![0..=1], 0..=1, None),
-            (vec![], 0..=1, None),
-        ];
-        for (ranges, del_range, expected_ranges) in cases {
-            // set the chain id
-            db.0.borrow_mut()
-                .insert(0u64.to_be_bytes().to_vec(), chain_id.to_be_bytes().to_vec()); // reset value
-            // set the initial ranges
-            db.0.borrow_mut()
-                .insert(chain_id.to_be_bytes().to_vec(), make_range_value(ranges)); // reset value
-            db.remove_range_from_ranges(chain_id, &del_range).unwrap();
-            if expected_ranges.is_some() {
-                assert!(db.get_chain_ids().unwrap().contains(&chain_id));
-            }
-            assert_eq!(
-                db.0.borrow().get(chain_id.to_be_bytes().as_slice()),
-                expected_ranges.map(make_range_value).as_ref()
-            );
+        // set the chain id
+        db.0.borrow_mut()
+            .insert(0u64.to_be_bytes().to_vec(), chain_id.to_be_bytes().to_vec());
+        // set the initial ranges
+        db.0.borrow_mut()
+            .insert(chain_id.to_be_bytes().to_vec(), make_range_value(ranges));
+        db.remove_range_from_ranges(chain_id, &del_range).unwrap();
+        if expected_ranges.is_some() {
+            assert!(db.get_chain_ids().unwrap().contains(&chain_id));
         }
+        assert_eq!(
+            db.0.borrow().get(chain_id.to_be_bytes().as_slice()),
+            expected_ranges.map(make_range_value).as_ref()
+        );
     }
 
     #[test]
@@ -489,8 +475,18 @@ mod tests {
         );
     }
 
-    #[test]
-    fn blockdb_iterate_converts_from_protobuf() {
+    #[derive(Debug)]
+    enum IterMode {
+        Forward,
+        Reverse,
+        WithBlockNumber,
+    }
+
+    #[rstest::rstest]
+    #[case::forward(IterMode::Forward)]
+    #[case::reverse(IterMode::Reverse)]
+    #[case::with_block_number(IterMode::WithBlockNumber)]
+    fn blockdb_iterate_converts_from_protobuf(#[case] mode: IterMode) {
         let chain_id = 1;
         let db = StubDb::new();
         let block = Block {
@@ -499,24 +495,25 @@ mod tests {
         };
         db.put(chain_id, block.clone()).unwrap();
 
-        // Forward
-        let mut iter = db.iterate(chain_id, 0);
-        let received = iter.next().unwrap().unwrap();
-        assert_eq!(received, block);
-
-        // Reverse
-        let mut iter = db.iterate_reverse(chain_id, 0);
-        let received = iter.next().unwrap().unwrap();
-        assert_eq!(received, block);
-
-        // With Block Number
-        let mut iter = db.iterate_with_block_number(chain_id, 0);
-        let received = iter.next().unwrap().unwrap().1;
+        let received = match mode {
+            IterMode::Forward => db.iterate(chain_id, 0).next().unwrap().unwrap(),
+            IterMode::Reverse => db.iterate_reverse(chain_id, 0).next().unwrap().unwrap(),
+            IterMode::WithBlockNumber => {
+                db.iterate_with_block_number(chain_id, 0)
+                    .next()
+                    .unwrap()
+                    .unwrap()
+                    .1
+            }
+        };
         assert_eq!(received, block);
     }
 
-    #[test]
-    fn blockdb_iterate_returns_error_for_invalid_protobuf() {
+    #[rstest::rstest]
+    #[case::forward(IterMode::Forward)]
+    #[case::reverse(IterMode::Reverse)]
+    #[case::with_block_number(IterMode::WithBlockNumber)]
+    fn blockdb_iterate_returns_error_for_invalid_protobuf(#[case] mode: IterMode) {
         let chain_id = 1;
         let block_number = 0;
         let db = StubDb::new();
@@ -525,21 +522,15 @@ mod tests {
             vec![0, 1, 2, 3], // invalid protobuf data
         );
 
-        // Forward
-        let mut iter = db.iterate(chain_id, block_number);
-        let result = iter.next().unwrap();
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
-
-        // Reverse
-        let mut iter = db.iterate_reverse(chain_id, block_number);
-        let result = iter.next().unwrap();
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
-
-        // With Block Number
-        let mut iter = db.iterate_with_block_number(chain_id, block_number);
-        let result = iter.next().unwrap();
+        let result: Result<Block, Error> = match mode {
+            IterMode::Forward => db.iterate(chain_id, block_number).next().unwrap(),
+            IterMode::Reverse => db.iterate_reverse(chain_id, block_number).next().unwrap(),
+            IterMode::WithBlockNumber => db
+                .iterate_with_block_number(chain_id, block_number)
+                .next()
+                .unwrap()
+                .map(|(_, b)| b),
+        };
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
     }

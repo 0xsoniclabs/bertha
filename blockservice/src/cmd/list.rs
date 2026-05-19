@@ -93,6 +93,7 @@ pub async fn list(
 
 #[cfg(test)]
 mod tests {
+    use tonic::metadata::{Ascii, MetadataValue};
 
     use super::*;
     use crate::{
@@ -104,6 +105,7 @@ mod tests {
             proto_rpc::{self, BlockRange, ChainRange, ChainRanges},
             test_utils::{MockRpcServer, TestServer},
         },
+        test_templates::auth_token,
         utils::test_dir::{Permissions, TestDir},
     };
 
@@ -392,46 +394,41 @@ mod tests {
         }
     }
 
+    #[rstest_reuse::apply(auth_token)]
     #[tokio::test]
-    async fn provides_auth_token_when_supplied() {
+    async fn provides_auth_token_when_supplied(auth_token: Option<MetadataValue<Ascii>>) {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (mut cfg, _db) = open_app_dir(tmpdir.path(), true).unwrap();
 
-        let cases = vec![
-            Some(auth::token_to_metadata_value("my-token").unwrap()),
-            None,
-        ];
-        for auth_token in cases {
-            cfg.set_auth_token(auth_token.clone()).unwrap();
+        cfg.set_auth_token(auth_token.clone()).unwrap();
 
-            let mut mock_server = MockRpcServer::new();
-            mock_server
-                .expect_list()
-                .withf({
-                    let auth_token = auth_token.clone();
-                    move |request| {
-                        if auth_token.is_some() {
-                            let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
-                            auth_token.as_ref() == req_token
-                        } else {
-                            true
-                        }
+        let mut mock_server = MockRpcServer::new();
+        mock_server
+            .expect_list()
+            .withf({
+                let auth_token = auth_token.clone();
+                move |request| {
+                    if auth_token.is_some() {
+                        let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
+                        auth_token.as_ref() == req_token
+                    } else {
+                        true
                     }
-                })
-                .returning(|_| {
-                    Ok(tonic::Response::new(ChainRanges {
-                        chain_ranges: vec![ChainRange {
-                            chain_id: 1,
-                            block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 0 }],
-                        }],
-                    }))
-                });
+                }
+            })
+            .returning(|_| {
+                Ok(tonic::Response::new(ChainRanges {
+                    chain_ranges: vec![ChainRange {
+                        chain_id: 1,
+                        block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 0 }],
+                    }],
+                }))
+            });
 
-            let server = TestServer::new(mock_server).await;
-            let mut buf = Vec::new();
-            let result = list(tmpdir.path(), None, Some(server.address.clone()), &mut buf).await;
-            assert!(result.is_ok(), "List should succeed");
-        }
+        let server = TestServer::new(mock_server).await;
+        let mut buf = Vec::new();
+        let result = list(tmpdir.path(), None, Some(server.address.clone()), &mut buf).await;
+        assert!(result.is_ok(), "List should succeed");
     }
 }

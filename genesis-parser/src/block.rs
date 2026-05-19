@@ -713,22 +713,19 @@ mod tests {
         }
     }
 
-    #[test]
-    fn encodes_invalid_transaction_to_rlp_of_rlp_of_empty_string() {
-        for invalid_tx in [
-            make_transaction(TransactionType::SetCode, false),
-            make_transaction(TransactionType::Blob, false),
-        ] {
-            let mut buf = Vec::new();
-            RlpTransaction(invalid_tx).encode(&mut buf);
+    #[rstest::rstest]
+    #[case::set_code_tx(make_transaction(TransactionType::SetCode, false))]
+    #[case::blob_tx(make_transaction(TransactionType::Blob, false))]
+    fn encodes_invalid_transaction_to_rlp_of_rlp_of_empty_string(#[case] invalid_tx: Transaction) {
+        let mut buf = Vec::new();
+        RlpTransaction(invalid_tx).encode(&mut buf);
 
-            let mut rlp_empty_str = Vec::new();
-            RlpString(vec![]).encode(&mut rlp_empty_str);
-            let mut rlp_rlp_empty_str = Vec::new();
-            RlpString(rlp_empty_str).encode(&mut rlp_rlp_empty_str);
+        let mut rlp_empty_str = Vec::new();
+        RlpString(vec![]).encode(&mut rlp_empty_str);
+        let mut rlp_rlp_empty_str = Vec::new();
+        RlpString(rlp_empty_str).encode(&mut rlp_rlp_empty_str);
 
-            assert_eq!(buf, rlp_rlp_empty_str);
-        }
+        assert_eq!(buf, rlp_rlp_empty_str);
     }
 
     #[test]

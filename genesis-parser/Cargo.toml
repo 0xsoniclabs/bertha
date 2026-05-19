@@ -41,6 +41,9 @@ alloy-consensus = "1.0.37"
 alloy-eips = "1.0.37"
 
 [dev-dependencies]
+# parameterized tests
+rstest = "0.26.1"
+
 const-hex = "1.14.1"
 
 [lints]

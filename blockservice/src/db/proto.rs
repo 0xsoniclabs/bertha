@@ -507,29 +507,18 @@ mod tests {
         assert_eq!(converted_access_tuple, access_tuple);
     }
 
-    #[test]
-    fn access_tuple_conversion_fails_for_invalid_byte_strings() {
-        let access_tuple: AccessListEntry = make_access_tuple(&mut TestRng::new(123)).into();
+    fn valid_proto_access_tuple() -> AccessListEntry {
+        make_access_tuple(&mut TestRng::new(42)).into()
+    }
 
-        // Invalid address
-        {
-            let invalid_access_tuple = AccessListEntry {
-                address: vec![0; 19],
-                ..access_tuple.clone()
-            };
-            let err = bertha_types::AccessListEntry::try_from(invalid_access_tuple).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid storage key
-        {
-            let invalid_access_tuple = AccessListEntry {
-                storage_keys: vec![vec![0; 31]],
-                ..access_tuple
-            };
-            let err = bertha_types::AccessListEntry::try_from(invalid_access_tuple).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
+    #[rstest::rstest]
+    #[case::invalid_address(AccessListEntry { address: vec![0; 19], ..valid_proto_access_tuple() })]
+    #[case::invalid_storage_key(AccessListEntry { storage_keys: vec![vec![0; 31]], ..valid_proto_access_tuple() })]
+    fn access_tuple_conversion_fails_for_invalid_byte_strings(
+        #[case] invalid_entry: AccessListEntry,
+    ) {
+        let err = bertha_types::AccessListEntry::try_from(invalid_entry).unwrap_err();
+        assert_eq!(err, Error::TypeConversion);
     }
 
     #[test]
@@ -541,204 +530,56 @@ mod tests {
         assert_eq!(converted_set_code_auth, set_code_auth);
     }
 
-    #[test]
-    fn set_code_authorization_conversion_fails_for_invalid_byte_strings() {
-        let set_code_auth: SetCodeAuthorization =
-            make_set_code_authorization(&mut TestRng::new(123)).into();
-
-        // Invalid chain ID
-        {
-            let invalid_set_code_auth = SetCodeAuthorization {
-                chain_id: vec![1; 33],
-                ..set_code_auth.clone()
-            };
-            let err =
-                bertha_types::SetCodeAuthorization::try_from(invalid_set_code_auth).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid address
-        {
-            let invalid_set_code_auth = SetCodeAuthorization {
-                address: vec![0; 19],
-                ..set_code_auth.clone()
-            };
-            let err =
-                bertha_types::SetCodeAuthorization::try_from(invalid_set_code_auth).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid y parity
-        {
-            let invalid_set_code_auth = SetCodeAuthorization {
-                y_parity: 256,
-                ..set_code_auth.clone()
-            };
-            let err =
-                bertha_types::SetCodeAuthorization::try_from(invalid_set_code_auth).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid r
-        {
-            let invalid_set_code_auth = SetCodeAuthorization {
-                r: vec![1; 33],
-                ..set_code_auth.clone()
-            };
-            let err =
-                bertha_types::SetCodeAuthorization::try_from(invalid_set_code_auth).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid s
-        {
-            let invalid_set_code_auth = SetCodeAuthorization {
-                s: vec![1; 33],
-                ..set_code_auth
-            };
-            let err =
-                bertha_types::SetCodeAuthorization::try_from(invalid_set_code_auth).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
+    fn valid_proto_set_code_auth() -> SetCodeAuthorization {
+        make_set_code_authorization(&mut TestRng::new(42)).into()
     }
 
-    #[test]
-    fn transaction_can_be_converted_from_and_to_protobuf_types() {
-        for tx_type in 0..5 {
-            let tx = make_transaction(
-                &mut TestRng::new(42),
-                TransactionType::try_from(tx_type as u8).unwrap(),
-            );
-            let proto_tx: Transaction = tx.clone().into();
-            let converted_tx: bertha_types::Transaction = proto_tx.try_into().unwrap();
-            assert_eq!(converted_tx, tx);
-        }
+    #[rstest::rstest]
+    #[case::invalid_chain_id(SetCodeAuthorization { chain_id: vec![1; 33], ..valid_proto_set_code_auth() })]
+    #[case::invalid_address(SetCodeAuthorization { address: vec![0; 19], ..valid_proto_set_code_auth() })]
+    #[case::invalid_y_parity(SetCodeAuthorization { y_parity: 256, ..valid_proto_set_code_auth() })]
+    #[case::invalid_r(SetCodeAuthorization { r: vec![1; 33], ..valid_proto_set_code_auth() })]
+    #[case::invalid_s(SetCodeAuthorization { s: vec![1; 33], ..valid_proto_set_code_auth() })]
+    fn set_code_authorization_conversion_fails_for_invalid_byte_strings(
+        #[case] invalid_auth: SetCodeAuthorization,
+    ) {
+        let err = bertha_types::SetCodeAuthorization::try_from(invalid_auth).unwrap_err();
+        assert_eq!(err, Error::TypeConversion);
     }
 
-    #[test]
-    fn transaction_conversion_fails_for_invalid_byte_strings() {
-        let tx: Transaction =
-            make_transaction(&mut TestRng::new(123), TransactionType::Legacy).into();
+    #[rstest::rstest]
+    #[case::legacy(TransactionType::Legacy)]
+    #[case::access_list(TransactionType::AccessList)]
+    #[case::dynamic_fee(TransactionType::DynamicFee)]
+    #[case::blob(TransactionType::Blob)]
+    #[case::set_code(TransactionType::SetCode)]
+    fn transaction_can_be_converted_from_and_to_protobuf_types(#[case] tx_type: TransactionType) {
+        let tx = make_transaction(&mut TestRng::new(42), tx_type);
+        let proto_tx: Transaction = tx.clone().into();
+        let converted_tx: bertha_types::Transaction = proto_tx.try_into().unwrap();
+        assert_eq!(converted_tx, tx);
+    }
 
-        // Invalid transaction type
-        {
-            let invalid_tx = Transaction {
-                transaction_type: 256,
-                ..tx.clone()
-            };
-            let err = bertha_types::Transaction::try_from(invalid_tx).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
+    fn valid_proto_transaction() -> Transaction {
+        make_transaction(&mut TestRng::new(42), TransactionType::Legacy).into()
+    }
 
-        // Invalid chain ID
-        {
-            let invalid_tx = Transaction {
-                chain_id: vec![1; 33],
-                ..tx.clone()
-            };
-            let err = bertha_types::Transaction::try_from(invalid_tx).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid gas price
-        {
-            let invalid_tx = Transaction {
-                gas_price: vec![1; 33],
-                ..tx.clone()
-            };
-            let err = bertha_types::Transaction::try_from(invalid_tx).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid address
-        {
-            let invalid_tx = Transaction {
-                to: Some(vec![0; 19]),
-                ..tx.clone()
-            };
-            let err = bertha_types::Transaction::try_from(invalid_tx).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid value
-        {
-            let invalid_tx = Transaction {
-                value: vec![1; 33],
-                ..tx.clone()
-            };
-            let err = bertha_types::Transaction::try_from(invalid_tx).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid max fee per gas
-        {
-            let invalid_tx = Transaction {
-                max_fee_per_gas: vec![1; 33],
-                ..tx.clone()
-            };
-            let err = bertha_types::Transaction::try_from(invalid_tx).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid max priority fee per gas
-        {
-            let invalid_tx = Transaction {
-                max_priority_fee_per_gas: vec![1; 33],
-                ..tx.clone()
-            };
-            let err = bertha_types::Transaction::try_from(invalid_tx).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid blob hash
-        {
-            let invalid_tx = Transaction {
-                blob_versioned_hashes: vec![vec![0; 31]],
-                ..tx.clone()
-            };
-            let err = bertha_types::Transaction::try_from(invalid_tx).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid max fee per blob gas
-        {
-            let invalid_tx = Transaction {
-                max_fee_per_blob_gas: vec![1; 33],
-                ..tx.clone()
-            };
-            let err = bertha_types::Transaction::try_from(invalid_tx).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid y parity
-        {
-            let invalid_tx = Transaction {
-                y_parity: vec![1; 33],
-                ..tx.clone()
-            };
-            let err = bertha_types::Transaction::try_from(invalid_tx).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid r
-        {
-            let invalid_tx = Transaction {
-                r: vec![1; 33],
-                ..tx.clone()
-            };
-            let err = bertha_types::Transaction::try_from(invalid_tx).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid s
-        {
-            let invalid_tx = Transaction {
-                s: vec![1; 33],
-                ..tx
-            };
-            let err = bertha_types::Transaction::try_from(invalid_tx).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
+    #[rstest::rstest]
+    #[case::invalid_transaction_type(Transaction { transaction_type: 256, ..valid_proto_transaction() })]
+    #[case::invalid_chain_id(Transaction { chain_id: vec![1; 33], ..valid_proto_transaction() })]
+    #[case::invalid_gas_price(Transaction { gas_price: vec![1; 33], ..valid_proto_transaction() })]
+    #[case::invalid_to(Transaction { to: Some(vec![0; 19]), ..valid_proto_transaction() })]
+    #[case::invalid_value(Transaction { value: vec![1; 33], ..valid_proto_transaction() })]
+    #[case::invalid_max_fee_per_gas(Transaction { max_fee_per_gas: vec![1; 33], ..valid_proto_transaction() })]
+    #[case::invalid_max_priority_fee_per_gas(Transaction { max_priority_fee_per_gas: vec![1; 33], ..valid_proto_transaction() })]
+    #[case::invalid_blob_hash(Transaction { blob_versioned_hashes: vec![vec![0; 31]], ..valid_proto_transaction() })]
+    #[case::invalid_max_fee_per_blob_gas(Transaction { max_fee_per_blob_gas: vec![1; 33], ..valid_proto_transaction() })]
+    #[case::invalid_y_parity(Transaction { y_parity: vec![1; 33], ..valid_proto_transaction() })]
+    #[case::invalid_r(Transaction { r: vec![1; 33], ..valid_proto_transaction() })]
+    #[case::invalid_s(Transaction { s: vec![1; 33], ..valid_proto_transaction() })]
+    fn transaction_conversion_fails_for_invalid_byte_strings(#[case] invalid_tx: Transaction) {
+        let err = bertha_types::Transaction::try_from(invalid_tx).unwrap_err();
+        assert_eq!(err, Error::TypeConversion);
     }
 
     #[test]
@@ -749,29 +590,16 @@ mod tests {
         assert_eq!(converted_log, log);
     }
 
-    #[test]
-    fn log_conversion_fails_for_invalid_byte_strings() {
-        let log: Log = make_log(&mut TestRng::new(123)).into();
+    fn valid_proto_log() -> Log {
+        make_log(&mut TestRng::new(42)).into()
+    }
 
-        // Invalid address
-        {
-            let invalid_log = Log {
-                address: vec![0; 19],
-                ..log.clone()
-            };
-            let err = bertha_types::Log::try_from(invalid_log).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid topic
-        {
-            let invalid_log = Log {
-                topics: vec![vec![0; 31]],
-                ..log
-            };
-            let err = bertha_types::Log::try_from(invalid_log).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
+    #[rstest::rstest]
+    #[case::invalid_address(Log { address: vec![0; 19], ..valid_proto_log() })]
+    #[case::invalid_topic(Log { topics: vec![vec![0; 31]], ..valid_proto_log() })]
+    fn log_conversion_fails_for_invalid_byte_strings(#[case] invalid_log: Log) {
+        let err = bertha_types::Log::try_from(invalid_log).unwrap_err();
+        assert_eq!(err, Error::TypeConversion);
     }
 
     #[test]
@@ -785,7 +613,7 @@ mod tests {
     #[test]
     fn receipt_conversion_fails_for_invalid_transaction_types() {
         let receipt: TransactionReceipt =
-            make_receipt(&mut TestRng::new(123), TransactionType::Legacy).into();
+            make_receipt(&mut TestRng::new(42), TransactionType::Legacy).into();
 
         let invalid_receipt = TransactionReceipt {
             transaction_type: 256,
@@ -803,108 +631,23 @@ mod tests {
         assert_eq!(converted_block, block);
     }
 
-    #[test]
-    fn block_conversion_fails_for_invalid_byte_strings() {
-        let block: Block = make_block(&mut TestRng::new(123)).into();
+    fn valid_proto_block() -> Block {
+        make_block(&mut TestRng::new(42)).into()
+    }
 
-        // Invalid parent hash
-        {
-            let invalid_block = Block {
-                parent_hash: vec![0; 31],
-                ..block.clone()
-            };
-            let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid ommers hash
-        {
-            let invalid_block = Block {
-                ommers_hash: vec![0; 31],
-                ..block.clone()
-            };
-            let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid beneficiary
-        {
-            let invalid_block = Block {
-                beneficiary: vec![0; 19],
-                ..block.clone()
-            };
-            let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid state root
-        {
-            let invalid_block = Block {
-                state_root: vec![0; 31],
-                ..block.clone()
-            };
-            let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid prev randao
-        {
-            let invalid_block = Block {
-                prev_randao: vec![0; 31],
-                ..block.clone()
-            };
-            let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid nonce
-        {
-            let invalid_block = Block {
-                nonce: vec![0; 7],
-                ..block.clone()
-            };
-            let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid base fee per gas
-        {
-            let invalid_block = Block {
-                base_fee_per_gas: Some(vec![1; 33]),
-                ..block.clone()
-            };
-            let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid withdrawals root
-        {
-            let invalid_block = Block {
-                withdrawals_root: Some(vec![0; 31]),
-                ..block.clone()
-            };
-            let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid parent beacon block root
-        {
-            let invalid_block = Block {
-                parent_beacon_block_root: Some(vec![0; 31]),
-                ..block.clone()
-            };
-            let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
-
-        // Invalid requests hash
-        {
-            let invalid_block = Block {
-                requests_hash: Some(vec![0; 31]),
-                ..block.clone()
-            };
-            let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
-            assert_eq!(err, Error::TypeConversion);
-        }
+    #[rstest::rstest]
+    #[case::invalid_parent_hash(Block { parent_hash: vec![0; 31], ..valid_proto_block() })]
+    #[case::invalid_ommers_hash(Block { ommers_hash: vec![0; 31], ..valid_proto_block() })]
+    #[case::invalid_beneficiary(Block { beneficiary: vec![0; 19], ..valid_proto_block() })]
+    #[case::invalid_state_root(Block { state_root: vec![0; 31], ..valid_proto_block() })]
+    #[case::invalid_prev_randao(Block { prev_randao: vec![0; 31], ..valid_proto_block() })]
+    #[case::invalid_nonce(Block { nonce: vec![0; 7], ..valid_proto_block() })]
+    #[case::invalid_base_fee_per_gas(Block { base_fee_per_gas: Some(vec![1; 33]), ..valid_proto_block() })]
+    #[case::invalid_withdrawals_root(Block { withdrawals_root: Some(vec![0; 31]), ..valid_proto_block() })]
+    #[case::invalid_parent_beacon_block_root(Block { parent_beacon_block_root: Some(vec![0; 31]), ..valid_proto_block() })]
+    #[case::invalid_requests_hash(Block { requests_hash: Some(vec![0; 31]), ..valid_proto_block() })]
+    fn block_conversion_fails_for_invalid_byte_strings(#[case] invalid_block: Block) {
+        let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
+        assert_eq!(err, Error::TypeConversion);
     }
 }

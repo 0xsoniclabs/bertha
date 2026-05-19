@@ -108,6 +108,7 @@ mod tests {
 
     use bertha_types::Block;
     use prost::Message;
+    use rstest::rstest;
 
     use super::*;
     use crate::{
@@ -148,8 +149,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn checks_hash_of_block() {
+    #[rstest]
+    #[case::correct_hash(true)]
+    #[case::incorrect_hash(false)]
+    fn checks_hash_of_block(#[case] correct_hash: bool) {
         let chain_id = 146;
 
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
@@ -159,41 +162,35 @@ mod tests {
         let block = Block::default();
         db.put(chain_id, block.clone()).unwrap();
 
-        // correct hash
-        let mut buf = Vec::new();
-        let result = verify(
-            tmpdir.path(),
-            chain_id,
-            Some(block.number),
-            Some(block.to_header().compute_hash()),
-            &mut buf,
-        );
-        assert!(result.is_ok());
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            format!("[chain ID {chain_id}] All blocks verified successfully.\n",)
-        );
+        let hash = if correct_hash {
+            block.to_header().compute_hash()
+        } else {
+            Hash::default() // intentionally wrong hash
+        };
 
-        // incorrect hash
-        let hash = Hash::default(); // intentionally wrong hash
-        let mut buf = Vec::new();
+        let mut output = Vec::new();
         let result = verify(
             tmpdir.path(),
             chain_id,
             Some(block.number),
             Some(hash),
-            &mut buf,
+            &mut output,
         );
         assert!(result.is_ok());
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            format!(
+
+        if correct_hash {
+            assert_eq!(
+                output,
+                format!("[chain ID {chain_id}] All blocks verified successfully.\n").as_bytes()
+            );
+        } else {
+            assert_eq!(output, format!(
                 "[chain ID {chain_id}] block hash verification failed for block {}: expected hash {}, got {}.\n[chain ID {chain_id}] Verification completed with 1 errors.\n",
                 block.number,
                 hash.to_hex(),
                 block.to_header().compute_hash().to_hex(),
-            )
-        );
+            ).as_bytes());
+        };
     }
 
     #[test]
@@ -221,8 +218,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn checks_number_of_block() {
+    #[rstest]
+    #[case::matching_number(true)]
+    #[case::mismatching_number(false)]
+    fn checks_number_of_block(#[case] matching_number: bool) {
         let chain_id = 146;
 
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
@@ -230,38 +229,43 @@ mod tests {
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let mut block = Block::default();
-        db.put(chain_id, block.clone()).unwrap();
+        let block_number = if matching_number {
+            db.put(chain_id, block.clone()).unwrap();
+            block.number
+        } else {
+            // at block number 0, blocknumber (0) and block.number (1) mismatch
+            block.number = 1;
+            let block_number = 0; // intentionally wrong block number
+            let data = proto::Block::from(block.clone()).encode_to_vec();
+            db.put_raw(chain_id, block_number, &data).unwrap();
+            block_number
+        };
 
-        // block number matches
-        let mut buf = Vec::new();
-        let result = verify(tmpdir.path(), chain_id, None, None, &mut buf);
+        let mut output = Vec::new();
+        let result = verify(tmpdir.path(), chain_id, None, None, &mut output);
         assert!(result.is_ok());
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            format!("[chain ID {chain_id}] All blocks verified successfully.\n",)
-        );
 
-        // block number mismatches
-        // at block number 0, blocknumber (0) and block.number (1) mismatch
-        block.number = 1;
-        let block_number = 0; // intentionally wrong block number
-        let data = proto::Block::from(block.clone()).encode_to_vec();
-        db.put_raw(chain_id, block_number, &data).unwrap();
-
-        let mut buf = Vec::new();
-        let result = verify(tmpdir.path(), chain_id, None, None, &mut buf);
-        assert!(result.is_ok());
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            format!(
-                "[chain ID {chain_id}] block number mismatch: block number in key = {block_number}, block.number = {}.\n[chain ID {chain_id}] Verification completed with 1 errors.\n",
-                block.number
-            )
-        );
+        if matching_number {
+            assert_eq!(
+                output,
+                format!("[chain ID {chain_id}] All blocks verified successfully.\n").as_bytes()
+            );
+        } else {
+            assert_eq!(
+                output,
+                format!(
+                    "[chain ID {chain_id}] block number mismatch: block number in key = {block_number}, block.number = {}.\n\
+                    [chain ID {chain_id}] Verification completed with 1 errors.\n",
+                    block.number
+                ).as_bytes()
+            );
+        };
     }
 
-    #[test]
-    fn checks_parent_hash_of_block() {
+    #[rstest]
+    #[case::correct_parent_hash(true)]
+    #[case::incorrect_parent_hash(false)]
+    fn checks_parent_hash_of_block(#[case] correct_parent_hash: bool) {
         let chain_id = 146;
 
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
@@ -277,32 +281,30 @@ mod tests {
             parent_hash: block0.to_header().compute_hash(),
             ..Block::default()
         };
+
+        if !correct_parent_hash {
+            // intentionally wrong parent hash
+            block1.parent_hash = Hash::default();
+        }
         db.put(chain_id, block1.clone()).unwrap();
 
-        let mut buf = Vec::new();
-        let result = verify(tmpdir.path(), chain_id, None, None, &mut buf);
+        let mut output = Vec::new();
+        let result = verify(tmpdir.path(), chain_id, None, None, &mut output);
         assert!(result.is_ok());
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            format!("[chain ID {chain_id}] All blocks verified successfully.\n",)
-        );
 
-        // incorrect parent hash
-        block1.parent_hash = Hash::default(); // intentionally wrong parent hash
-        db.put(chain_id, block1.clone()).unwrap();
-
-        let mut buf = Vec::new();
-        let result = verify(tmpdir.path(), chain_id, None, None, &mut buf);
-        assert!(result.is_ok());
-        assert_eq!(
-            String::from_utf8(buf).unwrap(),
-            format!(
+        if correct_parent_hash {
+            assert_eq!(
+                output,
+                format!("[chain ID {chain_id}] All blocks verified successfully.\n").as_bytes()
+            );
+        } else {
+            assert_eq!(output, format!(
                 "[chain ID {chain_id}] parent hash verification failed for block {}: expected hash {}, got {}.\n[chain ID {chain_id}] Verification completed with 1 errors.\n",
                 block1.number,
                 block0.to_header().compute_hash().to_hex(),
                 block1.parent_hash.to_hex()
-            )
-        );
+            ).as_bytes());
+        };
     }
 
     #[test]

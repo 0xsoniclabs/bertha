@@ -159,6 +159,8 @@ pub async fn fetch(
 #[cfg(test)]
 mod tests {
     use prost::Message;
+    use rstest::rstest;
+    use tonic::metadata::{Ascii, MetadataValue};
 
     use crate::{
         BlockRange,
@@ -170,6 +172,7 @@ mod tests {
             proto_rpc::{self, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock},
             test_utils::{MockRpcServer, TestServer},
         },
+        test_templates::auth_token,
         utils::test_dir::{Permissions, TestDir},
     };
 
@@ -332,64 +335,40 @@ mod tests {
         assert_eq!(err.to_string(), "no ranges found for chain ID 1");
     }
 
+    #[rstest]
+    #[case::empty_ranges(vec![], "chain id 1 found, but server returned empty chain range")]
+    #[case::non_sorted_ranges(
+        to_proto_block_range([10..=20, 0..=5]),
+        "remote ranges for chain ID 1 are not sorted"
+    )]
     #[tokio::test]
-    async fn fails_on_invalid_remote_chain_ranges() {
+    async fn fails_on_invalid_remote_chain_ranges(
+        #[case] block_ranges: Vec<proto_rpc::BlockRange>,
+        #[case] expected_error: &str,
+    ) {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        // Empty chain ranges for chain ID 1
-        {
-            let mut mock_server = MockRpcServer::new();
-            mock_server.expect_list().returning(|_| {
-                Ok(tonic::Response::new(ChainRanges {
-                    chain_ranges: vec![ChainRange {
-                        chain_id: 1,
-                        block_ranges: vec![],
-                    }],
-                }))
-            });
-            let test_server = TestServer::new(mock_server).await;
-            let result = fetch(
-                tmpdir.path(),
-                test_server.address.clone(),
-                1, // Chain ID that exists but has no ranges
-                None,
-                None,
-                std::io::sink(),
-            )
-            .await;
-            let err = result.expect_err("Fetch should fail with empty chain ranges");
-            assert_eq!(
-                err.to_string(),
-                "chain id 1 found, but server returned empty chain range"
-            );
-        }
-        // Non-sorted chain ranges for chain ID 1
-        {
-            let mut mock_server = MockRpcServer::new();
-            mock_server.expect_list().returning(|_| {
-                Ok(tonic::Response::new(ChainRanges {
-                    chain_ranges: vec![ChainRange {
-                        chain_id: 1,
-                        block_ranges: to_proto_block_range([10..=20, 0..=5]), // Not sorted
-                    }],
-                }))
-            });
-            let test_server = TestServer::new(mock_server).await;
-            let result = fetch(
-                tmpdir.path(),
-                test_server.address.clone(),
-                1, // Chain ID that exists but has unsorted ranges
-                None,
-                None,
-                std::io::sink(),
-            )
-            .await;
-            let err = result.expect_err("Fetch should fail with unsorted chain ranges");
-            assert_eq!(
-                err.to_string(),
-                "remote ranges for chain ID 1 are not sorted"
-            );
-        }
+        let mut mock_server = MockRpcServer::new();
+        mock_server.expect_list().returning(move |_| {
+            Ok(tonic::Response::new(ChainRanges {
+                chain_ranges: vec![ChainRange {
+                    chain_id: 1,
+                    block_ranges: block_ranges.clone(),
+                }],
+            }))
+        });
+        let test_server = TestServer::new(mock_server).await;
+        let err = fetch(
+            tmpdir.path(),
+            test_server.address.clone(),
+            1,
+            None,
+            None,
+            std::io::sink(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.to_string(), expected_error);
     }
 
     #[tokio::test]
@@ -423,8 +402,16 @@ mod tests {
         );
     }
 
+    #[rstest]
+    // The remote hash range is 5..=10
+    #[case::after_remote(11, 15)]
+    #[case::before_remote(0, 4)]
+    #[case::partial_overlap(5, 15)]
     #[tokio::test]
-    async fn fails_if_requested_range_does_not_exist_on_remote_server() {
+    async fn fails_if_requested_range_does_not_exist_on_remote_server(
+        #[case] from: u64,
+        #[case] to: u64,
+    ) {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
@@ -436,59 +423,21 @@ mod tests {
                 }],
             }))
         });
-
         let test_server = TestServer::new(mock_server).await;
-        // Range is completely after the remote ranges
-        {
-            let result = fetch(
-                tmpdir.path(),
-                test_server.address.clone(),
-                1,
-                Some(11), // Range that does not exist on the remote server
-                Some(15),
-                std::io::sink(),
-            )
-            .await;
-            let err = result.expect_err("Fetch should fail with missing range on remote server");
-            assert_eq!(
-                err.to_string(),
-                "range 11 to 15 for chain ID 1 is not available on remote server"
-            );
-        }
-        // Range is completely before the remote ranges
-        {
-            let result = fetch(
-                tmpdir.path(),
-                test_server.address.clone(),
-                1,
-                Some(0),
-                Some(4), // Range that exists locally but not on the remote server
-                std::io::sink(),
-            )
-            .await;
-            let err = result.expect_err("Fetch should fail with missing range on remote server");
-            assert_eq!(
-                err.to_string(),
-                "range 0 to 4 for chain ID 1 is not available on remote server"
-            );
-        }
-        // Range partially overlaps with the remote ranges but is not fully covered
-        {
-            let result = fetch(
-                tmpdir.path(),
-                test_server.address.clone(),
-                1,
-                Some(5),
-                Some(15), // Range that partially overlaps with the remote ranges
-                std::io::sink(),
-            )
-            .await;
-            let err = result.expect_err("Fetch should fail with missing range on remote server");
-            assert_eq!(
-                err.to_string(),
-                "range 5 to 15 for chain ID 1 is not available on remote server"
-            );
-        }
+        let err = fetch(
+            tmpdir.path(),
+            test_server.address.clone(),
+            1,
+            Some(from),
+            Some(to),
+            std::io::sink(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("range {from} to {to} for chain ID 1 is not available on remote server")
+        );
     }
 
     #[tokio::test]
@@ -835,78 +784,73 @@ mod tests {
         }
     }
 
+    #[rstest_reuse::apply(auth_token)]
     #[tokio::test]
-    async fn uses_authentication_token_to_connect_when_available() {
+    async fn uses_authentication_token_to_connect_when_available(
+        auth_token: Option<MetadataValue<Ascii>>,
+    ) {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (mut cfg, _db) = open_app_dir(tmpdir.path(), true).unwrap();
 
-        let cases = vec![
-            Some(auth::token_to_metadata_value("my-token").unwrap()),
-            None,
-        ];
-        for auth_token in cases {
-            cfg.set_auth_token(auth_token.clone()).unwrap();
+        cfg.set_auth_token(auth_token.clone()).unwrap();
 
-            let mut mock_server = MockRpcServer::new();
-            mock_server
-                .expect_list()
-                .withf({
-                    let auth_token = auth_token.clone();
-                    move |request| {
-                        if auth_token.is_some() {
-                            let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
-                            auth_token.as_ref() == req_token
-                        } else {
-                            true
-                        }
-                    }
-                })
-                .returning(|_| {
-                    Ok(tonic::Response::new(ChainRanges {
-                        chain_ranges: vec![ChainRange {
-                            chain_id: 1,
-                            block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 0 }],
-                        }],
-                    }))
-                });
-
-            let range_response = vec![Ok(EncodedBlock {
-                number: 0,
-                data: proto::Block::from(bertha_types::Block {
-                    number: 0,
-                    ..bertha_types::Block::default_sonic()
-                })
-                .encode_to_vec(),
-            })];
-
-            mock_server
-                .expect_get_block_range()
-                .withf(move |request| {
+        let mut mock_server = MockRpcServer::new();
+        mock_server
+            .expect_list()
+            .withf({
+                let auth_token = auth_token.clone();
+                move |request| {
                     if auth_token.is_some() {
                         let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
                         auth_token.as_ref() == req_token
                     } else {
                         true
                     }
-                })
-                .return_once(move |_| {
-                    Ok(tonic::Response::new(futures::stream::iter(range_response)))
-                });
+                }
+            })
+            .returning(|_| {
+                Ok(tonic::Response::new(ChainRanges {
+                    chain_ranges: vec![ChainRange {
+                        chain_id: 1,
+                        block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 0 }],
+                    }],
+                }))
+            });
 
-            let server = TestServer::new(mock_server).await;
-            let mut buf = Vec::new();
-            let result = fetch(
-                tmpdir.path(),
-                server.address.clone(),
-                1,
-                Some(0),
-                Some(0),
-                &mut buf,
-            )
-            .await;
-            assert!(result.is_ok(), "Fetch should succeed");
-        }
+        let range_response = vec![Ok(EncodedBlock {
+            number: 0,
+            data: proto::Block::from(bertha_types::Block {
+                number: 0,
+                ..bertha_types::Block::default_sonic()
+            })
+            .encode_to_vec(),
+        })];
+
+        mock_server
+            .expect_get_block_range()
+            .withf(move |request| {
+                if auth_token.is_some() {
+                    let req_token = request.metadata().get(AUTHORIZATION_HEADER_NAME);
+                    auth_token.as_ref() == req_token
+                } else {
+                    true
+                }
+            })
+            .return_once(move |_| Ok(tonic::Response::new(futures::stream::iter(range_response))));
+
+        let server = TestServer::new(mock_server).await;
+        let mut buf = Vec::new();
+        let result = fetch(
+            tmpdir.path(),
+            server.address.clone(),
+            1,
+            Some(0),
+            Some(0),
+            &mut buf,
+        )
+        .await;
+        assert!(result.is_ok(), "Fetch should succeed");
     }
 
     /// Helper function to convert an iterator of `(u64, u64)` tuples into a `Vec<BlockRange>`.

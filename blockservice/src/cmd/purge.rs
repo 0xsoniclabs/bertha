@@ -88,6 +88,7 @@ mod tests {
     use std::{io::Cursor, vec};
 
     use bertha_types::Block;
+    use rstest::rstest;
 
     use super::*;
     use crate::{
@@ -192,103 +193,12 @@ mod tests {
         assert!(output.is_empty());
     }
 
-    #[test]
-    fn can_be_called_with_chain_id_or_chain_id_and_start_or_chain_id_and_start_and_end() {
-        #[track_caller]
-        fn check_empty_db(path: &Path) {
-            let (_, db) = open_app_dir(path, true).unwrap();
-            assert!(db.get_chain_ids().unwrap().is_empty());
-        }
-
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
-        let init_db = || {
-            let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-            db.put(
-                1,
-                Block {
-                    number: 1,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-            db.put(
-                1,
-                Block {
-                    number: 2,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        };
-
-        // From is None, to is None
-        {
-            init_db();
-            let mut output = Vec::new();
-            assert!(purge(tmpdir.path(), 1, None, None, &mut output, &CONFIRM_PURGE).is_ok());
-            check_empty_db(tmpdir.path());
-            assert_eq!(
-                String::from_utf8(output).unwrap(),
-                format!(
-                    "Purging 2 blocks in range 0 - 2 for chain ID 1. Are you sure you want to continue? (y/n): Blocks successfully purged\n"
-                )
-            );
-        }
-        // From is Some, to is None
-        {
-            init_db();
-            let mut output = Vec::new();
-            assert!(purge(tmpdir.path(), 1, Some(1), None, &mut output, &CONFIRM_PURGE).is_ok());
-            check_empty_db(tmpdir.path());
-            assert_eq!(
-                String::from_utf8(output).unwrap(),
-                format!(
-                    "Purging 2 blocks in range 1 - 2 for chain ID 1. Are you sure you want to continue? (y/n): Blocks successfully purged\n"
-                )
-            );
-        }
-        // From is None, to is Some
-        {
-            init_db();
-            let mut output = Vec::new();
-            assert!(purge(tmpdir.path(), 1, None, Some(2), &mut output, &CONFIRM_PURGE).is_ok());
-            check_empty_db(tmpdir.path());
-            assert_eq!(
-                String::from_utf8(output).unwrap(),
-                format!(
-                    "Purging 2 blocks in range 0 - 2 for chain ID 1. Are you sure you want to continue? (y/n): Blocks successfully purged\n"
-                )
-            );
-        }
-        // From is Some, to is Some
-        {
-            init_db();
-            let mut output = Vec::new();
-            assert!(
-                purge(
-                    tmpdir.path(),
-                    1,
-                    Some(1),
-                    Some(2),
-                    &mut output,
-                    &CONFIRM_PURGE
-                )
-                .is_ok()
-            );
-            check_empty_db(tmpdir.path());
-            assert_eq!(
-                String::from_utf8(output).unwrap(),
-                format!(
-                    "Purging 2 blocks in range 1 - 2 for chain ID 1. Are you sure you want to continue? (y/n): Blocks successfully purged\n"
-                )
-            );
-        }
-    }
-
-    #[test]
-    fn deletes_range_of_blocks() {
+    #[rstest]
+    #[case::full_range(None, None)]
+    #[case::with_start(Some(1), None)]
+    #[case::with_end(None, Some(2))]
+    #[case::with_start_and_end(Some(1), Some(2))]
+    fn deletes_range_of_blocks(#[case] from: Option<u64>, #[case] to: Option<u64>) {
         // this test is just supposed to check that the purge command calls
         // BlockRocksDb::delete_range, not that all the corner cases work because they are
         // already tested in BlockRocksDb::delete_range
@@ -297,113 +207,55 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let chain_id = 146;
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
 
-        let init_db = || {
-            let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let mut block = Block::default();
+        db.put(chain_id, block.clone()).unwrap();
+        block.number = 1;
+        db.put(chain_id, block.clone()).unwrap();
+        block.number = 2;
+        db.put(chain_id, block.clone()).unwrap();
+        block.number = 3;
+        db.put(chain_id, block).unwrap();
+        drop(db);
 
-            let mut block = Block::default();
-            db.put(146, block.clone()).unwrap();
-            block.number = 1;
-            db.put(146, block.clone()).unwrap();
-            block.number = 2;
-            db.put(146, block.clone()).unwrap();
-            block.number = 3;
-            db.put(146, block.clone()).unwrap();
-        };
+        let mut output = Vec::new();
+        purge(
+            tmpdir.path(),
+            chain_id,
+            from,
+            to,
+            &mut output,
+            &CONFIRM_PURGE,
+        )
+        .unwrap();
+        assert_eq!(
+            String::from_utf8(output).unwrap(),
+            format!(
+                "Purging {} blocks in range {} - {} for chain ID 146. Are you sure you want to continue? (y/n): Blocks successfully purged\n",
+                to.unwrap_or(3) - from.unwrap_or(0) + 1,
+                from.unwrap_or(0),
+                to.unwrap_or(3)
+            )
+        );
 
-        // from is Some, to is Some
-        {
-            init_db();
-            let mut output = Vec::new();
-            purge(
-                tmpdir.path(),
-                chain_id,
-                Some(1),
-                Some(2),
-                &mut output,
-                &CONFIRM_PURGE,
-            )
-            .expect("purge should succeed");
-            assert_eq!(
-                String::from_utf8(output).unwrap(),
-                "Purging 2 blocks in range 1 - 2 for chain ID 146. Are you sure you want to continue? (y/n): Blocks successfully purged\n"
-            );
-
-            let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
-            assert!(db.get(chain_id, 0).unwrap().is_some());
-            assert!(db.get(chain_id, 1).unwrap().is_none());
-            assert!(db.get(chain_id, 2).unwrap().is_none());
-            assert!(db.get(chain_id, 3).unwrap().is_some());
-        }
-        // from is Some, to is None
-        {
-            init_db();
-            let mut output = Vec::new();
-            purge(
-                tmpdir.path(),
-                chain_id,
-                Some(1),
-                None,
-                &mut output,
-                &CONFIRM_PURGE,
-            )
-            .expect("purge should succeed");
-            assert_eq!(
-                String::from_utf8(output).unwrap(),
-                "Purging 3 blocks in range 1 - 3 for chain ID 146. Are you sure you want to continue? (y/n): Blocks successfully purged\n"
-            );
-            let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
-            assert!(db.get(chain_id, 0).unwrap().is_some());
-            assert!(db.get(chain_id, 1).unwrap().is_none());
-            assert!(db.get(chain_id, 2).unwrap().is_none());
-            assert!(db.get(chain_id, 3).unwrap().is_none());
-        }
-        // from is None, to is Some
-        {
-            init_db();
-            let mut output = Vec::new();
-            purge(
-                tmpdir.path(),
-                chain_id,
-                None,
-                Some(2),
-                &mut output,
-                &CONFIRM_PURGE,
-            )
-            .expect("purge should succeed");
-            assert_eq!(
-                String::from_utf8(output).unwrap(),
-                "Purging 3 blocks in range 0 - 2 for chain ID 146. Are you sure you want to continue? (y/n): Blocks successfully purged\n"
-            );
-            let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
-            assert!(db.get(chain_id, 0).unwrap().is_none());
-            assert!(db.get(chain_id, 1).unwrap().is_none());
-            assert!(db.get(chain_id, 2).unwrap().is_none());
-            assert!(db.get(chain_id, 3).unwrap().is_some());
-        }
-        // from is None, to is None
-        {
-            init_db();
-            let mut output = Vec::new();
-            purge(
-                tmpdir.path(),
-                chain_id,
-                None,
-                None,
-                &mut output,
-                &CONFIRM_PURGE,
-            )
-            .expect("purge should succeed");
-            assert_eq!(
-                String::from_utf8(output).unwrap(),
-                "Purging 4 blocks in range 0 - 3 for chain ID 146. Are you sure you want to continue? (y/n): Blocks successfully purged\n"
-            );
-            let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
-            assert!(db.get(chain_id, 0).unwrap().is_none());
-            assert!(db.get(chain_id, 1).unwrap().is_none());
-            assert!(db.get(chain_id, 2).unwrap().is_none());
-            assert!(db.get(chain_id, 3).unwrap().is_none());
-        }
+        let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
+        assert_eq!(
+            db.get(chain_id, 0).unwrap().is_none(),
+            (from.unwrap_or(0)..=to.unwrap_or(3)).contains(&0)
+        );
+        assert_eq!(
+            db.get(chain_id, 1).unwrap().is_none(),
+            (from.unwrap_or(0)..=to.unwrap_or(3)).contains(&1)
+        );
+        assert_eq!(
+            db.get(chain_id, 2).unwrap().is_none(),
+            (from.unwrap_or(0)..=to.unwrap_or(3)).contains(&2)
+        );
+        assert_eq!(
+            db.get(chain_id, 3).unwrap().is_none(),
+            (from.unwrap_or(0)..=to.unwrap_or(3)).contains(&3)
+        );
     }
 
     #[test]
@@ -472,8 +324,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn guard_is_case_unsensitive() {
+    #[rstest]
+    #[case::lowercase("y")]
+    #[case::uppercase("Y")]
+    fn guard_is_case_unsensitive(#[case] confirmation: &str) {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
@@ -488,57 +342,19 @@ mod tests {
             )
             .unwrap();
         };
-        // lowercase 'y'
-        {
-            set_elem();
-            let mut output = Vec::new();
-            purge(
-                tmpdir.path(),
-                42,
-                None,
-                None,
-                &mut output,
-                &Cursor::new("y"),
-            )
-            .expect("purge should succeed");
-            let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
-            let elem = db.get(42, 1).unwrap();
-            assert!(elem.is_none());
-            assert!(
-                open_app_dir(tmpdir.path(), true)
-                    .unwrap()
-                    .1
-                    .get(42, 1)
-                    .unwrap()
-                    .is_none()
-            );
-            let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
-            assert!(db.get(42, 1).unwrap().is_none());
-        }
-        // uppercase 'Y'
-        {
-            set_elem();
-            let mut output = Vec::new();
-            purge(
-                tmpdir.path(),
-                42,
-                None,
-                None,
-                &mut output,
-                &Cursor::new("Y"),
-            )
-            .expect("purge should succeed");
+        set_elem();
+        let mut output = Vec::new();
+        purge(
+            tmpdir.path(),
+            42,
+            None,
+            None,
+            &mut output,
+            &Cursor::new(confirmation),
+        )
+        .unwrap();
 
-            assert!(
-                open_app_dir(tmpdir.path(), true)
-                    .unwrap()
-                    .1
-                    .get(42, 1)
-                    .unwrap()
-                    .is_none()
-            );
-            let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
-            assert!(db.get(42, 1).unwrap().is_none());
-        }
+        let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
+        assert!(db.get(42, 1).unwrap().is_none());
     }
 }
