@@ -117,8 +117,7 @@ func TestReplayLoop(t *testing.T) {
 			"FailsOnBlockConversionError":                   failsOnBlockConversionError,
 			"FailsOnBlockApplicationError":                  failsOnBlockApplicationError,
 			"FailsOnCommitmentComputationError":             failsOnCommitmentComputationError,
-			"FailsOnWrongReceiptStatus":                     failsOnWrongReceiptStatus,
-			"FailsOnWrongReceiptCumulatedGasUsed":           failsOnWrongReceiptCumulatedGasUsed,
+			"FailsOnDifferentReceipts":                      failsOnDifferentReceipts,
 			"FailsOnIncorrectStateRootHash":                 failsOnIncorrectStateRootHash,
 			"OverwriteStateRootHash":                        overwriteStateRootHash,
 			"SkipStateRootCheckIfNoStateRootCheckFlagIsSet": skipStateRootCheckIfNoStateRootCheckFlagIsSet,
@@ -331,57 +330,57 @@ func failsOnCommitmentComputationError(t *testing.T, run replayer) {
 	)
 }
 
-func failsOnWrongReceiptStatus(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+func failsOnDifferentReceipts(t *testing.T, run replayer) {
+	cases := map[string]struct {
+		computedReceipts types.Receipts
+		blockReceipts    []*blockdb.TransactionReceipt
+		expectedError    string
+	}{
+		"count mismatch": {
+			computedReceipts: types.Receipts{{Status: types.ReceiptStatusFailed}},
+			blockReceipts:    []*blockdb.TransactionReceipt{},
+			expectedError:    "number of receipts mismatch",
+		},
+		"status mismatch": {
+			computedReceipts: types.Receipts{{Status: types.ReceiptStatusFailed}},
+			blockReceipts: []*blockdb.TransactionReceipt{
+				{PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful}},
+			},
+			expectedError: "receipt status mismatch",
+		},
+		"cumulative gas mismatch": {
+			computedReceipts: types.Receipts{
+				{Status: types.ReceiptStatusSuccessful, CumulativeGasUsed: 100},
+			},
+			blockReceipts: []*blockdb.TransactionReceipt{
+				{PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful}},
+			},
+			expectedError: "receipt cumulative gas used mismatch",
+		},
+	}
 
-	chain.EXPECT().
-		ApplyBlock(gomock.Any()).
-		Return(
-			types.Receipts{{Status: types.ReceiptStatusFailed}},
-			future.Immediate(result.Ok(common.Hash{})),
-			nil,
-		)
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			chain := NewMockChain(ctrl)
+			chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
-	ctxt := t.Context()
-	blocks := utils.NewIter([]*blockdb.Block{{
-		Receipts: []*blockdb.TransactionReceipt{{
-			PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
-		}},
-	}})
-	require.ErrorContains(t,
-		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
-		"receipt status mismatch",
-	)
-}
+			chain.EXPECT().
+				ApplyBlock(gomock.Any()).
+				Return(
+					tc.computedReceipts,
+					future.Immediate(result.Ok(common.Hash{})),
+					nil,
+				)
 
-func failsOnWrongReceiptCumulatedGasUsed(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-
-	chain.EXPECT().
-		ApplyBlock(gomock.Any()).
-		Return(
-			types.Receipts{{
-				Status:            types.ReceiptStatusSuccessful,
-				CumulativeGasUsed: 100,
-			}},
-			future.Immediate(result.Ok(common.Hash{})),
-			nil,
-		)
-
-	ctxt := t.Context()
-	blocks := utils.NewIter([]*blockdb.Block{{
-		Receipts: []*blockdb.TransactionReceipt{{
-			PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
-		}},
-	}})
-	require.ErrorContains(t,
-		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
-		"receipt cumulative gas used mismatch",
-	)
+			ctxt := t.Context()
+			blocks := utils.NewIter([]*blockdb.Block{{Receipts: tc.blockReceipts}})
+			require.ErrorContains(t,
+				run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
+				tc.expectedError,
+			)
+		})
+	}
 }
 
 func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
