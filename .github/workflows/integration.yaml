@@ -1,0 +1,72 @@
+# Copyright 2026 Sonic Operations Ltd
+# This file is part of the Sonic Client
+#
+# Sonic is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# Sonic is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with Sonic. If not, see <http://www.gnu.org/licenses/>.
+
+name: Integration
+
+permissions:
+  contents: read
+  checks: write
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ "**" ]
+
+jobs:
+  generate-test-data:
+    name: generate-test-data
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+    - name: install rust
+      uses: dtolnay/rust-toolchain@nightly
+      with:
+        components: rustfmt
+    - name: setup go
+      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      with:
+        go-version: "1.26.0"
+        cache-dependency-path: utils/test_data_generator/go.sum
+    - name: generate test data
+      working-directory: utils/test_data_generator
+      run: |
+        go run . transactions > ../../bertha-types/src/test_data/test_data_transaction.rs &&
+        go run . receipts > ../../bertha-types/src/test_data/test_data_receipts.rs &&
+        go run . blocks > ../../bertha-types/src/test_data/test_data_blocks.rs &&
+        git diff --exit-code # make sure there are no changes after test data generation
+
+  carmen-tracy-patch:
+    name: carmen-tracy-patches
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+      with:
+        path: bertha
+    - name: clone Carmen
+      run: git clone --depth 1 https://github.com/0xsoniclabs/carmen
+    - name: clone Tracy
+      run: git clone --depth 1 https://github.com/0xsoniclabs/tracy
+    - name: check if carmen and tracy patches apply
+      working-directory: bertha/go
+      run: git apply enable-carmen.patch && git apply enable-tracy.patch
+    - name: check if go module is tidy
+      working-directory: bertha/go
+      run: go build -n ./...

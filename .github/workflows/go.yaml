@@ -89,26 +89,6 @@ jobs:
       working-directory: go
       run: go test --count 1 ./...
 
-  carmen-tracy-patch:
-    name: carmen-tracy-patches
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: checkout
-      uses: actions/checkout@v4
-      with:
-        path: bertha
-    - name: clone Carmen
-      run: git clone --depth 1 https://github.com/0xsoniclabs/carmen
-    - name: clone Tracy
-      run: git clone --depth 1 https://github.com/0xsoniclabs/tracy
-    - name: check if carmen and tracy patches apply
-      working-directory: bertha/go
-      run: git apply enable-carmen.patch && git apply enable-tracy.patch
-    - name: check if go module is tidy
-      working-directory: bertha/go
-      run: go build -n ./...
-
   # This is currently disabled because we can not guarantee that the protobuf compiler versions between CI and dev machines do not get out of sync.
   #codegen:
     #name: codegen

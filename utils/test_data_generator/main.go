@@ -32,6 +32,8 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 )
 
+const licenseHeaderPath = "../scripts/license/license_header.txt"
+
 // generateTransactions generates a slice of transactions for each combination of [transaction::transactionFieldCases].
 func generateTransactions() []*types.Transaction {
 	txs := []*types.Transaction{}
@@ -332,7 +334,23 @@ func formatAndPrintRustCode(rustCode string) {
 		panic("Failed to re-format Rust code: " + err.Error())
 	}
 
-	fmt.Print(string(output))
+	licenseHeader, err := os.ReadFile(licenseHeaderPath)
+	if err != nil {
+		panic("Failed to read license header: " + err.Error())
+	}
+
+	commentedHeader := ""
+	headerLines := strings.Split(string(licenseHeader), "\n")
+	for i, line := range headerLines {
+		if line == "" {
+			headerLines[i] = "//"
+		} else {
+			headerLines[i] = "// " + line
+		}
+	}
+	commentedHeader = strings.Join(headerLines, "\n") + "\n\n"
+
+	fmt.Print(commentedHeader + string(output))
 }
 
 // Generate a main function that allow to select from the command line if to generate block headers, transactions, or receipts. Add an optional flag for the RLP encoding
@@ -349,6 +367,6 @@ func main() {
 		blocks := generateBlocks()
 		formatAndPrintRustCode(dumpBlocks(blocks))
 	default:
-		panic("Unknown command: " + os.Args[1])
+		fmt.Println("Unknown command: " + os.Args[1])
 	}
 }
