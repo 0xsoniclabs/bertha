@@ -25,8 +25,8 @@ import (
 
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
+	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/schollz/progressbar/v3"
 )
 
 type VerifyArgs struct {
@@ -36,7 +36,7 @@ type VerifyArgs struct {
 	EndBlock    uint64
 }
 
-func Verify(ctx context.Context, args VerifyArgs) (err error) {
+func Verify(ctx context.Context, args VerifyArgs, progressIndicatorFactory utils.ProgressIndicatorFactory) (err error) {
 	fmt.Printf("Opening block database in %q ...\n", args.DatabaseDir)
 	database, err := blockdb.OpenRocksDBForReading(args.DatabaseDir)
 	if err != nil {
@@ -49,7 +49,7 @@ func Verify(ctx context.Context, args VerifyArgs) (err error) {
 	fmt.Printf("Verifying blocks for chain ID %d from block %d to block %d ...\n", args.ChainID, args.StartBlock, args.EndBlock)
 
 	numBlocks := int64(args.EndBlock - args.StartBlock + 1)
-	bar := progressbar.Default(numBlocks, "Verifying blocks")
+	progressIndicator := progressIndicatorFactory.New(numBlocks, "Verifying blocks")
 
 	return verifyBlocks(
 		ctx,
@@ -59,7 +59,7 @@ func Verify(ctx context.Context, args VerifyArgs) (err error) {
 			args.EndBlock,
 		),
 		func(uint64) {
-			_ = bar.Add(1) // Progress bar update errors are ignored
+			_ = progressIndicator.Add(1) // update errors are ignored
 		},
 	)
 }

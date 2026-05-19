@@ -29,6 +29,7 @@ import (
 	"syscall"
 
 	"github.com/0xsoniclabs/bertha/replay"
+	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/bertha/verify"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/tracy"
@@ -311,5 +312,5 @@ func parseVerifyArgsAndRunVerify(ctx context.Context, c *cli.Command) error {
 		StartBlock:  c.Uint64(startBlockFlag.Name),
 		EndBlock:    c.Uint64(endBlockFlag.Name),
 	}
-	return verify.Verify(ctx, args)
+	return verify.Verify(ctx, args, &utils.ProgressBarFactory{})
 }
