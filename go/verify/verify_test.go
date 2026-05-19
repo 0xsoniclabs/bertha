@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"iter"
-	"path/filepath"
 	"slices"
 	"testing"
 
@@ -31,28 +30,38 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/linxGnu/grocksdb"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/protobuf/proto"
 )
 
 func TestVerify_RunWithoutParameters_FailsToOpenMissingDb(t *testing.T) {
+	ctrl := gomock.NewController(t)
 	require.ErrorContains(t,
-		Verify(t.Context(), VerifyArgs{}),
+		Verify(t.Context(), VerifyArgs{}, utils.NewMockProgressIndicatorFactory(ctrl)),
 		"failed to open database",
 	)
 }
 
 func TestVerify_InvalidDirectory_ReportsAnIssue(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "missing-db")
+	ctrl := gomock.NewController(t)
 	require.ErrorContains(t,
-		Verify(t.Context(), VerifyArgs{DatabaseDir: path}),
+		Verify(t.Context(), VerifyArgs{DatabaseDir: t.TempDir()}, utils.NewMockProgressIndicatorFactory(ctrl)),
 		"failed to open database",
 	)
 }
 
 func TestVerify_EmptyDatabase_DoesNotReportIssues(t *testing.T) {
+	ctrl := gomock.NewController(t)
 	require := require.New(t)
 
-	path := filepath.Join(t.TempDir(), "empty-db")
+	progressIndicatorFactory := utils.NewMockProgressIndicatorFactory(ctrl)
+	// Expect 1 block because interval 0..=0 contains 1 block and the number
+	// of blocks is computed from the requested interval, not from the actual
+	// content of the database.
+	progressIndicatorFactory.EXPECT().New(int64(1), "Verifying blocks").
+		Return(utils.NewMockProgressIndicator(ctrl)).Times(1)
+
+	path := t.TempDir()
 	options := grocksdb.NewDefaultOptions()
 	options.SetCreateIfMissing(true)
 	db, err := grocksdb.OpenDb(options, path)
@@ -60,23 +69,31 @@ func TestVerify_EmptyDatabase_DoesNotReportIssues(t *testing.T) {
 	db.Close()
 
 	require.NoError(
-		Verify(t.Context(), VerifyArgs{DatabaseDir: path}),
+		Verify(t.Context(), VerifyArgs{DatabaseDir: path}, progressIndicatorFactory),
 	)
 }
 
 func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
+	ctrl := gomock.NewController(t)
 	require := require.New(t)
 
 	chainID := uint64(123)
+	blocks := 10
 
-	path := filepath.Join(t.TempDir(), "small-db")
+	progressIndicator := utils.NewMockProgressIndicator(ctrl)
+	progressIndicator.EXPECT().Add(1).Return(nil).Times(blocks)
+	progressIndicatorFactory := utils.NewMockProgressIndicatorFactory(ctrl)
+	progressIndicatorFactory.EXPECT().New(int64(blocks), "Verifying blocks").
+		Return(progressIndicator).Times(1)
+
+	path := t.TempDir()
 	options := grocksdb.NewDefaultOptions()
 	options.SetCreateIfMissing(true)
 	db, err := grocksdb.OpenDb(options, path)
 	require.NoError(err, "failed to create database")
 
 	writeOptions := grocksdb.NewDefaultWriteOptions()
-	for _, block := range utils.CreateValidBlocks(t, 10) {
+	for _, block := range utils.CreateValidBlocks(t, blocks) {
 		key := make([]byte, 16)
 		binary.BigEndian.PutUint64(key[:8], chainID)
 		binary.BigEndian.PutUint64(key[8:], uint64(block.Number))
@@ -90,7 +107,10 @@ func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
 	db.Close()
 
 	require.NoError(
-		Verify(t.Context(), VerifyArgs{DatabaseDir: path, ChainID: 123}),
+		Verify(t.Context(),
+			VerifyArgs{DatabaseDir: path, ChainID: chainID, StartBlock: 0, EndBlock: uint64(blocks - 1)},
+			progressIndicatorFactory,
+		),
 	)
 }
 
