@@ -205,7 +205,7 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	receipts, err := state.ApplyBlock(block, processor, opera.Upgrades{}, nil)
+	receipts, err := state.ApplyBlock(block, processor, opera.Upgrades{}, nil, nil)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 }
@@ -239,7 +239,7 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, processor, opera.Upgrades{}, nil)
+	_, err = state.ApplyBlock(block, processor, opera.Upgrades{}, nil, nil)
 	require.ErrorContains(t, err, "skipped txs")
 }
 
@@ -273,7 +273,7 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	receipts, err := state.ApplyBlock(block, processor, opera.Upgrades{}, corrections[17])
+	receipts, err := state.ApplyBlock(block, processor, opera.Upgrades{}, corrections[17], nil)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 

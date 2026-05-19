@@ -36,6 +36,9 @@ import (
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	"github.com/0xsoniclabs/sonic/opera"
+	"github.com/0xsoniclabs/sonic/opera/contracts/driver"
+	"github.com/0xsoniclabs/sonic/opera/contracts/driver/drivercall"
+	"github.com/0xsoniclabs/sonic/opera/contracts/driver/driverpos"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -626,6 +629,87 @@ func TestStateChainAdapter_ApplyBlock_AppliesUpgrades(t *testing.T) {
 	}
 }
 
+func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnEpochSealingTx(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	address := crypto.PubkeyToAddress(key.PublicKey)
+	signer := types.LatestSignerForChainID(big.NewInt(1))
+
+	cases := map[string]struct {
+		tx                   *blockdb.Transaction
+		expectCommitUpgrades bool
+	}{
+		"EpochSealingTx": {
+			// An epoch sealing transaction must be an internal transaction to
+			// the driver contract with the correct data.
+			// Internal transitions must have YParity=0 and R=0 which produces
+			// V=0, R=0, which satisfies internaltx.IsInternal.
+			tx: convert.ToBerthaTransaction(types.NewTx(
+				&types.LegacyTx{
+					Gas:      25000,
+					To:       &driver.ContractAddress,
+					Data:     drivercall.SealEpoch(nil),
+					GasPrice: big.NewInt(0),
+					V:        big.NewInt(0),
+					R:        big.NewInt(0),
+				},
+			)),
+			expectCommitUpgrades: true,
+		},
+		"NonEpochSealingTx": {
+			tx: convert.ToBerthaTransaction(types.MustSignNewTx(key, signer,
+				&types.LegacyTx{
+					Gas:      21000,
+					To:       &common.Address{1},
+					GasPrice: big.NewInt(100000),
+				},
+			)),
+			expectCommitUpgrades: false,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			mockMetadataStore := NewMockMetadataStore(ctrl)
+
+			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+			require.NoError(t, err)
+			defer func() {
+				require.NoError(t, state.Close())
+			}()
+
+			state.setBalance(address, big.NewInt(1e18))
+
+			chain := &stateChainAdapter{
+				chainID:          1,
+				metadataStore:    mockMetadataStore,
+				blockHashHistory: &blockHashHistory{},
+				state:            state,
+				snapshotHandler:  &SnapshotHandler{},
+			}
+
+			block, err := convert.ConvertToGethBlock(&blockdb.Block{
+				GasLimit:     1e18,
+				Number:       5,
+				Transactions: []*blockdb.Transaction{tc.tx},
+			})
+			require.NoError(t, err)
+
+			mockMetadataStore.EXPECT().GetUpgrades()
+			mockMetadataStore.EXPECT().GetUpgradesAtBlock(uint64(5))
+			mockMetadataStore.EXPECT().GetCorrections(uint64(5))
+
+			if tc.expectCommitUpgrades {
+				mockMetadataStore.EXPECT().CommitUpgrades(uint64(5)).Return(nil)
+			}
+
+			_, _, err = chain.ApplyBlock(block)
+			require.NoError(t, err)
+		})
+	}
+}
+
 func Test_getExpectedStateRoot_ReturnsCorrectStateRoot(t *testing.T) {
 	require := require.New(t)
 
@@ -851,4 +935,70 @@ func TestBlockHashHistory_ProducesHeaderWithCorrectHashes(t *testing.T) {
 	require.Equal(t, blockNum-1, header.Number.Uint64())
 	require.Equal(t, parent, header.Hash)
 	require.Equal(t, grandParent, header.ParentHash)
+}
+
+func TestOnNewLog_CallsPatchUpgradesWithDecodedDiff(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockStore := NewMockMetadataStore(ctrl)
+
+	diff := []byte(`{"Upgrades":{"Allegro":true}}`)
+	log := makeUpdateNetworkRulesLog(diff)
+
+	mockStore.EXPECT().PatchUpgrades(uint64(42), diff).Return(nil)
+	onNewLog(mockStore, 42, log)
+}
+
+func TestOnNewLog_IgnoresLogsWithWrongAddress(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockStore := NewMockMetadataStore(ctrl)
+
+	diff := []byte(`{"Upgrades":{"Allegro":true}}`)
+	log := makeUpdateNetworkRulesLog(diff)
+	log.Address = common.Address{0x42} // wrong address
+
+	mockStore.EXPECT().PatchUpgrades(gomock.Any(), gomock.Any()).Return(nil).Times(0)
+	onNewLog(mockStore, 1, log)
+}
+
+func TestOnNewLog_IgnoresLogsWithWrongTopic(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockStore := NewMockMetadataStore(ctrl)
+
+	diff := []byte(`{"Upgrades":{"Allegro":true}}`)
+	log := makeUpdateNetworkRulesLog(diff)
+	log.Topics = []common.Hash{{0xFF}} // wrong topic
+
+	mockStore.EXPECT().PatchUpgrades(gomock.Any(), gomock.Any()).Return(nil).Times(0)
+	onNewLog(mockStore, 1, log)
+}
+
+func TestOnNewLog_IgnoresLogsWithTooShortData(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockStore := NewMockMetadataStore(ctrl)
+
+	mockStore.EXPECT().PatchUpgrades(gomock.Any(), gomock.Any()).Return(nil).Times(0)
+	onNewLog(mockStore, 1, &types.Log{
+		Address: driver.ContractAddress,
+		Topics:  []common.Hash{driverpos.Topics.UpdateNetworkRules},
+		Data:    make([]byte, 32), // < 64 bytes, should be ignored
+	})
+}
+
+// makeUpdateNetworkRulesLog returns a *types.Log that looks like an
+// UpdateNetworkRules event from the driver contract. The diff is ABI-encoded
+// as a single dynamic bytes parameter:
+//
+//	word 0 (bytes  0–31): offset = 32
+//	word 1 (bytes 32–63): length of diff
+//	bytes 64+:            diff
+func makeUpdateNetworkRulesLog(diff []byte) *types.Log {
+	data := make([]byte, 64+len(diff))
+	new(big.Int).SetInt64(32).FillBytes(data[0:32])
+	new(big.Int).SetInt64(int64(len(diff))).FillBytes(data[32:64])
+	copy(data[64:], diff)
+	return &types.Log{
+		Address: driver.ContractAddress,
+		Topics:  []common.Hash{driverpos.Topics.UpdateNetworkRules},
+		Data:    data,
+	}
 }

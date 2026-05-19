@@ -153,6 +153,7 @@ func (s *State) ApplyBlock(
 	processor *evmcore.StateProcessor,
 	upgrades opera.Upgrades,
 	corrections map[common.Address]Correction,
+	onLog func(*types.Log),
 ) (types.Receipts, error) {
 	evmBlock := &evmcore.EvmBlock{
 		EvmHeader: evmcore.EvmHeader{
@@ -182,7 +183,7 @@ func (s *State) ApplyBlock(
 		gasLimit,
 		&usedGas,
 		0, // Tx index offset
-		nil,
+		onLog,
 	)
 
 	// Check that all transactions were processed (i.e., none were skipped).
