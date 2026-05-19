@@ -63,7 +63,7 @@ func getTransactionFieldValueByMethod(tx *types.Transaction, fieldName string) (
 		panic("Method " + fieldName + " not found in transaction type")
 	}
 	fieldValue := method.Call([]reflect.Value{})[0].Interface()
-	if fieldName != "To" && (fieldValue == nil || (reflect.ValueOf(fieldValue).Kind() == reflect.Ptr && reflect.ValueOf(fieldValue).IsNil())) {
+	if fieldName != "To" && (fieldValue == nil || (reflect.ValueOf(fieldValue).Kind() == reflect.Pointer && reflect.ValueOf(fieldValue).IsNil())) {
 		// Field is not in  the transaction type
 		return nil, false
 	}
@@ -74,7 +74,7 @@ func getTransactionFieldValueByMethod(tx *types.Transaction, fieldName string) (
 func getFieldValueFromStruct[T any](data T, fieldName string) (any, bool) {
 	dataValue := reflect.ValueOf(data)
 	var f reflect.Value
-	if dataValue.Kind() == reflect.Ptr {
+	if dataValue.Kind() == reflect.Pointer {
 		f = dataValue.Elem().FieldByName(fieldName)
 	} else {
 		f = dataValue.FieldByName(fieldName)
@@ -82,7 +82,7 @@ func getFieldValueFromStruct[T any](data T, fieldName string) (any, bool) {
 	if !f.IsValid() {
 		return nil, false
 	}
-	if f.Kind() == reflect.Ptr && f.IsNil() {
+	if f.Kind() == reflect.Pointer && f.IsNil() {
 		return nil, false
 	}
 	return f.Interface(), true
