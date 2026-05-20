@@ -89,6 +89,35 @@ jobs:
       working-directory: go
       run: go test --count 1 ./...
 
+  protobuf:
+    name: protobuf
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+    - name: setup go
+      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      with:
+        go-version: "1.26.0"
+        cache-dependency-path: go/go.sum
+    - name: install rocksdb, protobuf compiler
+      uses: awalsh128/cache-apt-pkgs-action@latest
+      with:
+        packages: librocksdb-dev protobuf-compiler
+    - name: install protoc-gen-go
+      run: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+    - name: regenerate protobuf definitions
+      working-directory: go
+      run: go generate blockdb/proto_gen.go
+    # The goal is to ensure that the protobuf definitions and the generated
+    # Go code are not out of sync. Because the exact output may depend on the
+    # version of the protobuf compiler, we do not check for exact equality of
+    # the generated go code, but just make sure that the code still compiles.
+    - name: go build
+      working-directory: go
+      run: go build ./...
+
   # This is currently disabled because we can not guarantee that the protobuf compiler versions between CI and dev machines do not get out of sync.
   #codegen:
     #name: codegen
