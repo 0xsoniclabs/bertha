@@ -135,7 +135,9 @@ func (s *StaticMetadataStore) PatchUpgrades(blockNumber uint64, diff []byte) err
 	if err != nil {
 		return fmt.Errorf("failed to update rules: %v", err)
 	}
-	s.nextUpgrades = &updatedRules.Upgrades
+	if updatedRules.Upgrades != originalRules.Upgrades {
+		s.nextUpgrades = &updatedRules.Upgrades
+	}
 	return nil
 }
 
