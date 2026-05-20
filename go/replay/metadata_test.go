@@ -105,23 +105,30 @@ func TestStaticMetadataStore_PatchUpgrades_ReturnsErrorForInvalidDiff(t *testing
 	require.Error(t, err)
 }
 
+func TestStaticMetadataStore_PatchUpgrades_IgnoresUpdatesWithoutChanges(t *testing.T) {
+	store := &StaticMetadataStore{
+		metadata: Metadata{
+			Upgrades: []opera.UpgradeHeight{
+				{Upgrades: opera.Upgrades{Sonic: true}, Height: 2},
+			},
+		},
+	}
+
+	diff := []byte(`{"Upgrades":{"Sonic":true}}`)
+	err := store.PatchUpgrades(5, diff)
+	require.NoError(t, err)
+	require.Nil(t, store.nextUpgrades)
+}
+
 func TestStaticMetadataStore_PatchUpgrades_AppliesDiffToNextUpgrades(t *testing.T) {
 	store := &StaticMetadataStore{}
 	require.Nil(t, store.nextUpgrades)
 
-	diff := []byte(`{"Upgrades":{}}`)
+	diff := []byte(`{"Upgrades":{"Allegro":true}}`)
 	err := store.PatchUpgrades(0, diff)
 	require.NoError(t, err)
 	require.NotNil(t, store.nextUpgrades)
 	// Berlin, London and Sonic are enabled by default.
-	require.True(t, store.nextUpgrades.Berlin)
-	require.True(t, store.nextUpgrades.London)
-	require.True(t, store.nextUpgrades.Sonic)
-
-	diff = []byte(`{"Upgrades":{"Allegro":true}}`)
-	err = store.PatchUpgrades(0, diff)
-	require.NoError(t, err)
-	require.NotNil(t, store.nextUpgrades)
 	require.True(t, store.nextUpgrades.Berlin)
 	require.True(t, store.nextUpgrades.London)
 	require.True(t, store.nextUpgrades.Sonic)
