@@ -56,7 +56,7 @@ jobs:
     - name: init blockdb
       run: cargo run -- init
     - name: import g-file
-      run: cargo run -- import-gfile data/small.g
+      run: cargo run -- import-gfile data/genesis/small.g
     - name: verify blockdb (Rust)
       run: cargo run -- verify 4003
     - name: verify blockdb (Go)
@@ -64,7 +64,7 @@ jobs:
       run: go run . verify --database-dir ../.blockdb --chain-id 4003
     - name: replay blocks
       working-directory: go
-      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/small.json
+      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json
 
   generate-test-data:
     name: generate-test-data
