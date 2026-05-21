@@ -27,6 +27,45 @@ on:
     branches: [ "**" ]
 
 jobs:
+  import-verify-replay:
+    name: import-verify-replay
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout
+      uses: actions/checkout@v4
+    - name: install rust
+      uses: dtolnay/rust-toolchain@nightly
+      with:
+        components: rustfmt
+    - name: setup go
+      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      with:
+        go-version: "1.26.0"
+        cache-dependency-path: go/go.sum
+    - name: install protoc
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+    - name: install rocksdb
+      uses: awalsh128/cache-apt-pkgs-action@latest
+      with:
+        packages: librocksdb-dev
+    - name: load cache
+      uses: Swatinem/rust-cache@v2
+    - name: init blockdb
+      run: cargo run -- init
+    - name: import g-file
+      run: cargo run -- import-gfile data/genesis/small.g
+    - name: verify blockdb (Rust)
+      run: cargo run -- verify 4003
+    - name: verify blockdb (Go)
+      working-directory: go
+      run: go run . verify --database-dir ../.blockdb --chain-id 4003
+    - name: replay blocks
+      working-directory: go
+      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json
+
   generate-test-data:
     name: generate-test-data
     runs-on: ubuntu-latest
