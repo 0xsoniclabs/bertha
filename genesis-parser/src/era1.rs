@@ -14,13 +14,17 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-use alloy_consensus::{Eip658Value, EthereumTxEnvelope, ReceiptEnvelope, TxEip4844Variant};
+use alloy_consensus::{
+    BlockBody, Eip658Value, EthereumTxEnvelope, Header, ReceiptEnvelope, TxEip4844Variant,
+};
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
 use bertha_types::{
     AccessListEntry, Block, Log, PostStateOrStatus, SetCodeAuthorization, Transaction,
     TransactionReceipt, TransactionType, U256,
 };
-use e2store::era1::BlockTuple;
+use reth_era::{common::decode::DecodeCompressedRlp, era1::types::execution::BlockTuple};
+
+use crate::Error;
 
 /// Converts an [`AccessList`] to a [`Vec<AccessListEntry>`].
 fn convert_access_list(access_list: &AccessList) -> Vec<AccessListEntry> {
@@ -220,25 +224,23 @@ fn convert_receipts(receipt: ReceiptEnvelope) -> TransactionReceipt {
 }
 
 /// Converts a [`BlockTuple`] to a [`Block`].
-pub fn convert_block(block: BlockTuple) -> Block {
-    let header = block.header.header;
+pub fn convert_block(block: &BlockTuple) -> Result<Block, Error> {
+    let header: Header = block.header.decode()?;
     let transactions = block
         .body
-        .body
-        .0
+        .decode::<BlockBody<EthereumTxEnvelope<TxEip4844Variant>>>()?
         .transactions
         .into_iter()
         .map(|tx| convert_transaction(header.number, tx))
         .collect();
     let receipts = block
         .receipts
-        .receipts
-        .0
+        .decode::<Vec<ReceiptEnvelope>>()?
         .into_iter()
         .map(convert_receipts)
         .collect();
 
-    Block {
+    Ok(Block {
         parent_hash: header.parent_hash.0,
         ommers_hash: header.ommers_hash.0,
         beneficiary: header.beneficiary.0.0,
@@ -260,5 +262,5 @@ pub fn convert_block(block: BlockTuple) -> Block {
         requests_hash: header.requests_hash.map(|h| h.0),
         verkle_state_root: None,
         binary_state_root: None,
-    }
+    })
 }

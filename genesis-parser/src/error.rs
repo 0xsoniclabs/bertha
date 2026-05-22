@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
+use reth_era::e2s::error::E2sError;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("rlp decoding failed: {0}")]
@@ -26,6 +28,8 @@ pub enum Error {
     GFile(#[from] GFileError),
     #[error("era file parsing failed: {0}")]
     Era(String),
+    #[error("E2S error: {0}")]
+    E2S(#[from] E2sError),
 }
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]

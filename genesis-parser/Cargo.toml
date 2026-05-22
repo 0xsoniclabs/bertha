@@ -35,10 +35,11 @@ flate2 = "1.1.1"
 thiserror = "2.0.12"
 
 # era parsing
-e2store = { git = "https://github.com/0xsoniclabs/trin", branch = "bertha-era" }
-tree_hash = "0.10.0"
-alloy-consensus = "1.0.37"
-alloy-eips = "1.0.37"
+reth-era = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
+lighthouse-types = { git = "https://github.com/sigp/lighthouse", tag = "v8.1.2", package = "types" }
+tree_hash = "0.12.1"
+alloy-consensus = "2.0.5"
+alloy-eips = "2.0.5"
 
 [dev-dependencies]
 # parameterized tests

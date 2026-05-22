@@ -28,7 +28,7 @@ alloy-rlp = { version = "0.3.11", features = ["derive"] }
 const-hex = "1.14.0"
 
 # hashing & trie & bloom
-sha3 = "0.11.0"
+sha3 = "0.12.0"
 alloy-trie = "0.9.5"
 ethbloom = "0.14.1"
 
