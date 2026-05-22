@@ -37,6 +37,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/holiman/uint256"
 	// Uncomment to enable experimental Carmen features.
 	//_ "github.com/0xsoniclabs/carmen/go/experimental"
 )
@@ -219,6 +220,11 @@ func (s *State) ApplyBlock(
 		}
 		s.db.EndTransaction()
 	}
+
+	if isEthereum(chainConfig.ChainID.Uint64()) {
+		creditWithdrawals(block, s.db, chainConfig)
+	}
+
 	zone.End()
 
 	zone = tracy.ZoneBegin("EndBlock")
@@ -237,5 +243,15 @@ func (s *State) setBalance(address common.Address, balance *big.Int) {
 	case 1:
 		diff, _ := amount.NewFromBigInt(new(big.Int).Sub(cur, balance))
 		s.db.SubBalance(addr, diff)
+	}
+}
+
+func creditWithdrawals(block *types.Block, stateDB carmen.StateDB, chainConfig *params.ChainConfig) {
+	// Derived from https://github.com/0xsoniclabs/go-ethereum/blob/949ae6d396a5798262c0d228a8de0e3fa504e00c/consensus/beacon/consensus.go#L329-L342
+	for _, w := range block.Withdrawals() {
+		// Convert amount from gwei to wei.
+		amnt := new(uint256.Int).SetUint64(w.Amount)
+		amnt = amnt.Mul(amnt, uint256.NewInt(params.GWei))
+		stateDB.AddBalance(cc.Address(w.Address), amount.NewFromUint256(amnt))
 	}
 }
