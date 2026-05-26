@@ -23,7 +23,9 @@ use std::{
 };
 
 use bertha_types::Block;
-use lighthouse_types::{ForkName, ForkVersionDecode, SignedBeaconBlock, core::MainnetEthSpec};
+use lighthouse_types::{
+    BeaconState, ForkName, ForkVersionDecode, SignedBeaconBlock, core::MainnetEthSpec,
+};
 use reth_era::{common::file_ops::StreamReader, era::file::EraReader, era1::file::Era1Reader};
 
 pub use crate::error::{Error, GFileError};
@@ -162,7 +164,7 @@ impl FileReader for Era1FileReader {
         path: impl AsRef<Path>,
         _chain_id: u64,
     ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {
-        let file = File::open(path.as_ref())?;
+        let file = File::open(path)?;
         let reader = Era1Reader::new(file);
         Ok(reader.iter().map(|result| {
             result
@@ -183,21 +185,65 @@ impl FileReader for EraFileReader {
         path: impl AsRef<Path>,
         chain_id: u64,
     ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {
-        let file = File::open(path.as_ref())?;
-        let reader = EraReader::new(file);
-        Ok(reader.iter().map(move |result| {
-            let ssz_bytes = result?.decompress()?;
-            // Determine the fork from the slot in the beacon block.
-            // The slot is at a fixed offset in the SSZ: after the 4-byte offset for `message`
-            // and 96-byte signature in SignedBeaconBlock, then at the start of BeaconBlock.
-            let slot = decode_slot_from_signed_block(&ssz_bytes)?;
-            let fork = try_get_beacon_fork(slot, chain_id)
-                .ok_or_else(|| Error::Era(format!("unsupported fork for slot {slot}")))?;
-            let beacon_block =
-                SignedBeaconBlock::<MainnetEthSpec>::from_ssz_bytes_by_fork(&ssz_bytes, fork)
-                    .map_err(|e| Error::Era(format!("SSZ decode error: {e:?}")))?;
-            era::convert_block(beacon_block)
-        }))
+        let file = File::open(path)?;
+        let era_file = EraReader::new(file).read(String::new())?;
+
+        // The genesis group contains only the genesis state, but no blocks in the form of signed
+        // beacon blocks. Block 0 is extracted from the genesis BeaconState and all other blocks
+        // from the signed beacon blocks.
+        let blocks = if era_file.group.is_genesis()
+            && let Some(fork) = try_get_beacon_fork(0, chain_id)
+        {
+            // The genesis execution block header is embedded in
+            // BeaconState.latest_execution_payload_header.
+            vec![
+                era_file
+                    .group
+                    .era_state
+                    .decompress()
+                    .map_err(Error::E2S)
+                    .and_then(|ssz_bytes| {
+                        BeaconState::<MainnetEthSpec>::from_ssz_bytes_by_fork(&ssz_bytes, fork)
+                            .map_err(|e| Error::Era(format!("SSZ decode error: {e:?}")))
+                    })
+                    .and_then(era::convert_genesis_block),
+            ]
+        } else {
+            // Process the signed beacon blocks.
+            era_file
+                .group
+                .blocks
+                .into_iter()
+                .map(|block| {
+                    block
+                        .decompress()
+                        .map_err(Error::E2S)
+                        .and_then(|ssz_bytes| {
+                            let slot = decode_slot_from_signed_block(&ssz_bytes)?;
+                            let fork = try_get_beacon_fork(slot, chain_id).ok_or_else(|| {
+                                Error::Era(format!("unsupported fork for slot {slot}"))
+                            })?;
+                            let beacon_block =
+                                SignedBeaconBlock::<MainnetEthSpec>::from_ssz_bytes_by_fork(
+                                    &ssz_bytes, fork,
+                                )
+                                .map_err(|e| Error::Era(format!("SSZ decode error: {e:?}")))?;
+                            era::convert_block(beacon_block)
+                        })
+                })
+                .filter(|block| {
+                    // block must be parsed from the genesis BeaconState. The block contained om the
+                    // signed beacon blocks is incorrect.
+                    if let Ok(block) = block {
+                        block.number > 0
+                    } else {
+                        true
+                    }
+                })
+                .collect()
+        };
+
+        Ok(blocks.into_iter())
     }
 }
 

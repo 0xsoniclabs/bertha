@@ -16,8 +16,12 @@
 
 use std::ops::Deref;
 
-use bertha_types::{Block, EIP2718Unmarshallable, EMPTY_OMMERS_HASH, Transaction, U256};
-use lighthouse_types::{SignedBeaconBlock, core::MainnetEthSpec};
+use bertha_types::{
+    Block, EIP2718Unmarshallable, EMPTY_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Transaction, U256,
+};
+use lighthouse_types::{
+    BeaconState, ExecutionPayloadHeader, SignedBeaconBlock, core::MainnetEthSpec,
+};
 use tree_hash::TreeHash;
 
 use crate::Error;
@@ -171,4 +175,49 @@ pub fn convert_block(block: SignedBeaconBlock<MainnetEthSpec>) -> Result<Block, 
         }
         _ => Err(Error::Era("unsupported beacon block fork".to_string())),
     }
+}
+
+/// Converts the genesis [`BeaconState`] to a [`Block`] by extracting the
+/// `latest_execution_payload_header`. This is used for genesis era files, which contain only a
+/// `BeaconState` and no `SignedBeaconBlock` entries.
+pub fn convert_genesis_block(state: BeaconState<MainnetEthSpec>) -> Result<Block, Error> {
+    let header = match state {
+        BeaconState::Bellatrix(s) => {
+            ExecutionPayloadHeader::Bellatrix(s.latest_execution_payload_header)
+        }
+        BeaconState::Capella(s) => {
+            ExecutionPayloadHeader::Capella(s.latest_execution_payload_header)
+        }
+        BeaconState::Deneb(s) => ExecutionPayloadHeader::Deneb(s.latest_execution_payload_header),
+        BeaconState::Electra(s) => {
+            ExecutionPayloadHeader::Electra(s.latest_execution_payload_header)
+        }
+        BeaconState::Fulu(s) => ExecutionPayloadHeader::Fulu(s.latest_execution_payload_header),
+        _ => return Err(Error::Era("unsupported beacon block fork".to_string())),
+    };
+
+    Ok(Block {
+        parent_hash: header.parent_hash().0.into(),
+        ommers_hash: EMPTY_OMMERS_HASH,
+        beneficiary: header.fee_recipient().0.into(),
+        state_root: header.state_root().into(),
+        difficulty: 1, // TODO
+        number: header.block_number(),
+        gas_limit: header.gas_limit(),
+        timestamp: header.timestamp(),
+        extra_data: header.extra_data().to_vec(),
+        prev_randao: header.prev_randao().into(),
+        nonce: [0, 0, 0, 0, 0, 0, 0x12, 0x34], // TODO <[u8; 8]>::default(), // 0 for proof-of-stake
+        transactions: Vec::new(),              // not stored in the execution payload header
+        receipts: Vec::new(),                  // not stored in the execution payload header
+        base_fee_per_gas: Some(U256::from_le_bytes(header.base_fee_per_gas().to_le_bytes())),
+        // TODO header.withdrawals_root().ok().map(Into::into),
+        withdrawals_root: Some(EMPTY_TREE_ROOT_HASH),
+        blob_gas_used: header.blob_gas_used().ok(),
+        excess_blob_gas: header.excess_blob_gas().ok(),
+        parent_beacon_block_root: Some([0; 32]), // block 0 has no parent
+        requests_hash: None,
+        verkle_state_root: None,
+        binary_state_root: None,
+    })
 }
