@@ -16,14 +16,15 @@
 
 use std::{
     ffi::OsStr,
-    fs,
+    fs::{self, File},
     io::{self, BufRead, Read, Seek},
     marker::PhantomData,
     path::{Path, PathBuf},
 };
 
 use bertha_types::Block;
-use e2store::{era::Era, era1::Era1};
+use lighthouse_types::{ForkName, ForkVersionDecode, SignedBeaconBlock, core::MainnetEthSpec};
+use reth_era::{common::file_ops::StreamReader, era::file::EraReader, era1::file::Era1Reader};
 
 pub use crate::error::{Error, GFileError};
 use crate::{block_parser::BlockParser, units::parse_metadata};
@@ -147,9 +148,9 @@ pub trait FileReader {
     ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error>;
 }
 
-pub struct Era1Reader;
+pub struct Era1FileReader;
 
-impl FileReader for Era1Reader {
+impl FileReader for Era1FileReader {
     const EXTENSION: &'static str = "era1";
 
     /// Reads and parses a single `.era1` file at the given path, returning an iterator over its
@@ -157,17 +158,19 @@ impl FileReader for Era1Reader {
     fn read_file(
         path: impl AsRef<Path>,
     ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {
-        let data = fs::read(path.as_ref())?;
-        Ok(Era1::iter_tuples(&data)
-            .map_err(|err| Error::Era(err.to_string()))?
-            .map(era1::convert_block)
-            .map(Ok))
+        let file = File::open(path.as_ref())?;
+        let reader = Era1Reader::new(file);
+        Ok(reader.iter().map(|result| {
+            result
+                .map_err(Error::E2S)
+                .and_then(|block| era1::convert_block(&block))
+        }))
     }
 }
 
-pub struct EraReader;
+pub struct EraFileReader;
 
-impl FileReader for EraReader {
+impl FileReader for EraFileReader {
     const EXTENSION: &'static str = "era";
 
     /// Reads and parses a single `.era` file at the given path, returning an iterator over its
@@ -175,13 +178,58 @@ impl FileReader for EraReader {
     fn read_file(
         path: impl AsRef<Path>,
     ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {
-        let data = fs::read(path.as_ref())?;
+        let file = File::open(path.as_ref())?;
+        let reader = EraReader::new(file);
+        Ok(reader.iter().map(|result| {
+            let ssz_bytes = result?.decompress()?;
+            // Determine the fork from the slot in the beacon block.
+            // The slot is at a fixed offset in the SSZ: after the 4-byte offset for `message`
+            // and 96-byte signature in SignedBeaconBlock, then at the start of BeaconBlock.
+            let slot = decode_slot_from_signed_block(&ssz_bytes)?;
+            let fork = try_get_beacon_fork(slot)
+                .ok_or_else(|| Error::Era(format!("unsupported fork for slot {slot}")))?;
+            let beacon_block =
+                SignedBeaconBlock::<MainnetEthSpec>::from_ssz_bytes_by_fork(&ssz_bytes, fork)
+                    .map_err(|e| Error::Era(format!("SSZ decode error: {e:?}")))?;
+            era::convert_block(beacon_block)
+        }))
+    }
+}
 
-        let blocks = Era::deserialize_blocks(&data)
-            .map_err(|err| Error::Era(err.to_string()))?
-            .into_iter()
-            .map(era::convert_block);
-        Ok(blocks)
+/// Decodes the slot number from the raw SSZ bytes of a `SignedBeaconBlock`.
+///
+/// In the SSZ encoding of `SignedBeaconBlock`:
+/// - Fixed section: [4-byte offset to `message`] [96-byte signature] = 100 bytes
+/// - Variable section starts at byte 100 with `BeaconBlock`
+/// - `BeaconBlock` fixed section starts with `slot` (u64 LE, 8 bytes)
+fn decode_slot_from_signed_block(ssz: &[u8]) -> Result<u64, Error> {
+    if ssz.len() < 108 {
+        return Err(Error::Era(
+            "SSZ too short for SignedBeaconBlock".to_string(),
+        ));
+    }
+    let slot_bytes: [u8; 8] = ssz[100..108]
+        .try_into()
+        .map_err(|_| Error::Era("failed to read slot".to_string()))?;
+    Ok(u64::from_le_bytes(slot_bytes))
+}
+
+/// Returns the fork name for a given slot.
+fn try_get_beacon_fork(slot_index: u64) -> Option<ForkName> {
+    // go-ethereum/beacon/params/networks.go
+    const MAINNET_BELLATRIX: u64 = 144896 * 32;
+    const MAINNET_CAPELLA: u64 = 194048 * 32;
+    const MAINNET_DENEB: u64 = 269568 * 32;
+    const MAINNET_ELECTRA: u64 = 364032 * 32;
+    const MAINNET_FULU: u64 = 411392 * 32;
+
+    match slot_index {
+        0..MAINNET_BELLATRIX => None, // pre-merge
+        MAINNET_BELLATRIX..MAINNET_CAPELLA => Some(ForkName::Bellatrix),
+        MAINNET_CAPELLA..MAINNET_DENEB => Some(ForkName::Capella),
+        MAINNET_DENEB..MAINNET_ELECTRA => Some(ForkName::Deneb),
+        MAINNET_ELECTRA..MAINNET_FULU => Some(ForkName::Electra),
+        MAINNET_FULU.. => Some(ForkName::Fulu),
     }
 }
 

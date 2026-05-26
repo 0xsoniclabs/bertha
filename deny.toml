@@ -148,6 +148,53 @@ exceptions = [
 #{ path = "LICENSE", hash = 0xbd0eed23 }
 #]
 
+# Lighthouse crates (sigp/lighthouse) don't specify a license field in their
+# individual Cargo.toml manifests, but the repo is Apache-2.0 licensed.
+[[licenses.clarify]]
+crate = "bls@0.2.0"
+expression = "Apache-2.0"
+license-files = [{ path = "../../LICENSE", hash = 0x2c5a5fa9 }]
+
+[[licenses.clarify]]
+crate = "eth2_interop_keypairs@0.2.0"
+expression = "Apache-2.0"
+license-files = [{ path = "../../LICENSE", hash = 0x2c5a5fa9 }]
+
+[[licenses.clarify]]
+crate = "fixed_bytes@0.1.0"
+expression = "Apache-2.0"
+license-files = [{ path = "../../LICENSE", hash = 0x2c5a5fa9 }]
+
+[[licenses.clarify]]
+crate = "int_to_bytes@0.2.0"
+expression = "Apache-2.0"
+license-files = [{ path = "../../LICENSE", hash = 0x2c5a5fa9 }]
+
+[[licenses.clarify]]
+crate = "kzg@0.1.0"
+expression = "Apache-2.0"
+license-files = [{ path = "../../LICENSE", hash = 0x2c5a5fa9 }]
+
+[[licenses.clarify]]
+crate = "merkle_proof@0.2.0"
+expression = "Apache-2.0"
+license-files = [{ path = "../../LICENSE", hash = 0x2c5a5fa9 }]
+
+[[licenses.clarify]]
+crate = "swap_or_not_shuffle@0.2.0"
+expression = "Apache-2.0"
+license-files = [{ path = "../../LICENSE", hash = 0x2c5a5fa9 }]
+
+[[licenses.clarify]]
+crate = "test_random_derive@0.2.0"
+expression = "Apache-2.0"
+license-files = [{ path = "../../LICENSE", hash = 0x2c5a5fa9 }]
+
+[[licenses.clarify]]
+crate = "types@0.2.1"
+expression = "Apache-2.0"
+license-files = [{ path = "../../LICENSE", hash = 0x2c5a5fa9 }]
+
 [licenses.private]
 # If true, ignores workspace crates that aren't published, or are only
 # published to private registries.
@@ -252,7 +299,7 @@ allow-git = []
 
 [sources.allow-org]
 # github.com organizations to allow git sources for
-github = []
+github = ["sigp"]
 # gitlab.com organizations to allow git sources for
 gitlab = []
 # bitbucket.org organizations to allow git sources for
