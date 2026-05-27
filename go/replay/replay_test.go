@@ -476,6 +476,7 @@ func skipReceiptsCheckIfNoReceiptsCheckFlagIsSet(t *testing.T, run replayer) {
 	chain := NewMockChain(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any()).
@@ -896,16 +897,17 @@ func Test_checkBlockResults_LogsMessageIfStateRootNotSet(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
+	block := &blockdb.Block{
+		Number:     1,
+		ParentHash: common.Hash{0xAB}.Bytes(),
+	}
+
 	chainID := uint64(12)
 	stateRoot := common.HexToHash("0xfeedface")
 	chain := NewMockChain(ctrl)
 	chain.EXPECT().ChainID().Return(chainID).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
-	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).AnyTimes()
-
-	block := &blockdb.Block{
-		Number: 0,
-	}
+	chain.EXPECT().GetBlockHash(block.Number - 1).Return(common.BytesToHash(block.ParentHash)).AnyTimes()
 
 	blockDB := blockdb.NewMockBlockDB(ctrl)
 	replayLoopContext := ReplayLoopContext{
@@ -926,7 +928,7 @@ func Test_checkBlockResults_LogsMessageIfStateRootNotSet(t *testing.T) {
 		&replayLoopContext,
 	)
 	require.NoError(t, err)
-	require.Contains(t, logBuffer.String(), "No state root set in the block DB. No checks will be performed")
+	require.Contains(t, logBuffer.String(), "No state root set in the block DB. State root verification skipped")
 
 	// Clear log buffer
 	logBuffer.Reset()

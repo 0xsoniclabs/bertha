@@ -521,7 +521,7 @@ func checkBlockResults(
 	if !noStateRootCheck && !overwriteStateRoot.IsEnabled() {
 		if expectedStateRoot == (common.Hash{}) {
 			if !replayLoopContext.stateRootNotSet {
-				slog.Warn("No state root set in the block DB. No checks will be performed", "block_number", block.Number)
+				slog.Warn("No state root set in the block DB. State root verification skipped", "block_number", block.Number)
 				replayLoopContext.stateRootNotSet = true
 			}
 		} else if computedStateRoot != expectedStateRoot {
@@ -532,7 +532,9 @@ func checkBlockResults(
 
 	hashOfParentBlock := chain.GetBlockHash(block.Number - 1)
 	parentHash := common.BytesToHash(block.ParentHash)
-	if hashOfParentBlock != (common.Hash{}) && parentHash != hashOfParentBlock {
+	if hashOfParentBlock == (common.Hash{}) {
+		slog.Warn("No block hash set. Parent hash verification skipped", "block_number", block.Number)
+	} else if parentHash != hashOfParentBlock {
 		return fmt.Errorf("parent hash mismatch: hash of block %d is %x, parent hash of block %d is %x",
 			block.Number-1, hashOfParentBlock, block.Number, parentHash)
 	}
