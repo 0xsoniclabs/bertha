@@ -308,6 +308,10 @@ func runReplayLoop(
 				return err
 			}
 		}
+
+		if err := chain.MaybeCreateSnapshot(gethBlock.NumberU64()); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -409,6 +413,11 @@ func runReplayPipeline(
 			receipts, stateRootFuture, err := chain.ApplyBlock(gethBlock)
 			if err != nil {
 				reportIssue(fmt.Errorf("failed to apply block %d: %w", gethBlock.NumberU64(), err))
+				return
+			}
+			// TODO: this should be called in stage 3, but the state db might have advanced by then
+			if err := chain.MaybeCreateSnapshot(gethBlock.NumberU64()); err != nil {
+				reportIssue(err)
 				return
 			}
 			result := &processResult{
@@ -563,6 +572,7 @@ type Chain interface {
 		error,
 	)
 	GetBlockHash(number uint64) common.Hash
+	MaybeCreateSnapshot(blockNum uint64) error
 }
 
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
@@ -679,16 +689,20 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 
 	a.blockHashHistory.SetBlockHash(block.NumberU64(), completeHeader.Hash())
 
-	stateRoot := a.state.GetStateRoot()
-	if a.snapshotHandler.ShouldCreateSnapshot(block.NumberU64()) {
-		stateRoot = future.Immediate(stateRoot.Await())
-		a.state, err = a.snapshotHandler.Snapshot(block.NumberU64(), a.state)
+	return receipts, a.state.GetStateRoot(), nil
+}
+
+func (a *stateChainAdapter) MaybeCreateSnapshot(blockNum uint64) error {
+	if a.snapshotHandler.ShouldCreateSnapshot(blockNum) {
+		a.stateRwMutex.Lock()
+		defer a.stateRwMutex.Unlock()
+		var err error
+		a.state, err = a.snapshotHandler.Snapshot(blockNum, a.state)
 		if err != nil {
-			return nil, stateRoot, fmt.Errorf("failed to create snapshot at block %d: %w", block.NumberU64(), err)
+			return fmt.Errorf("failed to create snapshot at block %d: %w", blockNum, err)
 		}
 	}
-	// Return the receipts and the resulting state root.
-	return receipts, stateRoot, nil
+	return nil
 }
 
 // getExpectedStateRoot returns the expected state root for the given block, based on the chain type.

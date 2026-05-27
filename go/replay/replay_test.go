@@ -202,6 +202,7 @@ func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).AnyTimes()
+	chain.EXPECT().MaybeCreateSnapshot(gomock.Any()).Return(nil).AnyTimes()
 
 	// A block history with a few transactions.
 	blocks := []*blockdb.Block{
@@ -330,6 +331,7 @@ func failsOnCommitmentComputationError(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := NewMockChain(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().MaybeCreateSnapshot(gomock.Any()).Return(nil).AnyTimes()
 
 	injectedError := fmt.Errorf("injected error")
 	chain.EXPECT().
@@ -378,6 +380,7 @@ func failsOnDifferentReceipts(t *testing.T, run replayer) {
 			ctrl := gomock.NewController(t)
 			chain := NewMockChain(ctrl)
 			chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+			chain.EXPECT().MaybeCreateSnapshot(gomock.Any()).Return(nil).AnyTimes()
 
 			chain.EXPECT().
 				ApplyBlock(gomock.Any()).
@@ -402,6 +405,7 @@ func failsOnParentHashMismatch(t *testing.T, run replayer) {
 	chain := NewMockChain(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+	chain.EXPECT().MaybeCreateSnapshot(gomock.Any()).Return(nil).AnyTimes()
 
 	hashOfParentBlock := common.Hash{0xAB}
 	chain.EXPECT().GetBlockHash(uint64(0)).Return(hashOfParentBlock)
@@ -430,6 +434,7 @@ func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 	chain := NewMockChain(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+	chain.EXPECT().MaybeCreateSnapshot(gomock.Any()).Return(nil).AnyTimes()
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any()).
@@ -455,6 +460,7 @@ func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
+	chain.EXPECT().MaybeCreateSnapshot(gomock.Any()).Return(nil).AnyTimes()
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any()).
@@ -482,6 +488,7 @@ func skipReceiptsCheckIfNoReceiptsCheckFlagIsSet(t *testing.T, run replayer) {
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
+	chain.EXPECT().MaybeCreateSnapshot(gomock.Any()).Return(nil).AnyTimes()
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any()).
@@ -507,6 +514,7 @@ func overwriteStateRootHash(t *testing.T, run replayer) {
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
+	chain.EXPECT().MaybeCreateSnapshot(gomock.Any()).Return(nil).AnyTimes()
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any()).
@@ -547,6 +555,7 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 		chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 		chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 		chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).AnyTimes()
+		chain.EXPECT().MaybeCreateSnapshot(gomock.Any()).Return(nil).AnyTimes()
 
 		promise, firstHash := future.Create[result.Result[common.Hash]]()
 

@@ -114,3 +114,17 @@ func (mr *MockChainMockRecorder) IsVerkleConformant() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsVerkleConformant", reflect.TypeOf((*MockChain)(nil).IsVerkleConformant))
 }
+
+// MaybeCreateSnapshot mocks base method.
+func (m *MockChain) MaybeCreateSnapshot(arg0 uint64) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "MaybeCreateSnapshot", arg0)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// MaybeCreateSnapshot indicates an expected call of MaybeCreateSnapshot.
+func (mr *MockChainMockRecorder) MaybeCreateSnapshot(arg0 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaybeCreateSnapshot", reflect.TypeOf((*MockChain)(nil).MaybeCreateSnapshot), arg0)
+}
