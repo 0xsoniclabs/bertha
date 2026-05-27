@@ -70,6 +70,7 @@ func getApp() *cli.Command {
 					snapshotNumToKeep,
 					overwriteStateRoot,
 					noStateRootCheck,
+					noReceiptsCheck,
 					logDBSize,
 					confirmAllPromptsFlag,
 				},
@@ -254,6 +255,13 @@ var (
 		Name:    "no-state-root-check",
 		Aliases: []string{"no-src"},
 		Usage:   "Skip checking the state roots with the ones stored in the block database",
+		Value:   false,
+	}
+
+	noReceiptsCheck = &cli.BoolFlag{
+		Name:    "no-receipts-check",
+		Aliases: []string{"no-rc"},
+		Usage:   "Skip checking the receipts with the ones stored in the block database",
 		Value:   false,
 	}
 

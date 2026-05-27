@@ -124,6 +124,7 @@ func TestReplayLoop(t *testing.T) {
 			"FailsOnIncorrectStateRootHash":                 failsOnIncorrectStateRootHash,
 			"OverwriteStateRootHash":                        overwriteStateRootHash,
 			"SkipStateRootCheckIfNoStateRootCheckFlagIsSet": skipStateRootCheckIfNoStateRootCheckFlagIsSet,
+			"SkipReceiptsCheckIfNoReceiptsCheckFlagIsSet":   skipReceiptsCheckIfNoReceiptsCheckFlagIsSet,
 		}
 		for name, test := range tests {
 			t.Run(name, func(t *testing.T) {
@@ -434,6 +435,30 @@ func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 		}, nil),
 		"state root mismatch",
 	)
+}
+
+func skipReceiptsCheckIfNoReceiptsCheckFlagIsSet(t *testing.T, run replayer) {
+	ctrl := gomock.NewController(t)
+	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+
+	chain.EXPECT().
+		ApplyBlock(gomock.Any()).
+		Return(
+			types.Receipts{{Status: types.ReceiptStatusFailed}},
+			future.Immediate(result.Ok(common.Hash{})),
+			nil,
+		)
+
+	ctxt := t.Context()
+	blocks := utils.NewIter([]*blockdb.Block{{
+		Receipts: []*blockdb.TransactionReceipt{{
+			PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful}, // different receipt
+		}},
+	}})
+	err := run(ctxt, blocks, chain, nil, ReplayLoopContext{skipReceiptsCheck: true}, nil)
+	require.NoError(t, err)
 }
 
 func overwriteStateRootHash(t *testing.T, run replayer) {

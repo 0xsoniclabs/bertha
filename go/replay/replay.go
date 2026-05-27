@@ -71,6 +71,7 @@ type ReplayArgs struct {
 	SnapshotNumToKeep  uint64
 	OverwriteStateRoot bool
 	NoStateRootCheck   bool
+	NoReceiptsCheck    bool
 	LogDBSize          bool
 	ConfirmAllPrompts  bool
 }
@@ -248,6 +249,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		overwriteStateRoot: New(args.OverwriteStateRoot, args.ConfirmAllPrompts),
 		skipStateRootCheck: args.NoStateRootCheck,
 		stateRootNotSet:    false,
+		skipReceiptsCheck:  args.NoReceiptsCheck,
 	}
 
 	return run(
@@ -459,21 +461,23 @@ func checkBlockResults(
 	overwriteStateRoot := &replayLoopContext.overwriteStateRoot
 	noStateRootCheck := replayLoopContext.skipStateRootCheck
 
-	if len(receipts) != len(block.Receipts) {
-		return fmt.Errorf("number of receipts mismatch for block %d: expected %d, got %d",
-			block.Number, len(block.Receipts), len(receipts))
-	}
-	for i, receipt := range receipts {
-		want := block.Receipts[i]
-		if receipt.Status != want.GetStatus() {
-			return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
-				block.Number, i, want.GetStatus(), receipt.Status)
+	if !replayLoopContext.skipReceiptsCheck {
+		if len(receipts) != len(block.Receipts) {
+			return fmt.Errorf("number of receipts mismatch for block %d: expected %d, got %d",
+				block.Number, len(block.Receipts), len(receipts))
 		}
-		if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
-			return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
-				block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
+		for i, receipt := range receipts {
+			want := block.Receipts[i]
+			if receipt.Status != want.GetStatus() {
+				return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
+					block.Number, i, want.GetStatus(), receipt.Status)
+			}
+			if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
+				return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
+					block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
+			}
+			// TODO: check all receipt fields if needed.
 		}
-		// TODO: check all receipt fields if needed.
 	}
 
 	// TODO:
@@ -655,6 +659,8 @@ type ReplayLoopContext struct {
 	overwriteStateRoot FlagWithConfirmation
 	skipStateRootCheck bool
 	stateRootNotSet    bool
+
+	skipReceiptsCheck bool
 }
 
 // FlagWithConfirmation is a utility struct to hold a boolean flag along with a confirmation flag to track user confirmation.
