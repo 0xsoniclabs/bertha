@@ -307,6 +307,7 @@ func parseReplayArgsAndRunReplay(ctx context.Context, c *cli.Command) error {
 		SnapshotNumToKeep:  c.Uint64(snapshotNumToKeep.Name),
 		OverwriteStateRoot: c.Bool(overwriteStateRoot.Name),
 		NoStateRootCheck:   c.Bool(noStateRootCheck.Name),
+		NoReceiptsCheck:    c.Bool(noReceiptsCheck.Name),
 		LogDBSize:          c.Bool(logDBSize.Name),
 		ConfirmAllPrompts:  c.Bool(confirmAllPromptsFlag.Name),
 	}
