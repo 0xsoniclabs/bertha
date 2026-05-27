@@ -109,7 +109,7 @@ func NewStaticMetadataStore(chainID uint64, logger utils.Logger) (*StaticMetadat
 			},
 		}, nil
 	default:
-		logger.Warn("no metadata available for chain ID, proceeding without upgrades or corrections", "chainId", chainID)
+		logger.Warn("No metadata available for chain ID, proceeding without upgrades or corrections", "chainId", chainID)
 		return &StaticMetadataStore{}, nil
 	}
 }

@@ -49,6 +49,7 @@ import (
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
 //go:generate mockgen -source=replay.go -destination=replay_mock.go -package=replay
@@ -520,13 +521,22 @@ func checkBlockResults(
 	if !noStateRootCheck && !overwriteStateRoot.IsEnabled() {
 		if expectedStateRoot == (common.Hash{}) {
 			if !replayLoopContext.stateRootNotSet {
-				slog.Warn("No state root set in the block DB. No checks will be performed", "block_number", block.Number)
+				slog.Warn("No state root set in the block DB. State root verification skipped", "block_number", block.Number)
 				replayLoopContext.stateRootNotSet = true
 			}
 		} else if computedStateRoot != expectedStateRoot {
 			return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
 				block.Number, expectedStateRoot, computedStateRoot)
 		}
+	}
+
+	hashOfParentBlock := chain.GetBlockHash(block.Number - 1)
+	parentHash := common.BytesToHash(block.ParentHash)
+	if hashOfParentBlock == (common.Hash{}) {
+		slog.Warn("No block hash set. Parent hash verification skipped", "block_number", block.Number)
+	} else if parentHash != hashOfParentBlock {
+		return fmt.Errorf("parent hash mismatch: hash of block %d is %x, parent hash of block %d is %x",
+			block.Number-1, hashOfParentBlock, block.Number, parentHash)
 	}
 
 	zone.End()
@@ -543,6 +553,7 @@ type Chain interface {
 		future.Future[result.Result[common.Hash]],
 		error,
 	)
+	GetBlockHash(number uint64) common.Hash
 }
 
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
@@ -566,6 +577,10 @@ func (a *stateChainAdapter) IsMptConformant() bool {
 
 func (a *stateChainAdapter) IsVerkleConformant() bool {
 	return a.schema == 6
+}
+
+func (a *stateChainAdapter) GetBlockHash(number uint64) common.Hash {
+	return a.blockHashHistory.GetBlockHash(number)
 }
 
 func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
@@ -603,8 +618,6 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	)
 	upgrades := a.metadataStore.GetUpgradesAtBlock(block.NumberU64())
 
-	a.blockHashHistory.SetBlockHash(block.NumberU64()-1, block.ParentHash())
-
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
 		a.blockHashHistory,
@@ -621,6 +634,21 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 		stateRoot := future.Future[result.Result[common.Hash]]{}
 		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
 	}
+
+	// Reconstruct the complete header by filling in fields that are derived
+	// from receipts, which are not stored in the block DB when importing
+	// from era files.
+	completeHeader := block.Header()
+	if len(receipts) > 0 {
+		completeHeader.GasUsed = receipts[len(receipts)-1].CumulativeGasUsed
+	} else {
+		completeHeader.GasUsed = 0
+	}
+	completeHeader.Bloom = types.MergeBloom(receipts)
+	completeHeader.ReceiptHash = types.DeriveSha(receipts, trie.NewStackTrie(nil))
+	*block = *block.WithSeal(completeHeader)
+
+	a.blockHashHistory.SetBlockHash(block.NumberU64(), completeHeader.Hash())
 
 	stateRoot := a.state.GetStateRoot()
 	if a.snapshotHandler.ShouldCreateSnapshot(block.NumberU64()) {

@@ -73,6 +73,20 @@ func (mr *MockChainMockRecorder) ChainID() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChainID", reflect.TypeOf((*MockChain)(nil).ChainID))
 }
 
+// GetBlockHash mocks base method.
+func (m *MockChain) GetBlockHash(number uint64) common.Hash {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBlockHash", number)
+	ret0, _ := ret[0].(common.Hash)
+	return ret0
+}
+
+// GetBlockHash indicates an expected call of GetBlockHash.
+func (mr *MockChainMockRecorder) GetBlockHash(number any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBlockHash", reflect.TypeOf((*MockChain)(nil).GetBlockHash), number)
+}
+
 // IsMptConformant mocks base method.
 func (m *MockChain) IsMptConformant() bool {
 	m.ctrl.T.Helper()

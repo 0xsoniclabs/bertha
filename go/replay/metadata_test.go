@@ -91,7 +91,7 @@ func TestNewStaticMetadataStore_UnknownChainID_LogsWarningAndReturnsEmptyMetadat
 
 	chainID := uint64(12345)
 
-	logger.EXPECT().Warn("no metadata available for chain ID, proceeding without upgrades or corrections", "chainId", chainID).Times(1)
+	logger.EXPECT().Warn("No metadata available for chain ID, proceeding without upgrades or corrections", "chainId", chainID).Times(1)
 
 	store, err := NewStaticMetadataStore(chainID, logger)
 	require.NoError(t, err)
