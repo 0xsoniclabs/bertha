@@ -18,6 +18,7 @@
 package utils
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -36,7 +37,7 @@ func IsEmptyOrMissingDir(path string) (s bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	defer func() { err = f.Close() }()
+	defer func() { err = errors.Join(err, f.Close()) }()
 
 	_, err = f.Readdir(1) // try to read a single entry
 	if err == io.EOF {

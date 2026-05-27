@@ -351,9 +351,10 @@ func runReplayPipeline(
 
 	// Utility to collect errors.
 	issue := atomic.Pointer[error]{}
+	var abortOnce sync.Once
 	reportIssue := func(err error) {
 		issue.Store(&err)
-		close(abort)
+		abortOnce.Do(func() { close(abort) })
 	}
 
 	// Stage 1: Decode blocks
