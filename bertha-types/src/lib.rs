@@ -29,6 +29,7 @@ mod rlp_utils;
 mod test_data;
 mod transaction;
 mod u256;
+mod withdrawal;
 
 pub use as_hex::AsHex;
 pub use block::Block;
@@ -43,6 +44,7 @@ pub use receipts::{
 };
 pub use transaction::{AccessListEntry, SetCodeAuthorization, Transaction, TransactionType};
 pub use u256::U256;
+pub use withdrawal::Withdrawal;
 
 pub type Bloom = [u8; 256];
 pub type Hash = [u8; 32];
