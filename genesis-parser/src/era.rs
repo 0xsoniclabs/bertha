@@ -16,9 +16,11 @@
 
 use std::ops::Deref;
 
-use bertha_types::{Block, EIP2718Unmarshallable, EMPTY_OMMERS_HASH, Transaction, U256};
+use bertha_types::{
+    Block, EIP2718Unmarshallable, EMPTY_OMMERS_HASH, Transaction, U256, Withdrawal,
+    compute_root_hash,
+};
 use lighthouse_types::{SignedBeaconBlock, core::MainnetEthSpec};
-use tree_hash::TreeHash;
 
 use crate::Error;
 
@@ -32,6 +34,19 @@ fn parse_transactions(
         .map(|t| Transaction::unmarshal(&mut t.deref()))
         .collect::<Result<_, _>>()
         .map_err(Error::from)
+}
+
+fn parse_withdrawals(
+    data: impl IntoIterator<Item = lighthouse_types::Withdrawal>,
+) -> Vec<Withdrawal> {
+    data.into_iter()
+        .map(|w| Withdrawal {
+            index: w.index,
+            validator_index: w.validator_index,
+            address: w.address.into(),
+            amount: w.amount,
+        })
+        .collect()
 }
 
 /// Converts a [`SignedBeaconBlock`] to a [`Block`].
@@ -55,6 +70,7 @@ pub fn convert_block(block: SignedBeaconBlock<MainnetEthSpec>) -> Result<Block, 
                 receipts: Vec::default(), // .era files don't contain receipts
                 base_fee_per_gas: Some(U256::from_le_bytes(block.base_fee_per_gas.to_le_bytes())),
                 withdrawals_root: Option::default(),
+                withdrawals: Vec::new(),
                 blob_gas_used: Option::default(),
                 excess_blob_gas: Option::default(),
                 parent_beacon_block_root: Some(blk.message.parent_root.into()),
@@ -65,6 +81,9 @@ pub fn convert_block(block: SignedBeaconBlock<MainnetEthSpec>) -> Result<Block, 
         }
         SignedBeaconBlock::Capella(blk) => {
             let block = blk.message.body.execution_payload.execution_payload;
+            let withdrawals = parse_withdrawals(block.withdrawals);
+            let withdrawals_root = compute_root_hash(&withdrawals);
+
             Ok(Block {
                 parent_hash: block.parent_hash.0.into(),
                 ommers_hash: EMPTY_OMMERS_HASH,
@@ -80,7 +99,8 @@ pub fn convert_block(block: SignedBeaconBlock<MainnetEthSpec>) -> Result<Block, 
                 transactions: parse_transactions(block.transactions)?,
                 receipts: Vec::default(), // .era files don't contain receipts
                 base_fee_per_gas: Some(U256::from_le_bytes(block.base_fee_per_gas.to_le_bytes())),
-                withdrawals_root: Option::default(),
+                withdrawals_root: Some(withdrawals_root),
+                withdrawals,
                 blob_gas_used: Option::default(),
                 excess_blob_gas: Option::default(),
                 parent_beacon_block_root: Some(blk.message.parent_root.into()),
@@ -91,6 +111,9 @@ pub fn convert_block(block: SignedBeaconBlock<MainnetEthSpec>) -> Result<Block, 
         }
         SignedBeaconBlock::Deneb(blk) => {
             let block = blk.message.body.execution_payload.execution_payload;
+            let withdrawals = parse_withdrawals(block.withdrawals);
+            let withdrawals_root = compute_root_hash(&withdrawals);
+
             Ok(Block {
                 parent_hash: block.parent_hash.0.into(),
                 ommers_hash: EMPTY_OMMERS_HASH,
@@ -106,7 +129,8 @@ pub fn convert_block(block: SignedBeaconBlock<MainnetEthSpec>) -> Result<Block, 
                 transactions: parse_transactions(block.transactions)?,
                 receipts: Vec::default(), // .era files don't contain receipts
                 base_fee_per_gas: Some(U256::from_le_bytes(block.base_fee_per_gas.to_le_bytes())),
-                withdrawals_root: Option::default(),
+                withdrawals_root: Some(withdrawals_root),
+                withdrawals,
                 blob_gas_used: Some(block.blob_gas_used),
                 excess_blob_gas: Some(block.excess_blob_gas),
                 parent_beacon_block_root: Some(blk.message.parent_root.into()),
@@ -118,6 +142,9 @@ pub fn convert_block(block: SignedBeaconBlock<MainnetEthSpec>) -> Result<Block, 
         SignedBeaconBlock::Electra(blk) => {
             let execution_requests = blk.message.body.execution_requests;
             let block = blk.message.body.execution_payload.execution_payload;
+            let withdrawals = parse_withdrawals(block.withdrawals);
+            let withdrawals_root = compute_root_hash(&withdrawals);
+
             Ok(Block {
                 parent_hash: block.parent_hash.0.into(),
                 ommers_hash: EMPTY_OMMERS_HASH,
@@ -133,7 +160,8 @@ pub fn convert_block(block: SignedBeaconBlock<MainnetEthSpec>) -> Result<Block, 
                 transactions: parse_transactions(block.transactions)?,
                 receipts: Vec::default(), // .era files don't contain receipts
                 base_fee_per_gas: Some(U256::from_le_bytes(block.base_fee_per_gas.to_le_bytes())),
-                withdrawals_root: Some(execution_requests.withdrawals.tree_hash_root().into()),
+                withdrawals_root: Some(withdrawals_root),
+                withdrawals,
                 blob_gas_used: Some(block.blob_gas_used),
                 excess_blob_gas: Some(block.excess_blob_gas),
                 parent_beacon_block_root: Some(blk.message.parent_root.into()),
@@ -145,6 +173,9 @@ pub fn convert_block(block: SignedBeaconBlock<MainnetEthSpec>) -> Result<Block, 
         SignedBeaconBlock::Fulu(blk) => {
             let execution_requests = blk.message.body.execution_requests;
             let block = blk.message.body.execution_payload.execution_payload;
+            let withdrawals = parse_withdrawals(block.withdrawals);
+            let withdrawals_root = compute_root_hash(&withdrawals);
+
             Ok(Block {
                 parent_hash: block.parent_hash.0.into(),
                 ommers_hash: EMPTY_OMMERS_HASH,
@@ -160,7 +191,8 @@ pub fn convert_block(block: SignedBeaconBlock<MainnetEthSpec>) -> Result<Block, 
                 transactions: parse_transactions(block.transactions)?,
                 receipts: Vec::default(), // .era files don't contain receipts
                 base_fee_per_gas: Some(U256::from_le_bytes(block.base_fee_per_gas.to_le_bytes())),
-                withdrawals_root: Some(execution_requests.withdrawals.tree_hash_root().into()),
+                withdrawals_root: Some(withdrawals_root),
+                withdrawals,
                 blob_gas_used: Some(block.blob_gas_used),
                 excess_blob_gas: Some(block.excess_blob_gas),
                 parent_beacon_block_root: Some(blk.message.parent_root.into()),

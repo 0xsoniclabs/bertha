@@ -256,6 +256,7 @@ pub fn convert_block(block: &BlockTuple) -> Result<Block, Error> {
         receipts,
         base_fee_per_gas: header.base_fee_per_gas.map(U256::from),
         withdrawals_root: header.withdrawals_root.map(|w| w.0),
+        withdrawals: Vec::new(), // withdrawals don't exist pre-merge
         blob_gas_used: header.blob_gas_used,
         excess_blob_gas: header.excess_blob_gas,
         parent_beacon_block_root: header.parent_beacon_block_root.map(|r| r.0),

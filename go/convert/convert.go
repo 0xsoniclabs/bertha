@@ -59,6 +59,11 @@ func ConvertToGethBlock(block *blockdb.Block) (*types.Block, error) {
 	receiptsHash := types.DeriveSha(receipts, trie.NewStackTrie(nil))
 	bloom := types.MergeBloom(receipts)
 
+	withdrawals := types.Withdrawals{}
+	for _, w := range block.Withdrawals {
+		withdrawals = append(withdrawals, toGethWithdrawal(w))
+	}
+
 	// Obtain the total gas used in this block.
 	gasUsed := uint64(0)
 	if len(receipts) > 0 {
@@ -95,6 +100,7 @@ func ConvertToGethBlock(block *blockdb.Block) (*types.Block, error) {
 		}).
 		WithBody(types.Body{
 			Transactions: transactions,
+			Withdrawals:  withdrawals,
 		}), nil
 }
 
@@ -302,4 +308,16 @@ func toOptionalHash(data []byte) *common.Hash {
 	var hash common.Hash
 	copy(hash[:], data)
 	return &hash
+}
+
+func toGethWithdrawal(w *blockdb.Withdrawal) *types.Withdrawal {
+	if w == nil {
+		return nil
+	}
+	return &types.Withdrawal{
+		Index:     w.Index,
+		Validator: w.ValidatorIndex,
+		Address:   common.BytesToAddress(w.Address),
+		Amount:    w.Amount,
+	}
 }

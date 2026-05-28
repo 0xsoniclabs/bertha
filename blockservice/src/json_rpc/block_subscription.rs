@@ -45,9 +45,9 @@ async fn block_subscription_task(
 
             loop {
                 let mut timeout = Duration::from_millis(10);
-                let block_header_with_transactions = loop {
-                    match source.get_block_header_with_transactions(block_number).await {
-                        Ok(block_header_with_transactions) => break block_header_with_transactions,
+                let block_header_with_transactions_and_withdrawals = loop {
+                    match source.get_block_header_with_transactions_and_withdrawals(block_number).await {
+                        Ok(block_header_with_transactions_and_withdrawals) => break block_header_with_transactions_and_withdrawals,
                         Err(Error::NotFound) => {
                             // next block does not yet exist
                             tokio::time::sleep(timeout).await;
@@ -71,10 +71,11 @@ async fn block_subscription_task(
                     }
                 };
 
-                let block = Block::from_header_and_transactions_and_receipts(
-                    block_header_with_transactions.block_header,
-                    block_header_with_transactions.transactions,
+                let block = Block::from_parts(
+                    block_header_with_transactions_and_withdrawals.block_header,
+                    block_header_with_transactions_and_withdrawals.transactions,
                     receipts,
+                    block_header_with_transactions_and_withdrawals.withdrawals,
                 );
 
                 // if receiver dropped
@@ -99,7 +100,7 @@ mod tests {
     use tokio_stream::StreamExt;
 
     use super::*;
-    use crate::json_rpc::source::{BlockHeaderWithTransactions, MockSource};
+    use crate::json_rpc::source::{BlockHeaderWithTransactionsAndWithdrawals, MockSource};
 
     #[tokio::test]
     async fn subscribe_to_blocks_sends_blocks_over_channel() {
@@ -107,7 +108,7 @@ mod tests {
 
         let mut mock_source = MockSource::new();
         mock_source
-            .expect_get_block_header_with_transactions()
+            .expect_get_block_header_with_transactions_and_withdrawals()
             //.withf(|number| ...) <- we can not constrain which blocks are requested because the subscription is running as a separate task and may produce more blocks than we consume in this test.
             .returning({
                 let mut block_number = start_block;
@@ -116,12 +117,13 @@ mod tests {
                     let curr_block_number = block_number;
                     block_number += 1;
                     Box::pin(async move {
-                        Ok(BlockHeaderWithTransactions {
+                        Ok(BlockHeaderWithTransactionsAndWithdrawals {
                             block_header: BlockHeader {
                                 number: curr_block_number,
                                 ..BlockHeader::default()
                             },
                             transactions: Vec::new(),
+                            withdrawals: Vec::new(),
                         })
                     })
                 }
@@ -149,7 +151,7 @@ mod tests {
     async fn subscribe_to_blocks_retries_when_block_header_and_receipt_do_not_exist_yet() {
         let mut mock_source = MockSource::new();
         mock_source
-            .expect_get_block_header_with_transactions()
+            .expect_get_block_header_with_transactions_and_withdrawals()
             .returning({
                 let mut return_error = true;
                 move |_| {
@@ -157,7 +159,7 @@ mod tests {
                         return_error = false;
                         Box::pin(async { Err(Error::NotFound) })
                     } else {
-                        Box::pin(async { Ok(BlockHeaderWithTransactions::default()) })
+                        Box::pin(async { Ok(BlockHeaderWithTransactionsAndWithdrawals::default()) })
                     }
                 }
             });
@@ -184,7 +186,7 @@ mod tests {
         {
             let mut mock_source = MockSource::new();
             mock_source
-                .expect_get_block_header_with_transactions()
+                .expect_get_block_header_with_transactions_and_withdrawals()
                 .returning({
                     move |_| {
                         Box::pin(async move {
@@ -207,8 +209,10 @@ mod tests {
         {
             let mut mock_source = MockSource::new();
             mock_source
-                .expect_get_block_header_with_transactions()
-                .returning(|_| Box::pin(async { Ok(BlockHeaderWithTransactions::default()) }));
+                .expect_get_block_header_with_transactions_and_withdrawals()
+                .returning(|_| {
+                    Box::pin(async { Ok(BlockHeaderWithTransactionsAndWithdrawals::default()) })
+                });
             mock_source.expect_get_block_receipts().returning({
                 move |_| {
                     Box::pin(async { Err(Error::Serde(serde::de::Error::custom("some error"))) })
@@ -231,8 +235,10 @@ mod tests {
     async fn block_subscription_task_shuts_down_if_receiver_dropped() {
         let mut mock_source = MockSource::new();
         mock_source
-            .expect_get_block_header_with_transactions()
-            .returning(|_| Box::pin(async { Ok(BlockHeaderWithTransactions::default()) }));
+            .expect_get_block_header_with_transactions_and_withdrawals()
+            .returning(|_| {
+                Box::pin(async { Ok(BlockHeaderWithTransactionsAndWithdrawals::default()) })
+            });
         mock_source
             .expect_get_block_receipts()
             .returning(move |_| Box::pin(async { Ok(vec![TransactionReceipt::default()]) }));

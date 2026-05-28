@@ -165,7 +165,7 @@ mod tests {
         db::{BlockDb, proto},
         grpc::{RpcClient, auth},
         json_rpc::{
-            BlockHeaderWithTransactions,
+            BlockHeaderWithTransactionsAndWithdrawals,
             test_utils::build_mock_server_request_handler_for_infinitely_many_requests,
         },
         test_templates::auth_token,
@@ -309,9 +309,10 @@ mod tests {
 
         let block_number: u64 = 0;
         let block_receipts = vec![TransactionReceipt::default()];
-        let block_header_with_transactions = BlockHeaderWithTransactions {
+        let block_header_with_transactions = BlockHeaderWithTransactionsAndWithdrawals {
             block_header: BlockHeader::default(),
             transactions: Vec::new(),
+            withdrawals: Vec::new(),
         };
 
         mock_server
@@ -363,9 +364,10 @@ mod tests {
 
         let block_number: u64 = 0;
         let block_receipts = vec![TransactionReceipt::default()];
-        let block_header_with_transactions = BlockHeaderWithTransactions {
+        let block_header_with_transactions = BlockHeaderWithTransactionsAndWithdrawals {
             block_header: BlockHeader::default(),
             transactions: Vec::new(),
+            withdrawals: Vec::new(),
         };
 
         mock_server
@@ -440,10 +442,12 @@ mod tests {
         let block_number: u64 = 0;
         let block_header = BlockHeader::default();
         let transactions = Vec::new();
+        let withdrawals = Vec::new();
         let block_receipts = vec![TransactionReceipt::default()];
-        let block_header_with_transactions = BlockHeaderWithTransactions {
+        let block_header_with_transactions = BlockHeaderWithTransactionsAndWithdrawals {
             block_header: block_header.clone(),
             transactions: transactions.clone(),
+            withdrawals: withdrawals.clone(),
         };
 
         mock_server
@@ -510,11 +514,7 @@ mod tests {
         let block = Block::try_from(proto::Block::decode(block.data.as_slice()).unwrap()).unwrap();
         assert_eq!(
             block,
-            Block::from_header_and_transactions_and_receipts(
-                block_header,
-                transactions,
-                block_receipts
-            )
+            Block::from_parts(block_header, transactions, block_receipts, withdrawals)
         );
         token.cancel();
         task.abort();

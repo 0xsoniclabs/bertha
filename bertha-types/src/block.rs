@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Address, AsHex, BlockHeader, EMPTY_OMMERS_HASH, EMPTY_TREE_ROOT_HASH, Hash, Transaction,
-    TransactionReceipt, U256, compute_root_hash,
+    TransactionReceipt, U256, Withdrawal, compute_root_hash,
 };
 
 /// An Ethereum-compatible block in "normal form", that is, without any redundant or derived fields.
@@ -64,6 +64,9 @@ pub struct Block {
     /// Added by EIP-4895
     /// geth: WithdrawalsHash, JSON RPC: withdrawalsRoot
     pub withdrawals_root: Option<Hash>,
+
+    /// Added by EIP-4895 and needed for ethereum post-merge replay.
+    pub withdrawals: Vec<Withdrawal>,
 
     /// Added by EIP-4844
     pub blob_gas_used: Option<u64>,
@@ -143,10 +146,11 @@ impl Block {
         }
     }
 
-    pub fn from_header_and_transactions_and_receipts(
+    pub fn from_parts(
         header: BlockHeader,
         transactions: Vec<Transaction>,
         receipts: Vec<TransactionReceipt>,
+        withdrawals: Vec<Withdrawal>,
     ) -> Self {
         Block {
             parent_hash: header.parent_hash,
@@ -164,6 +168,7 @@ impl Block {
             receipts,
             base_fee_per_gas: header.base_fee_per_gas,
             withdrawals_root: header.withdrawals_root,
+            withdrawals,
             blob_gas_used: header.blob_gas_used,
             excess_blob_gas: header.excess_blob_gas,
             parent_beacon_block_root: None,
@@ -201,6 +206,8 @@ struct JsonBlock {
     pub excess_blob_gas: Option<AsHex<u64>>,
     pub parent_beacon_block_root: Option<AsHex<Hash>>,
     pub requests_hash: Option<AsHex<Hash>>,
+    #[serde(default)]
+    pub withdrawals: Vec<Withdrawal>,
 }
 
 impl From<Block> for JsonBlock {
@@ -221,6 +228,7 @@ impl From<Block> for JsonBlock {
             receipts: block.receipts,
             base_fee_per_gas: block.base_fee_per_gas.map(AsHex),
             withdrawals_root: block.withdrawals_root.map(AsHex),
+            withdrawals: block.withdrawals,
             blob_gas_used: block.blob_gas_used.map(AsHex),
             excess_blob_gas: block.excess_blob_gas.map(AsHex),
             parent_beacon_block_root: block.parent_beacon_block_root.map(AsHex),
@@ -247,6 +255,7 @@ impl From<JsonBlock> for Block {
             receipts: json_block.receipts,
             base_fee_per_gas: json_block.base_fee_per_gas.map(|v| v.0),
             withdrawals_root: json_block.withdrawals_root.map(|v| v.0),
+            withdrawals: json_block.withdrawals,
             blob_gas_used: json_block.blob_gas_used.map(|v| v.0),
             excess_blob_gas: json_block.excess_blob_gas.map(|v| v.0),
             parent_beacon_block_root: json_block.parent_beacon_block_root.map(|v| v.0),
@@ -276,15 +285,15 @@ mod tests {
     }
 
     #[test]
-    fn block_to_header_and_then_from_header_and_transactions_and_receipts_is_identity() {
+    fn block_to_parts_and_then_from_parts_is_identity() {
         for data in generate_blocks_with_data() {
             let block = data.block;
             let header = block.to_header();
             let transactions = block.transactions.clone();
             let receipts = block.receipts.clone();
+            let withdrawals = block.withdrawals.clone();
 
-            let new_block =
-                Block::from_header_and_transactions_and_receipts(header, transactions, receipts);
+            let new_block = Block::from_parts(header, transactions, receipts, withdrawals);
             assert_eq!(new_block, block);
         }
     }

@@ -46,6 +46,16 @@ message Block {
   // State roots for alternative tree data structures
   optional bytes verkle_state_root = 20;
   optional bytes binary_state_root = 21;
+
+  repeated Withdrawal withdrawals = 22;
+}
+
+// Corresponds to bertha_types::Withdrawal
+message Withdrawal {
+  uint64 index = 1;
+  uint64 validator_index = 2;
+  bytes address = 3;
+  uint64 amount = 4;
 }
 
 // Corresponds to bertha_types::Transaction
