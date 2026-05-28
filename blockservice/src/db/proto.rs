@@ -118,6 +118,7 @@ impl From<bertha_types::Block> for Block {
             .map(From::from)
             .collect::<Vec<_>>();
         let receipts = value.receipts.into_iter().map(From::from).collect();
+        let withdrawals = value.withdrawals.into_iter().map(From::from).collect();
 
         Block {
             parent_hash: value.parent_hash.into(),
@@ -137,6 +138,7 @@ impl From<bertha_types::Block> for Block {
 
             base_fee_per_gas: value.base_fee_per_gas.map(|v| v.to_be_bytes().to_vec()),
             withdrawals_root: value.withdrawals_root.map(Into::into),
+            withdrawals,
             blob_gas_used: value.blob_gas_used,
             excess_blob_gas: value.excess_blob_gas,
             parent_beacon_block_root: value.parent_beacon_block_root.map(Into::into),
@@ -284,6 +286,30 @@ impl TryFrom<TransactionReceipt> for bertha_types::TransactionReceipt {
     }
 }
 
+impl From<bertha_types::Withdrawal> for Withdrawal {
+    fn from(value: bertha_types::Withdrawal) -> Self {
+        Self {
+            index: value.index,
+            validator_index: value.validator_index,
+            address: value.address.into(),
+            amount: value.amount,
+        }
+    }
+}
+
+impl TryFrom<Withdrawal> for bertha_types::Withdrawal {
+    type Error = Error;
+
+    fn try_from(value: Withdrawal) -> Result<Self, Self::Error> {
+        Ok(Self {
+            index: value.index,
+            validator_index: value.validator_index,
+            address: convert_to_fixed_size(value.address)?,
+            amount: value.amount,
+        })
+    }
+}
+
 impl TryFrom<Block> for bertha_types::Block {
     type Error = Error;
 
@@ -297,6 +323,11 @@ impl TryFrom<Block> for bertha_types::Block {
             .receipts
             .into_iter()
             .map(TryFrom::try_from)
+            .collect::<Result<Vec<_>, _>>()?;
+        let withdrawals = value
+            .withdrawals
+            .into_iter()
+            .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(bertha_types::Block {
@@ -320,6 +351,7 @@ impl TryFrom<Block> for bertha_types::Block {
                 .withdrawals_root
                 .map(convert_to_fixed_size)
                 .transpose()?,
+            withdrawals,
             blob_gas_used: value.blob_gas_used,
             excess_blob_gas: value.excess_blob_gas,
             parent_beacon_block_root: value
@@ -495,6 +527,16 @@ mod tests {
 
             verkle_state_root: rng.option(verkle_state_root),
             binary_state_root: rng.option(binary_state_root),
+            withdrawals: vec![make_withdrawal(rng), make_withdrawal(rng)],
+        }
+    }
+
+    fn make_withdrawal(rng: &mut TestRng) -> bertha_types::Withdrawal {
+        bertha_types::Withdrawal {
+            index: rng.u64(),
+            validator_index: rng.u64(),
+            address: rng.bytes(),
+            amount: rng.u64(),
         }
     }
 
@@ -648,6 +690,28 @@ mod tests {
     #[case::invalid_requests_hash(Block { requests_hash: Some(vec![0; 31]), ..valid_proto_block() })]
     fn block_conversion_fails_for_invalid_byte_strings(#[case] invalid_block: Block) {
         let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
+        assert_eq!(err, Error::TypeConversion);
+    }
+
+    #[test]
+    fn withdrawal_can_be_converted_from_and_to_protobuf_types() {
+        let withdrawal = make_withdrawal(&mut TestRng::new(42));
+        let proto_withdrawal: Withdrawal = withdrawal.clone().into();
+        let converted_withdrawal: bertha_types::Withdrawal = proto_withdrawal.try_into().unwrap();
+        assert_eq!(converted_withdrawal, withdrawal);
+    }
+
+    fn valid_proto_withdrawal() -> Withdrawal {
+        make_withdrawal(&mut TestRng::new(42)).into()
+    }
+
+    #[test]
+    fn withdrawal_conversion_fails_for_invalid_address() {
+        let invalid_withdrawal = Withdrawal {
+            address: vec![0; 19], // address must be exactly 20 bytes
+            ..valid_proto_withdrawal()
+        };
+        let err = bertha_types::Withdrawal::try_from(invalid_withdrawal).unwrap_err();
         assert_eq!(err, Error::TypeConversion);
     }
 }

@@ -18,7 +18,7 @@
 #![allow(dead_code)]
 use crate::{
     AccessListEntry, Address, Block, Hash, HexConvert, Log, SetCodeAuthorization, Transaction,
-    TransactionReceipt, TransactionType, U256, receipts::PostStateOrStatus,
+    TransactionReceipt, TransactionType, U256, Withdrawal, receipts::PostStateOrStatus,
 };
 
 #[derive(Debug, Clone)]
@@ -48,6 +48,7 @@ pub fn generate_blocks_with_data() -> impl IntoIterator<Item = BlockWithTestData
                 nonce: Vec::<u8>::try_from_hex("0x0000000000000000").unwrap().try_into().unwrap(),
                 transactions: vec![],
                 receipts: vec![],
+                withdrawals: vec![],
                 withdrawals_root: Some(Hash::try_from_hex("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").unwrap()),
 
                 ..Default::default()
@@ -129,6 +130,12 @@ pub fn generate_blocks_with_data() -> impl IntoIterator<Item = BlockWithTestData
                         }],
                     },
                 ],
+                withdrawals: vec![Withdrawal {
+                    index: 0,
+                    validator_index: 0,
+                    address: Address::try_from_hex("0x0000000000000000000000000000000000000000").unwrap(),
+                    amount: 0,
+                }],
                 withdrawals_root: Some(Hash::try_from_hex("0x84acf72a081dc4dc03576e1c007cfd904b213bb65faef5821cdd053312820430").unwrap()),
 
                 ..Default::default()
@@ -267,6 +274,7 @@ pub fn generate_blocks_with_data() -> impl IntoIterator<Item = BlockWithTestData
                         }],
                     },
                 ],
+                withdrawals: vec![],
                 withdrawals_root: Some(Hash::try_from_hex("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").unwrap()),
 
                 ..Default::default()
@@ -583,6 +591,7 @@ pub fn generate_blocks_with_data() -> impl IntoIterator<Item = BlockWithTestData
                         }],
                     },
                 ],
+                withdrawals: vec![],
                 withdrawals_root: Some(Hash::try_from_hex("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").unwrap()),
 
                 ..Default::default()
@@ -608,6 +617,7 @@ pub fn generate_blocks_with_data() -> impl IntoIterator<Item = BlockWithTestData
                 nonce: Vec::<u8>::try_from_hex("0x859bd7df529ddd09").unwrap().try_into().unwrap(),
                 transactions: vec![],
                 receipts: vec![],
+                withdrawals: vec![],
                 withdrawals_root: Some(Hash::try_from_hex("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").unwrap()),
 
                 ..Default::default()

@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-use bertha_types::{BlockHeader, HexConvert, Transaction, TransactionReceipt};
+use bertha_types::{BlockHeader, HexConvert, Transaction, TransactionReceipt, Withdrawal};
 use jsonrpsee::{
     core::client::ClientT,
     http_client::{HttpClient, HttpClientBuilder},
@@ -28,10 +28,10 @@ use crate::json_rpc::Error;
 #[cfg_attr(test, mockall::automock)]
 pub trait Source: Send + Sync {
     /// Returns the block header and transactions for the specified block number.
-    fn get_block_header_with_transactions(
+    fn get_block_header_with_transactions_and_withdrawals(
         &self,
         block_number: u64,
-    ) -> impl Future<Output = Result<BlockHeaderWithTransactions, Error>> + Send;
+    ) -> impl Future<Output = Result<BlockHeaderWithTransactionsAndWithdrawals, Error>> + Send;
 
     /// Returns the receipts for the block with the specified block number.
     fn get_block_receipts(
@@ -57,10 +57,10 @@ impl NetworkSource {
 }
 
 impl Source for NetworkSource {
-    async fn get_block_header_with_transactions(
+    async fn get_block_header_with_transactions_and_withdrawals(
         &self,
         block_number: u64,
-    ) -> Result<BlockHeaderWithTransactions, Error> {
+    ) -> Result<BlockHeaderWithTransactionsAndWithdrawals, Error> {
         // see: https://docs.chainstack.com/reference/fantom-getblockbynumber
         // see: https://docs.chainstack.com/reference/fantom-getblockbyhash
         let result: Option<_> = self
@@ -91,10 +91,12 @@ impl Source for NetworkSource {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BlockHeaderWithTransactions {
+pub struct BlockHeaderWithTransactionsAndWithdrawals {
     #[serde(flatten)]
     pub block_header: BlockHeader,
     pub transactions: Vec<Transaction>,
+    #[serde(default)]
+    pub withdrawals: Vec<Withdrawal>,
 }
 
 #[cfg(test)]
@@ -113,13 +115,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_block_header_with_transactions_requests_and_deserializes_block_header() {
+    async fn get_block_header_with_transactions_and_withdrawals_requests_and_deserializes_block_header()
+     {
         let mock_server = MockServer::start().await;
         let network_source = NetworkSource::try_new(mock_server.uri()).unwrap();
 
-        let block_header_with_transactions = BlockHeaderWithTransactions {
+        let block_header_with_transactions = BlockHeaderWithTransactionsAndWithdrawals {
             block_header: BlockHeader::default(),
             transactions: Vec::new(),
+            withdrawals: Vec::new(),
         };
 
         let block_number = 123456;
@@ -133,7 +137,7 @@ mod tests {
             .await;
 
         let received_block = network_source
-            .get_block_header_with_transactions(block_number)
+            .get_block_header_with_transactions_and_withdrawals(block_number)
             .await;
         assert!(received_block.is_ok());
         let received_block = received_block.unwrap();
@@ -169,20 +173,38 @@ mod tests {
     }
 
     #[test]
-    fn block_header_with_transactions_serializes_and_deserializes_correctly() {
+    fn block_header_with_transactions_and_withdrawals_serializes_and_deserializes_correctly() {
         let block_header = BlockHeader::default();
         let transactions = vec![Transaction::default()];
-        let block_header_with_transactions = BlockHeaderWithTransactions {
+        let withdrawals = vec![Withdrawal {
+            index: 0,
+            validator_index: 0,
+            address: [0u8; 20],
+            amount: 0,
+        }];
+        let block_header_with_transactions = BlockHeaderWithTransactionsAndWithdrawals {
             block_header,
             transactions,
+            withdrawals,
         };
 
         // serialize and deserialize = identity
         {
             let serialized = serde_json::to_string_pretty(&block_header_with_transactions).unwrap();
-            let deserialized: BlockHeaderWithTransactions =
+            let deserialized: BlockHeaderWithTransactionsAndWithdrawals =
                 serde_json::from_str(&serialized).unwrap();
             assert_eq!(deserialized, block_header_with_transactions);
+        }
+
+        // deserialization also works if withdrawals field is missing, since Sonic RPC does not
+        // include it
+        {
+            let mut serialized = serde_json::to_value(&block_header_with_transactions).unwrap();
+            let serialized = serialized.as_object_mut().unwrap();
+            serialized.remove("withdrawals");
+            let deserialized: BlockHeaderWithTransactionsAndWithdrawals =
+                serde_json::from_value(serde_json::Value::Object(serialized.clone())).unwrap();
+            assert_eq!(deserialized.withdrawals, Vec::new());
         }
 
         // header fields are flattened
@@ -194,6 +216,8 @@ mod tests {
             assert!(serialized.get("number").is_some());
             // check that transactions are included
             assert!(serialized.get("transactions").is_some());
+            // check that withdrawals are included
+            assert!(serialized.get("withdrawals").is_some());
         }
     }
 }

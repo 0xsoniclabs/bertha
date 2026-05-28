@@ -62,6 +62,7 @@ func TestConvertToGethBlock_ConvertsBlockToGethBlock(t *testing.T) {
 		ExcessBlobGas:   func() *uint64 { x := uint64(10); return &x }(),
 		Transactions:    []*blockdb.Transaction{{}, {}},
 		Receipts:        []*blockdb.TransactionReceipt{{}, {}},
+		Withdrawals:     []*blockdb.Withdrawal{{}, {}},
 	}
 
 	transactions := types.Transactions{}
@@ -74,6 +75,11 @@ func TestConvertToGethBlock_ConvertsBlockToGethBlock(t *testing.T) {
 	receipts := types.Receipts{}
 	for _, receipt := range input.Receipts {
 		receipts = append(receipts, toGethReceipt(receipt))
+	}
+
+	withdrawals := types.Withdrawals{}
+	for _, w := range input.Withdrawals {
+		withdrawals = append(withdrawals, toGethWithdrawal(w))
 	}
 
 	want := (&types.Block{}).
@@ -100,6 +106,7 @@ func TestConvertToGethBlock_ConvertsBlockToGethBlock(t *testing.T) {
 		}).
 		WithBody(types.Body{
 			Transactions: transactions,
+			Withdrawals:  withdrawals,
 		})
 
 	got, err := ConvertToGethBlock(input)
@@ -670,4 +677,31 @@ func TestToOptionalHash_ConvertsBytesToHashesIfNotEmpty(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestToGethWithdrawal_ConvertsWithdrawal(t *testing.T) {
+	input := &blockdb.Withdrawal{
+		Index:          1,
+		ValidatorIndex: 2,
+		Address:        []byte{0x03, 0x04},
+		Amount:         5,
+	}
+
+	want := &types.Withdrawal{
+		Index:     1,
+		Validator: 2,
+		Address:   common.BytesToAddress([]byte{0x03, 0x04}),
+		Amount:    5,
+	}
+
+	got := toGethWithdrawal(input)
+	require.Equal(t, want.Index, got.Index)
+	require.Equal(t, want.Validator, got.Validator)
+	require.Equal(t, want.Address, got.Address)
+	require.Equal(t, want.Amount, got.Amount)
+}
+
+func TestToGethWithdrawal_NilWithdrawal_ReturnsNil(t *testing.T) {
+	got := toGethWithdrawal(nil)
+	require.Nil(t, got)
 }

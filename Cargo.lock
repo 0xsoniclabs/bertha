@@ -1910,7 +1910,6 @@ dependencies = [
  "reth-era",
  "rstest",
  "thiserror 2.0.18",
- "tree_hash",
  "types",
 ]
 

@@ -193,6 +193,9 @@ func toRustBlock(block BlockWithReceipts) string {
 	rustReceipt := toRustVector(receipts, func(receipt *types.Receipt) string {
 		return toRustReceipt(receipt)
 	})
+	withdrawals := toRustVector(blockData.Withdrawals(), func(w *types.Withdrawal) string {
+		return toRustWithdrawal(w)
+	})
 	return fmt.Sprintf(
 		`Block {
 			parent_hash: Hash::try_from_hex("%s").unwrap(),
@@ -208,6 +211,7 @@ func toRustBlock(block BlockWithReceipts) string {
 			nonce: Vec::<u8>::try_from_hex("%s").unwrap().try_into().unwrap(),
 			transactions: %s,
 			receipts: %s,
+			withdrawals: %s,
 			%s%s%s%s%s
 			..Default::default()
 	}`,
@@ -224,6 +228,7 @@ func toRustBlock(block BlockWithReceipts) string {
 		blockNonce,
 		transactions,
 		rustReceipt,
+		withdrawals,
 		baseFeePerGas,
 		withdrawalsRoot,
 		blobGasUsed,

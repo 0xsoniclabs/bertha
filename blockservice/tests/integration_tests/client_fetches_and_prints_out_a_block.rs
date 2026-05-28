@@ -126,7 +126,8 @@ async fn client_fetches_and_prints_out_a_block() {
   "blobGasUsed": "0x0",
   "excessBlobGas": "0x0",
   "parentBeaconBlockRoot": null,
-  "requestsHash": null
+  "requestsHash": null,
+  "withdrawals": []
 }
 "#
     );
