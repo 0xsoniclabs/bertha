@@ -248,6 +248,13 @@ func TestGenerateTransactionReceiptsGenerateAllValueCase(t *testing.T) {
 	require.Equal(t, 5*maxLenField(transactionReceiptFieldCases), len(receipts), "Expected %d transaction receipts, but got %d", 5*maxLenField(transactionReceiptFieldCases), len(receipts))
 }
 
+func TestGenerateWithdrawalsGeneratesAllValueCases(t *testing.T) {
+	withdrawals := generateWithdrawals()
+
+	require.True(t, filterFields(withdrawals, copyMap(withdrawalFieldCases), getFieldValueFromStruct), "Expected all withdrawal fields to be covered")
+	require.Equal(t, maxLenField(withdrawalFieldCases), len(withdrawals), "Expected %d withdrawals, but got %d", maxLenField(withdrawalFieldCases), len(withdrawals))
+}
+
 func TestGenerateBlockHeadersGenerateAllValueCase(t *testing.T) {
 	headers := generateBlockHeaders()
 

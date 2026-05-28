@@ -208,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn can_be_serialized_and_deserialized_from_json() {
+    fn can_be_serialized_to_json() {
         for value in generate_receipts_with_data() {
             let serialized = serde_json::to_value(&value.receipt)
                 .expect("Serialization to JSON should not fail");
@@ -221,6 +221,15 @@ mod tests {
                 serialized, expected_value,
                 "Serialized JSON should match the expected value"
             );
+        }
+    }
+
+    #[test]
+    fn can_be_deserialized_from_json() {
+        for value in generate_receipts_with_data() {
+            let deserialized: TransactionReceipt =
+                serde_json::from_str(&value.json_representation).unwrap();
+            assert_eq!(deserialized, value.receipt,);
         }
     }
 

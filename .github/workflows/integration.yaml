@@ -87,6 +87,7 @@ jobs:
       run: |
         go run . transactions > ../../bertha-types/src/test_data/test_data_transaction.rs &&
         go run . receipts > ../../bertha-types/src/test_data/test_data_receipts.rs &&
+        go run . withdrawals > ../../bertha-types/src/test_data/test_data_withdrawals.rs &&
         go run . blocks > ../../bertha-types/src/test_data/test_data_blocks.rs &&
         git diff --exit-code # make sure there are no changes after test data generation
 
