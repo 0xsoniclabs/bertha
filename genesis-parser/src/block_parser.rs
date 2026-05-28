@@ -32,6 +32,7 @@ use crate::{
 /// An iterator that parses blocks from a compressed genesis file lazily while they are consumed.
 /// It yields [Result<Block, Error>] to be able to propagate errors during parsing.
 /// Once an error was returned, the iterator will not yield any more blocks.
+#[derive(Debug)]
 pub struct BlockParser<R: BufRead> {
     slice_reader: SliceReader<GzDecoder<Take<R>>>,
     error: bool,
@@ -130,7 +131,7 @@ impl<R: BufRead> Iterator for BlockParser<R> {
 
 #[cfg(test)]
 mod tests {
-    use std::{io::Cursor, iter, vec};
+    use std::{assert_matches, io::Cursor, iter, vec};
 
     use alloy_rlp::Encodable;
     use flate2::{Compression, bufread::GzEncoder};
@@ -230,13 +231,13 @@ mod tests {
             )]),
         );
 
-        assert!(matches!(
+        assert_matches!(
             blocks_iter,
             Err(Error::GFile(GFileError::PieceSizeTooLarge {
                 got: _,
                 max: BlockParser::<Cursor<Vec<u8>>>::MAX_MEM_USAGE,
             }))
-        ));
+        );
     }
 
     #[test]
@@ -287,7 +288,7 @@ mod tests {
         // first block is valid
         assert_eq!(blocks_iter.next().unwrap().unwrap(), Block::default_sonic());
         // second block is invalid
-        assert!(matches!(blocks_iter.next(), Some(Err(Error::Rlp(_)))));
+        assert_matches!(blocks_iter.next(), Some(Err(Error::Rlp(_))));
         // third block is not processed because of the error
         assert!(blocks_iter.next().is_none());
     }

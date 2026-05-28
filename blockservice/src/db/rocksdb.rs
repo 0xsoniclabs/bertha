@@ -169,6 +169,8 @@ impl KvDbBatch for RocksDbBatch {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use mockall::predicate::eq;
 
     use super::*;
@@ -196,22 +198,22 @@ mod tests {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         RocksDb::create(tmpdir.path()).unwrap();
         let result = RocksDb::create(tmpdir.path());
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(Error::StorageLayer(msg))
             if msg.contains("exists (error_if_exists is true)")
-        ));
+        );
     }
 
     #[test]
     fn rocksdb_create_returns_error_if_path_is_not_writable() {
         let tmpdir = TestDir::try_new(Permissions::ReadOnly).unwrap();
         let result = RocksDb::create(tmpdir.path());
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(Error::StorageLayer(msg))
             if msg.contains("Permission denied")
-        ));
+        );
     }
 
     #[test]
@@ -228,11 +230,11 @@ mod tests {
     fn rocksdb_open_returns_error_if_db_does_not_exist() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let result = RocksDb::open(tmpdir.path());
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(Error::StorageLayer(msg))
             if msg.contains("does not exist (create_if_missing is false)")
-        ));
+        );
     }
 
     #[test]
@@ -240,11 +242,11 @@ mod tests {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let _db = RocksDb::create(tmpdir.path()).unwrap();
         let result = RocksDb::open(tmpdir.path());
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(Error::StorageLayer(msg))
             if msg.contains("No locks available")
-        ));
+        );
     }
 
     #[test]
@@ -258,18 +260,18 @@ mod tests {
         let value = db.db.get(b"key").unwrap();
         assert_eq!(value, Some(b"value".to_vec()));
         let result = db.db.put(b"key", b"baz");
-        assert!(matches!(result, Err(e) if e.kind() == rocksdb::ErrorKind::NotSupported));
+        assert_matches!(result, Err(e) if e.kind() == rocksdb::ErrorKind::NotSupported);
     }
 
     #[test]
     fn rocksdb_open_for_reading_returns_error_if_db_does_not_exist() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let result = RocksDb::open_for_reading(tmpdir.path());
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(Error::StorageLayer(msg))
             if msg.contains("No such file or directory")
-        ));
+        );
     }
 
     #[test]
@@ -356,10 +358,10 @@ mod tests {
         let db = RocksDb::open_for_reading(tmpdir.path()).unwrap();
 
         let result = db.put_raw(b"key", b"value");
-        assert!(matches!(
+        assert_matches!(
             result,
             Err(e) if e.to_string().contains("Not supported operation in secondary mode")
-        ));
+        );
     }
 
     #[test]

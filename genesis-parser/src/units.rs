@@ -55,6 +55,7 @@ pub struct UnitDescriptor {
 }
 
 /// A container which contains all metadata needed to parse blocks from the genesis file.
+#[derive(Debug)]
 pub struct GenesisMetadata {
     pub chain_id: u64,
     pub units: HashMap<String, UnitDescriptor>,
@@ -180,7 +181,7 @@ pub fn parse_metadata(mut reader: impl BufRead + Seek) -> Result<GenesisMetadata
 
 #[cfg(test)]
 mod tests {
-    use std::{io::Cursor, iter};
+    use std::{assert_matches, io::Cursor, iter};
 
     use alloy_rlp::Encodable;
     use bertha_types::Hash;
@@ -210,10 +211,10 @@ mod tests {
         #[case] buf: Vec<u8>,
         #[case] expected_error: GFileError,
     ) {
-        assert!(matches!(
+        assert_matches!(
             read_file_header(buf.as_slice()).unwrap_err(),
             Error::GFile(err) if err == expected_error,
-        ));
+        );
     }
 
     #[test]
@@ -293,9 +294,6 @@ mod tests {
         }
 
         let meta = parse_metadata(Cursor::new(buf));
-        assert!(matches!(
-            meta,
-            Err(Error::GFile(GFileError::HeaderMismatch))
-        ));
+        assert_matches!(meta, Err(Error::GFile(GFileError::HeaderMismatch)));
     }
 }

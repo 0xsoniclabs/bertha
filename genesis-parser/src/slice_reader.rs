@@ -23,6 +23,7 @@ use crate::error::Error;
 /// [SliceReader::min_slice_size] bytes. If this is not the case, the reader is used to fill the
 /// buffer with more data. The only exception is when the reader is empty, in which case the buffer
 /// is allowed to hold less elements.
+#[derive(Debug)]
 pub struct SliceReader<R: Read> {
     reader: R,
     reader_empty: bool,
@@ -96,7 +97,7 @@ impl<R: Read> SliceReader<R> {
 
 #[cfg(test)]
 mod tests {
-    use std::{io::Read, num::NonZeroUsize};
+    use std::{assert_matches, io::Read, num::NonZeroUsize};
 
     use super::SliceReader;
     use crate::{Error, GFileError};
@@ -197,10 +198,10 @@ mod tests {
             NonZeroUsize::new(MIN_SLICE_SIZE).unwrap(),
         );
 
-        assert!(matches!(
+        assert_matches!(
             reader.process_with(|_| { Err::<(), _>(Error::GFile(GFileError::BlocksUnitMissing)) }),
             Err(Error::GFile(GFileError::BlocksUnitMissing))
-        ));
+        );
     }
 
     #[test]

@@ -107,6 +107,8 @@ impl From<DynamicFeeTx> for Transaction {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     #[test]
@@ -127,7 +129,7 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to dynamic fee transaction must fail");
-        assert!(matches!(error, TransactionError::ConversionError(_)));
+        assert_matches!(error, TransactionError::ConversionError(_));
     }
 
     #[test]
@@ -148,6 +150,6 @@ mod tests {
         .expect_err(
             "DynamicFeeTx should not be constructible from a transaction with a mismatched type",
         );
-        assert!(matches!(err, TransactionError::ConversionError(_)));
+        assert_matches!(err, TransactionError::ConversionError(_));
     }
 }
