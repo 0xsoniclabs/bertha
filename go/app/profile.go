@@ -37,7 +37,7 @@ func StartCPUProfile(path string) (*profiler, error) {
 	}
 	slog.Info("Starting CPU profile", "file", path)
 	if err := pprof.StartCPUProfile(out); err != nil {
-		return nil, errors.Join(err, os.Remove(path))
+		return nil, errors.Join(err, out.Close(), os.Remove(path))
 	}
 	return &profiler{path: path, out: out}, nil
 }
