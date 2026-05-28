@@ -753,6 +753,7 @@ func (h *blockHashHistory) Header(_ common.Hash, number uint64) *evmcore.EvmHead
 func onNewLog(metadataStore MetadataStore, blockNumber uint64, l *types.Log) {
 	// https://github.com/0xsoniclabs/sonic/blob/c3816115c9ae51682aa475c715aabbe10e0dcef4/gossip/blockproc/drivermodule/driver_txs.go#L351
 	if l.Address == driver.ContractAddress &&
+		len(l.Topics) > 0 &&
 		l.Topics[0] == driverpos.Topics.UpdateNetworkRules &&
 		len(l.Data) >= 64 {
 		diff, err := decodeDataBytes(l)

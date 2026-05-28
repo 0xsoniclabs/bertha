@@ -1037,6 +1037,18 @@ func TestOnNewLog_IgnoresLogsWithWrongTopic(t *testing.T) {
 	onNewLog(mockStore, 1, log)
 }
 
+func TestOnNewLog_IgnoresLogsWithNoTopic(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockStore := NewMockMetadataStore(ctrl)
+
+	diff := []byte(`{"Upgrades":{"Allegro":true}}`)
+	log := makeUpdateNetworkRulesLog(diff)
+	log.Topics = []common.Hash{} // no topic
+
+	mockStore.EXPECT().PatchUpgrades(gomock.Any(), gomock.Any()).Return(nil).Times(0)
+	onNewLog(mockStore, 1, log)
+}
+
 func TestOnNewLog_IgnoresLogsWithTooShortData(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockStore := NewMockMetadataStore(ctrl)
