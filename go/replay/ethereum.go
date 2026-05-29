@@ -25,3 +25,9 @@ var ethereumChainConfigMap = map[uint64]*params.ChainConfig{
 	params.HoleskyChainConfig.ChainID.Uint64(): params.HoleskyChainConfig,
 	params.HoodiChainConfig.ChainID.Uint64():   params.HoodiChainConfig,
 }
+
+// isEthereum checks if the given chain ID corresponds to a known Ethereum chain.
+func isEthereum(chainID uint64) bool {
+	_, exists := ethereumChainConfigMap[chainID]
+	return exists
+}

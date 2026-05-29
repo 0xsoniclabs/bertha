@@ -35,6 +35,8 @@ import (
 	"github.com/0xsoniclabs/tracy"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/params"
 	// Uncomment to enable experimental Carmen features.
 	//_ "github.com/0xsoniclabs/carmen/go/experimental"
 )
@@ -153,6 +155,7 @@ func (s *State) ApplyBlock(
 	processor *evmcore.StateProcessor,
 	upgrades opera.Upgrades,
 	corrections map[common.Address]Correction,
+	chainConfig *params.ChainConfig,
 	onLog func(*types.Log),
 ) (types.Receipts, error) {
 	evmBlock := &evmcore.EvmBlock{
@@ -170,8 +173,11 @@ func (s *State) ApplyBlock(
 
 	stateDB := evmstore.CreateCarmenStateDb(s.db, nil)
 
-	vmConfig := opera.GetVmConfig(opera.Rules{Upgrades: upgrades})
-	gasLimit := block.GasLimit()
+	var vmConfig vm.Config
+	if !isEthereum(chainConfig.ChainID.Uint64()) {
+		// Apply Sonic-specific VM settings that are not applicable to Ethereum chains.
+		vmConfig = opera.GetVmConfig(opera.Rules{Upgrades: upgrades})
+	}
 
 	zone := tracy.ZoneBegin("TransactionProcessing")
 	s.db.BeginBlock()
@@ -180,7 +186,7 @@ func (s *State) ApplyBlock(
 		evmBlock,
 		stateDB,
 		vmConfig,
-		gasLimit,
+		block.GasLimit(),
 		&usedGas,
 		0, // Tx index offset
 		onLog,
