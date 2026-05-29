@@ -346,7 +346,6 @@ func runReplayPipeline(
 	// Channels between stages
 	decodedBlocks := make(chan *decodedBlock, bufferSize)
 	results := make(chan *processResult, bufferSize)
-	done := make(chan struct{})
 	abort := make(chan struct{})
 
 	// Utility to collect errors.
@@ -357,8 +356,13 @@ func runReplayPipeline(
 		abortOnce.Do(func() { close(abort) })
 	}
 
+	// WaitGroup to ensure all goroutines finish before returning.
+	// This is critical to avoid closing the database while an iterator
+	// is still active in Stage 1.
+	var wg sync.WaitGroup
+
 	// Stage 1: Decode blocks
-	go func() {
+	wg.Go(func() {
 		defer close(decodedBlocks)
 		signer := types.LatestSignerForChainID(new(big.Int).SetUint64(chain.ChainID()))
 		for block, err := range blocks {
@@ -394,10 +398,10 @@ func runReplayPipeline(
 				return
 			}
 		}
-	}()
+	})
 
 	// Stage 2: Apply blocks
-	go func() {
+	wg.Go(func() {
 		defer close(results)
 		for decoded := range decodedBlocks {
 			gethBlock := decoded.geth
@@ -418,11 +422,10 @@ func runReplayPipeline(
 				return
 			}
 		}
-	}()
+	})
 
 	// Stage 3: Check results
-	go func() {
-		defer close(done)
+	wg.Go(func() {
 		for result := range results {
 			block := result.decoded.proto
 
@@ -437,8 +440,9 @@ func runReplayPipeline(
 				onBlockDone(result.decoded.geth)
 			}
 		}
-	}()
-	<-done
+	})
+
+	wg.Wait()
 
 	err := issue.Load()
 	if err == nil {
