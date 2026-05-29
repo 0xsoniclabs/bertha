@@ -49,6 +49,7 @@ import (
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
 )
 
@@ -616,12 +617,32 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 		}
 	}
 
-	chainConfig := opera.CreateTransientEvmChainConfig(
-		a.chainID,
-		a.metadataStore.GetUpgrades(),
-		idx.Block(block.NumberU64()),
-	)
-	upgrades := a.metadataStore.GetUpgradesAtBlock(block.NumberU64())
+	var chainConfig *params.ChainConfig
+	var upgrades opera.Upgrades
+	if cfg := ethereumChainConfigMap[a.chainID]; cfg != nil {
+		chainConfig = cfg
+		rules := chainConfig.Rules(block.Number(), false, block.Time())
+		upgrades = opera.Upgrades{
+			Berlin: rules.IsBerlin,
+			London: rules.IsLondon,
+			Llr:    false,
+
+			Sonic:   rules.IsCancun,
+			Allegro: rules.IsPrague,
+			Brio:    rules.IsOsaka,
+
+			SingleProposerBlockFormation: false,
+			GasSubsidies:                 false,
+			TransactionBundles:           false,
+		}
+	} else {
+		chainConfig = opera.CreateTransientEvmChainConfig(
+			a.chainID,
+			a.metadataStore.GetUpgrades(),
+			idx.Block(block.NumberU64()),
+		)
+		upgrades = a.metadataStore.GetUpgradesAtBlock(block.NumberU64())
+	}
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
