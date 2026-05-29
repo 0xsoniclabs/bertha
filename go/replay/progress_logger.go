@@ -28,6 +28,7 @@ import (
 // progressLogger is a UX helper utility for the replay command producing
 // the main progress log output.
 type progressLogger struct {
+	logger                 utils.Logger
 	state                  *State
 	stateDBDirectory       string
 	start                  time.Time
@@ -42,9 +43,10 @@ type progressLogger struct {
 	logDBSize              bool
 }
 
-func startProgressLogger(state *State, stateDBDirectory string, logDBSize bool) *progressLogger {
+func startProgressLogger(logger utils.Logger, state *State, stateDBDirectory string, logDBSize bool) *progressLogger {
 	now := time.Now()
 	return &progressLogger{
+		logger:           logger,
 		state:            state,
 		stateDBDirectory: stateDBDirectory,
 		start:            now,
@@ -53,9 +55,9 @@ func startProgressLogger(state *State, stateDBDirectory string, logDBSize bool) 
 	}
 }
 
-func (p *progressLogger) LogProgress(block *types.Block) (string, error) {
+func (p *progressLogger) LogProgress(block *types.Block) error {
 	// Keep track of metrics for logging purposes.
-	p.lastProcessedBlockTime = time.Unix(int64(block.Time()), 0)
+	p.lastProcessedBlockTime = time.Unix(int64(block.Time()), 0).UTC()
 	p.txCounter += uint64(len(block.Transactions()))
 	p.gasCounter += block.GasUsed()
 
@@ -63,15 +65,15 @@ func (p *progressLogger) LogProgress(block *types.Block) (string, error) {
 	if number == 0 {
 		p.firstBlockTime = p.lastProcessedBlockTime
 		p.lastReportedBlockTime = p.lastProcessedBlockTime
-		return "", nil
+		return nil
 	}
 
 	// Periodically log the progress of the replay.
 	if number%10_000 != 0 {
-		return "", nil
+		return nil
 	}
 
-	currentBlockTime := time.Unix(int64(block.Time()), 0)
+	currentBlockTime := time.Unix(int64(block.Time()), 0).UTC()
 	deltaBlockTime := currentBlockTime.Sub(p.lastReportedBlockTime)
 	p.lastReportedBlockTime = currentBlockTime
 	deltaTx := p.txCounter - p.lastTxCounter
@@ -85,60 +87,56 @@ func (p *progressLogger) LogProgress(block *types.Block) (string, error) {
 
 	runtime := time.Since(p.start)
 
+	args := []any{
+		"block", number,
+		"block_time", currentBlockTime.Format(time.RFC3339),
+		"elapsed", fmt.Sprintf("%02d:%02d:%02d", int(runtime.Hours()), int(runtime.Minutes())%60, int(runtime.Seconds())%60),
+		"txs/s", int(float64(deltaTx) / deltaTime.Seconds()),
+		"MGas/s", int(float64(deltaGas) / deltaTime.Seconds() / 1000 / 1000),
+		"realtime", int(deltaBlockTime.Seconds() / deltaTime.Seconds()),
+	}
+
 	// Optionally log the size of the state database.
-	var sizeStr string
 	if p.logDBSize {
 		err := p.state.db.Flush()
 		if err != nil {
-			return "", fmt.Errorf("failed to flush state database: %w", err)
+			return fmt.Errorf("failed to flush state database: %w", err)
 		}
 		liveSize, err := utils.DirSize(filepath.Join(p.stateDBDirectory, "live"))
 		if err != nil {
-			return "", fmt.Errorf("failed to compute live database size: %w", err)
+			return fmt.Errorf("failed to compute live database size: %w", err)
 		}
 
-		sizeStr = fmt.Sprintf(", live DB size: %.3f GiB", float64(liveSize)/1024/1024/1024)
+		args = append(args, "LiveDB size", fmt.Sprintf("%.3fGiB", float64(liveSize)/1024/1024/1024))
 
 		archiveDir := filepath.Join(p.stateDBDirectory, "archive")
 		archiveMissing, err := utils.IsEmptyOrMissingDir(archiveDir)
 		if err != nil {
-			return "", fmt.Errorf("failed to check existence of archive database directory: %w", err)
+			return fmt.Errorf("failed to check existence of archive database directory: %w", err)
 		}
 		if !archiveMissing {
 			archiveSize, err := utils.DirSize(archiveDir)
 			if err != nil {
-				return "", fmt.Errorf("failed to compute archive database size: %w", err)
+				return fmt.Errorf("failed to compute archive database size: %w", err)
 			}
-			sizeStr += fmt.Sprintf(", archive DB size: %.3f GiB", float64(archiveSize)/1024/1024/1024)
-		} else {
-			sizeStr += ", archive DB size: n/a"
+			args = append(args, "ArchiveDB size", fmt.Sprintf("%.3fGiB", float64(archiveSize)/1024/1024/1024))
 		}
 	}
 
-	return fmt.Sprintf(
-		"Processing block %d from %v @ t=%2d:%02d:%02d, %.2f txs/s, %.2f MGas/s, %.2fx realtime%s",
-		number,
-		currentBlockTime.Format(time.DateTime),
-		int(runtime.Hours()),
-		int(runtime.Minutes())%60,
-		int(runtime.Seconds())%60,
-		float64(deltaTx)/deltaTime.Seconds(),
-		float64(deltaGas)/deltaTime.Seconds()/1000/1000,
-		deltaBlockTime.Seconds()/deltaTime.Seconds(),
-		sizeStr,
-	), nil
+	p.logger.Info("Processing block", args...)
+	return nil
 }
 
-func (p *progressLogger) GetSummary() string {
+func (p *progressLogger) LogSummary() {
 	duration := time.Since(p.start)
 	deltaBlockTime := p.lastProcessedBlockTime.Sub(p.firstBlockTime)
-	return fmt.Sprintf(
-		"Replay finished in %v, processed %d txs (%.2f Tx/s), used %.3f TGas (%.2f MGas/s), %.2fx realtime",
-		duration,
-		p.txCounter,
-		float64(p.txCounter)/duration.Seconds(),
-		float64(p.gasCounter)/1e12,
-		float64(p.gasCounter)/duration.Seconds()/1e6,
-		deltaBlockTime.Seconds()/duration.Seconds(),
+	p.logger.Info(
+		"Replay finished",
+		"elapsed", fmt.Sprintf("%02d:%02d:%02d", int(duration.Hours()), int(duration.Minutes())%60, int(duration.Seconds())%60),
+		"txs", p.txCounter,
+		"TGas", float64(p.gasCounter)/1e12,
+		"txs/s", int(float64(p.txCounter)/duration.Seconds()),
+		"MGas/s", int(float64(p.gasCounter)/duration.Seconds()/1e6),
+		"realtime", int(deltaBlockTime.Seconds()/duration.Seconds()),
 	)
 }

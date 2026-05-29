@@ -24,6 +24,7 @@ import (
 	"io"
 	"iter"
 	"log/slog"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -150,7 +151,11 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 			}
 		}
 
-		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", args.SnapshotInterval, "start_block", args.SnapshotStartBlock, "end_block", args.SnapshotEndBlock, "snapshot to keep", args.SnapshotNumToKeep)
+		end := fmt.Sprintf("%d", args.SnapshotEndBlock)
+		if args.SnapshotEndBlock == math.MaxUint64 {
+			end = "max"
+		}
+		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", args.SnapshotInterval, "start_block", args.SnapshotStartBlock, "end_block", end, "snapshots_to_keep", args.SnapshotNumToKeep)
 		if strings.Contains(string(args.DBVariant), "flat") {
 			slog.Warn("Snapshots are currently not supported with flat database variants; consider disabling snapshots or using a different variant")
 		}
@@ -230,9 +235,9 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}()
 
 	// Prepare the progress logger.
-	progress := startProgressLogger(state, args.StateDBDir, args.LogDBSize)
+	progress := startProgressLogger(slog.Default(), state, args.StateDBDir, args.LogDBSize)
 	defer func() {
-		slog.Info(progress.GetSummary())
+		progress.LogSummary()
 	}()
 
 	// Pick the replay method.
@@ -255,16 +260,8 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 
 	return run(
-		ctx, blocks, chain, database, replayLoopContext, func(block *types.Block) {
-			info, err := progress.LogProgress(block)
-			if err != nil {
-				slog.Error("Failed to log progress", "error", err)
-				return
-			}
-			if len(info) > 0 {
-				slog.Info(info)
-			}
-		},
+		ctx, blocks, chain, database, replayLoopContext,
+		func(block *types.Block) error { return progress.LogProgress(block) },
 	)
 }
 
@@ -277,7 +274,7 @@ func runReplayLoop(
 	chain Chain,
 	blockDB blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
-	onBlockDone func(block *types.Block),
+	onBlockDone func(block *types.Block) error,
 ) error {
 	for block, err := range blocks {
 		tracy.FrameMark()
@@ -306,7 +303,9 @@ func runReplayLoop(
 
 		// Report the progress of the replay.
 		if onBlockDone != nil {
-			onBlockDone(gethBlock)
+			if err := onBlockDone(gethBlock); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -322,7 +321,7 @@ func runReplayPipeline(
 	chain Chain,
 	blockDB blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
-	onBlockDone func(block *types.Block),
+	onBlockDone func(block *types.Block) error,
 ) error {
 	const bufferSize = 1024
 
@@ -438,7 +437,10 @@ func runReplayPipeline(
 
 			// Report the progress of the replay.
 			if onBlockDone != nil {
-				onBlockDone(result.decoded.geth)
+				if err := onBlockDone(result.decoded.geth); err != nil {
+					reportIssue(err)
+					return
+				}
 			}
 		}
 	})

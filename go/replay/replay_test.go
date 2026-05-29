@@ -149,7 +149,7 @@ type replayer func(
 	chain Chain,
 	database blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
-	onBlockProcessed func(*types.Block),
+	onBlockProcessed func(*types.Block) error,
 ) error
 
 func canProcessEmptyBlocks(t *testing.T, run replayer) {
@@ -185,8 +185,9 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 
 	iter := utils.NewIter(blocks)
 	counter := 0
-	require.NoError(t, run(t.Context(), iter, chain, nil, ReplayLoopContext{}, func(block *types.Block) {
+	require.NoError(t, run(t.Context(), iter, chain, nil, ReplayLoopContext{}, func(block *types.Block) error {
 		counter++
+		return nil
 	}))
 	require.Equal(t, len(blocks), counter)
 }

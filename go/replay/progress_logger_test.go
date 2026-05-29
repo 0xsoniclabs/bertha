@@ -20,9 +20,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
+	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
@@ -31,8 +33,10 @@ import (
 
 func TestProgressLogger_ProducesLogMessagesEvery10kSteps(t *testing.T) {
 	require := require.New(t)
+	ctrl := gomock.NewController(t)
+	mockLogger := utils.NewMockLogger(ctrl)
 
-	logger := startProgressLogger(nil, "", false)
+	logger := startProgressLogger(mockLogger, nil, "", false)
 
 	block0, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:    0,
@@ -55,20 +59,31 @@ func TestProgressLogger_ProducesLogMessagesEvery10kSteps(t *testing.T) {
 	})
 	require.NoError(err)
 
-	require.Empty(logger.LogProgress(block0))
-	res, err := logger.LogProgress(block10k)
-	require.NoError(err)
-	require.Regexp(
-		`Processing block 10000 from 1970-01-01 [0-9]{2}:33:20 @ t= 0:00:[0-9]{2}, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime`,
-		res,
+	require.NoError(logger.LogProgress(block0))
+
+	mockLogger.EXPECT().Info(
+		"Processing block",
+		"block", uint64(10_000),
+		"block_time", time.Unix(2000, 0).UTC().Format(time.RFC3339),
+		"elapsed", gomock.Any(),
+		"txs/s", 0,
+		"MGas/s", 0,
+		"realtime", gomock.Any(),
 	)
-	require.Empty(logger.LogProgress(block15k))
-	res, err = logger.LogProgress(block20k)
-	require.NoError(err)
-	require.Regexp(
-		`Processing block 20000 from 1970-01-01 [0-9]{2}:58:20 @ t= 0:00:[0-9]{2}, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime`,
-		res,
+	require.NoError(logger.LogProgress(block10k))
+
+	require.NoError(logger.LogProgress(block15k))
+
+	mockLogger.EXPECT().Info(
+		"Processing block",
+		"block", uint64(20_000),
+		"block_time", time.Unix(3500, 0).UTC().Format(time.RFC3339),
+		"elapsed", gomock.Any(),
+		"txs/s", 0,
+		"MGas/s", 0,
+		"realtime", gomock.Any(),
 	)
+	require.NoError(logger.LogProgress(block20k))
 }
 
 func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
@@ -97,14 +112,20 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 	})
 	require.NoError(err)
 
-	logger := startProgressLogger(state, dir, true)
-	res, err := logger.LogProgress(block)
-	require.NoError(err)
-
-	require.Regexp(
-		`Processing block 10000 from 1970-01-01 [0-9]{2}:[0-9]{2}:[0-9]{2} @ t= 0:00:00, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime, live DB size: 0.121 GiB, archive DB size: n/a`,
-		res,
+	mockLogger := utils.NewMockLogger(ctrl)
+	logger := startProgressLogger(mockLogger, state, dir, true)
+	mockLogger.EXPECT().Info(
+		"Processing block",
+		"block", uint64(10000),
+		"block_time", gomock.Any(),
+		"elapsed", gomock.Any(),
+		"txs/s", 0,
+		"MGas/s", 0,
+		"realtime", gomock.Any(),
+		"LiveDB size", "0.121GiB",
 	)
+	err = logger.LogProgress(block)
+	require.NoError(err)
 
 	archiveDir := filepath.Join(dir, "archive")
 	require.NoError(os.Mkdir(archiveDir, 0700))
@@ -113,20 +134,29 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 	err = os.WriteFile(filePath, data, 0644)
 	require.NoError(err)
 
-	logger = startProgressLogger(state, dir, true)
-	res, err = logger.LogProgress(block)
-	require.NoError(err)
-
-	require.Regexp(
-		`Processing block 10000 from 1970-01-01 [0-9]{2}:[0-9]{2}:[0-9]{2} @ t= 0:00:00, 0.00 txs/s, 0.00 MGas/s, [0-9]+.[0-9]{2}x realtime, live DB size: 0.121 GiB, archive DB size: 0.152 GiB`,
-		res,
+	mockLogger2 := utils.NewMockLogger(ctrl)
+	logger = startProgressLogger(mockLogger2, state, dir, true)
+	mockLogger2.EXPECT().Info(
+		"Processing block",
+		"block", uint64(10000),
+		"block_time", gomock.Any(),
+		"elapsed", gomock.Any(),
+		"txs/s", 0,
+		"MGas/s", 0,
+		"realtime", gomock.Any(),
+		"LiveDB size", "0.121GiB",
+		"ArchiveDB size", "0.152GiB",
 	)
+	err = logger.LogProgress(block)
+	require.NoError(err)
 }
 
 func TestProgressLogger_ProducesASummary(t *testing.T) {
 	require := require.New(t)
+	ctrl := gomock.NewController(t)
+	mockLogger := utils.NewMockLogger(ctrl)
 
-	logger := startProgressLogger(nil, "", false)
+	logger := startProgressLogger(mockLogger, nil, "", false)
 
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:    0,
@@ -138,9 +168,16 @@ func TestProgressLogger_ProducesASummary(t *testing.T) {
 	})
 	require.NoError(err)
 
-	require.Empty(logger.LogProgress(block))
-	require.Regexp(
-		`Replay finished in .*, processed 2 txs \([0-9]+.[0-9]{2} Tx/s\), used 0.000 TGas \([0-9]+.[0-9]{2} MGas/s\), [0-9]+.[0-9]{2}x realtime`,
-		logger.GetSummary(),
+	require.NoError(logger.LogProgress(block))
+
+	mockLogger.EXPECT().Info(
+		"Replay finished",
+		"elapsed", gomock.Any(),
+		"txs", uint64(2),
+		"TGas", float64(0),
+		"txs/s", gomock.Any(),
+		"MGas/s", 0,
+		"realtime", 0,
 	)
+	logger.LogSummary()
 }
