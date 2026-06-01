@@ -3,9 +3,9 @@ index 3f0c3cf..afdf5f3 100644
 --- a/go/replay/state.go
 +++ b/go/replay/state.go
 @@ -36,8 +36,9 @@ import (
- 	"github.com/0xsoniclabs/tracy"
- 	"github.com/ethereum/go-ethereum/common"
  	"github.com/ethereum/go-ethereum/core/types"
+ 	"github.com/ethereum/go-ethereum/core/vm"
+ 	"github.com/ethereum/go-ethereum/params"
 +
  	// Uncomment to enable experimental Carmen features.
 -	//_ "github.com/0xsoniclabs/carmen/go/experimental"

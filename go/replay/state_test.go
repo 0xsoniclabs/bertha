@@ -33,6 +33,8 @@ import (
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -205,7 +207,7 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	receipts, err := state.ApplyBlock(block, processor, opera.Upgrades{}, nil, nil)
+	receipts, err := state.ApplyBlock(block, processor, opera.Upgrades{}, nil, chainConfig, nil)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 }
@@ -239,7 +241,7 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, processor, opera.Upgrades{}, nil, nil)
+	_, err = state.ApplyBlock(block, processor, opera.Upgrades{}, nil, chainConfig, nil)
 	require.ErrorContains(t, err, "skipped txs")
 }
 
@@ -273,11 +275,70 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	receipts, err := state.ApplyBlock(block, processor, opera.Upgrades{}, corrections[17], nil)
+	receipts, err := state.ApplyBlock(block, processor, opera.Upgrades{}, corrections[17], chainConfig, nil)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 
 	require.Equal(t, uint64(1000), state.db.GetBalance(cc.Address{1}).Uint64())
+}
+
+func TestState_ApplyBlock_ApplySonicVmConfigIfNotEthereumChain(t *testing.T) {
+	// Note: the vm config setting "InsufficientBalanceIsNotAnError" is used as
+	// a proxy for whether the Sonic VM config is applied.
+	tests := map[string]struct {
+		chainConfig *params.ChainConfig
+		blockNumber uint64
+		wantSkipped bool
+	}{
+		"Ethereum": {
+			chainConfig: params.MainnetChainConfig,
+			blockNumber: 3_000_000, // past EIP-155 activation (block 2,675,000)
+			wantSkipped: true,
+		},
+		"Sonic": {
+			chainConfig: opera.CreateTransientEvmChainConfig(146, []opera.UpgradeHeight{}, idx.Block(1)),
+			blockNumber: 1,
+			wantSkipped: false,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+			require.NoError(t, err)
+			defer func() { require.NoError(t, state.Close()) }()
+
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			signer := types.LatestSignerForChainID(tt.chainConfig.ChainID)
+
+			// Sender has no balance, but the tx transfers 1 wei.
+			tx := types.MustSignNewTx(key, signer, &types.LegacyTx{
+				Nonce:    0,
+				To:       &common.Address{1},
+				Gas:      21_000,
+				GasPrice: big.NewInt(0),
+				Value:    big.NewInt(1),
+			})
+
+			block, err := convert.ConvertToGethBlock(&blockdb.Block{
+				Number:       tt.blockNumber,
+				GasLimit:     8_000_000,
+				Transactions: []*blockdb.Transaction{convert.ToBerthaTransaction(tx)},
+			})
+			require.NoError(t, err)
+
+			processor := evmcore.NewStateProcessorForReplay(tt.chainConfig, &blockHashHistory{}, opera.Upgrades{})
+
+			receipts, err := state.ApplyBlock(block, processor, opera.Upgrades{}, nil, tt.chainConfig, nil)
+			if tt.wantSkipped {
+				require.ErrorContains(t, err, "skipped txs")
+			} else {
+				require.NoError(t, err)
+				require.Len(t, receipts, 1)
+			}
+		})
+	}
 }
 
 func TestState_setBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
