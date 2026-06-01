@@ -341,6 +341,63 @@ func TestState_ApplyBlock_ApplySonicVmConfigIfNotEthereumChain(t *testing.T) {
 	}
 }
 
+func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChains(t *testing.T) {
+	const sonicChainID = uint64(146)
+	sonicUpgrades := opera.GetSonicUpgrades()
+	sonicChainConfig := opera.CreateTransientEvmChainConfig(
+		sonicChainID,
+		[]opera.UpgradeHeight{},
+		idx.Block(1),
+	)
+
+	const amountGwei = uint64(1000)
+	withdrawalAddr := common.Address{0xAB}
+
+	tests := map[string]struct {
+		chainConfig    *params.ChainConfig
+		upgrades       opera.Upgrades
+		wantBalanceWei uint64
+	}{
+		"ethereum": {
+			chainConfig:    params.MainnetChainConfig,
+			upgrades:       opera.Upgrades{},
+			wantBalanceWei: amountGwei * params.GWei,
+		},
+		"non-ethereum": {
+			chainConfig:    sonicChainConfig,
+			upgrades:       sonicUpgrades,
+			wantBalanceWei: 0,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+			require.NoError(t, err)
+			defer func() { require.NoError(t, state.Close()) }()
+
+			block, err := convert.ConvertToGethBlock(&blockdb.Block{
+				GasLimit: 8_000_000,
+				Withdrawals: []*blockdb.Withdrawal{
+					{Address: withdrawalAddr.Bytes(), Amount: amountGwei},
+				},
+			})
+			require.NoError(t, err)
+
+			processor := evmcore.NewStateProcessorForReplay(
+				tt.chainConfig,
+				&blockHashHistory{},
+				tt.upgrades,
+			)
+
+			_, err = state.ApplyBlock(block, processor, tt.upgrades, nil, tt.chainConfig, nil)
+			require.NoError(t, err)
+
+			require.Equal(t, tt.wantBalanceWei, state.db.GetBalance(cc.Address(withdrawalAddr)).Uint64())
+		})
+	}
+}
+
 func TestState_setBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
 	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
