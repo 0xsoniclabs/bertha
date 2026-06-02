@@ -19,6 +19,7 @@ package replay
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"math/big"
 	"os"
 	"strings"
@@ -29,11 +30,13 @@ import (
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/evmcore"
+	"github.com/0xsoniclabs/sonic/evmcore/core_types"
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"
 	"github.com/0xsoniclabs/sonic/inter"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/tracy"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
@@ -158,8 +161,12 @@ func (s *State) ApplyBlock(
 	upgrades opera.Upgrades,
 	corrections map[common.Address]Correction,
 	chainConfig *params.ChainConfig,
-	onLog func(*types.Log),
+	onLog func(*core_types.Log),
 ) (types.Receipts, error) {
+	blobBaseFee := big.NewInt(1)
+	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsCancun(block.Number(), block.Time()) && block.ExcessBlobGas() != nil {
+		blobBaseFee = eip4844.CalcBlobFee(chainConfig, block.Header())
+	}
 	evmBlock := &evmcore.EvmBlock{
 		EvmHeader: evmcore.EvmHeader{
 			Number:      block.Number(),
@@ -168,7 +175,7 @@ func (s *State) ApplyBlock(
 			GasLimit:    block.GasLimit(),
 			PrevRandao:  block.Header().MixDigest,
 			BaseFee:     block.BaseFee(),
-			BlobBaseFee: big.NewInt(1),
+			BlobBaseFee: blobBaseFee,
 			Coinbase:    block.Coinbase(),
 		},
 		Transactions: block.Transactions(),
@@ -204,6 +211,7 @@ func (s *State) ApplyBlock(
 		&usedGas,
 		0, // Tx index offset
 		onLog,
+		math.MaxUint64,
 	)
 
 	// Check that all transactions were processed (i.e., none were skipped).
@@ -296,13 +304,16 @@ func processSystemCall(
 		Data:      data,
 	}
 
-	txContext := evmcore.NewEVMTxContext(msg)
+	txContext, err := evmcore.NewEVMTxContext(msg)
+	if err != nil {
+		return fmt.Errorf("failed to create EVM transaction context: %w", err)
+	}
 	evm.SetTxContext(txContext)
 	stateDB.AddAddressToAccessList(addr)
 	defer stateDB.EndTransaction()
-	_, _, err := evm.Call(msg.From, *msg.To, msg.Data, msg.GasLimit, common.U2560)
+	_, _, err = evm.Call(msg.From, *msg.To, msg.Data, msg.GasLimit, common.U2560)
 	if err != nil {
-		return fmt.Errorf("failed to execute system call: %v", err)
+		return fmt.Errorf("failed to execute system call: %w", err)
 	}
 	return nil
 }

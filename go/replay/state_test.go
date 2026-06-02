@@ -26,6 +26,7 @@ import (
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
 	cc "github.com/0xsoniclabs/carmen/go/common"
+	"github.com/0xsoniclabs/carmen/go/common/amount"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
@@ -33,6 +34,7 @@ import (
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
@@ -281,6 +283,99 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 	require.Empty(t, receipts)
 
 	require.Equal(t, uint64(1000), state.db.GetBalance(cc.Address{1}).Uint64())
+}
+
+func TestState_ApplyBlock_BlobBaseFeeIsCalculatedFromHeaderForEthereum(t *testing.T) {
+	sonicChainConfig := opera.CreateTransientEvmChainConfig(
+		uint64(146),
+		[]opera.UpgradeHeight{},
+		idx.Block(1),
+	)
+
+	cancunTime := *params.MainnetChainConfig.CancunTime
+	// excessBlobGas causes CalcBlobFee to return a value > 1.
+	excessBlobGas := uint64(3338477)
+	blobGasUsed := uint64(0)
+
+	expectedEthBlobFee := eip4844.CalcBlobFee(params.MainnetChainConfig, &types.Header{ExcessBlobGas: &excessBlobGas, Time: cancunTime})
+	require.True(t, expectedEthBlobFee.Cmp(big.NewInt(1)) > 0,
+		"blob base fee with non-zero ExcessBlobGas should be > 1, got %s", expectedEthBlobFee)
+
+	// A blob tx with BlobFeeCap=1 is below the Ethereum blob base fee (>1)
+	// but meets the Sonic default (1). This causes the tx to be rejected on
+	// Ethereum but processed on Sonic.
+	tests := map[string]struct {
+		chainConfig *params.ChainConfig
+		upgrades    opera.Upgrades
+		wantErr     string
+	}{
+		"Ethereum": {
+			chainConfig: params.MainnetChainConfig,
+			upgrades:    opera.Upgrades{},
+			wantErr:     "skipped txs",
+		},
+		"Sonic": {
+			chainConfig: sonicChainConfig,
+			upgrades:    opera.GetSonicUpgrades(),
+			wantErr:     "",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+			require.NoError(t, err)
+			defer func() { require.NoError(t, state.Close()) }()
+
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			sender := crypto.PubkeyToAddress(key.PublicKey)
+			signer := types.LatestSignerForChainID(tt.chainConfig.ChainID)
+
+			// Fund the sender.
+			state.db.BeginBlock()
+			state.db.BeginTransaction()
+			state.db.AddBalance(cc.Address(sender), amount.New(1e18))
+			state.db.EndTransaction()
+			state.db.EndBlock(0)
+
+			// Create a blob tx with BlobFeeCap=1 (below Ethereum's blob base fee).
+			blobHash := common.Hash{0x01, 0xab}
+			tx := types.MustSignNewTx(key, signer, &types.BlobTx{
+				ChainID:    uint256.MustFromBig(tt.chainConfig.ChainID),
+				Nonce:      0,
+				GasTipCap:  uint256.NewInt(0),
+				GasFeeCap:  uint256.NewInt(0),
+				Gas:        21_000,
+				To:         common.Address{1},
+				BlobFeeCap: uint256.NewInt(1), // intentionally too low for Ethereum
+				BlobHashes: []common.Hash{blobHash},
+			})
+
+			block := types.NewBlockWithHeader(&types.Header{
+				Number:        big.NewInt(20_000_000),
+				Time:          cancunTime,
+				GasLimit:      30_000_000,
+				BaseFee:       big.NewInt(0),
+				ExcessBlobGas: &excessBlobGas,
+				BlobGasUsed:   &blobGasUsed,
+				MixDigest:     common.Hash{1}, // non-zero PrevRandao
+			}).WithBody(types.Body{Transactions: types.Transactions{tx}})
+
+			processor := evmcore.NewStateProcessorForReplay(
+				tt.chainConfig,
+				&blockHashHistory{},
+				tt.upgrades,
+			)
+
+			_, err = state.ApplyBlock(block, processor, tt.upgrades, nil, tt.chainConfig, nil)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestState_ApplyBlock_ApplySonicVmConfigIfNotEthereumChain(t *testing.T) {
