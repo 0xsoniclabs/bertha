@@ -17,6 +17,7 @@
 package replay
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math/big"
 	"os"
@@ -339,6 +340,165 @@ func TestState_ApplyBlock_ApplySonicVmConfigIfNotEthereumChain(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestState_ApplyBlock_EthereumCancunBlock_AppliesEIP4788(t *testing.T) {
+	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, state.Close()) }()
+
+	chainConfig := params.MainnetChainConfig
+	cancunTime := *chainConfig.CancunTime
+	beaconRoot := common.Hash{1, 2, 3}
+	excessBlobGas := uint64(0)
+	blobGasUsed := uint64(0)
+
+	// Deploy the EIP-4788 beacon roots contract so the system call has an effect.
+	state.db.BeginBlock()
+	state.db.BeginTransaction()
+	state.db.SetCode(cc.Address(params.BeaconRootsAddress), params.BeaconRootsCode)
+	state.db.EndTransaction()
+	state.db.EndBlock(0)
+
+	block, err := convert.ConvertToGethBlock(&blockdb.Block{
+		// Use a large block number to ensure all forks including London are active.
+		Number:                20_000_000,
+		Timestamp:             cancunTime,
+		GasLimit:              30_000_000,
+		ExcessBlobGas:         &excessBlobGas,
+		BlobGasUsed:           &blobGasUsed,
+		ParentBeaconBlockRoot: beaconRoot.Bytes(),
+		// A non-zero PrevRandao activates post-merge EVM rules (Random != nil),
+		// which enables Shanghai opcodes like PUSH0 used by the beacon roots contract.
+		PrevRandao: []byte{1},
+	})
+	require.NoError(t, err)
+
+	processor := evmcore.NewStateProcessorForReplay(
+		chainConfig,
+		&blockHashHistory{},
+		opera.Upgrades{},
+	)
+
+	_, err = state.ApplyBlock(block, processor, opera.Upgrades{}, nil, chainConfig, nil)
+	require.NoError(t, err)
+
+	// EIP-4788 stores the beacon root at storage slot (timestamp % 8191) + 8191.
+	// Verify the root was written to the contract's storage.
+	const historyBufferLen = uint64(8191)
+	rootSlot := cancunTime%historyBufferLen + historyBufferLen
+	var rootKey cc.Key
+	binary.BigEndian.PutUint64(rootKey[24:], rootSlot)
+	gotRoot := state.db.GetState(cc.Address(params.BeaconRootsAddress), rootKey)
+	require.Equal(t, cc.Value(beaconRoot), gotRoot)
+}
+
+func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7002(t *testing.T) {
+	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, state.Close()) }()
+
+	chainConfig := params.MainnetChainConfig
+	pragueTime := *chainConfig.PragueTime
+	excessBlobGas := uint64(0)
+	blobGasUsed := uint64(0)
+
+	// Deploy the EIP-7002 contract and pre-populate the
+	// WITHDRAWAL_REQUEST_COUNT slot (slot 1) to simulate requests queued during
+	// a prior block. The system call will compute new excess from this count.
+	requestCount := cc.Value{31: 3} // 3 requests queued
+	countSlot := cc.Key{31: 1}      // WITHDRAWAL_REQUEST_COUNT_SLOT = 1
+	state.db.BeginBlock()
+	state.db.BeginTransaction()
+	state.db.SetCode(cc.Address(params.WithdrawalQueueAddress), params.WithdrawalQueueCode)
+	state.db.SetState(cc.Address(params.WithdrawalQueueAddress), countSlot, requestCount)
+	state.db.EndTransaction()
+	state.db.EndBlock(0)
+
+	block, err := convert.ConvertToGethBlock(&blockdb.Block{
+		Number:        20_000_000,
+		Timestamp:     pragueTime,
+		GasLimit:      30_000_000,
+		ExcessBlobGas: &excessBlobGas,
+		BlobGasUsed:   &blobGasUsed,
+		// A non-zero PrevRandao activates post-merge EVM rules (Random != nil),
+		// which enables Shanghai opcodes like PUSH0 used by the system contracts.
+		PrevRandao: []byte{1},
+	})
+	require.NoError(t, err)
+
+	processor := evmcore.NewStateProcessorForReplay(
+		chainConfig,
+		&blockHashHistory{},
+		opera.Upgrades{},
+	)
+
+	_, err = state.ApplyBlock(block, processor, opera.Upgrades{}, nil, chainConfig, nil)
+	require.NoError(t, err)
+
+	// Verify the main side effects of the system calls:
+	// - EXCESS_REQUESTS (slot 0) = max(0, old_excess + count - TARGET)
+	//   EIP-7002: TARGET=2 → 0 + 3 - 2 = 1
+	// - WITHDRAWAL_REQUEST_COUNT (slot 1) reset to 0
+	excessSlot := cc.Key{} // EXCESS_WITHDRAWAL_REQUESTS_SLOT = 0
+	require.Equal(t, cc.Value{31: 1}, state.db.GetState(cc.Address(params.WithdrawalQueueAddress), excessSlot),
+		"EIP-7002: excess should be count - TARGET_2 = 3 - 2 = 1")
+	require.Equal(t, cc.Value{}, state.db.GetState(cc.Address(params.WithdrawalQueueAddress), countSlot),
+		"EIP-7002: request count should be reset to 0")
+}
+
+func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7251(t *testing.T) {
+	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, state.Close()) }()
+
+	chainConfig := params.MainnetChainConfig
+	pragueTime := *chainConfig.PragueTime
+	excessBlobGas := uint64(0)
+	blobGasUsed := uint64(0)
+
+	// Deploy the EIP-7251 contract and pre-populate the
+	// CONSOLIDATION_REQUEST_COUNT slot (slot 1) to simulate requests queued during
+	// a prior block. The system call will compute new excess from this count.
+	requestCount := cc.Value{31: 3} // 3 requests queued
+	countSlot := cc.Key{31: 1}      // CONSOLIDATION_REQUEST_COUNT_SLOT = 1
+	state.db.BeginBlock()
+	state.db.BeginTransaction()
+	state.db.SetCode(cc.Address(params.ConsolidationQueueAddress), params.ConsolidationQueueCode)
+	state.db.SetState(cc.Address(params.ConsolidationQueueAddress), countSlot, requestCount)
+	state.db.EndTransaction()
+	state.db.EndBlock(0)
+
+	block, err := convert.ConvertToGethBlock(&blockdb.Block{
+		Number:        20_000_000,
+		Timestamp:     pragueTime,
+		GasLimit:      30_000_000,
+		ExcessBlobGas: &excessBlobGas,
+		BlobGasUsed:   &blobGasUsed,
+		// A non-zero PrevRandao activates post-merge EVM rules (Random != nil),
+		// which enables Shanghai opcodes like PUSH0 used by the system contracts.
+		PrevRandao: []byte{1},
+	})
+	require.NoError(t, err)
+
+	processor := evmcore.NewStateProcessorForReplay(
+		chainConfig,
+		&blockHashHistory{},
+		opera.Upgrades{},
+	)
+
+	_, err = state.ApplyBlock(block, processor, opera.Upgrades{}, nil, chainConfig, nil)
+	require.NoError(t, err)
+
+	// Verify the main side effects of the system calls:
+	// - EXCESS_REQUESTS (slot 0) = max(0, old_excess + count - TARGET)
+	//   EIP-7251: TARGET=1 → 0 + 3 - 1 = 2
+	// - CONSOLIDATION_REQUEST_COUNT (slot 1) reset to 0
+	excessSlot := cc.Key{} // EXCESS_CONSOLIDATION_REQUESTS_SLOT = 0
+	require.Equal(t, cc.Value{31: 2}, state.db.GetState(cc.Address(params.ConsolidationQueueAddress), excessSlot),
+		"EIP-7251: excess should be count - TARGET_1 = 3 - 1 = 2")
+	require.Equal(t, cc.Value{}, state.db.GetState(cc.Address(params.ConsolidationQueueAddress), countSlot),
+		"EIP-7251: request count should be reset to 0")
 }
 
 func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChains(t *testing.T) {
