@@ -35,6 +35,7 @@ import (
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
+	"github.com/0xsoniclabs/sonic/evmcore/core_types"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver/drivercall"
@@ -1121,26 +1122,26 @@ func TestOnNewLog_IgnoresLogsWithTooShortData(t *testing.T) {
 	mockStore := NewMockMetadataStore(ctrl)
 
 	mockStore.EXPECT().PatchUpgrades(gomock.Any(), gomock.Any()).Return(nil).Times(0)
-	onNewLog(mockStore, 1, &types.Log{
+	onNewLog(mockStore, 1, &core_types.Log{
 		Address: driver.ContractAddress,
 		Topics:  []common.Hash{driverpos.Topics.UpdateNetworkRules},
 		Data:    make([]byte, 32), // < 64 bytes, should be ignored
 	})
 }
 
-// makeUpdateNetworkRulesLog returns a *types.Log that looks like an
+// makeUpdateNetworkRulesLog returns a *core_types.Log that looks like an
 // UpdateNetworkRules event from the driver contract. The diff is ABI-encoded
 // as a single dynamic bytes parameter:
 //
 //	word 0 (bytes  0–31): offset = 32
 //	word 1 (bytes 32–63): length of diff
 //	bytes 64+:            diff
-func makeUpdateNetworkRulesLog(diff []byte) *types.Log {
+func makeUpdateNetworkRulesLog(diff []byte) *core_types.Log {
 	data := make([]byte, 64+len(diff))
 	new(big.Int).SetInt64(32).FillBytes(data[0:32])
 	new(big.Int).SetInt64(int64(len(diff))).FillBytes(data[32:64])
 	copy(data[64:], diff)
-	return &types.Log{
+	return &core_types.Log{
 		Address: driver.ContractAddress,
 		Topics:  []common.Hash{driverpos.Topics.UpdateNetworkRules},
 		Data:    data,

@@ -1,8 +1,8 @@
 diff --git a/go/go.mod b/go/go.mod
-index fd58cbf..b296480 100644
+index 043657d..520a34d 100644
 --- a/go/go.mod
 +++ b/go/go.mod
-@@ -105,6 +105,6 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
+@@ -125,6 +125,6 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
 
  // This line is automatically uncommented by the `go-run-with-carmen-and-tracy.sh` script.
  //

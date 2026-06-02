@@ -42,6 +42,7 @@ import (
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	_ "github.com/0xsoniclabs/carmen/go/state/gostate"
 	"github.com/0xsoniclabs/sonic/evmcore"
+	"github.com/0xsoniclabs/sonic/evmcore/core_types"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver/drivercall"
@@ -654,7 +655,7 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 
 	corrections := a.metadataStore.GetCorrections(block.NumberU64())
 
-	onLog := func(l *types.Log) { onNewLog(a.metadataStore, block.NumberU64(), l) }
+	onLog := func(l *core_types.Log) { onNewLog(a.metadataStore, block.NumberU64(), l) }
 
 	// Apply the block to the state database.
 	receipts, err := a.state.ApplyBlock(block, processor, upgrades, corrections, chainConfig, onLog)
@@ -778,7 +779,7 @@ func (h *blockHashHistory) Header(_ common.Hash, number uint64) *evmcore.EvmHead
 
 // --- upgrade handling ---
 
-func onNewLog(metadataStore MetadataStore, blockNumber uint64, l *types.Log) {
+func onNewLog(metadataStore MetadataStore, blockNumber uint64, l *core_types.Log) {
 	// https://github.com/0xsoniclabs/sonic/blob/c3816115c9ae51682aa475c715aabbe10e0dcef4/gossip/blockproc/drivermodule/driver_txs.go#L351
 	if l.Address == driver.ContractAddress &&
 		len(l.Topics) > 0 &&
@@ -797,7 +798,7 @@ func onNewLog(metadataStore MetadataStore, blockNumber uint64, l *types.Log) {
 }
 
 // https://github.com/0xsoniclabs/sonic/blob/c3816115c9ae51682aa475c715aabbe10e0dcef4/gossip/blockproc/drivermodule/driver_txs.go#L296
-func decodeDataBytes(l *types.Log) ([]byte, error) {
+func decodeDataBytes(l *core_types.Log) ([]byte, error) {
 	if len(l.Data) < 32 {
 		return nil, io.ErrUnexpectedEOF
 	}
