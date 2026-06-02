@@ -136,13 +136,13 @@ func (db RocksDB) Update(chainID uint64, block *Block) error {
 func (db RocksDB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error] {
 	startKey := computeKey(chainID, startBlockNumber)
 
-	readOptions := grocksdb.NewDefaultReadOptions()
-	defer readOptions.Destroy()
-	it := db.db.NewIterator(readOptions)
-	it.Seek(startKey)
-
 	return func(yield func(*Block, error) bool) {
+		readOptions := grocksdb.NewDefaultReadOptions()
+		defer readOptions.Destroy()
+		it := db.db.NewIterator(readOptions)
 		defer it.Close()
+		it.Seek(startKey)
+
 		for it.Valid() {
 			key := it.Key().Data()
 			// Stop if the key is not a valid block key
@@ -176,12 +176,13 @@ func (db RocksDB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) ite
 func (db RocksDB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error] {
 	endKey := computeKey(chainID, endBlockNumber)
 
-	readOptions := grocksdb.NewDefaultReadOptions()
-	it := db.db.NewIterator(readOptions)
-	it.SeekForPrev(endKey)
-
 	return func(yield func(*Block, error) bool) {
+		readOptions := grocksdb.NewDefaultReadOptions()
+		defer readOptions.Destroy()
+		it := db.db.NewIterator(readOptions)
 		defer it.Close()
+		it.SeekForPrev(endKey)
+
 		for it.Valid() {
 			key := it.Key().Data()
 			// Stop if the key is not a valid block key
