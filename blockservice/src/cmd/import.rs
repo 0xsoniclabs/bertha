@@ -22,7 +22,7 @@ use prost::Message;
 
 use crate::{
     app_dir::open_app_dir,
-    cmd::make_progress_bar,
+    cmd::{CancelIndicator, make_progress_bar},
     config::{ChainConfig, Config},
     db::{BlockDb, BlockDbBatch, RocksBlockDb, proto},
 };
@@ -36,6 +36,7 @@ pub fn import_era1(
     era_dir_path: impl AsRef<Path>,
     chain_id: u64,
     verify: bool,
+    cancel_indicator: &impl CancelIndicator,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     writeln!(
@@ -48,7 +49,15 @@ pub fn import_era1(
     let era_dir = EraDir::<Era1FileReader>::open(era_dir_path, chain_id)?;
     let blocks = era_dir.blocks();
 
-    import(cfg, &db, blocks, chain_id, verify, &mut writer)
+    import(
+        cfg,
+        &db,
+        blocks,
+        chain_id,
+        verify,
+        cancel_indicator,
+        &mut writer,
+    )
 }
 
 /// Imports blocks from a directory containing `.era` files into the database located in `app_dir`.
@@ -56,6 +65,7 @@ pub fn import_era(
     app_dir: impl AsRef<Path>,
     era_dir_path: impl AsRef<Path>,
     chain_id: u64,
+    cancel_indicator: &impl CancelIndicator,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     writeln!(
@@ -68,7 +78,15 @@ pub fn import_era(
     let era_dir = EraDir::<EraFileReader>::open(era_dir_path, chain_id)?;
     let blocks = era_dir.blocks();
 
-    import(cfg, &db, blocks, chain_id, false, &mut writer)
+    import(
+        cfg,
+        &db,
+        blocks,
+        chain_id,
+        false,
+        cancel_indicator,
+        &mut writer,
+    )
 }
 
 /// Imports blocks from a `.g` file into the database located in `app_dir` and optionally verifies
@@ -77,6 +95,7 @@ pub fn import_gfile(
     app_dir: impl AsRef<Path>,
     gfile_path: impl AsRef<Path>,
     verify: bool,
+    cancel_indicator: &impl CancelIndicator,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (cfg, db) = open_app_dir(app_dir, false)?;
@@ -87,7 +106,15 @@ pub fn import_gfile(
     let chain_id = genesis.chain_id();
     let blocks = genesis.blocks();
 
-    import(cfg, &db, blocks, chain_id, verify, &mut writer)
+    import(
+        cfg,
+        &db,
+        blocks,
+        chain_id,
+        verify,
+        cancel_indicator,
+        &mut writer,
+    )
 }
 
 fn import(
@@ -96,6 +123,7 @@ fn import(
     blocks: impl Iterator<Item = Result<Block, genesis_parser::Error>>,
     chain_id: u64,
     verify: bool,
+    cancel_indicator: &impl CancelIndicator,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut blocks = blocks.peekable();
@@ -156,6 +184,11 @@ fn import(
     let mut prev_parent_hash: Option<Hash> = None;
     let before = std::time::Instant::now();
     for result in blocks {
+        if cancel_indicator.is_cancelled() {
+            writeln!(writer, "Import cancelled.")?;
+            break;
+        }
+
         let mut block = result?;
 
         if verify {
@@ -227,12 +260,14 @@ fn import(
 
 #[cfg(test)]
 mod tests {
-
     use bertha_types::Block;
+    use mockall::Sequence;
+    use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::{
         app_dir::init_app_dir,
+        cmd::MockCancelIndicator,
         db::{
             CHAIN_IDS_KEY, KvDb, make_block_ranges_key, serialize_block_ranges, serialize_chain_ids,
         },
@@ -255,6 +290,7 @@ mod tests {
             tmpdir.path(),
             genesis_file.to_str().unwrap(),
             true,
+            &CancellationToken::new(),
             &mut writer,
         )
         .unwrap();
@@ -317,6 +353,7 @@ mod tests {
             tmpdir.path(),
             genesis_file.to_str().unwrap(),
             false,
+            &CancellationToken::new(),
             &mut writer,
         )
         .unwrap();
@@ -355,7 +392,7 @@ mod tests {
 
         let mut writer = Vec::new();
         assert!(
-            import_gfile(tmpdir.path(),genesis_file.to_str().unwrap(), true, &mut writer)
+            import_gfile(tmpdir.path(),genesis_file.to_str().unwrap(), true, &CancellationToken::new(), &mut writer)
                 .unwrap_err()
                 .to_string()
                 .contains("Block zero must have parent hash 0x0000000000000000000000000000000000000000000000000000000000000000")
@@ -384,6 +421,7 @@ mod tests {
                 tmpdir.path(),
                 genesis_file.to_str().unwrap(),
                 true,
+                &CancellationToken::new(),
                 &mut writer
             )
             .unwrap_err()
@@ -426,6 +464,7 @@ mod tests {
                 tmpdir.path(),
                 genesis_file.to_str().unwrap(),
                 true,
+                &CancellationToken::new(),
                 &mut writer
             )
             .unwrap_err()
@@ -473,6 +512,7 @@ mod tests {
                 tmpdir.path(),
                 genesis_file.to_str().unwrap(),
                 true,
+                &CancellationToken::new(),
                 &mut writer
             )
             .unwrap_err()
@@ -509,6 +549,7 @@ mod tests {
                 tmpdir.path(),
                 genesis_file.to_str().unwrap(),
                 false,
+                &CancellationToken::new(),
                 &mut writer,
             );
             assert!(result.is_err());
@@ -527,6 +568,7 @@ mod tests {
                 tmpdir.path(),
                 genesis_file.to_str().unwrap(),
                 false,
+                &CancellationToken::new(),
                 &mut writer,
             );
             assert!(result.is_err());
@@ -551,7 +593,13 @@ mod tests {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let mut writer = Vec::new();
-        let result = import_gfile(tmpdir.path(), "somepath", true, &mut writer);
+        let result = import_gfile(
+            tmpdir.path(),
+            "somepath",
+            true,
+            &CancellationToken::new(),
+            &mut writer,
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no blockservice.toml found at {} - did you forget to run init?",
@@ -569,7 +617,13 @@ mod tests {
         tmpdir.set_permissions(Permissions::ReadOnly).unwrap();
 
         let mut writer = Vec::new();
-        let result = import_gfile(tmpdir.path(), "somepath", true, &mut writer);
+        let result = import_gfile(
+            tmpdir.path(),
+            "somepath",
+            true,
+            &CancellationToken::new(),
+            &mut writer,
+        );
         // We expect an error because we cannot write to the database
         assert!(result.is_err());
         assert!(
@@ -579,5 +633,50 @@ mod tests {
                 .contains("Permission denied")
         );
         assert!(writer.is_empty());
+    }
+
+    #[test]
+    fn stops_import_and_flushes_batch_when_cancelled() {
+        let chain_id = 146;
+
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let (config, db) = open_app_dir(tmpdir.path(), false).unwrap();
+
+        let mut token = MockCancelIndicator::new();
+        let mut seq = Sequence::new();
+        token
+            .expect_is_cancelled()
+            .times(1)
+            .return_const(false)
+            .in_sequence(&mut seq);
+        token
+            .expect_is_cancelled()
+            .times(1)
+            .return_const(true)
+            .in_sequence(&mut seq);
+
+        let mut i = 0;
+        let blocks = std::iter::from_fn(|| {
+            let block = Block {
+                number: i,
+                ..Block::default_sonic()
+            };
+            i += 1;
+            Some(Ok(block))
+        });
+
+        let mut writer = Vec::new();
+        let result = import(config, &db, blocks, chain_id, false, &token, &mut writer);
+        assert!(result.is_ok());
+
+        let output = String::from_utf8(writer).unwrap();
+        assert!(output.contains("Import cancelled."));
+
+        // Only the first block should have been imported.
+        assert!(db.get(chain_id, 0).unwrap().is_some());
+        assert!(db.get(chain_id, 1).unwrap().is_none());
+        assert!(db.get(chain_id, 2).unwrap().is_none());
     }
 }

@@ -104,7 +104,7 @@ async fn client_fetches_and_verifies_blocks() {
     assert!(result.is_ok(), "verify should succeed");
     assert_eq!(
         String::from_utf8_lossy(&log),
-        "[chain ID 146] All blocks verified successfully.\n"
+        "[chain ID 146] Blocks verified successfully.\n"
     );
 
     // Fetch the next 20 blocks from the SONIC chain
@@ -143,6 +143,6 @@ async fn client_fetches_and_verifies_blocks() {
     assert!(result.is_ok(), "verify should succeed");
     assert_eq!(
         String::from_utf8_lossy(&log),
-        "[chain ID 146] All blocks verified successfully.\n"
+        "[chain ID 146] Blocks verified successfully.\n"
     );
 }
