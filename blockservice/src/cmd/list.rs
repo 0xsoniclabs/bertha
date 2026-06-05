@@ -97,9 +97,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        app_dir::{BLOCK_DB_NAME, init_app_dir},
+        app_dir::init_app_dir,
         config::ChainConfig,
-        db::RocksBlockDb,
+        db::{
+            BlockDb, CHAIN_IDS_KEY, KvDb, make_block_ranges_key, serialize_block_ranges,
+            serialize_chain_ids,
+        },
         grpc::{
             auth::{self, AUTHORIZATION_HEADER_NAME},
             proto_rpc::{self, BlockRange, ChainRange, ChainRanges},
@@ -211,7 +214,15 @@ mod tests {
 
         // block ranges for chain id
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.put_ranges_of_chain_id(1, &[2..=4, 6..=8]).unwrap();
+        db.kv_db()
+            .put_raw(
+                &make_block_ranges_key(1),
+                &serialize_block_ranges([2..=4, 6..=8]),
+            )
+            .unwrap();
+        db.kv_db()
+            .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids([1]))
+            .unwrap();
         drop(db);
 
         let mut buf = Vec::new();
@@ -230,8 +241,12 @@ mod tests {
 
         // block ranges for multiple chain ids
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.put_ranges_of_chain_id(3, &[3..=5]).unwrap();
-        db.put_chain_ids(&[1, 3]).unwrap();
+        db.kv_db()
+            .put_raw(&make_block_ranges_key(3), &serialize_block_ranges([3..=5]))
+            .unwrap();
+        db.kv_db()
+            .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids([1, 3]))
+            .unwrap();
         drop(db);
 
         let mut buf = Vec::new();
@@ -261,14 +276,13 @@ mod tests {
             description: "A test chain".to_string(),
             ..ChainConfig::new(32)
         };
-        let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
+        let (mut cfg, db) = open_app_dir(tmpdir.path(), false).unwrap();
         cfg.add_chain(chain_cfg.clone()).unwrap();
 
         // Add ranges for chain 7 w/o adding to config file
-        let db_path = tmpdir.path().join(BLOCK_DB_NAME);
-        let db = RocksBlockDb::open(db_path.clone()).unwrap();
-        db.put_ranges_of_chain_id(7, &[2..=4, 6..=8]).unwrap();
-        db.put_chain_ids(&[7]).unwrap();
+        for n in [2, 3, 4, 6, 7, 8] {
+            db.put_bytes(7, n, b"block").unwrap();
+        }
         drop(db);
 
         let mut buf = Vec::new();

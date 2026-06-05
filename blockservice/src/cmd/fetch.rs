@@ -130,7 +130,7 @@ pub async fn fetch(
                 )
                 .into());
             }
-            db.put_raw(chain_id, encoded_block.number, &encoded_block.data)?;
+            db.put_bytes(chain_id, encoded_block.number, &encoded_block.data)?;
             uncompressed_bytes_written += encoded_block.data.len();
             expected_block += 1;
             progress_bar.inc(1);
@@ -166,7 +166,7 @@ mod tests {
         BlockRange,
         app_dir::{init_app_dir, open_app_dir},
         cmd::fetch::fetch,
-        db::{BlockDb, proto},
+        db::{BlockDb, KvDb, make_block_ranges_key, proto},
         grpc::{
             auth::{self, AUTHORIZATION_HEADER_NAME},
             proto_rpc::{self, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock},
@@ -215,7 +215,8 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         {
             let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-            db.put_metadata_raw(1, vec![0].as_slice()).unwrap(); // Invalid metadata length
+            // Write invalid ranges metadata directly via KVDb
+            db.kv_db().put_raw(&make_block_ranges_key(1), &[0]).unwrap();
         }
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
@@ -239,7 +240,7 @@ mod tests {
         let err = result.expect_err("Fetch should fail with invalid DB");
         assert!(
             err.to_string()
-                .contains("error in underlying storage layer: invalid ranges for chain ID 1")
+                .contains("error in underlying storage layer: invalid block ranges length")
         );
     }
 

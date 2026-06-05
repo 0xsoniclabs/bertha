@@ -24,10 +24,10 @@ use crate::{
     app_dir::open_app_dir,
     cmd::make_progress_bar,
     config::{ChainConfig, Config},
-    db::{BlockBatch, BlockDb, RocksBlockDb, proto},
+    db::{BlockDb, BlockDbBatch, RocksBlockDb, proto},
 };
 
-const BATCH_SIZE: usize = 10000;
+const BATCH_SIZE: usize = 100_000_000; // in bytes
 
 /// Imports blocks from a directory containing `.era1` files into the database located in `app_dir`,
 /// and optionally verifies the parent hashes.
@@ -152,7 +152,7 @@ fn import(
         "Importing {import_blocks} blocks for chain ID {chain_id}"
     )?;
 
-    let mut batch = BlockBatch::new();
+    let mut batch = db.batch();
     let mut prev_parent_hash: Option<Hash> = None;
     let before = std::time::Instant::now();
     for result in blocks {
@@ -196,21 +196,21 @@ fn import(
             break;
         }
 
-        // We use put_raw so we can count bytes.
+        // We use put_bytes so we can count bytes.
         let number = block.number;
         let protoblock = proto::Block::from(block).encode_to_vec();
         uncompressed_bytes_written += protoblock.len();
 
-        if batch.count() >= BATCH_SIZE {
-            db.write_batch(chain_id, batch)?;
-            batch = BlockBatch::new();
+        if batch.size() >= BATCH_SIZE {
+            db.write_batch(batch)?;
+            batch = db.batch();
         }
-        batch.put_raw(chain_id, number, &protoblock)?;
+        batch.put_bytes(chain_id, number, &protoblock);
 
         block_count += 1;
         progress_bar.inc(1);
     }
-    db.write_batch(chain_id, batch)?;
+    db.write_batch(batch)?;
     let elapsed = before.elapsed();
     progress_bar.finish();
     writeln!(
@@ -233,6 +233,9 @@ mod tests {
     use super::*;
     use crate::{
         app_dir::init_app_dir,
+        db::{
+            CHAIN_IDS_KEY, KvDb, make_block_ranges_key, serialize_block_ranges, serialize_chain_ids,
+        },
         utils::test_dir::{Permissions, TestDir},
     };
 
@@ -448,7 +451,16 @@ mod tests {
         let chain_id = 146;
 
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.put_ranges_of_chain_id(chain_id, &[0..=1]).unwrap(); // this data does not exist
+        // Write invalid metadata: claim blocks 0..=1 exist without storing them
+        db.kv_db()
+            .put_raw(
+                &make_block_ranges_key(chain_id),
+                &serialize_block_ranges([0..=1]),
+            )
+            .unwrap();
+        db.kv_db()
+            .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids([chain_id]))
+            .unwrap();
         drop(db);
 
         let genesis_file = tmpdir.path().join("genesis.g");

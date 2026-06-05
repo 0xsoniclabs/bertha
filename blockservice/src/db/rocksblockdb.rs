@@ -19,7 +19,10 @@ use std::path::Path;
 use rocksdb::WriteBatchWithTransaction;
 use tempfile::TempDir;
 
-use crate::{BlockRange, Error, db::BlockDb, utils::ranges::RangesExt};
+use crate::{
+    Error,
+    db::blockdb::{IterationDirection, KvDb, KvDbBatch},
+};
 
 impl From<rocksdb::Error> for Error {
     fn from(e: rocksdb::Error) -> Self {
@@ -27,24 +30,24 @@ impl From<rocksdb::Error> for Error {
     }
 }
 
-/// A block database using RocksDB as its storage layer.
+/// A key-value store using RocksDB as its storage layer.
 #[derive(Debug)]
-pub struct RocksBlockDb {
+pub struct RocksDb {
     db: rocksdb::DB,
 
     /// Path of the secondary instance, if opened for reading.
     _secondary_path: Option<TempDir>,
 }
 
-impl RocksBlockDb {
-    /// Creates a new RocksDB block database at the specified path.
+impl RocksDb {
+    /// Creates a new RocksDB database at the specified path.
     /// Returns an error if the database already exists.
     pub fn create(path: impl AsRef<Path>) -> Result<Self, Error> {
         let mut db_opts = Self::make_options();
         db_opts.set_error_if_exists(true);
         db_opts.create_if_missing(true);
         Ok(Self {
-            db: rocksdb::DB::open(&db_opts, path).map_err(Error::from)?,
+            db: rocksdb::DB::open(&db_opts, path)?,
             _secondary_path: None,
         })
     }
@@ -55,7 +58,7 @@ impl RocksBlockDb {
         let mut db_opts = Self::make_options();
         db_opts.create_if_missing(false);
         Ok(Self {
-            db: rocksdb::DB::open(&db_opts, path).map_err(Error::from)?,
+            db: rocksdb::DB::open(&db_opts, path)?,
             _secondary_path: None,
         })
     }
@@ -70,11 +73,10 @@ impl RocksBlockDb {
         // recommendation or a functional requirement. We currently do not adhere to this advice to
         // avoid running into the rlimit (see comment in make_options).
         let db_opts = Self::make_options();
-        let secondary_path = tempfile::tempdir().map_err(|e| Error::StorageLayer(e.to_string()))?;
+        let secondary_path = tempfile::tempdir()?;
         Ok(Self {
-            db: rocksdb::DB::open_as_secondary(&db_opts, path.as_ref(), secondary_path.path())
-                .map_err(Error::from)?,
-            // This will be removed automatically when the RocksBlockDb instance is dropped.
+            db: rocksdb::DB::open_as_secondary(&db_opts, path.as_ref(), secondary_path.path())?,
+            // This will be removed automatically when the rocksdb instance is dropped.
             _secondary_path: Some(secondary_path),
         })
     }
@@ -96,623 +98,459 @@ impl RocksBlockDb {
         opts.set_max_open_files(1);
         opts
     }
-
-    fn make_key(chain_id: u64, block_number: u64) -> [u8; 16] {
-        let mut key = [0u8; 16];
-        key[0..8].copy_from_slice(&chain_id.to_be_bytes());
-        key[8..16].copy_from_slice(&block_number.to_be_bytes());
-        key
-    }
-
-    /// Iterates over raw protobuf-encoded blocks for the specified chain-ID starting from the given
-    /// block number in the given direction.
-    /// Returns an iterator that yields tuples of (block number, data).
-    /// The sequence of blocks is ordered by block number (depending on the direction in ascending
-    /// or descending order) and may contain gaps for missing blocks.
-    fn iterate_with_direction_raw(
-        &self,
-        chain_id: u64,
-        from: u64,
-        direction: rocksdb::Direction,
-    ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
-        self.db
-            .iterator(rocksdb::IteratorMode::From(
-                &Self::make_key(chain_id, from),
-                direction,
-            ))
-            .map_while({
-                let mut stop = false;
-                move |result| {
-                    if stop {
-                        return None;
-                    }
-                    let (key, value) = match result {
-                        Ok((key, value)) => (key, value),
-                        Err(e) => return Some(Err(Error::StorageLayer(e.to_string()))),
-                    };
-                    if key.len() == 8 {
-                        // we got metadata, so there is no more data for this chain id
-                        return None;
-                    }
-                    if key.len() != 16 {
-                        // we got an error: return the error and stop the iteration
-                        stop = true;
-                        return Some(Err(Error::StorageLayer(format!(
-                            "unexpected key length {}",
-                            key.len()
-                        ))));
-                    }
-                    let cid = u64::from_be_bytes(key[0..8].try_into().unwrap());
-                    if cid != chain_id {
-                        return None;
-                    }
-                    let block_number = u64::from_be_bytes(key[8..16].try_into().unwrap());
-                    Some(Ok((cid, block_number, value)))
-                }
-            })
-            .map(|result| result.map(|(_, block_number, value)| (block_number, value)))
-    }
-
-    /// Write all blocks in the batch to the database.
-    /// This also updates the metadata for the chain-ID and the block ranges.
-    pub fn write_batch(&self, chain_id: u64, block_batch: BlockBatch) -> Result<(), Error> {
-        self.db.write(block_batch.batch)?;
-        for block_range in block_batch.block_ranges {
-            self.add_range_to_ranges(chain_id, block_range)?;
-        }
-        Ok(())
-    }
 }
 
-impl BlockDb for RocksBlockDb {
-    fn get_metadata_raw(&self, key: u64) -> Result<Option<Vec<u64>>, Error> {
-        self.db
-            .get(key.to_be_bytes())
-            .map_err(|e| Error::StorageLayer(e.to_string()))?
-            .map(|value| {
-                if value.len() % 8 != 0 {
-                    return Err(Error::StorageLayer(format!(
-                        "invalid metadata length: data length {} not a multiple of 8 bytes",
-                        value.len()
-                    )));
-                }
-                Ok(value
-                    .chunks_exact(8)
-                    // the length is a multiple of 8, so we can safely unwrap
-                    .map(|chunk| u64::from_be_bytes(chunk.try_into().unwrap()))
-                    .collect())
-            })
-            .transpose()
+impl KvDb for RocksDb {
+    type Batch = RocksBatch;
+
+    fn get_raw(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
+        self.db.get(key).map_err(Error::from)
     }
 
-    fn put_metadata_raw(&self, key: u64, data: &[u64]) -> Result<(), Error> {
-        self.db
-            .put(
-                key.to_be_bytes(),
-                data.iter()
-                    .flat_map(|v| v.to_be_bytes())
-                    .collect::<Vec<u8>>(),
-            )
-            .map_err(|e| Error::StorageLayer(e.to_string()))
+    fn put_raw(&self, key: &[u8], data: &[u8]) -> Result<(), Error> {
+        self.db.put(key, data).map_err(Error::from)
     }
 
-    fn delete_metadata(&self, key: u64) -> Result<(), Error> {
-        self.db
-            .delete(key.to_be_bytes())
-            .map_err(|e| Error::StorageLayer(e.to_string()))
-    }
-
-    fn get_raw(&self, chain_id: u64, block_number: u64) -> Result<Option<Vec<u8>>, Error> {
-        self.db
-            .get(Self::make_key(chain_id, block_number))
-            .map_err(|e| Error::StorageLayer(e.to_string()))
-    }
-
-    fn put_raw(&self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
-        self.db
-            .put(Self::make_key(chain_id, block_number), data)
-            .map_err(|e| Error::StorageLayer(e.to_string()))?;
-        self.add_block_number_to_ranges(chain_id, block_number)
+    fn delete_raw(&self, key: &[u8]) -> Result<(), Error> {
+        self.db.delete(key).map_err(Error::from)
     }
 
     fn iterate_raw(
         &self,
-        chain_id: u64,
-        from: u64,
-    ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
-        self.iterate_with_direction_raw(chain_id, from, rocksdb::Direction::Forward)
+        start: Box<[u8]>,
+        direction: IterationDirection,
+    ) -> impl Iterator<Item = Result<(Box<[u8]>, Box<[u8]>), Error>> {
+        let rocksdb_direction = match direction {
+            IterationDirection::Forward => rocksdb::Direction::Forward,
+            IterationDirection::Reverse => rocksdb::Direction::Reverse,
+        };
+        self.db
+            .iterator(rocksdb::IteratorMode::From(&start, rocksdb_direction))
+            .map(|item| item.map_err(Error::from))
     }
 
-    fn iterate_reverse_raw(
-        &self,
-        chain_id: u64,
-        from: u64,
-    ) -> impl Iterator<Item = Result<(u64, Box<[u8]>), Error>> {
-        self.iterate_with_direction_raw(chain_id, from, rocksdb::Direction::Reverse)
+    fn batch_raw(&self) -> Self::Batch {
+        Self::Batch::default()
     }
 
-    fn delete_range(&self, chain_id: u64, from_block: u64, to_block: u64) -> Result<(), Error> {
-        if from_block > to_block {
-            return Err(Error::StorageLayer(
-                "Invalid argument: end key comes before start key".to_string(),
-            ));
-        }
-        let from = Self::make_key(chain_id, from_block);
-        let to = Self::make_key(chain_id, to_block.saturating_add(1)); // RocksDB expects the end key to be exclusive
-
-        let mut batch = WriteBatchWithTransaction::<false>::default();
-        batch.delete_range(from, to);
-        self.db.write(batch)?;
-
-        self.remove_range_from_ranges(chain_id, &(from_block..=to_block))
+    fn write_batch_raw(&self, batch: Self::Batch) -> Result<(), Error> {
+        self.db.write(batch.batch).map_err(Error::from)
     }
 }
 
-/// A batch of blocks to be written to the database.
-/// This wrapper keeps track of the block ranges that are added to the batch, so that they can be
-/// added to the database after the batch is written.
+/// A batch of write/ delete operations to be written to the database.
 #[derive(Default)]
-pub struct BlockBatch {
-    /// The buffer of blocks to be written.
+pub struct RocksBatch {
+    /// The underlying RocksDB batch.
     /// The `false` parameter indicates that this batch is not transactional.
     batch: WriteBatchWithTransaction<false>,
-    /// The block ranges of the blocks in `batch`.
-    block_ranges: Vec<BlockRange>,
 }
 
-impl BlockBatch {
-    /// Creates a new empty block batch.
-    pub fn new() -> Self {
-        BlockBatch::default()
+impl KvDbBatch for RocksBatch {
+    fn put_raw(&mut self, key: &[u8], data: &[u8]) {
+        self.batch.put(key, data);
     }
 
-    /// Stores the raw protobuf-encoded data for the specified chain-ID and block number in the
-    /// batch.
-    pub fn put_raw(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
-        self.batch
-            .put(RocksBlockDb::make_key(chain_id, block_number), data);
-
-        self.block_ranges.add_range(block_number..=block_number);
-
-        Ok(())
+    fn delete_raw(&mut self, key: &[u8]) {
+        self.batch.delete(key);
     }
 
-    /// Returns the current number of blocks in the batch.
-    pub fn count(&self) -> usize {
-        self.batch.len()
+    fn delete_range_raw(&mut self, start_key: &[u8], end_key: &[u8]) {
+        // RocksDB's delete_range is exclusive of the end key, but this function should delete an
+        // inclusive range, so the end key is deleted separately.
+        self.batch.delete(end_key);
+        self.batch.delete_range(start_key, end_key);
+    }
+
+    fn size(&self) -> usize {
+        self.batch.size_in_bytes()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use mockall::predicate::eq;
+
     use super::*;
-    use crate::{
-        db::test_utils::{make_meta_value, make_range_value},
-        utils::test_dir::{Permissions, TestDir},
-    };
+    use crate::utils::test_dir::{Permissions, TestDir};
 
     #[test]
-    fn rocksblockdb_create_creates_new_db() {
+    fn rocksdb_create_creates_new_db_in_existing_directory() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        RocksBlockDb::create(tmpdir.path()).unwrap();
+        RocksDb::create(tmpdir.path()).unwrap();
         let lock_file = tmpdir.path().join("LOCK");
-        assert!(lock_file.exists(), "RocksDB LOCK file should exist");
+        assert!(lock_file.exists());
     }
 
     #[test]
-    fn rocksblockdb_create_returns_error_if_db_exists() {
+    fn rocksdb_create_creates_new_db_in_non_existent_directory() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        RocksBlockDb::create(tmpdir.path()).unwrap();
-        let result = RocksBlockDb::create(tmpdir.path());
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            format!(
-                "error in underlying storage layer: Invalid argument: {}: exists (error_if_exists is true)",
-                tmpdir.path().display()
-            )
-        );
+        let non_existent_path = tmpdir.path().join("non_existent_dir");
+        RocksDb::create(&non_existent_path).unwrap();
+        let lock_file = non_existent_path.join("LOCK");
+        assert!(lock_file.exists());
     }
 
     #[test]
-    fn rocksblockdb_open_opens_existing_db_for_reading_and_writing() {
+    fn rocksdb_create_returns_error_if_db_exists() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        {
-            RocksBlockDb::create(tmpdir.path()).unwrap();
-        }
-        let db = RocksBlockDb::open(tmpdir.path()).unwrap();
-        db.db.put(b"foo", b"bar").unwrap();
-        let value = db.db.get(b"foo").unwrap().unwrap();
-        assert_eq!(value, b"bar");
+        RocksDb::create(tmpdir.path()).unwrap();
+        let result = RocksDb::create(tmpdir.path());
+        assert!(matches!(
+            result,
+            Err(Error::StorageLayer(msg))
+            if msg.contains("exists (error_if_exists is true)")
+        ));
     }
 
     #[test]
-    fn rocksblockdb_open_returns_error_if_db_does_not_exist() {
+    fn rocksdb_create_returns_error_if_path_is_not_writable() {
+        let tmpdir = TestDir::try_new(Permissions::ReadOnly).unwrap();
+        let result = RocksDb::create(tmpdir.path());
+        assert!(matches!(
+            result,
+            Err(Error::StorageLayer(msg))
+            if msg.contains("Permission denied")
+        ));
+    }
+
+    #[test]
+    fn rocksdb_open_opens_existing_db_for_reading_and_writing() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let result = RocksBlockDb::open(tmpdir.path());
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            format!(
-                "error in underlying storage layer: Invalid argument: {}/CURRENT: does not exist (create_if_missing is false)",
-                tmpdir.path().display()
-            )
-        );
+        RocksDb::create(tmpdir.path()).unwrap();
+        let db = RocksDb::open(tmpdir.path()).unwrap();
+        db.db.put(b"key", b"value").unwrap();
+        let value = db.db.get(b"key").unwrap();
+        assert_eq!(value, Some(b"value".to_vec()));
     }
 
     #[test]
-    fn rocksblockdb_open_returns_error_if_db_already_opened() {
+    fn rocksdb_open_returns_error_if_db_does_not_exist() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let _db = RocksBlockDb::create(tmpdir.path()).unwrap();
-        let result = RocksBlockDb::open(tmpdir.path());
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("No locks available")
-        );
+        let result = RocksDb::open(tmpdir.path());
+        assert!(matches!(
+            result,
+            Err(Error::StorageLayer(msg))
+            if msg.contains("does not exist (create_if_missing is false)")
+        ));
     }
 
     #[test]
-    fn rocksblockdb_open_for_reading_opens_existing_db_for_reading() {
+    fn rocksdb_open_returns_error_if_db_already_opened() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        {
-            let db = RocksBlockDb::create(tmpdir.path()).unwrap();
-            db.db.put(b"foo", b"bar").unwrap();
-        }
-        let db = RocksBlockDb::open_for_reading(tmpdir.path()).unwrap();
-        let value = db.db.get(b"foo").unwrap().unwrap();
-        assert_eq!(value, b"bar");
+        let _db = RocksDb::create(tmpdir.path()).unwrap();
+        let result = RocksDb::open(tmpdir.path());
+        assert!(matches!(
+            result,
+            Err(Error::StorageLayer(msg))
+            if msg.contains("No locks available")
+        ));
     }
 
     #[test]
-    fn rocksblockdb_removes_secondary_path_on_drop() {
+    fn rocksdb_open_for_reading_opens_existing_db_for_reading() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         {
-            RocksBlockDb::create(tmpdir.path()).unwrap();
+            let db = RocksDb::create(tmpdir.path()).unwrap();
+            db.db.put(b"key", b"value").unwrap();
         }
-        let secondary_path;
+        let db = RocksDb::open_for_reading(tmpdir.path()).unwrap();
+        let value = db.db.get(b"key").unwrap();
+        assert_eq!(value, Some(b"value".to_vec()));
+        let result = db.db.put(b"key", b"baz");
+        assert!(matches!(result, Err(e) if e.kind() == rocksdb::ErrorKind::NotSupported));
+    }
+
+    #[test]
+    fn rocksdb_open_for_reading_returns_error_if_db_does_not_exist() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        let result = RocksDb::open_for_reading(tmpdir.path());
+        assert!(matches!(
+            result,
+            Err(Error::StorageLayer(msg))
+            if msg.contains("No such file or directory")
+        ));
+    }
+
+    #[test]
+    fn rocksdb_open_for_reading_can_be_called_multiple_times() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         {
-            let db = RocksBlockDb::open_for_reading(tmpdir.path()).unwrap();
-            assert!(db._secondary_path.is_some());
-            secondary_path = db._secondary_path.as_ref().unwrap().path().to_owned();
-            assert!(secondary_path.exists());
+            let db = RocksDb::create(tmpdir.path()).unwrap();
+            db.db.put(b"key", b"value").unwrap();
         }
+        let db1 = RocksDb::open_for_reading(tmpdir.path()).unwrap();
+        let db2 = RocksDb::open_for_reading(tmpdir.path()).unwrap();
+        let value = db1.db.get(b"key").unwrap().unwrap();
+        assert_eq!(value, b"value");
+        let value = db2.db.get(b"key").unwrap().unwrap();
+        assert_eq!(value, b"value");
+    }
+
+    #[test]
+    fn rocksdb_removes_secondary_path_on_drop() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        RocksDb::create(tmpdir.path()).unwrap();
+        let db = RocksDb::open_for_reading(tmpdir.path()).unwrap();
+        assert!(db._secondary_path.is_some());
+        let secondary_path = db._secondary_path.as_ref().unwrap().path().to_owned();
+        assert!(secondary_path.exists());
+        drop(db);
         assert!(!secondary_path.exists());
     }
 
     #[test]
-    fn rocksblockdb_open_for_reading_returns_error_if_db_does_not_exist() {
+    fn rocksdb_can_be_opened_for_reading_and_writing_concurrently() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let result = RocksBlockDb::open_for_reading(tmpdir.path());
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            format!(
-                "error in underlying storage layer: IO error: No such file or directory: While opening a file for sequentially reading: {}/CURRENT: No such file or directory",
-                tmpdir.path().display()
-            )
-        );
-    }
-
-    #[test]
-    fn rocksblockdb_can_be_opened_multiple_times_for_reading() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        {
-            let db = RocksBlockDb::create(tmpdir.path()).unwrap();
-            db.db.put(b"foo", b"bar").unwrap();
-        }
-        let db1 = RocksBlockDb::open_for_reading(tmpdir.path()).unwrap();
-        let db2 = RocksBlockDb::open_for_reading(tmpdir.path()).unwrap();
-        let value = db1.db.get(b"foo").unwrap().unwrap();
-        assert_eq!(value, b"bar");
-        let value = db2.db.get(b"foo").unwrap().unwrap();
-        assert_eq!(value, b"bar");
-    }
-
-    #[test]
-    fn rocksblockdb_can_be_opened_for_reading_and_writing_concurrently() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let write_db = RocksBlockDb::create(tmpdir.path()).unwrap();
-        let read_db = RocksBlockDb::open_for_reading(tmpdir.path()).unwrap();
-        write_db.db.put(b"foo", b"bar").unwrap();
+        let write_db = RocksDb::create(tmpdir.path()).unwrap();
+        let read_db = RocksDb::open_for_reading(tmpdir.path()).unwrap();
+        write_db.db.put(b"key", b"value").unwrap();
         read_db.db.try_catch_up_with_primary().unwrap();
-        let value = read_db.db.get(b"foo").unwrap().unwrap();
-        assert_eq!(value, b"bar");
+        let value = read_db.db.get(b"key").unwrap().unwrap();
+        assert_eq!(value, b"value");
     }
 
     #[test]
-    fn rocksblockdb_get_metadata_raw_returns_raw_metadata() {
+    fn rocksdb_get_raw_returns_stored_data() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let db = RocksDb::create(tmpdir.path()).unwrap();
+        db.db.put(b"key", b"value").unwrap();
 
-        let key = 1u64;
-        let data = [1u64; 2];
-        db.db
-            .put(
-                key.to_be_bytes(),
-                data.into_iter()
-                    .flat_map(u64::to_be_bytes)
-                    .collect::<Vec<_>>(),
-            )
-            .unwrap();
-
-        let result = db.get_metadata_raw(key).unwrap();
-        assert_eq!(result, Some(data.to_vec()));
-
-        // query non existing key
-        let key = 2u64;
-
-        let result = db.get_metadata_raw(key).unwrap();
-        assert_eq!(result, None);
+        let result = db.get_raw(b"key").unwrap();
+        assert_eq!(result, Some(b"value".to_vec()));
     }
 
     #[test]
-    fn rocksblockdb_get_metadata_raw_returns_error_if_value_length_is_invalid() {
+    fn rocksdb_get_raw_returns_none_for_missing_key() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
-        let key = 1u64;
-        let data = [1u8]; // not a multiple of 8 bytes
-        db.db.put(key.to_be_bytes(), data).unwrap();
+        let db = RocksDb::create(tmpdir.path()).unwrap();
 
-        assert_eq!(
-            db.get_metadata_raw(key),
-            Err(Error::StorageLayer(
-                "invalid metadata length: data length 1 not a multiple of 8 bytes".to_owned()
-            ))
-        );
+        assert_eq!(db.get_raw(b"missing").unwrap(), None);
     }
 
     #[test]
-    fn rocksblockdb_put_metadata_raw_write_raw_metadata() {
+    fn rocksdb_put_raw_stores_data() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
-        let key = 1u64;
-        let data = [1u64; 2];
+        let db = RocksDb::create(tmpdir.path()).unwrap();
 
-        db.put_metadata_raw(key, &data).unwrap();
-
-        let result = db.db.get(key.to_be_bytes()).unwrap();
-
-        assert_eq!(result, Some(make_meta_value(data)));
+        db.put_raw(b"key", b"value").unwrap();
+        let value = db.db.get(b"key").unwrap();
+        assert_eq!(value, Some(b"value".to_vec()));
     }
 
     #[test]
-    fn blockrocksdb_put_raw_adds_range_and_chain_id() {
+    fn rocksdb_put_raw_overwrites_existing_data() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let db = RocksDb::create(tmpdir.path()).unwrap();
+        db.db.put(b"key", b"value1").unwrap();
 
-        let chain_id = 146;
-        let block_number = 123;
-        db.put_raw(chain_id, block_number, b"block").unwrap();
-
-        assert_eq!(
-            db.db.get(0u64.to_be_bytes().as_slice()),
-            Ok(Some(make_meta_value([chain_id])))
-        );
-        assert_eq!(
-            db.db.get(chain_id.to_be_bytes().as_slice()),
-            Ok(Some(make_range_value([block_number..=block_number])))
-        );
+        db.put_raw(b"key", b"value2").unwrap();
+        let value = db.db.get(b"key").unwrap();
+        assert_eq!(value, Some(b"value2".to_vec()));
     }
 
     #[test]
-    fn blockrocksdb_delete_range_removes_range_and_chain_id() {
+    fn rocksdb_put_raw_fails_if_db_opened_as_read_only() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        RocksDb::create(tmpdir.path()).unwrap();
+        let db = RocksDb::open_for_reading(tmpdir.path()).unwrap();
 
-        let chain_id = 146;
-        let block_number = 123;
-        db.put_chain_ids(&[chain_id]).unwrap();
-        db.put_ranges_of_chain_id(chain_id, &[block_number..=block_number])
-            .unwrap();
-        db.delete_range(chain_id, block_number, block_number)
-            .unwrap();
-
-        assert_eq!(db.db.get(0u64.to_be_bytes().as_slice()), Ok(Some(vec![])));
-        assert_eq!(db.db.get(chain_id.to_be_bytes().as_slice()), Ok(None));
+        let result = db.put_raw(b"key", b"value");
+        assert!(matches!(
+            result,
+            Err(e) if e.to_string().contains("Not supported operation in secondary mode")
+        ));
     }
 
     #[test]
-    fn rocksblockdb_put_raw_writes_raw_data() {
+    fn rocksdb_delete_raw_removes_key() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
-        let chain_id = 1;
-        let block_number = 42;
-        let data = b"test data";
-
-        db.put_raw(chain_id, block_number, data).unwrap();
-        let key = RocksBlockDb::make_key(chain_id, block_number);
-        let value = db.db.get(key).unwrap().unwrap();
-        assert_eq!(value, data);
+        let db = RocksDb::create(tmpdir.path()).unwrap();
+        db.db.put(b"key", b"value").unwrap();
+        db.delete_raw(b"key").unwrap();
+        assert_eq!(db.db.get(b"key").unwrap(), None);
     }
 
     #[test]
-    fn rocksblockdb_put_raw_fails_if_db_opened_as_read_only() {
+    fn rocksdb_delete_raw_is_noop_on_non_existing_key() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        {
-            RocksBlockDb::create(tmpdir.path()).unwrap();
-        }
-        let db = RocksBlockDb::open_for_reading(tmpdir.path()).unwrap();
-        let result = db.put_raw(1, 42, b"test data");
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "error in underlying storage layer: Not implemented: Not supported operation in secondary mode."
-        );
+        let db = RocksDb::create(tmpdir.path()).unwrap();
+        db.delete_raw(b"key").unwrap();
     }
 
     #[test]
-    fn rocksblockdb_get_raw_returns_raw_data() {
+    fn rocksdb_iterate_raw_forward_starts_at_given_key_and_continues_until_end() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
-        let chain_id = 1;
-        let block_number = 42;
-        let data = b"test data";
-        let key = RocksBlockDb::make_key(chain_id, block_number);
-        db.db.put(key, data).unwrap();
+        let db = RocksDb::create(tmpdir.path()).unwrap();
 
-        let result = db.get_raw(chain_id, block_number).unwrap();
-        assert_eq!(result, Some(data.to_vec()));
+        db.put_raw(b"a", b"1").unwrap();
+        db.put_raw(b"b", b"2").unwrap();
+        db.put_raw(b"c", b"3").unwrap();
 
-        // query non existing key
-        let result = db.get_raw(chain_id, 100).unwrap();
-        assert_eq!(result, None);
-    }
+        let last_two_entries = vec![
+            (Box::from(b"b".as_slice()), Box::from(b"2".as_slice())),
+            (Box::from(b"c".as_slice()), Box::from(b"3".as_slice())),
+        ];
 
-    #[test]
-    fn rocksblockdb_iterate_raw_returns_blocks_for_single_chain_in_order() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
-
-        db.put_raw(1, 0, b"block1-0").unwrap();
-        db.put_raw(7, 2, b"block7-2").unwrap();
-        db.put_raw(7, 3, b"block7-3").unwrap();
-        db.put_raw(7, 6, b"block7-6").unwrap(); // insert out of order
-        db.put_raw(7, 4, b"block7-4").unwrap();
-        db.put_raw(9, 1, b"block9-1").unwrap();
-
-        // Forward
-        let blocks: Vec<_> = db.iterate_raw(7, 3).collect::<Result<_, _>>().unwrap();
-        assert_eq!(
-            blocks,
-            vec![
-                (3u64, Box::from(b"block7-3".as_slice())),
-                (4u64, Box::from(b"block7-4".as_slice())),
-                (6u64, Box::from(b"block7-6".as_slice()))
-            ]
-        );
-
-        // Reverse
-        let blocks: Vec<_> = db
-            .iterate_reverse_raw(7, 4)
+        // start at existing key
+        let results: Vec<_> = db
+            .iterate_raw(Box::from(b"b".as_slice()), IterationDirection::Forward)
             .collect::<Result<_, _>>()
             .unwrap();
-        assert_eq!(
-            blocks,
-            vec![
-                (4u64, Box::from(b"block7-4".as_slice())),
-                (3u64, Box::from(b"block7-3".as_slice())),
-                (2u64, Box::from(b"block7-2".as_slice()))
-            ]
-        );
+        assert_eq!(results, last_two_entries);
+
+        // start at non-existing key
+        let results: Vec<_> = db
+            .iterate_raw(Box::from(b"a0".as_slice()), IterationDirection::Forward)
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(results, last_two_entries);
     }
 
     #[test]
-    fn rocksblockdb_iterate_raw_returns_error_if_error_occurs_and_stops() {
-        let chain_id = 1;
-
+    fn rocksdb_iterate_raw_reverse_starts_at_given_key_and_continues_until_start() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let db = RocksDb::create(tmpdir.path()).unwrap();
 
-        db.put_raw(chain_id, 0, b"block1-0").unwrap();
-        let mut invalid_key = [0; 17];
-        invalid_key[0..8].copy_from_slice(&chain_id.to_be_bytes());
-        db.db.put(invalid_key, b"block0-1").unwrap();
-        db.put_raw(chain_id, 2, b"block1-2").unwrap();
+        db.put_raw(b"a", b"1").unwrap();
+        db.put_raw(b"b", b"2").unwrap();
+        db.put_raw(b"c", b"3").unwrap();
 
-        let blocks: Vec<_> = db.iterate_raw(chain_id, 0).collect();
-        assert_eq!(
-            blocks,
-            vec![
-                Ok((0u64, Box::from(b"block1-0".as_slice()))),
-                Err(Error::StorageLayer("unexpected key length 17".to_string()))
-            ],
-        );
+        let first_two_entries = vec![
+            (Box::from(b"b".as_slice()), Box::from(b"2".as_slice())),
+            (Box::from(b"a".as_slice()), Box::from(b"1".as_slice())),
+        ];
+
+        // start at existing key
+        let results: Vec<_> = db
+            .iterate_raw(Box::from(b"b".as_slice()), IterationDirection::Reverse)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(results, first_two_entries);
+
+        // start at non-existing key
+        let results: Vec<_> = db
+            .iterate_raw(Box::from(b"b0".as_slice()), IterationDirection::Reverse)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(results, first_two_entries,);
     }
 
     #[test]
-    fn rocksblockdb_delete_range_deletes_blocks_in_range() {
+    fn rocksdb_batch_raw_returns_empty_rocks_batch() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
-        let chain_id = 1;
+        let db = RocksDb::create(tmpdir.path()).unwrap();
 
-        // Insert blocks 1 to 5
-        for i in 1..=5 {
-            db.put_raw(chain_id, i, format!("block {i}").as_bytes())
-                .unwrap();
-        }
-
-        // Delete blocks 2 to 4
-        db.delete_range(chain_id, 2, 4).unwrap();
-
-        // Check remaining blocks
-        assert_eq!(db.get_raw(chain_id, 1).unwrap(), Some(b"block 1".to_vec()));
-        assert_eq!(db.get_raw(chain_id, 2).unwrap(), None);
-        assert_eq!(db.get_raw(chain_id, 3).unwrap(), None);
-        assert_eq!(db.get_raw(chain_id, 4).unwrap(), None); // range end is exclusive
-        assert_eq!(db.get_raw(chain_id, 5).unwrap(), Some(b"block 5".to_vec()));
+        let batch = db.batch_raw();
+        assert_eq!(batch.batch.len(), 0);
     }
 
     #[test]
-    fn rocksblockdb_delete_range_succeeds_if_no_blocks_in_range() {
+    fn rocksdb_write_batch_raw_writes_batch() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
+        let db = RocksDb::create(tmpdir.path()).unwrap();
 
-        // delete range when no blocks exist
-        assert!(db.delete_range(1, 1, 5).is_ok());
+        let mut batch = db.batch_raw();
+        batch.batch.put(b"key1", b"value1");
+        batch.batch.put(b"key2", b"value2");
+
+        db.write_batch_raw(batch).unwrap();
+
+        assert_eq!(db.db.get(b"key1").unwrap(), Some(b"value1".to_vec()));
+        assert_eq!(db.db.get(b"key2").unwrap(), Some(b"value2".to_vec()));
     }
 
     #[test]
-    fn rocksblockdb_delete_range_returns_error_if_start_greater_than_end() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
-        let chain_id = 1;
+    fn rocksbatch_put_raw_adds_put_operation_to_batch() {
+        let mut batch = RocksBatch::default();
+        batch.put_raw(b"key", b"value");
 
-        // Insert blocks 1 to 5
-        for i in 1..=5 {
-            db.put_raw(chain_id, i, format!("block {i}").as_bytes())
-                .unwrap();
-        }
-
-        // Delete range with start greater than end
-        assert_eq!(
-            db.delete_range(chain_id, 2, 1),
-            Err(Error::StorageLayer(
-                "Invalid argument: end key comes before start key".to_string(),
-            ))
-        );
-
-        // Ensure all blocks are still present
-        for i in 1..=5 {
-            assert_eq!(
-                db.get_raw(chain_id, i).unwrap(),
-                Some(format!("block {i}").as_bytes().to_vec())
-            );
-        }
+        let mut inspector = MockBatchInspector::new();
+        inspector
+            .expect_put()
+            .with(eq(b"key".as_slice()), eq(b"value".as_slice()))
+            .times(1)
+            .return_const(());
+        batch.batch.iterate(&mut inspector);
     }
 
     #[test]
-    fn rocksblockdb_batched_writes_write_all_elements_and_update_metadata() {
+    fn rocksbatch_delete_raw_adds_delete_operation_to_batch() {
+        let mut batch = RocksBatch::default();
+        batch.delete_raw(b"key");
+
+        let mut inspector = MockBatchInspector::new();
+        inspector
+            .expect_delete()
+            .with(eq(b"key".as_slice()))
+            .times(1)
+            .return_const(());
+        batch.batch.iterate(&mut inspector);
+    }
+
+    #[test]
+    fn rocksbatch_delete_range_raw_adds_delete_operation_for_end_key_to_batch() {
+        let mut batch = RocksBatch::default();
+        batch.delete_range_raw(b"start", b"end");
+
+        let mut inspector = MockBatchInspector::new();
+        inspector
+            .expect_delete()
+            .with(eq(b"end".as_slice()))
+            .return_const(())
+            .times(1);
+        batch.batch.iterate(&mut inspector);
+        // Note: We currently cannot verify that the delete_range operation was added to the batch,
+        // because the WriteBatchIterator trait does not provide support for this.
+        // This is tested in the test below by writing the batch to a RocksDb instance.
+    }
+
+    #[test]
+    fn rocksbatch_delete_range_raw_deletes_range_inclusively() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let db = RocksBlockDb::create(tmpdir.path()).unwrap();
-        let chain_id = 1;
-        let block_numbers = [1, 2, 4];
-        let ranges = [1..=2, 4..=4];
+        let db = RocksDb::create(tmpdir.path()).unwrap();
 
-        let mut batch = BlockBatch::new();
-        for (i, &block_number) in block_numbers.iter().enumerate() {
-            assert!(batch.count() == i);
-            batch
-                .put_raw(
-                    chain_id,
-                    block_number,
-                    format!("block {block_number}").as_bytes(),
-                )
-                .unwrap();
-            assert!(batch.count() == i + 1);
+        // Populate keys
+        db.put_raw(b"a", b"1").unwrap();
+        db.put_raw(b"b", b"2").unwrap();
+        db.put_raw(b"c", b"3").unwrap();
+        db.put_raw(b"d", b"4").unwrap();
+
+        // delete_range_raw should delete b, c (inclusive range)
+        let mut batch = db.batch_raw();
+        batch.delete_range_raw(b"b", b"c");
+        db.write_batch_raw(batch).unwrap();
+
+        assert_eq!(db.get_raw(b"a").unwrap(), Some(b"1".to_vec()));
+        assert_eq!(db.get_raw(b"b").unwrap(), None);
+        assert_eq!(db.get_raw(b"c").unwrap(), None);
+        assert_eq!(db.get_raw(b"d").unwrap(), Some(b"4".to_vec())); // end key is inclusive
+    }
+
+    #[test]
+    fn rocksbatch_size_returns_size_of_batch() {
+        let mut batch = RocksBatch::default();
+        let size0 = batch.size();
+
+        batch.put_raw(b"key", b"value");
+        let size1 = batch.size();
+        assert!(size1 > size0);
+
+        batch.put_raw(b"key2", b"value");
+        let size2 = batch.size();
+        assert!(size2 > size1);
+
+        batch.delete_raw(b"key");
+        let size3 = batch.size();
+        assert!(size3 > size2);
+    }
+
+    mockall::mock! {
+        pub BatchInspector {}
+
+        impl rocksdb::WriteBatchIterator for BatchInspector  {
+            fn put(&mut self, key: &[u8], value: &[u8]);
+            fn delete(&mut self, key: &[u8]);
         }
-        assert_eq!(batch.block_ranges, ranges);
-
-        db.write_batch(chain_id, batch).unwrap();
-
-        for block_number in block_numbers {
-            assert_eq!(
-                db.get_raw(chain_id, block_number).unwrap(),
-                Some(format!("block {block_number}").as_bytes().to_vec())
-            );
-        }
-        assert_eq!(db.get_ranges_of_chain_id(chain_id).unwrap(), ranges);
     }
 }

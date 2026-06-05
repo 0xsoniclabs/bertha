@@ -21,7 +21,7 @@ use tonic::{service::interceptor::InterceptedService, transport::Server};
 
 use crate::{
     config::Config,
-    db::BlockDb,
+    db::{BlockDb, IterationDirection},
     grpc::{
         GRPC_COMPRESSION_ALGORITHM, auth,
         proto_rpc::{
@@ -103,7 +103,7 @@ where
 
         let db = self.db.clone();
         tokio::spawn(async move {
-            for result in db.iterate_raw(chain_id, from) {
+            for result in db.iterate_bytes(chain_id, from, IterationDirection::Forward) {
                 match result {
                     Ok((number, block)) => {
                         if number > to {
@@ -246,16 +246,18 @@ mod tests {
         for i in 1..=request_count {
             data.push((i as u64, vec![i as u8]));
         }
-        db.expect_iterate_raw().with(eq(1), eq(1)).returning({
-            let data = data.clone();
-            move |_, _| {
-                Box::new(
-                    data.clone()
-                        .into_iter()
-                        .map(|(number, block)| Ok((number, block.into_boxed_slice()))),
-                )
-            }
-        });
+        db.expect_iterate_bytes()
+            .with(eq(1), eq(1), eq(IterationDirection::Forward))
+            .returning({
+                let data = data.clone();
+                move |_, _, _| {
+                    Box::new(
+                        data.clone()
+                            .into_iter()
+                            .map(|(number, block)| Ok((number, block.into_boxed_slice()))),
+                    )
+                }
+            });
 
         let server = RpcServer::new(Arc::new(db), Config::default());
 
@@ -299,9 +301,9 @@ mod tests {
     #[tokio::test]
     async fn get_block_range_forwards_errors() {
         let mut db = MockBlockDb::new();
-        db.expect_iterate_raw()
-            .with(eq(1), eq(0))
-            .returning(|_, _| {
+        db.expect_iterate_bytes()
+            .with(eq(1), eq(0), eq(IterationDirection::Forward))
+            .returning(|_, _, _| {
                 Box::new(std::iter::once(Err(Error::StorageLayer(
                     "DB error".to_owned(),
                 ))))
@@ -329,9 +331,11 @@ mod tests {
     #[tokio::test]
     async fn serve_starts_server_on_specified_listener() {
         let mut db = MockBlockDb::new();
-        db.expect_iterate_raw().with(eq(1), eq(1)).returning({
-            move |_, _| Box::new(vec![Ok((1, vec![1, 2, 3].into_boxed_slice()))].into_iter())
-        });
+        db.expect_iterate_bytes()
+            .with(eq(1), eq(1), eq(IterationDirection::Forward))
+            .returning(|_, _, _| {
+                Box::new(vec![Ok((1, vec![1, 2, 3].into_boxed_slice()))].into_iter())
+            });
 
         let config = Config::default();
         let server = RpcServer::new(Arc::new(db), config.clone());
@@ -363,9 +367,11 @@ mod tests {
     #[tokio::test]
     async fn serve_authenticates_user_if_token_specified() {
         let mut db = MockBlockDb::new();
-        db.expect_iterate_raw().with(eq(1), eq(1)).returning({
-            move |_, _| Box::new(vec![Ok((1, vec![1, 2, 3].into_boxed_slice()))].into_iter())
-        });
+        db.expect_iterate_bytes()
+            .with(eq(1), eq(1), eq(IterationDirection::Forward))
+            .returning(|_, _, _| {
+                Box::new(vec![Ok((1, vec![1, 2, 3].into_boxed_slice()))].into_iter())
+            });
         let db = Arc::new(db);
 
         let auth_token = Some("xyz");
