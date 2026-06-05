@@ -202,7 +202,7 @@ mod tests {
 
     #[rstest_reuse::apply(auth_token)]
     #[tokio::test]
-    async fn starts_server_successfully_and_forwards_auth_token(
+    async fn start_starts_server_successfully_and_forwards_auth_token(
         auth_token: Option<MetadataValue<Ascii>>,
     ) {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();

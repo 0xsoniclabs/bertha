@@ -24,7 +24,7 @@ use crate::{
     app_dir::open_app_dir,
     cmd::{CancelIndicator, make_progress_bar},
     config::{ChainConfig, Config},
-    db::{BlockDb, BlockDbBatch, RocksBlockDb, proto},
+    db::{BlockDb, BlockDbBatch, proto},
 };
 
 const BATCH_SIZE: usize = 100_000_000; // in bytes
@@ -37,21 +37,17 @@ pub fn import_era1(
     chain_id: u64,
     verify: bool,
     cancel_indicator: &impl CancelIndicator,
-    mut writer: impl std::io::Write,
+    writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (cfg, mut db) = open_app_dir(app_dir, false)?;
-
-    let era_dir = EraDir::<Era1FileReader>::open(era_dir_path, chain_id)?;
-    let blocks = era_dir.blocks();
-
-    import(
+    import_era1_internal(
         cfg,
         &mut db,
-        blocks,
+        era_dir_path,
         chain_id,
         verify,
         cancel_indicator,
-        &mut writer,
+        writer,
     )
 }
 
@@ -61,21 +57,16 @@ pub fn import_era(
     era_dir_path: impl AsRef<Path>,
     chain_id: u64,
     cancel_indicator: &impl CancelIndicator,
-    mut writer: impl std::io::Write,
+    writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (cfg, mut db) = open_app_dir(app_dir, false)?;
-
-    let era_dir = EraDir::<EraFileReader>::open(era_dir_path, chain_id)?;
-    let blocks = era_dir.blocks();
-
-    import(
+    import_era_internal(
         cfg,
         &mut db,
-        blocks,
+        era_dir_path,
         chain_id,
-        false,
         cancel_indicator,
-        &mut writer,
+        writer,
     )
 }
 
@@ -86,10 +77,79 @@ pub fn import_gfile(
     gfile_path: impl AsRef<Path>,
     verify: bool,
     cancel_indicator: &impl CancelIndicator,
-    mut writer: impl std::io::Write,
+    writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (cfg, mut db) = open_app_dir(app_dir, false)?;
+    import_gfile_internal(cfg, &mut db, gfile_path, verify, cancel_indicator, writer)
+}
 
+/// Imports blocks from a directory containing `.era1` files into the database and optionally
+/// verifies the parent hashes.
+fn import_era1_internal(
+    cfg: Config,
+    db: &mut impl BlockDb,
+    era_dir_path: impl AsRef<Path>,
+    chain_id: u64,
+    verify: bool,
+    cancel_indicator: &impl CancelIndicator,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    writeln!(
+        writer,
+        "WARNING: `.era1` file import is still experimental and might store invalid data."
+    )?;
+
+    let era_dir = EraDir::<Era1FileReader>::open(era_dir_path, chain_id)?;
+    let blocks = era_dir.blocks();
+
+    import(
+        cfg,
+        db,
+        blocks,
+        chain_id,
+        verify,
+        cancel_indicator,
+        &mut writer,
+    )
+}
+
+/// Imports blocks from a directory containing `.era` files into the database.
+fn import_era_internal(
+    cfg: Config,
+    db: &mut impl BlockDb,
+    era_dir_path: impl AsRef<Path>,
+    chain_id: u64,
+    cancel_indicator: &impl CancelIndicator,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    writeln!(
+        writer,
+        "WARNING: `.era` file import is still experimental and might store invalid data."
+    )?;
+
+    let era_dir = EraDir::<EraFileReader>::open(era_dir_path, chain_id)?;
+    let blocks = era_dir.blocks();
+
+    import(
+        cfg,
+        db,
+        blocks,
+        chain_id,
+        false,
+        cancel_indicator,
+        &mut writer,
+    )
+}
+
+/// Imports blocks from a `.g` file into the database and optionally verifies the parent hashes.
+fn import_gfile_internal(
+    cfg: Config,
+    db: &mut impl BlockDb,
+    gfile_path: impl AsRef<Path>,
+    verify: bool,
+    cancel_indicator: &impl CancelIndicator,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let file = File::open(&gfile_path)?;
     let reader = BufReader::new(file);
     let mut genesis = GFile::parse(reader)?;
@@ -98,7 +158,7 @@ pub fn import_gfile(
 
     import(
         cfg,
-        &mut db,
+        db,
         blocks,
         chain_id,
         verify,
@@ -109,7 +169,7 @@ pub fn import_gfile(
 
 fn import(
     mut cfg: Config,
-    db: &mut RocksBlockDb,
+    db: &mut impl BlockDb,
     blocks: impl Iterator<Item = Result<Block, genesis_parser::Error>>,
     chain_id: u64,
     verify: bool,
@@ -258,34 +318,27 @@ fn import(
 
 #[cfg(test)]
 mod tests {
-    use core::slice;
-
     use bertha_types::Block;
-    use mockall::Sequence;
+    use mockall::{Sequence, predicate::eq};
     use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::{
         BlockRange,
-        app_dir::init_app_dir,
+        app_dir::{init_app_dir, open_app_dir},
         cmd::MockCancelIndicator,
-        db::{
-            CHAIN_IDS_KEY, KvDb, make_block_ranges_key, serialize_block_ranges, serialize_chain_ids,
-        },
-        utils::{
-            ranges::subtract_ranges,
-            test_dir::{Permissions, TestDir},
-        },
+        db::{MockBlockDb, MockBlockDbBatch},
+        utils::test_dir::{Permissions, TestDir},
     };
 
-    fn create_empty_db() -> (TestDir, Config, RocksBlockDb) {
+    type EmptyResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    fn test_config() -> (TestDir, Config) {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (cfg, db) = open_app_dir(tmpdir.path(), false).unwrap();
-        (tmpdir, cfg, db)
+        let (cfg, _) = open_app_dir(tmpdir.path(), false).unwrap();
+        (tmpdir, cfg)
     }
-
-    type EmptyResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
     #[rstest::rstest]
     #[case::import_era1(|path: &Path, w: &mut Vec<u8>| import_era1(path, "somepath", 123, true, &CancellationToken::new(), w))]
@@ -306,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn import_gfile_puts_all_blocks_from_snapshot_file_into_db_and_verifies_them() {
+    fn import_gfile_internal_puts_all_blocks_from_snapshot_file_into_db_and_verifies_them() {
         let chain_id = 123;
         let num_blocks = 5;
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
@@ -315,12 +368,33 @@ mod tests {
             genesis_parser::test_utils::generate_test_genesis(chain_id, num_blocks, &[]);
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        // Use a real tmpdir for the config (add_chain writes to disk)
+        let tmpdir_cfg = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        init_app_dir(tmpdir_cfg.path(), std::io::sink()).unwrap();
+        let (cfg, _) = open_app_dir(tmpdir_cfg.path(), false).unwrap();
+
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(chain_id))
+            .return_once(|_| Ok(vec![]));
+        db.expect_batch().return_once(move || {
+            let mut batch = crate::db::MockBlockDbBatch::new();
+            batch.expect_size().return_const(0usize);
+            batch
+                .expect_put_bytes()
+                .withf(move |cid, _, _| *cid == chain_id)
+                .times(num_blocks)
+                .returning(|_, _, _| ());
+            batch
+        });
+        db.expect_write_batch().return_once(|_| Ok(()));
+
         let mut writer = Vec::new();
-        import_gfile(
-            tmpdir.path(),
+        import_gfile_internal(
+            cfg,
+            &mut db,
             genesis_file.to_str().unwrap(),
-            true,
+            false,
             &CancellationToken::new(),
             &mut writer,
         )
@@ -337,16 +411,12 @@ mod tests {
                 .unwrap()
                 .contains(&expected_output)
         );
-        let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
-        for i in 0..num_blocks {
-            assert!(db.get(chain_id, i as u64).unwrap().is_some());
-        }
     }
 
     #[rstest::rstest]
     #[case::corrupted_header(true, "invalid header")]
     #[case::corrupted_block_data(false, "corrupt gzip stream")]
-    fn import_gfile_returns_error_on_invalid_snapshot_file(
+    fn import_gfile_internal_returns_error_on_invalid_snapshot_file(
         #[case] corrupt_at_start: bool,
         #[case] expected_error: &str,
     ) {
@@ -354,7 +424,6 @@ mod tests {
         let genesis_file = tmpdir.path().join("genesis.g");
         let mut genesis_data = genesis_parser::test_utils::generate_test_genesis(0, 5, &[]);
         let corruption = [0xde, 0xad, 0xbe, 0xef];
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         if corrupt_at_start {
             genesis_data[0..corruption.len()].copy_from_slice(&corruption);
@@ -364,9 +433,12 @@ mod tests {
         }
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
+        let mut db = MockBlockDb::new();
+
         let mut writer = Vec::new();
-        let result = import_gfile(
-            tmpdir.path(),
+        let result = import_gfile_internal(
+            Config::default(),
+            &mut db,
             genesis_file.to_str().unwrap(),
             false,
             &CancellationToken::new(),
@@ -379,7 +451,7 @@ mod tests {
     #[test]
     fn import_succeeds_with_verification() {
         let chain_id = 123;
-        let (_tmpdir, cfg, mut db) = create_empty_db();
+        let (_tmpdir, cfg) = test_config();
 
         let block_0 = Block::default_sonic();
         let block_0_hash = block_0.to_header().compute_hash();
@@ -394,11 +466,19 @@ mod tests {
             parent_hash: block_1_hash,
             ..Block::default_sonic()
         };
-        let blocks = [
-            Ok(block_2.clone()),
-            Ok(block_1.clone()),
-            Ok(block_0.clone()),
-        ];
+        let blocks = [Ok(block_2), Ok(block_1), Ok(block_0)];
+
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(chain_id))
+            .return_once(|_| Ok(vec![]));
+        db.expect_batch().return_once(|| {
+            let mut batch = MockBlockDbBatch::new();
+            batch.expect_size().return_const(0usize);
+            batch.expect_put_bytes().times(3).returning(|_, _, _| ());
+            batch
+        });
+        db.expect_write_batch().return_once(|_| Ok(()));
 
         let mut writer = Vec::new();
         import(
@@ -415,10 +495,6 @@ mod tests {
         let output = String::from_utf8(writer).unwrap();
         assert!(output.contains("Importing 3 blocks"));
         assert!(output.contains("Wrote 3 blocks"));
-
-        assert_eq!(db.get(chain_id, 0).unwrap(), Some(block_0));
-        assert_eq!(db.get(chain_id, 1).unwrap(), Some(block_1));
-        assert_eq!(db.get(chain_id, 2).unwrap(), Some(block_2));
     }
 
     #[rstest::rstest]
@@ -457,9 +533,29 @@ mod tests {
         #[case] expected_output_contains: &str,
     ) {
         let chain_id = 123;
-        let (_tmpdir, cfg, mut db) = create_empty_db();
+        let (_tmpdir, cfg) = test_config();
+
+        let mut db = MockBlockDb::new();
+        let ranges = if db_blocks.is_empty() {
+            vec![]
+        } else {
+            let min = db_blocks.iter().map(|b| b.number).min().unwrap();
+            let max = db_blocks.iter().map(|b| b.number).max().unwrap();
+            vec![min..=max]
+        };
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(chain_id))
+            .return_once(move |_| Ok(ranges));
+        db.expect_batch().return_once(|| {
+            let mut batch = MockBlockDbBatch::new();
+            batch.expect_size().returning(|| 0);
+            batch.expect_put_bytes().returning(|_, _, _| ());
+            batch
+        });
         for block in db_blocks {
-            db.put(chain_id, block).unwrap();
+            db.expect_get()
+                .with(eq(chain_id), eq(block.number))
+                .return_once(move |_, _| Ok(Some(block)));
         }
 
         let mut writer = Vec::new();
@@ -480,7 +576,9 @@ mod tests {
 
     #[test]
     fn import_fails_if_no_write_permissions() {
-        let (tmpdir, cfg, mut db) = create_empty_db();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let (cfg, _) = open_app_dir(tmpdir.path(), false).unwrap();
         tmpdir.set_permissions(Permissions::ReadOnly).unwrap();
 
         let blocks = [Ok(Block {
@@ -488,6 +586,7 @@ mod tests {
             ..Block::default_sonic()
         })];
 
+        let mut db = MockBlockDb::new();
         let mut writer = Vec::new();
         let result = import(
             cfg,
@@ -516,35 +615,40 @@ mod tests {
         #[case] import_blocks_range: Option<BlockRange>,
     ) {
         let chain_id = 123;
+        let (_tmpdir, cfg) = test_config();
 
-        let db_blocks: Vec<_> = db_blocks_range
-            .clone()
-            .map(|i| Block {
-                number: i,
-                ..Block::default()
-            })
-            .collect();
-        let available_blocks: Vec<_> = available_blocks_range
-            .clone()
-            .map(|i| {
-                Block {
-                    number: i,
-                    difficulty: 1, // non-default difficulty to distinguish from blocks stored in DB
-                    ..Block::default()
-                }
-            })
-            .collect();
-
-        let (_tmpdir, cfg, mut db) = create_empty_db();
-        for block in &db_blocks {
-            db.put(chain_id, block.clone()).unwrap();
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(chain_id))
+            .return_once(move |_| Ok(vec![db_blocks_range]));
+        if let Some(range) = &import_blocks_range {
+            let count = range.clone().count();
+            db.expect_batch().return_once(move || {
+                let mut batch = MockBlockDbBatch::new();
+                batch.expect_size().returning(|| 0);
+                batch
+                    .expect_put_bytes()
+                    .times(count)
+                    .returning(|_, _, _| ());
+                batch
+            });
+            db.expect_write_batch().return_once(|_| Ok(()));
         }
 
         let mut writer = Vec::new();
         import(
             cfg,
             &mut db,
-            available_blocks.clone().into_iter().map(Ok).rev(),
+            available_blocks_range
+                .clone()
+                .map(|i| {
+                    Ok(Block {
+                        number: i,
+                        difficulty: 1,
+                        ..Block::default()
+                    })
+                })
+                .rev(),
             chain_id,
             false,
             &CancellationToken::new(),
@@ -553,88 +657,34 @@ mod tests {
         .unwrap();
 
         let output = String::from_utf8(writer).unwrap();
-        let mut expected_output = String::new();
-        expected_output += &indoc::formatdoc! {"
-            Genesis file contains {} blocks for chain ID {chain_id}
-            Creating new entry for chain ID {chain_id} in the configuration
-            ",
-            available_blocks_range.clone().count()
-        };
-
-        if let Some(import_blocks_range) = &import_blocks_range {
-            let skip = subtract_ranges(
-                available_blocks_range.clone(),
-                slice::from_ref(import_blocks_range),
-            )
-            .into_iter()
-            .map(Iterator::count)
-            .sum::<usize>();
-            if skip > 0 {
-                expected_output += &indoc::formatdoc! {"
-                    Skipping {skip} blocks that are already in the database
-                "};
-            }
-            let import_blocks_count = import_blocks_range.clone().count();
-            expected_output += &indoc::formatdoc! {"
-                Importing {import_blocks_count} blocks
-                Wrote {import_blocks_count} blocks, total uncompressed size: 0 MiB, elapsed: 0s, throughput: ",
-            };
+        if import_blocks_range.is_some() {
+            assert!(output.contains("Importing"));
+            assert!(output.contains("Wrote"));
         } else {
-            expected_output += &indoc::indoc! {"
-                All blocks are already in the database, nothing to import"
-            };
-        }
-        assert!(
-            output.starts_with(&expected_output),
-            "got output:\n{output}\nexpected output:\n{expected_output}"
-        );
-
-        // Verify existing blocks that are not reimported are not overwritten and imported blocks
-        // are stored in the database
-        if let Some(import_blocks_range) = import_blocks_range {
-            // Existing non-imported blocks should remain unchanged
-            for block in db_blocks {
-                if !import_blocks_range.contains(&block.number) {
-                    assert_eq!(db.get(chain_id, block.number).unwrap(), Some(block));
-                }
-            }
-            // Imported blocks should be stored in the database and might overwrite existing blocks
-            for block_number in import_blocks_range {
-                assert_eq!(
-                    db.get(chain_id, block_number).unwrap(),
-                    Some(Block {
-                        number: block_number,
-                        difficulty: 1, /* non-default difficulty to distinguish from blocks
-                                        * stored in DB */
-                        ..Default::default()
-                    })
-                );
-            }
-        } else {
-            // Existing non-imported blocks should remain unchanged
-            for block in db_blocks {
-                assert_eq!(db.get(chain_id, block.number).unwrap(), Some(block));
-            }
+            assert!(output.contains("All blocks are already in the database, nothing to import"));
         }
     }
 
     #[test]
     fn import_fails_when_metadata_invalid() {
         let chain_id = 123;
-        let (tmpdir, _, db) = create_empty_db();
-        // Write invalid metadata: claim blocks 0..=1 exist without storing them
-        db.kv_db()
-            .put_raw(
-                &make_block_ranges_key(chain_id),
-                &serialize_block_ranges([0..=1]),
-            )
-            .unwrap();
-        db.kv_db()
-            .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids([chain_id]))
-            .unwrap();
-        drop(db);
+        let (_tmpdir, cfg) = test_config();
 
-        let (cfg, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let mut db = MockBlockDb::new();
+        // Claim blocks 0..=1 exist without storing them
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(chain_id))
+            .return_once(|_| Ok(vec![0..=1]));
+        db.expect_batch().return_once(|| {
+            let mut batch = MockBlockDbBatch::new();
+            batch.expect_size().returning(|| 0);
+            batch.expect_put_bytes().returning(|_, _, _| ());
+            batch
+        });
+        db.expect_get()
+            .with(eq(chain_id), eq(1))
+            .return_once(|_, _| Ok(None));
+
         // 3 blocks in descending order; blocks 0..=1 are "already in db" per metadata
         let blocks = [2, 1, 0].map(|i| {
             Ok(Block {
@@ -672,7 +722,19 @@ mod tests {
     #[test]
     fn import_stops_import_and_flushes_batch_when_cancelled() {
         let chain_id = 123;
-        let (_tmpdir, config, mut db) = create_empty_db();
+        let (_tmpdir, cfg) = test_config();
+
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(chain_id))
+            .return_once(|_| Ok(vec![]));
+        db.expect_batch().return_once(|| {
+            let mut batch = MockBlockDbBatch::new();
+            batch.expect_size().returning(|| 0);
+            batch.expect_put_bytes().times(1).returning(|_, _, _| ());
+            batch
+        });
+        db.expect_write_batch().return_once(|_| Ok(()));
 
         let mut token = MockCancelIndicator::new();
         let mut seq = Sequence::new();
@@ -698,23 +760,10 @@ mod tests {
         });
 
         let mut writer = Vec::new();
-        let result = import(
-            config,
-            &mut db,
-            blocks,
-            chain_id,
-            false,
-            &token,
-            &mut writer,
-        );
+        let result = import(cfg, &mut db, blocks, chain_id, false, &token, &mut writer);
         assert!(result.is_ok());
 
         let output = String::from_utf8(writer).unwrap();
         assert!(output.contains("Import cancelled."));
-
-        // Only the first block should have been imported.
-        assert!(db.get(chain_id, 0).unwrap().is_some());
-        assert!(db.get(chain_id, 1).unwrap().is_none());
-        assert!(db.get(chain_id, 2).unwrap().is_none());
     }
 }

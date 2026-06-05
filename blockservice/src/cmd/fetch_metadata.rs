@@ -16,17 +16,26 @@
 
 use std::path::Path;
 
-use crate::{app_dir::open_app_dir, db::BlockDb, grpc::RpcClient};
+use crate::{app_dir::open_app_dir, config::Config, db::BlockDb, grpc::RpcClient};
 
 /// Fetches metadata from a remote blockservice and stores it in the local database.
 pub async fn fetch_metadata(
     app_dir: impl AsRef<Path>,
     url: String,
     chain_id: u64,
-    mut writer: impl std::io::Write,
+    writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (cfg, mut db) = open_app_dir(&app_dir, false)?;
+    fetch_metadata_internal(cfg, &mut db, url, chain_id, writer).await
+}
 
+async fn fetch_metadata_internal(
+    cfg: Config,
+    db: &mut impl BlockDb,
+    url: String,
+    chain_id: u64,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let auth_token = cfg.get_auth_token().cloned();
 
     let mut client = RpcClient::try_new(url, auth_token).await?;
@@ -58,7 +67,9 @@ mod tests {
 
     use super::*;
     use crate::{
-        app_dir::init_app_dir,
+        app_dir::{init_app_dir, open_app_dir},
+        config::Config,
+        db::MockBlockDb,
         grpc::{
             auth::{self, AUTHORIZATION_HEADER_NAME},
             proto_rpc,
@@ -74,12 +85,21 @@ mod tests {
     #[case::only_corrections(None, Some(b"corrections".to_vec()))]
     #[case::both_metadata(Some(b"upgrade-heights".to_vec()), Some(b"corrections".to_vec()))]
     #[tokio::test]
-    async fn fetches_metadata_and_stores_in_database(
+    async fn fetch_metadata_internal_fetches_and_stores_in_database(
         #[case] upgrade_heights: Option<Vec<u8>>,
         #[case] corrections: Option<Vec<u8>>,
     ) {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let mut db = MockBlockDb::new();
+        if upgrade_heights.is_some() {
+            db.expect_put_upgrade_heights()
+                .times(1)
+                .returning(|_, _| Ok(()));
+        }
+        if corrections.is_some() {
+            db.expect_put_corrections()
+                .times(1)
+                .returning(|_, _| Ok(()));
+        }
 
         let mut server = MockRpcServer::new();
         server.expect_get_metadata().returning({
@@ -97,37 +117,35 @@ mod tests {
         let chain_id = 1;
 
         let mut log = Vec::new();
-        let result =
-            fetch_metadata(tmpdir.path(), server.address.clone(), chain_id, &mut log).await;
+        let result = fetch_metadata_internal(
+            Config::default(),
+            &mut db,
+            server.address.clone(),
+            chain_id,
+            &mut log,
+        )
+        .await;
 
         assert!(result.is_ok());
         let log_str = String::from_utf8(log).unwrap();
 
-        let (_cfg, db) = open_app_dir(tmpdir.path(), true).unwrap();
-
         if upgrade_heights.is_some() {
             assert!(log_str.contains(&format!("Stored upgrade heights for chain ID {chain_id}")));
-            let stored = db.get_upgrade_heights(chain_id).unwrap().unwrap();
-            assert_eq!(stored, upgrade_heights.unwrap());
         } else {
             assert!(log_str.contains(&format!(
                 "No upgrade heights available for chain ID {chain_id}"
             )));
-            assert!(db.get_upgrade_heights(chain_id).unwrap().is_none());
         }
 
         if corrections.is_some() {
             assert!(log_str.contains(&format!("Stored corrections for chain ID {chain_id}")));
-            let stored = db.get_corrections(chain_id).unwrap().unwrap();
-            assert_eq!(stored, corrections.unwrap());
         } else {
             assert!(log_str.contains(&format!("No corrections available for chain ID {chain_id}")));
-            assert!(db.get_corrections(chain_id).unwrap().is_none());
         }
     }
 
     #[tokio::test]
-    async fn fails_if_app_dir_is_not_initialized() {
+    async fn fetch_metadata_fails_if_app_dir_is_not_initialized() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let mut log = Vec::new();
@@ -142,20 +160,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_for_invalid_server_url() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
+    async fn fetch_metadata_internal_fails_for_invalid_server_url() {
+        let mut db = MockBlockDb::new();
         let url = "invalid-url".to_string();
-        let result = fetch_metadata(tmpdir.path(), url, 1, std::io::sink()).await;
+        let result =
+            fetch_metadata_internal(Config::default(), &mut db, url, 1, std::io::sink()).await;
         assert_eq!(result.unwrap_err().to_string(), "transport error");
     }
 
     #[tokio::test]
-    async fn forwards_server_errors() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
+    async fn fetch_metadata_internal_forwards_server_errors() {
         let mut mock_server = MockRpcServer::new();
         mock_server
             .expect_get_metadata()
@@ -163,15 +177,25 @@ mod tests {
 
         let server = TestServer::new(mock_server).await;
 
+        let mut db = MockBlockDb::new();
         let mut log = Vec::new();
-        let result = fetch_metadata(tmpdir.path(), server.address.clone(), 1, &mut log).await;
+        let result = fetch_metadata_internal(
+            Config::default(),
+            &mut db,
+            server.address.clone(),
+            1,
+            &mut log,
+        )
+        .await;
 
         assert!(result.unwrap_err().to_string().contains("server error"));
     }
 
     #[rstest_reuse::apply(auth_token)]
     #[tokio::test]
-    async fn provides_auth_token_when_supplied(auth_token: Option<MetadataValue<Ascii>>) {
+    async fn fetch_metadata_internal_provides_auth_token_when_supplied(
+        auth_token: Option<MetadataValue<Ascii>>,
+    ) {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (mut cfg, _db) = open_app_dir(tmpdir.path(), true).unwrap();
@@ -202,8 +226,10 @@ mod tests {
             });
 
         let server = TestServer::new(mock_server).await;
+        let mut db = MockBlockDb::new();
         let mut buf = Vec::new();
-        let result = fetch_metadata(tmpdir.path(), server.address.clone(), 1, &mut buf).await;
-        assert!(result.is_ok(), "fetch metadata should succeed");
+        let result =
+            fetch_metadata_internal(cfg, &mut db, server.address.clone(), 1, &mut buf).await;
+        assert!(result.is_ok());
     }
 }

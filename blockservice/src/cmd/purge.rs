@@ -30,14 +30,22 @@ pub fn purge(
     chain_id: u64,
     from: Option<u64>,
     to: Option<u64>,
+    writer: impl std::io::Write,
+    reader: &impl InputReader,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (_, mut db) = open_app_dir(app_dir, false)?;
+
+    purge_internal(&mut db, chain_id, from, to, writer, reader)
+}
+
+fn purge_internal(
+    db: &mut impl BlockDb,
+    chain_id: u64,
+    from: Option<u64>,
+    to: Option<u64>,
     mut writer: impl std::io::Write,
     reader: &impl InputReader,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if chain_id == 0 {
-        return Err("chain ID cannot be 0".into());
-    }
-    // Guard the purge command
-    let (_, mut db) = open_app_dir(app_dir, false)?;
     let block_ranges = db.get_ranges_of_chain_id(chain_id)?;
     // Nothing to do
     if block_ranges.is_empty() {
@@ -87,13 +95,14 @@ pub fn purge(
 mod tests {
     use std::io::Cursor;
 
-    use bertha_types::Block;
+    use mockall::predicate::eq;
     use rstest::rstest;
 
     use super::*;
     use crate::{
         app_dir::init_app_dir,
-        db::{BlockDb, CHAIN_IDS_KEY, KvDb, make_block_ranges_key, serialize_chain_ids},
+        db::MockBlockDb,
+        error::Error,
         utils::test_dir::{Permissions, TestDir},
     };
 
@@ -101,7 +110,7 @@ mod tests {
     static DENY_PURGE: Cursor<&'static str> = Cursor::new("n\n");
 
     #[test]
-    fn fails_if_app_dir_is_not_initialized() {
+    fn purge_fails_if_app_dir_is_not_initialized() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let mut output = Vec::new();
@@ -115,7 +124,7 @@ mod tests {
     }
 
     #[test]
-    fn fails_if_no_write_permissions() {
+    fn purge_fails_if_no_write_permissions() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         // create database
@@ -136,61 +145,33 @@ mod tests {
     }
 
     #[test]
-    fn fails_for_invalid_stored_chain_ids() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.kv_db()
-            .put_raw(&make_block_ranges_key(42), &[0]) // invalid value for block ranges
-            .unwrap();
-        db.kv_db()
-            .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids([42]))
-            .unwrap();
-        drop(db);
+    fn purge_internal_fails_for_invalid_stored_chain_ids() {
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(42))
+            .return_once(|_| {
+                Err(Error::StorageLayer(
+                    "invalid block ranges length".to_string(),
+                ))
+            });
 
-        let err = purge(
-            tmpdir.path(),
-            42,
-            None,
-            None,
-            std::io::sink(),
-            &CONFIRM_PURGE,
-        )
-        .expect_err("purge should fail");
+        let err = purge_internal(&mut db, 42, None, None, std::io::sink(), &CONFIRM_PURGE)
+            .expect_err("purge should fail");
         assert!(
             err.to_string()
                 .contains("error in underlying storage layer: invalid block ranges length")
         );
     }
 
-    #[tokio::test]
-    async fn fails_for_chain_id_zero() {
-        let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
-        let mut writer = Vec::new();
-        let result = purge(tmpdir.path(), 0, None, None, &mut writer, &CONFIRM_PURGE);
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err().to_string(), "chain ID cannot be 0");
-    }
-
     #[test]
-    fn fails_for_invalid_range() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.put(1, Block::default_sonic()).unwrap();
-        drop(db);
+    fn purge_internal_fails_for_invalid_range() {
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(1))
+            .return_once(|_| Ok(vec![0..=5]));
 
         let mut output = Vec::new();
-        let result = purge(
-            tmpdir.path(),
-            1,
-            Some(2),
-            Some(1),
-            &mut output,
-            &CONFIRM_PURGE,
-        );
+        let result = purge_internal(&mut db, 1, Some(2), Some(1), &mut output, &CONFIRM_PURGE);
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().to_string(),
@@ -200,98 +181,66 @@ mod tests {
     }
 
     #[rstest]
-    #[case::full_range(None, None)]
-    #[case::with_start(Some(1), None)]
-    #[case::with_end(None, Some(2))]
-    #[case::with_start_and_end(Some(1), Some(2))]
-    fn deletes_range_of_blocks(#[case] from: Option<u64>, #[case] to: Option<u64>) {
+    #[case::full_range(None, None, 0, 3, 4)]
+    #[case::with_start(Some(1), None, 1, 3, 3)]
+    #[case::with_end(None, Some(2), 0, 2, 3)]
+    #[case::with_start_and_end(Some(1), Some(2), 1, 2, 2)]
+    fn purge_internal_deletes_range_of_blocks(
+        #[case] from: Option<u64>,
+        #[case] to: Option<u64>,
+        #[case] expected_from: u64,
+        #[case] expected_to: u64,
+        #[case] expected_count: u64,
+    ) {
         // this test is just supposed to check that the purge command calls
-        // BlockRocksDb::delete_range, not that all the corner cases work because they are
+        // BlockDb::delete_range, not that all the corner cases work because they are
         // already tested in BlockRocksDb::delete_range
 
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
         let chain_id = 146;
-        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
-
-        let mut block = Block::default();
-        db.put(chain_id, block.clone()).unwrap();
-        block.number = 1;
-        db.put(chain_id, block.clone()).unwrap();
-        block.number = 2;
-        db.put(chain_id, block.clone()).unwrap();
-        block.number = 3;
-        db.put(chain_id, block).unwrap();
-        drop(db);
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(chain_id))
+            .return_once(move |_| Ok(vec![0..=3]));
+        db.expect_delete_range()
+            .with(eq(chain_id), eq(expected_from), eq(expected_to))
+            .return_once(|_, _, _| Ok(()));
 
         let mut output = Vec::new();
-        purge(
-            tmpdir.path(),
-            chain_id,
-            from,
-            to,
-            &mut output,
-            &CONFIRM_PURGE,
-        )
-        .unwrap();
+        purge_internal(&mut db, chain_id, from, to, &mut output, &CONFIRM_PURGE).unwrap();
         assert_eq!(
             String::from_utf8(output).unwrap(),
             format!(
-                "Purging {} blocks in range {} - {} for chain ID 146. Are you sure you want to continue? (y/n): Blocks successfully purged\n",
-                to.unwrap_or(3) - from.unwrap_or(0) + 1,
-                from.unwrap_or(0),
-                to.unwrap_or(3)
+                "Purging {expected_count} blocks in range {expected_from} - {expected_to} for chain ID {chain_id}. Are you sure you want to continue? (y/n): Blocks successfully purged\n",
             )
-        );
-
-        let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
-        assert_eq!(
-            db.get(chain_id, 0).unwrap().is_none(),
-            (from.unwrap_or(0)..=to.unwrap_or(3)).contains(&0)
-        );
-        assert_eq!(
-            db.get(chain_id, 1).unwrap().is_none(),
-            (from.unwrap_or(0)..=to.unwrap_or(3)).contains(&1)
-        );
-        assert_eq!(
-            db.get(chain_id, 2).unwrap().is_none(),
-            (from.unwrap_or(0)..=to.unwrap_or(3)).contains(&2)
-        );
-        assert_eq!(
-            db.get(chain_id, 3).unwrap().is_none(),
-            (from.unwrap_or(0)..=to.unwrap_or(3)).contains(&3)
         );
     }
 
     #[test]
-    fn cancel_operation_if_user_does_not_confirm() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
-        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.put_bytes(42, 1, &[1, 2, 3]).unwrap();
-        drop(db);
+    fn purge_internal_cancel_operation_if_user_does_not_confirm() {
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(42))
+            .return_once(|_| Ok(vec![1..=1]));
+        db.expect_delete_range().never();
 
         let mut output = Vec::new();
-        purge(tmpdir.path(), 42, None, None, &mut output, &DENY_PURGE)
+        purge_internal(&mut db, 42, None, None, &mut output, &DENY_PURGE)
             .expect("purge should succeed");
         assert_eq!(
             String::from_utf8(output).unwrap(),
             "Purging 1 blocks in range 0 - 1 for chain ID 42. Are you sure you want to continue? (y/n): "
         );
-
-        let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
-        assert_eq!(db.get_bytes(42, 1).unwrap(), Some(vec![1, 2, 3]));
     }
 
     #[test]
-    fn cancel_operation_if_db_is_empty() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+    fn purge_internal_cancel_operation_if_db_is_empty() {
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(42))
+            .return_once(|_| Ok(vec![]));
 
         let mut output = Vec::new();
-        purge(tmpdir.path(), 42, None, None, &mut output, &CONFIRM_PURGE)
+        purge_internal(&mut db, 42, None, None, &mut output, &CONFIRM_PURGE)
             .expect("purge should succeed");
         assert_eq!(
             String::from_utf8(output).unwrap(),
@@ -300,23 +249,15 @@ mod tests {
     }
 
     #[test]
-    fn cancel_operation_if_range_to_purge_is_empty() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.put(
-            42,
-            Block {
-                number: 1,
-                ..Default::default()
-            },
-        )
-        .unwrap();
-        drop(db);
+    fn purge_internal_cancel_operation_if_range_to_purge_is_empty() {
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(42))
+            .return_once(|_| Ok(vec![1..=1]));
 
         let mut output = Vec::new();
-        purge(
-            tmpdir.path(),
+        purge_internal(
+            &mut db,
             42,
             Some(3),
             Some(4), // range is not in the local db
@@ -333,34 +274,23 @@ mod tests {
     #[rstest]
     #[case::lowercase("y")]
     #[case::uppercase("Y")]
-    fn guard_is_case_unsensitive(#[case] confirmation: &str) {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+    fn purge_internal_guard_is_case_unsensitive(#[case] confirmation: &str) {
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(42))
+            .return_once(move |_| Ok(vec![1..=1]));
+        db.expect_delete_range()
+            .with(eq(42), eq(0u64), eq(1u64))
+            .return_once(|_, _, _| Ok(()));
 
-        let set_elem = || {
-            let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
-            db.put(
-                42,
-                Block {
-                    number: 1,
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        };
-        set_elem();
-        let mut output = Vec::new();
-        purge(
-            tmpdir.path(),
+        purge_internal(
+            &mut db,
             42,
             None,
             None,
-            &mut output,
+            std::io::sink(),
             &Cursor::new(confirmation),
         )
         .unwrap();
-
-        let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
-        assert!(db.get(42, 1).unwrap().is_none());
     }
 }

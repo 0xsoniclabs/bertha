@@ -30,10 +30,27 @@ pub fn verify(
     block_number: Option<u64>,
     block_hash: Option<Hash>,
     cancellation_token: &impl CancelIndicator,
-    mut writer: impl std::io::Write,
+    writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (_cfg, db) = open_app_dir(app_dir, true)?;
+    verify_internal(
+        &db,
+        chain_id,
+        block_number,
+        block_hash,
+        cancellation_token,
+        writer,
+    )
+}
 
+fn verify_internal(
+    db: &impl BlockDb,
+    chain_id: u64,
+    block_number: Option<u64>,
+    block_hash: Option<Hash>,
+    cancellation_token: &impl CancelIndicator,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut errors = 0;
 
     if let (Some(block_number), Some(expected_hash)) = (block_number, block_hash) {
@@ -135,8 +152,7 @@ pub fn verify(
 mod tests {
 
     use bertha_types::Block;
-    use mockall::Sequence;
-    use prost::Message;
+    use mockall::{Sequence, predicate::eq};
     use rstest::rstest;
     use tokio_util::sync::CancellationToken;
 
@@ -144,12 +160,12 @@ mod tests {
     use crate::{
         app_dir::init_app_dir,
         cmd::MockCancelIndicator,
-        db::proto,
+        db::{IterationDirection, MockBlockDb},
         utils::test_dir::{Permissions, TestDir},
     };
 
     #[test]
-    fn fails_if_app_dir_is_not_initialized() {
+    fn verify_fails_if_app_dir_is_not_initialized() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let result = verify(
@@ -168,7 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn fails_if_no_read_permissions() {
+    fn verify_fails_if_no_read_permissions() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         // create database
@@ -197,15 +213,9 @@ mod tests {
     #[rstest]
     #[case::correct_hash(true)]
     #[case::incorrect_hash(false)]
-    fn checks_hash_of_block(#[case] correct_hash: bool) {
+    fn verify_internal_checks_hash_of_block(#[case] correct_hash: bool) {
         let chain_id = 146;
-
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
-
         let block = Block::default();
-        db.put(chain_id, block.clone()).unwrap();
 
         let hash = if correct_hash {
             block.to_header().compute_hash()
@@ -213,9 +223,26 @@ mod tests {
             Hash::default() // intentionally wrong hash
         };
 
+        let mut db = MockBlockDb::new();
+        db.expect_get()
+            .with(eq(chain_id), eq(block.number))
+            .return_once({
+                let block = block.clone();
+                move |_, _| Ok(Some(block))
+            });
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(chain_id))
+            .return_once(|_| Ok(vec![0..=0]));
+        db.expect_iterate()
+            .with(eq(chain_id), eq(0u64), eq(IterationDirection::Forward))
+            .return_once({
+                let block = block.clone();
+                move |_, _, _| Box::new(std::iter::once(Ok((0u64, block))))
+            });
+
         let mut output = Vec::new();
-        let result = verify(
-            tmpdir.path(),
+        let result = verify_internal(
+            &db,
             chain_id,
             Some(block.number),
             Some(hash),
@@ -240,16 +267,24 @@ mod tests {
     }
 
     #[test]
-    fn prints_message_if_block_not_found() {
+    fn verify_internal_prints_message_if_block_not_found() {
         let chain_id = 146;
         let block_number = 0;
 
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let mut db = MockBlockDb::new();
+        db.expect_get()
+            .with(eq(chain_id), eq(block_number))
+            .return_once(|_, _| Ok(None));
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(chain_id))
+            .return_once(|_| Ok(vec![]));
+        db.expect_iterate()
+            .with(eq(chain_id), eq(0u64), eq(IterationDirection::Forward))
+            .return_once(|_, _, _| Box::new(std::iter::empty()));
 
         let mut buf = Vec::new();
-        let result = verify(
-            tmpdir.path(),
+        let result = verify_internal(
+            &db,
             chain_id,
             Some(block_number),
             Some(Hash::default()),
@@ -268,29 +303,34 @@ mod tests {
     #[rstest]
     #[case::matching_number(true)]
     #[case::mismatching_number(false)]
-    fn checks_number_of_block(#[case] matching_number: bool) {
+    fn verify_internal_checks_number_of_block(#[case] matching_number: bool) {
         let chain_id = 146;
 
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
-
-        let mut block = Block::default();
-        let block_number = if matching_number {
-            db.put(chain_id, block.clone()).unwrap();
-            block.number
+        let (block_number, block, iter_entry) = if matching_number {
+            let block = Block::default(); // block.number = 0
+            let block_number = block.number;
+            (block_number, block.clone(), (block_number, block))
         } else {
-            // at block number 0, blocknumber (0) and block.number (1) mismatch
-            block.number = 1;
-            let block_number = 0; // intentionally wrong block number
-            let data = proto::Block::from(block.clone()).encode_to_vec();
-            db.put_bytes(chain_id, block_number, &data).unwrap();
-            block_number
+            // block at key 0 but block.number = 1 (intentionally wrong)
+            let block = Block {
+                number: 1,
+                ..Block::default()
+            };
+            let block_number = 0;
+            (block_number, block.clone(), (block_number, block))
         };
 
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(chain_id))
+            .return_once(|_| Ok(vec![0..=0]));
+        db.expect_iterate()
+            .with(eq(chain_id), eq(0u64), eq(IterationDirection::Forward))
+            .return_once(move |_, _, _| Box::new(std::iter::once(Ok(iter_entry))));
+
         let mut output = Vec::new();
-        let result = verify(
-            tmpdir.path(),
+        let result = verify_internal(
+            &db,
             chain_id,
             None,
             None,
@@ -319,32 +359,35 @@ mod tests {
     #[rstest]
     #[case::correct_parent_hash(true)]
     #[case::incorrect_parent_hash(false)]
-    fn checks_parent_hash_of_block(#[case] correct_parent_hash: bool) {
+    fn verify_internal_checks_parent_hash_of_block(#[case] correct_parent_hash: bool) {
         let chain_id = 146;
 
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
-
         let block0 = Block::default();
-        db.put(chain_id, block0.clone()).unwrap();
-
-        // correct hash
-        let mut block1 = Block {
+        let block1 = Block {
             number: 1,
-            parent_hash: block0.to_header().compute_hash(),
+            parent_hash: if correct_parent_hash {
+                block0.to_header().compute_hash()
+            } else {
+                Hash::default() // intentionally wrong
+            },
             ..Block::default()
         };
 
-        if !correct_parent_hash {
-            // intentionally wrong parent hash
-            block1.parent_hash = Hash::default();
-        }
-        db.put(chain_id, block1.clone()).unwrap();
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(chain_id))
+            .return_once(|_| Ok(vec![0..=1]));
+        db.expect_iterate()
+            .with(eq(chain_id), eq(0u64), eq(IterationDirection::Forward))
+            .return_once({
+                let block0 = block0.clone();
+                let block1 = block1.clone();
+                move |_, _, _| Box::new(vec![Ok((0u64, block0)), Ok((1u64, block1))].into_iter())
+            });
 
         let mut output = Vec::new();
-        let result = verify(
-            tmpdir.path(),
+        let result = verify_internal(
+            &db,
             chain_id,
             None,
             None,
@@ -369,34 +412,54 @@ mod tests {
     }
 
     #[test]
-    fn skips_parent_hash_check_between_disjoint_ranges() {
+    fn verify_internal_skips_parent_hash_check_between_disjoint_ranges() {
         let chain_id = 146;
 
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let block0 = Block::default();
+        let block1 = Block {
+            number: 1,
+            parent_hash: block0.to_header().compute_hash(),
+            ..Block::default()
+        };
+        // block 2 is missing (gap)
+        let block3 = Block {
+            number: 3,
+            parent_hash: Hash::default(), // wrong parent hash, but should be skipped due to gap
+            ..Block::default()
+        };
+        let block4 = Block {
+            number: 4,
+            parent_hash: block3.to_header().compute_hash(),
+            ..Block::default()
+        };
 
-        let mut block = Block::default();
-        db.put(chain_id, block.clone()).unwrap();
-
-        // correct hash
-        block.parent_hash = block.to_header().compute_hash();
-        block.number = 1;
-        db.put(chain_id, block.clone()).unwrap();
-
-        // skip one block and use mismatching parent hash
-        block.parent_hash = Hash::default();
-        block.number = 3;
-        db.put(chain_id, block.clone()).unwrap();
-
-        // correct hash
-        block.parent_hash = block.to_header().compute_hash();
-        block.number = 4;
-        db.put(chain_id, block.clone()).unwrap();
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(chain_id))
+            .return_once(|_| Ok(vec![0..=1, 3..=4]));
+        db.expect_iterate()
+            .with(eq(chain_id), eq(0u64), eq(IterationDirection::Forward))
+            .return_once({
+                let b0 = block0.clone();
+                let b1 = block1.clone();
+                let b3 = block3.clone();
+                let b4 = block4.clone();
+                move |_, _, _| {
+                    Box::new(
+                        vec![
+                            Ok((0u64, b0)),
+                            Ok((1u64, b1)),
+                            Ok((3u64, b3)),
+                            Ok((4u64, b4)),
+                        ]
+                        .into_iter(),
+                    )
+                }
+            });
 
         let mut buf = Vec::new();
-        let result = verify(
-            tmpdir.path(),
+        let result = verify_internal(
+            &db,
             chain_id,
             None,
             None,
@@ -411,12 +474,8 @@ mod tests {
     }
 
     #[test]
-    fn stops_verification_when_cancelled() {
+    fn verify_internal_stops_verification_when_cancelled() {
         let chain_id = 146;
-
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let block0 = Block {
             number: 0,
@@ -428,9 +487,18 @@ mod tests {
             parent_hash: block0.to_header().compute_hash(),
             ..Block::default()
         };
-        db.put(chain_id, block0).unwrap();
-        db.put(chain_id, block1).unwrap();
-        drop(db);
+
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(chain_id))
+            .return_once(|_| Ok(vec![0..=1]));
+        db.expect_iterate()
+            .with(eq(chain_id), eq(0u64), eq(IterationDirection::Forward))
+            .return_once({
+                let b0 = block0.clone();
+                let b1 = block1.clone();
+                move |_, _, _| Box::new(vec![Ok((0u64, b0)), Ok((1u64, b1))].into_iter())
+            });
 
         let mut token = MockCancelIndicator::new();
         let mut seq = Sequence::new();
@@ -446,7 +514,7 @@ mod tests {
             .in_sequence(&mut seq);
 
         let mut output = Vec::new();
-        let result = verify(tmpdir.path(), chain_id, None, None, &token, &mut output);
+        let result = verify_internal(&db, chain_id, None, None, &token, &mut output);
         assert!(result.is_ok());
 
         let output = String::from_utf8(output).unwrap();

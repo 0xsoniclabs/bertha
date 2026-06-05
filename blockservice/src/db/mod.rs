@@ -18,19 +18,11 @@ mod blockdb;
 pub mod proto;
 mod rocksdb;
 
-pub use blockdb::{BlockDb, BlockDbBatch, IterationDirection, KvDbBackedBlockDb};
 // By not exposing the KvDb outside of tests, access to the underlying key-value database is
 // only possible through the BlockDb interface.
+pub use blockdb::{BlockDb, BlockDbBatch, IterationDirection, KvDbBackedBlockDb};
 #[cfg(test)]
-pub use blockdb::{
-    //TODO make private
-    CHAIN_IDS_KEY,
-    KvDb,
-    MockBlockDb,
-    make_block_ranges_key,
-    serialize_block_ranges,
-    serialize_chain_ids,
-};
+pub use blockdb::{MockBlockDb, MockBlockDbBatch};
 pub use rocksdb::RocksDb;
 
 pub type RocksBlockDb = KvDbBackedBlockDb<RocksDb>;

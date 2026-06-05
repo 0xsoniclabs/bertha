@@ -239,7 +239,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn config_file_address_binder_bind_address_binds_address_with_config_file_port() {
+    async fn bind_address_binds_with_config_file_port() {
         let temp_dir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(temp_dir.path(), std::io::sink()).unwrap();
         let mut rng = SmallRng::seed_from_u64(123);
@@ -259,7 +259,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn config_file_address_binder_fails_for_non_existing_config_dir() {
+    async fn bind_address_fails_for_non_existing_config_dir() {
         let non_existing_dir = std::path::PathBuf::from("/non/existing/dir");
         let binder = ConfigFileAddressBinder::new(non_existing_dir);
         let result = binder.bind_address().await;
@@ -273,7 +273,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn config_file_address_binder_fails_for_port_already_in_use() {
+    async fn bind_address_fails_for_port_already_in_use() {
         let temp_dir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(temp_dir.path(), std::io::sink()).unwrap();
 

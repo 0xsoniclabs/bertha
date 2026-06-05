@@ -256,13 +256,6 @@ where
         Ok(Self { db })
     }
 
-    /// Provides access to the underlying [KvDb] for test setup/verification.
-    #[cfg(test)]
-    pub(crate) fn kv_db(&self) -> &D {
-        // TODO remove this method
-        &self.db
-    }
-
     /// Executes a function that operates on a batch, then writes the batch atomically.
     fn execute_in_batch<R>(&mut self, f: impl FnOnce(&mut D::Batch) -> R) -> Result<R, Error> {
         let mut batch = self.db.batch_raw();
@@ -689,7 +682,7 @@ mod tests {
                 assert!(result.is_ok());
                 let db = result.unwrap();
                 assert_eq!(
-                    db.kv_db().get_raw(&VERSION_KEY).unwrap(),
+                    db.db.get_raw(&VERSION_KEY).unwrap(),
                     Some(serialize_version(CURRENT_VERSION).to_vec())
                 );
             }
@@ -821,7 +814,7 @@ mod tests {
     ) {
         let (_tmpdir, db) = create_rocks_block_db();
         if let Some(payload) = stored_payload {
-            db.kv_db().put_raw(&CHAIN_IDS_KEY, &payload).unwrap();
+            db.db.put_raw(&CHAIN_IDS_KEY, &payload).unwrap();
         }
         assert_eq!(db.get_chain_ids(), expected);
     }
@@ -872,7 +865,7 @@ mod tests {
         let chain_id = 1;
         let (_tmpdir, db) = create_rocks_block_db();
         if let Some(payload) = stored_payload {
-            db.kv_db()
+            db.db
                 .put_raw(&make_block_ranges_key(chain_id), &payload)
                 .unwrap();
         }
@@ -909,7 +902,7 @@ mod tests {
         let chain_id = 1;
         let (_tmpdir, db) = create_rocks_block_db();
         if let Some(payload) = &stored_payload {
-            db.kv_db()
+            db.db
                 .put_raw(&make_upgrade_heights_key(chain_id), payload)
                 .unwrap();
         }
@@ -968,19 +961,17 @@ mod tests {
         let chain_id = 2;
         let data = vec![1, 2, 3];
         let (_tmpdir, mut db) = create_rocks_block_db();
-        db.kv_db()
+        db.db
             .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids(existing_chain_ids))
             .unwrap();
         db.put_upgrade_heights(chain_id, &data).unwrap();
 
         assert_eq!(
-            db.kv_db()
-                .get_raw(&make_upgrade_heights_key(chain_id))
-                .unwrap(),
+            db.db.get_raw(&make_upgrade_heights_key(chain_id)).unwrap(),
             Some(data)
         );
         assert_eq!(
-            db.kv_db().get_raw(&CHAIN_IDS_KEY).unwrap(),
+            db.db.get_raw(&CHAIN_IDS_KEY).unwrap(),
             Some(serialize_chain_ids([1, 2, 3]))
         );
     }
@@ -1015,7 +1006,7 @@ mod tests {
         let chain_id = 1;
         let (_tmpdir, db) = create_rocks_block_db();
         if let Some(payload) = &stored_payload {
-            db.kv_db()
+            db.db
                 .put_raw(&make_corrections_key(chain_id), payload)
                 .unwrap();
         }
@@ -1074,17 +1065,17 @@ mod tests {
         let chain_id = 2;
         let data = vec![1, 2, 3];
         let (_tmpdir, mut db) = create_rocks_block_db();
-        db.kv_db()
+        db.db
             .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids(existing_chain_ids))
             .unwrap();
         db.put_corrections(chain_id, &data).unwrap();
 
         assert_eq!(
-            db.kv_db().get_raw(&make_corrections_key(chain_id)).unwrap(),
+            db.db.get_raw(&make_corrections_key(chain_id)).unwrap(),
             Some(data)
         );
         assert_eq!(
-            db.kv_db().get_raw(&CHAIN_IDS_KEY).unwrap(),
+            db.db.get_raw(&CHAIN_IDS_KEY).unwrap(),
             Some(serialize_chain_ids([1, 2, 3]))
         );
     }
@@ -1112,7 +1103,7 @@ mod tests {
         let block = some_block();
         let encoded = proto::Block::from(block.clone()).encode_to_vec();
         let (_tmpdir, db) = create_rocks_block_db();
-        db.kv_db()
+        db.db
             .put_raw(&make_block_key(chain_id, block.number), &encoded)
             .unwrap();
         let received = db.get(chain_id, block.number).unwrap().unwrap();
@@ -1140,7 +1131,7 @@ mod tests {
         let chain_id = 1;
         let block_number = 0;
         let (_tmpdir, db) = create_rocks_block_db();
-        db.kv_db()
+        db.db
             .put_raw(&make_block_key(chain_id, block_number), &[1, 2, 3])
             .unwrap();
         let result = db.get(chain_id, block_number);
@@ -1170,7 +1161,7 @@ mod tests {
         let block_number = 2;
         let raw_data = [0, 1, 2];
         let (_tmpdir, db) = create_rocks_block_db();
-        db.kv_db()
+        db.db
             .put_raw(&make_block_key(chain_id, block_number), &raw_data)
             .unwrap();
         let received = db.get_bytes(chain_id, block_number).unwrap().unwrap();
@@ -1258,7 +1249,7 @@ mod tests {
         db.put(chain_id, block.clone()).unwrap();
 
         assert_eq!(
-            db.kv_db()
+            db.db
                 .get_raw(&make_block_key(chain_id, block.number))
                 .unwrap(),
             Some(encoded)
@@ -1349,12 +1340,12 @@ mod tests {
         let (_tmpdir, mut db) = create_rocks_block_db();
 
         if let Some(existing_chain_ids) = existing_chain_ids {
-            db.kv_db()
+            db.db
                 .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids(existing_chain_ids))
                 .unwrap();
         }
         if let Some(existing_ranges) = existing_ranges {
-            db.kv_db()
+            db.db
                 .put_raw(
                     &make_block_ranges_key(chain_id),
                     &serialize_block_ranges(existing_ranges.clone()),
@@ -1365,19 +1356,17 @@ mod tests {
         db.put_bytes(chain_id, block_number, b"data").unwrap();
 
         assert_eq!(
-            db.kv_db()
+            db.db
                 .get_raw(&make_block_key(chain_id, block_number))
                 .unwrap(),
             Some(b"data".to_vec())
         );
         assert_eq!(
-            db.kv_db()
-                .get_raw(&make_block_ranges_key(chain_id))
-                .unwrap(),
+            db.db.get_raw(&make_block_ranges_key(chain_id)).unwrap(),
             Some(serialize_block_ranges(new_ranges))
         );
         assert_eq!(
-            db.kv_db().get_raw(&CHAIN_IDS_KEY).unwrap(),
+            db.db.get_raw(&CHAIN_IDS_KEY).unwrap(),
             Some(serialize_chain_ids(new_chain_ids))
         );
     }
@@ -1553,7 +1542,7 @@ mod tests {
     ) {
         let chain_id = 1;
         let (_tmpdir, db) = create_rocks_block_db();
-        db.kv_db()
+        db.db
             .put_raw(&make_block_key(chain_id, 1), &raw_block)
             .unwrap();
 
@@ -1730,7 +1719,7 @@ mod tests {
         let start_block_number = 1;
         let (_tmpdir, db) = create_rocks_block_db();
         for (key, value) in raw_items {
-            db.kv_db().put_raw(&key, &value).unwrap();
+            db.db.put_raw(&key, &value).unwrap();
         }
 
         let result: Vec<_> = db
@@ -1895,7 +1884,7 @@ mod tests {
         let start_block_number = 3;
         let (_tmpdir, db) = create_rocks_block_db();
         for (key, value) in raw_items {
-            db.kv_db().put_raw(&key, &value).unwrap();
+            db.db.put_raw(&key, &value).unwrap();
         }
 
         let result: Vec<_> = db
@@ -2046,10 +2035,10 @@ mod tests {
         let (_tmpdir, mut db) = create_rocks_block_db();
 
         // Set up existing state via kv_db
-        db.kv_db()
+        db.db
             .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids([1, 2]))
             .unwrap();
-        db.kv_db()
+        db.db
             .put_raw(&make_block_ranges_key(2), &serialize_block_ranges([1..=2]))
             .unwrap();
         let existing_blocks = [
@@ -2058,7 +2047,7 @@ mod tests {
             (2, 2, b"existing"),
         ];
         for (cid, bn, data) in existing_blocks {
-            db.kv_db().put_raw(&make_block_key(cid, bn), data).unwrap();
+            db.db.put_raw(&make_block_key(cid, bn), data).unwrap();
         }
 
         let new_blocks = [(2, 2, b"block"), (2, 3, b"block"), (3, 1, b"block")];
@@ -2071,7 +2060,7 @@ mod tests {
         // Verify data
         for (chain_id, block_number, data) in new_blocks {
             assert_eq!(
-                db.kv_db()
+                db.db
                     .get_raw(&make_block_key(chain_id, block_number))
                     .unwrap(),
                 Some(data.to_vec())
@@ -2079,15 +2068,15 @@ mod tests {
         }
         // Verify metadata
         assert_eq!(
-            db.kv_db().get_raw(&CHAIN_IDS_KEY).unwrap(),
+            db.db.get_raw(&CHAIN_IDS_KEY).unwrap(),
             Some(serialize_chain_ids([1, 2, 3]))
         );
         assert_eq!(
-            db.kv_db().get_raw(&make_block_ranges_key(2)).unwrap(),
+            db.db.get_raw(&make_block_ranges_key(2)).unwrap(),
             Some(serialize_block_ranges([1..=3]))
         );
         assert_eq!(
-            db.kv_db().get_raw(&make_block_ranges_key(3)).unwrap(),
+            db.db.get_raw(&make_block_ranges_key(3)).unwrap(),
             Some(serialize_block_ranges([1..=1]))
         );
     }

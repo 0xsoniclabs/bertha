@@ -24,10 +24,20 @@ pub fn view(
     app_dir: impl AsRef<Path>,
     chain_id: u64,
     block_number: u64,
-    mut writer: impl std::io::Write,
+    writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (_cfg, db) = open_app_dir(app_dir, true)?;
+    view_internal(&db, chain_id, block_number, writer)
+}
 
+/// Writes the pretty-printed JSON representation of the block with the specified `block_number` for
+/// `chain_id` stored in the block database to `writer`.
+fn view_internal(
+    db: &impl BlockDb,
+    chain_id: u64,
+    block_number: u64,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let block = db.get(chain_id, block_number)?;
     match block {
         Some(block) => {
@@ -46,15 +56,17 @@ pub fn view(
 mod tests {
 
     use bertha_types::Block;
+    use mockall::predicate::eq;
 
     use super::*;
     use crate::{
         app_dir::init_app_dir,
+        db::MockBlockDb,
         utils::test_dir::{Permissions, TestDir},
     };
 
     #[test]
-    fn fails_if_app_dir_is_not_initialized() {
+    fn view_fails_if_app_dir_is_not_initialized() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let result = view(tmpdir.path(), 1, 0, std::io::sink());
@@ -66,7 +78,7 @@ mod tests {
     }
 
     #[test]
-    fn fails_if_no_read_permissions() {
+    fn view_fails_if_no_read_permissions() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         // create database
@@ -86,17 +98,20 @@ mod tests {
     }
 
     #[test]
-    fn writes_block_if_exists() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
+    fn view_internal_writes_block_if_exists() {
         let chain_id = 1;
         let block = Block::default();
-        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.put(chain_id, block.clone()).unwrap();
+
+        let mut db = MockBlockDb::new();
+        db.expect_get()
+            .with(eq(chain_id), eq(block.number))
+            .return_once({
+                let block = block.clone();
+                move |_, _| Ok(Some(block))
+            });
 
         let mut buf = Vec::new();
-        let result = view(tmpdir.path(), chain_id, block.number, &mut buf);
+        let result = view_internal(&db, chain_id, block.number, &mut buf);
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -105,12 +120,17 @@ mod tests {
     }
 
     #[test]
-    fn writes_error_message_if_not_exists() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+    fn view_internal_writes_error_message_if_not_exists() {
+        let chain_id = 1;
+        let block_number = 0;
+
+        let mut db = MockBlockDb::new();
+        db.expect_get()
+            .with(eq(chain_id), eq(block_number))
+            .return_once(|_, _| Ok(None));
 
         let mut buf = Vec::new();
-        let result = view(tmpdir.path(), 1, 0, &mut buf);
+        let result = view_internal(&db, chain_id, block_number, &mut buf);
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),

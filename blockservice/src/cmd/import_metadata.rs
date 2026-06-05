@@ -24,10 +24,32 @@ pub fn import_upgrade_heights(
     app_dir: impl AsRef<Path>,
     chain_id: u64,
     file: impl AsRef<Path>,
-    mut writer: impl std::io::Write,
+    writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (_cfg, mut db) = open_app_dir(app_dir, false)?;
+    import_upgrade_heights_internal(&mut db, chain_id, file, writer)
+}
 
+/// Reads the contents of `file` and stores them as the corrections for `chain_id` in the
+/// block database located at `app_dir`.
+pub fn import_corrections(
+    app_dir: impl AsRef<Path>,
+    chain_id: u64,
+    file: impl AsRef<Path>,
+    writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (_cfg, mut db) = open_app_dir(app_dir, false)?;
+    import_corrections_internal(&mut db, chain_id, file, writer)
+}
+
+/// Reads the contents of `file` and stores them as the upgrade heights for `chain_id` in the
+/// block database.
+fn import_upgrade_heights_internal(
+    db: &mut impl BlockDb,
+    chain_id: u64,
+    file: impl AsRef<Path>,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let data = std::fs::read(file)?;
     db.put_upgrade_heights(chain_id, &data)?;
     writeln!(
@@ -38,15 +60,13 @@ pub fn import_upgrade_heights(
 }
 
 /// Reads the contents of `file` and stores them as the corrections for `chain_id` in the
-/// block database located at `app_dir`.
-pub fn import_corrections(
-    app_dir: impl AsRef<Path>,
+/// block database.
+fn import_corrections_internal(
+    db: &mut impl BlockDb,
     chain_id: u64,
     file: impl AsRef<Path>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (_cfg, mut db) = open_app_dir(app_dir, false)?;
-
     let data = std::fs::read(file)?;
     db.put_corrections(chain_id, &data)?;
     writeln!(
@@ -58,9 +78,12 @@ pub fn import_corrections(
 
 #[cfg(test)]
 mod tests {
+    use mockall::predicate::eq;
+
     use super::*;
     use crate::{
         app_dir::init_app_dir,
+        db::MockBlockDb,
         utils::test_dir::{Permissions, TestDir},
     };
 
@@ -77,7 +100,7 @@ mod tests {
     }
 
     #[test]
-    fn import_upgrade_heights_stores_file_contents() {
+    fn import_upgrade_heights_internal_stores_file_contents() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
@@ -85,14 +108,13 @@ mod tests {
         let file = tmpdir.path().join("upgrade_heights.json");
         std::fs::write(&file, data).unwrap();
 
-        let mut buf = Vec::new();
-        import_upgrade_heights(tmpdir.path(), 1, &file, &mut buf).unwrap();
+        let mut db = MockBlockDb::new();
+        db.expect_put_upgrade_heights()
+            .with(eq(1u64), eq(data.to_vec()))
+            .return_once(|_, _| Ok(()));
 
-        let (_, db) = crate::app_dir::open_app_dir(tmpdir.path(), true).unwrap();
-        assert_eq!(
-            db.get_upgrade_heights(1).unwrap().as_deref(),
-            Some(data.as_ref())
-        );
+        let mut buf = Vec::new();
+        import_upgrade_heights_internal(&mut db, 1, &file, &mut buf).unwrap();
         assert_eq!(
             buf,
             b"Upgrade heights for chain ID 1 imported successfully.\n"
@@ -112,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn import_corrections_stores_file_contents() {
+    fn import_corrections_internal_stores_file_contents() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
@@ -120,14 +142,13 @@ mod tests {
         let file = tmpdir.path().join("corrections.json");
         std::fs::write(&file, data).unwrap();
 
-        let mut buf = Vec::new();
-        import_corrections(tmpdir.path(), 1, &file, &mut buf).unwrap();
+        let mut db = MockBlockDb::new();
+        db.expect_put_corrections()
+            .with(eq(1u64), eq(data.to_vec()))
+            .return_once(|_, _| Ok(()));
 
-        let (_, db) = crate::app_dir::open_app_dir(tmpdir.path(), true).unwrap();
-        assert_eq!(
-            db.get_corrections(1).unwrap().as_deref(),
-            Some(data.as_ref())
-        );
+        let mut buf = Vec::new();
+        import_corrections_internal(&mut db, 1, &file, &mut buf).unwrap();
         assert_eq!(buf, b"Corrections for chain ID 1 imported successfully.\n");
     }
 }

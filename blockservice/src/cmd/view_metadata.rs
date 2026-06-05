@@ -22,10 +22,28 @@ use crate::{app_dir::open_app_dir, db::BlockDb};
 pub fn view_upgrade_heights(
     app_dir: impl AsRef<Path>,
     chain_id: u64,
-    mut writer: impl std::io::Write,
+    writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (_cfg, db) = open_app_dir(app_dir, true)?;
+    view_upgrade_heights_internal(&db, chain_id, writer)
+}
 
+/// Writes the corrections stored in the block database for `chain_id` to `writer`.
+pub fn view_corrections(
+    app_dir: impl AsRef<Path>,
+    chain_id: u64,
+    writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (_cfg, db) = open_app_dir(app_dir, true)?;
+    view_corrections_internal(&db, chain_id, writer)
+}
+
+/// Writes the upgrade heights stored in the block database for `chain_id` to `writer`.
+fn view_upgrade_heights_internal(
+    db: &impl BlockDb,
+    chain_id: u64,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match db.get_upgrade_heights(chain_id)? {
         Some(data) => writeln!(writer, "{}", String::from_utf8_lossy(&data))?,
         None => writeln!(writer, "[chain ID {chain_id}] no upgrade heights found")?,
@@ -35,13 +53,11 @@ pub fn view_upgrade_heights(
 }
 
 /// Writes the corrections stored in the block database for `chain_id` to `writer`.
-pub fn view_corrections(
-    app_dir: impl AsRef<Path>,
+fn view_corrections_internal(
+    db: &impl BlockDb,
     chain_id: u64,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (_cfg, db) = open_app_dir(app_dir, true)?;
-
     match db.get_corrections(chain_id)? {
         Some(data) => writeln!(writer, "{}", String::from_utf8_lossy(&data))?,
         None => writeln!(writer, "[chain ID {chain_id}] no corrections found")?,
@@ -52,9 +68,11 @@ pub fn view_corrections(
 
 #[cfg(test)]
 mod tests {
+    use mockall::predicate::eq;
+
     use super::*;
     use crate::{
-        app_dir::init_app_dir,
+        db::MockBlockDb,
         utils::test_dir::{Permissions, TestDir},
     };
 
@@ -71,12 +89,14 @@ mod tests {
     }
 
     #[test]
-    fn view_upgrade_heights_writes_not_found_if_absent() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+    fn view_upgrade_heights_internal_writes_not_found_if_absent() {
+        let mut db = MockBlockDb::new();
+        db.expect_get_upgrade_heights()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
 
         let mut buf = Vec::new();
-        view_upgrade_heights(tmpdir.path(), 1, &mut buf).unwrap();
+        view_upgrade_heights_internal(&db, 1, &mut buf).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             "[chain ID 1] no upgrade heights found\n"
@@ -84,16 +104,16 @@ mod tests {
     }
 
     #[test]
-    fn view_upgrade_heights_writes_stored_data() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
+    fn view_upgrade_heights_internal_writes_stored_data() {
         let data = b"upgrade-heights";
-        let (_, mut db) = crate::app_dir::open_app_dir(tmpdir.path(), false).unwrap();
-        db.put_upgrade_heights(1, data).unwrap();
+
+        let mut db = MockBlockDb::new();
+        db.expect_get_upgrade_heights()
+            .with(eq(1u64))
+            .return_once(|_| Ok(Some(data.to_vec())));
 
         let mut buf = Vec::new();
-        view_upgrade_heights(tmpdir.path(), 1, &mut buf).unwrap();
+        view_upgrade_heights_internal(&db, 1, &mut buf).unwrap();
         let data_with_newline = [data.as_slice(), b"\n"].concat();
         assert_eq!(buf, data_with_newline);
     }
@@ -111,12 +131,14 @@ mod tests {
     }
 
     #[test]
-    fn view_corrections_writes_not_found_if_absent() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+    fn view_corrections_internal_writes_not_found_if_absent() {
+        let mut db = MockBlockDb::new();
+        db.expect_get_corrections()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
 
         let mut buf = Vec::new();
-        view_corrections(tmpdir.path(), 1, &mut buf).unwrap();
+        view_corrections_internal(&db, 1, &mut buf).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             "[chain ID 1] no corrections found\n"
@@ -124,16 +146,16 @@ mod tests {
     }
 
     #[test]
-    fn view_corrections_writes_stored_data() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
+    fn view_corrections_internal_writes_stored_data() {
         let data = b"corrections";
-        let (_, mut db) = crate::app_dir::open_app_dir(tmpdir.path(), false).unwrap();
-        db.put_corrections(1, data).unwrap();
+
+        let mut db = MockBlockDb::new();
+        db.expect_get_corrections()
+            .with(eq(1u64))
+            .return_once(|_| Ok(Some(data.to_vec())));
 
         let mut buf = Vec::new();
-        view_corrections(tmpdir.path(), 1, &mut buf).unwrap();
+        view_corrections_internal(&db, 1, &mut buf).unwrap();
         let data_with_newline = [data.as_slice(), b"\n"].concat();
         assert_eq!(buf, data_with_newline);
     }

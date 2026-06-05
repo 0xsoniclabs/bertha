@@ -16,10 +16,27 @@
 
 use std::path::Path;
 
-use crate::{BlockRange, app_dir::open_app_dir, config::ChainConfig, db::BlockDb, grpc::RpcClient};
+use crate::{
+    BlockRange,
+    app_dir::open_app_dir,
+    config::{ChainConfig, Config},
+    db::BlockDb,
+    grpc::RpcClient,
+};
 
 pub async fn list(
     app_dir: impl AsRef<Path>,
+    chain_id: Option<u64>,
+    url: Option<String>,
+    writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (cfg, db) = open_app_dir(app_dir, true)?;
+    list_internal(cfg, &db, chain_id, url, writer).await
+}
+
+async fn list_internal(
+    cfg: Config,
+    db: &impl BlockDb,
     chain_id: Option<u64>,
     url: Option<String>,
     mut writer: impl std::io::Write,
@@ -27,7 +44,6 @@ pub async fn list(
     if matches!(chain_id, Some(0)) {
         return Err("chain ID cannot be 0".into());
     }
-    let (cfg, db) = open_app_dir(app_dir, true)?;
     let auth_token = cfg.get_auth_token().cloned();
     let chain_listings: Vec<(u64, Vec<BlockRange>, bool, bool)> = if let Some(url) = url {
         let mut client = RpcClient::try_new(url, auth_token).await?;
@@ -103,16 +119,14 @@ pub async fn list(
 
 #[cfg(test)]
 mod tests {
+    use mockall::predicate::eq;
     use tonic::metadata::{Ascii, MetadataValue};
 
     use super::*;
     use crate::{
-        app_dir::init_app_dir,
+        app_dir::{init_app_dir, open_app_dir},
         config::ChainConfig,
-        db::{
-            BlockDb, CHAIN_IDS_KEY, KvDb, make_block_ranges_key, serialize_block_ranges,
-            serialize_chain_ids,
-        },
+        db::MockBlockDb,
         grpc::{
             auth::{self, AUTHORIZATION_HEADER_NAME},
             proto_rpc::{self, BlockRange, ChainListing, ChainListings},
@@ -123,7 +137,7 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn fails_if_app_dir_is_not_initialized() {
+    async fn list_fails_if_app_dir_is_not_initialized() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         let result = list(tmpdir.path(), None, None, std::io::sink()).await;
@@ -135,7 +149,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_if_no_read_permissions() {
+    async fn list_fails_if_no_read_permissions() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         // create database
@@ -154,29 +168,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_for_invalid_server_url() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+    async fn list_internal_fails_for_invalid_server_url() {
         let url = "invalid-url".to_string();
+        let db = MockBlockDb::new();
 
-        let result = list(tmpdir.path(), None, Some(url), std::io::sink()).await;
+        let result = list_internal(Config::default(), &db, None, Some(url), std::io::sink()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("transport error"));
     }
 
     #[tokio::test]
-    async fn fails_on_server_error() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
+    async fn list_internal_fails_on_server_error() {
         let mut mock_server = MockRpcServer::new();
         mock_server
             .expect_list()
             .returning(|_| Err(tonic::Status::internal("Server error")));
         let server = TestServer::new(mock_server).await;
 
-        let result = list(
-            tmpdir.path(),
+        let db = MockBlockDb::new();
+        let result = list_internal(
+            Config::default(),
+            &db,
             None,
             Some(server.address.clone()),
             std::io::sink(),
@@ -188,22 +200,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fails_for_chain_id_zero() {
-        let tmpdir = tempfile::tempdir().unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
-        let result = list(tmpdir.path(), Some(0), None, std::io::sink()).await;
+    async fn list_internal_fails_for_chain_id_zero() {
+        let db = MockBlockDb::new();
+        let result = list_internal(Config::default(), &db, Some(0), None, std::io::sink()).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().to_string(), "chain ID cannot be 0");
     }
 
     #[tokio::test]
-    async fn print_availability_of_upgrade_heights_and_corrections() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+    async fn list_internal_print_availability_of_upgrade_heights_and_corrections() {
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(1u64))
+            .return_once(|_| Ok(vec![]));
+        db.expect_get_upgrade_heights()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
+        db.expect_get_corrections()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
 
         let mut buf = Vec::new();
-        let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
+        let result = list_internal(Config::default(), &db, Some(1), None, &mut buf).await;
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -216,13 +234,19 @@ mod tests {
             }
         );
 
-        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.put_upgrade_heights(1, b"upgrade-heights").unwrap();
-        db.put_corrections(1, b"corrections").unwrap();
-        drop(db);
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(1u64))
+            .return_once(|_| Ok(vec![]));
+        db.expect_get_upgrade_heights()
+            .with(eq(1u64))
+            .return_once(|_| Ok(Some(b"upgrade-heights".to_vec())));
+        db.expect_get_corrections()
+            .with(eq(1u64))
+            .return_once(|_| Ok(Some(b"corrections".to_vec())));
 
         let mut buf = Vec::new();
-        let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
+        let result = list_internal(Config::default(), &db, Some(1), None, &mut buf).await;
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -237,13 +261,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prints_all_stored_ranges() {
+    async fn list_internal_prints_all_stored_ranges() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
-        // no blocks for chain id
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(1u64))
+            .return_once(|_| Ok(vec![]));
+        db.expect_get_upgrade_heights()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
+        db.expect_get_corrections()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
+
         let mut buf = Vec::new();
-        let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
+        let result = list_internal(Config::default(), &db, Some(1), None, &mut buf).await;
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -255,24 +289,31 @@ mod tests {
                ",
             }
         );
+    }
 
-        // block ranges for chain id
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.kv_db()
-            .put_raw(
-                &make_block_ranges_key(1),
-                &serialize_block_ranges([2..=4, 6..=8]),
-            )
-            .unwrap();
-        db.kv_db()
-            .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids([1]))
-            .unwrap();
-        drop(db);
+    #[tokio::test]
+    async fn list_internal_prints_block_ranges_for_chain() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+
+        let chain_cfg = ChainConfig::new(1);
+        let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
+        cfg.add_chain(chain_cfg.clone()).unwrap();
+
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(1u64))
+            .return_once(|_| Ok(vec![2..=4, 6..=8]));
+        db.expect_get_upgrade_heights()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
+        db.expect_get_corrections()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
 
         let mut buf = Vec::new();
-        let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
+        let result = list_internal(cfg, &db, Some(1), None, &mut buf).await;
         assert!(result.is_ok());
-
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
@@ -284,19 +325,40 @@ mod tests {
                 "
             }
         );
+    }
 
-        // block ranges for multiple chain ids
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.kv_db()
-            .put_raw(&make_block_ranges_key(3), &serialize_block_ranges([3..=5]))
-            .unwrap();
-        db.kv_db()
-            .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids([1, 3]))
-            .unwrap();
-        drop(db);
+    #[tokio::test]
+    async fn list_internal_prints_block_ranges_for_multiple_chains() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+
+        let chain_cfg = ChainConfig::new(1);
+        let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
+        cfg.add_chain(chain_cfg.clone()).unwrap();
+
+        let mut db = MockBlockDb::new();
+        db.expect_get_chain_ids().return_once(|| Ok(vec![3]));
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(1u64))
+            .return_once(|_| Ok(vec![2..=4, 6..=8]));
+        db.expect_get_upgrade_heights()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
+        db.expect_get_corrections()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(3u64))
+            .return_once(|_| Ok(vec![3..=5]));
+        db.expect_get_upgrade_heights()
+            .with(eq(3u64))
+            .return_once(|_| Ok(None));
+        db.expect_get_corrections()
+            .with(eq(3u64))
+            .return_once(|_| Ok(None));
 
         let mut buf = Vec::new();
-        let result = list(tmpdir.path(), None, None, &mut buf).await;
+        let result = list_internal(cfg, &db, None, None, &mut buf).await;
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -316,12 +378,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn uses_config_file_name_and_description_if_available() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+    async fn list_internal_uses_config_file_name_and_description_if_available() {
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(1u64))
+            .return_once(|_| Ok(vec![]));
+        db.expect_get_upgrade_heights()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
+        db.expect_get_corrections()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
 
         let mut buf = Vec::new();
-        let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
+        let result = list_internal(Config::default(), &db, Some(1), None, &mut buf).await;
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -339,11 +409,24 @@ mod tests {
             description: "A test chain".to_string(),
             ..ChainConfig::new(1)
         };
-        let (mut cfg, _db) = open_app_dir(tmpdir.path(), false).unwrap();
-        cfg.add_chain(chain_cfg.clone()).unwrap();
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let (mut cfg, _) = open_app_dir(tmpdir.path(), false).unwrap();
+        cfg.add_chain(chain_cfg).unwrap();
+
+        let mut db = MockBlockDb::new();
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(1u64))
+            .return_once(|_| Ok(vec![]));
+        db.expect_get_upgrade_heights()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
+        db.expect_get_corrections()
+            .with(eq(1u64))
+            .return_once(|_| Ok(None));
 
         let mut buf = Vec::new();
-        let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
+        let result = list_internal(cfg, &db, Some(1), None, &mut buf).await;
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -358,7 +441,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prints_message_for_all_chains_in_db_and_config_file() {
+    async fn list_internal_prints_message_for_all_chains_in_db_and_config_file() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
@@ -368,17 +451,33 @@ mod tests {
             description: "A test chain".to_string(),
             ..ChainConfig::new(32)
         };
-        let (mut cfg, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
         cfg.add_chain(chain_cfg.clone()).unwrap();
 
-        // Add ranges for chain 7 w/o adding to config file
-        for n in [2, 3, 4, 6, 7, 8] {
-            db.put_bytes(7, n, b"block").unwrap();
-        }
-        drop(db);
+        let mut db = MockBlockDb::new();
+        // chain 7 is in db but not in config
+        db.expect_get_chain_ids().return_once(|| Ok(vec![7]));
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(7u64))
+            .return_once(|_| Ok(vec![2..=4, 6..=8]));
+        db.expect_get_upgrade_heights()
+            .with(eq(7u64))
+            .return_once(|_| Ok(None));
+        db.expect_get_corrections()
+            .with(eq(7u64))
+            .return_once(|_| Ok(None));
+        db.expect_get_ranges_of_chain_id()
+            .with(eq(32u64))
+            .return_once(|_| Ok(vec![]));
+        db.expect_get_upgrade_heights()
+            .with(eq(32u64))
+            .return_once(|_| Ok(None));
+        db.expect_get_corrections()
+            .with(eq(32u64))
+            .return_once(|_| Ok(None));
 
         let mut buf = Vec::new();
-        let result = list(tmpdir.path(), None, None, &mut buf).await;
+        let result = list_internal(cfg, &db, None, None, &mut buf).await;
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
@@ -398,10 +497,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prints_message_for_each_remote_range() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
+    async fn list_internal_prints_message_for_each_remote_range() {
         {
             // no blocks for chain id
             let list_response = ChainListings {
@@ -418,9 +514,11 @@ mod tests {
                 .returning(move |_| Ok(tonic::Response::new(list_response.clone())));
             let server = TestServer::new(mock_server).await;
 
+            let db = MockBlockDb::new();
             let mut buf = Vec::new();
-            let result = list(
-                tmpdir.path(),
+            let result = list_internal(
+                Config::default(),
+                &db,
                 Some(1),
                 Some(server.address.clone()),
                 &mut buf,
@@ -457,8 +555,16 @@ mod tests {
                 .returning(move |_| Ok(tonic::Response::new(list_response.clone())));
             let server = TestServer::new(mock_server).await;
 
+            let db = MockBlockDb::new();
             let mut buf = Vec::new();
-            let result = list(tmpdir.path(), None, Some(server.address.clone()), &mut buf).await;
+            let result = list_internal(
+                Config::default(),
+                &db,
+                None,
+                Some(server.address.clone()),
+                &mut buf,
+            )
+            .await;
             assert!(result.is_ok());
             assert_eq!(
                 String::from_utf8(buf).unwrap(),
@@ -499,8 +605,16 @@ mod tests {
                 .returning(move |_| Ok(tonic::Response::new(list_response.clone())));
             let server = TestServer::new(mock_server).await;
 
+            let db = MockBlockDb::new();
             let mut buf = Vec::new();
-            let result = list(tmpdir.path(), None, Some(server.address.clone()), &mut buf).await;
+            let result = list_internal(
+                Config::default(),
+                &db,
+                None,
+                Some(server.address.clone()),
+                &mut buf,
+            )
+            .await;
             assert!(result.is_ok());
             assert_eq!(
                 String::from_utf8(buf).unwrap(),
@@ -522,7 +636,7 @@ mod tests {
 
     #[rstest_reuse::apply(auth_token)]
     #[tokio::test]
-    async fn provides_auth_token_when_supplied(auth_token: Option<MetadataValue<Ascii>>) {
+    async fn list_internal_provides_auth_token_when_supplied(auth_token: Option<MetadataValue<Ascii>>) {
         let tmpdir = tempfile::tempdir().unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (mut cfg, _db) = open_app_dir(tmpdir.path(), true).unwrap();
@@ -555,8 +669,9 @@ mod tests {
             });
 
         let server = TestServer::new(mock_server).await;
+        let db = MockBlockDb::new();
         let mut buf = Vec::new();
-        let result = list(tmpdir.path(), None, Some(server.address.clone()), &mut buf).await;
+        let result = list_internal(cfg, &db, None, Some(server.address.clone()), &mut buf).await;
         assert!(result.is_ok(), "List should succeed");
     }
 }
