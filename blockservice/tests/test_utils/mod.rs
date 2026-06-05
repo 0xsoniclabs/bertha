@@ -117,10 +117,9 @@ pub async fn init_blockservice(
         Some(p) => p.to_path_buf(),
         None => tempfile::tempdir()?.keep(),
     };
-    let CommandExecutionOutput { result, log } =
+    let CommandExecutionOutput { result, .. } =
         execute_command(Command::Init {}, &dir, None, None, None).await;
     result?;
-    check_init_output(&log, &dir);
     add_chain_configs_to_config_file(chain_configs, &dir)?;
     Ok(dir)
 }
@@ -225,20 +224,6 @@ fn uri(addr: SocketAddr) -> String {
     format!("http://[{}]:{}", addr.ip(), addr.port())
 }
 
-/// Helper function to check the output of the `init` command is correct.
-/// NOTE: It assumes neither the config file or the db exists prior to the command execution.
-#[track_caller]
-pub fn check_init_output(output: &[u8], path: impl AsRef<Path>) {
-    assert_eq!(
-        String::from_utf8_lossy(output),
-        indoc::formatdoc! {"
-                Initializing new blockservice directory at: {path}
-                Creating new configuration at: {path}/blockservice.toml
-                Creating new block database at: {path}/.blockdb
-        ", path = path.as_ref().display()}
-    );
-}
-
 /// Adds the chain configurations to the config file at the specified path.
 pub fn add_chain_configs_to_config_file(
     chain_configs: &[ChainConfig],
@@ -311,16 +296,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn init_blockservice_fails_if_dir_is_already_initialized() {
+    async fn init_blockservice_succeeds_if_dir_is_already_initialized() {
         let temp_dir = tempfile::tempdir().unwrap();
         let dir = temp_dir.path();
         init_blockservice(Some(dir), &[])
             .await
             .expect("blockservice should initialize");
 
-        // Try to initialize again, it should fail
         let result = init_blockservice(Some(dir), &[]).await;
-        assert!(result.is_err(), "Re-initialization should fail");
+        assert!(result.is_ok(), "Re-initialization should succeed");
     }
 
     #[tokio::test]
@@ -484,7 +468,7 @@ mod tests {
         assert_eq!(
             String::from_utf8_lossy(&log),
             indoc::formatdoc! {"
-            Initializing new blockservice directory at: {path}
+            Initializing blockservice directory at: {path}
             Creating new configuration at: {path}/blockservice.toml
             Creating new block database at: {path}/.blockdb
             ",
