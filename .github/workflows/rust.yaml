@@ -36,7 +36,7 @@ jobs:
 
     steps:
     - name: checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: install rust
       uses: dtolnay/rust-toolchain@nightly
       with:
@@ -52,7 +52,7 @@ jobs:
 
     steps:
     - name: checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: install rust
       uses: dtolnay/rust-toolchain@1.95
       with:
@@ -72,7 +72,7 @@ jobs:
 
     steps:
     - name: checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: install rust
       uses: dtolnay/rust-toolchain@1.95
     - name: install protoc
@@ -95,7 +95,7 @@ jobs:
 
     steps:
     - name: checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: install rust
       uses: dtolnay/rust-toolchain@1.95
     - name: install protoc
@@ -117,7 +117,7 @@ jobs:
 
     steps:
     - name: checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: install rust
       uses: dtolnay/rust-toolchain@1.95
     - name: install protoc
@@ -139,7 +139,7 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
     - name: checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: install rust
       uses: dtolnay/rust-toolchain@1.95
     - name: install protoc
@@ -157,7 +157,7 @@ jobs:
     - name: generate code coverage
       run: cargo llvm-cov --all-features --workspace --codecov --output-path codecov.json
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v7
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: codecov.json
@@ -170,7 +170,7 @@ jobs:
 
     steps:
     - name: checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: load cache
       uses: Swatinem/rust-cache@v2
     - name: install cargo-machete
@@ -184,7 +184,7 @@ jobs:
 
     steps:
     - name: checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
     - name: load cache
       uses: Swatinem/rust-cache@v2
     - name: cargo deny
