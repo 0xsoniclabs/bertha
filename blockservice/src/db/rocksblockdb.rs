@@ -101,7 +101,7 @@ impl RocksDb {
 }
 
 impl KvDb for RocksDb {
-    type Batch = RocksBatch;
+    type Batch = RocksDbBatch;
 
     fn get_raw(&self, key: &[u8]) -> Result<Option<Vec<u8>>, Error> {
         self.db.get(key).map_err(Error::from)
@@ -140,13 +140,13 @@ impl KvDb for RocksDb {
 
 /// A batch of write/ delete operations to be written to the database.
 #[derive(Default)]
-pub struct RocksBatch {
-    /// The underlying RocksDB batch.
+pub struct RocksDbBatch {
+    /// The underlying Rocks DB batch.
     /// The `false` parameter indicates that this batch is not transactional.
     batch: WriteBatchWithTransaction<false>,
 }
 
-impl KvDbBatch for RocksBatch {
+impl KvDbBatch for RocksDbBatch {
     fn put_raw(&mut self, key: &[u8], data: &[u8]) {
         self.batch.put(key, data);
     }
@@ -462,7 +462,7 @@ mod tests {
 
     #[test]
     fn rocksbatch_put_raw_adds_put_operation_to_batch() {
-        let mut batch = RocksBatch::default();
+        let mut batch = RocksDbBatch::default();
         batch.put_raw(b"key", b"value");
 
         let mut inspector = MockBatchInspector::new();
@@ -476,7 +476,7 @@ mod tests {
 
     #[test]
     fn rocksbatch_delete_raw_adds_delete_operation_to_batch() {
-        let mut batch = RocksBatch::default();
+        let mut batch = RocksDbBatch::default();
         batch.delete_raw(b"key");
 
         let mut inspector = MockBatchInspector::new();
@@ -490,7 +490,7 @@ mod tests {
 
     #[test]
     fn rocksbatch_delete_range_raw_adds_delete_operation_for_end_key_to_batch() {
-        let mut batch = RocksBatch::default();
+        let mut batch = RocksDbBatch::default();
         batch.delete_range_raw(b"start", b"end");
 
         let mut inspector = MockBatchInspector::new();
@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn rocksbatch_size_returns_size_of_batch() {
-        let mut batch = RocksBatch::default();
+        let mut batch = RocksDbBatch::default();
         let size0 = batch.size();
 
         batch.put_raw(b"key", b"value");

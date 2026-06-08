@@ -31,6 +31,22 @@ type RawEntry = (Box<[u8]>, Box<[u8]>);
 
 type IterBytesItem = (u64, Box<[u8]>);
 
+/// A batch of operations for the [KvDb] that can be written atomically.
+#[cfg_attr(test, mockall::automock)]
+pub trait KvDbBatch: Default {
+    /// Stores raw bytes for an arbitrary key in the batch.
+    fn put_raw(&mut self, key: &[u8], data: &[u8]);
+
+    /// Deletes the value for an arbitrary key in the batch.
+    fn delete_raw(&mut self, key: &[u8]);
+
+    /// Deletes all entries with keys in the range [start_key, end_key] in the batch.
+    fn delete_range_raw(&mut self, start_key: &[u8], end_key: &[u8]);
+
+    /// Returns the size of the serialized batch in bytes.
+    fn size(&self) -> usize;
+}
+
 /// A lower-level key-value database interface that operates on raw byte keys and values.
 /// This is used by [BlockDb] to store blocks and metadata, but can also be used directly for
 /// other purposes.
@@ -63,17 +79,12 @@ pub trait KvDb {
     fn write_batch_raw(&self, batch: Self::Batch) -> Result<(), Error>;
 }
 
-/// A batch of operations for the [KvDb] that can be written atomically.
+/// A batch of operations for the [BlockDb] that can be written atomically.
 #[cfg_attr(test, mockall::automock)]
-pub trait KvDbBatch: Default {
-    /// Stores raw bytes for an arbitrary key in the batch.
-    fn put_raw(&mut self, key: &[u8], data: &[u8]);
-
-    /// Deletes the value for an arbitrary key in the batch.
-    fn delete_raw(&mut self, key: &[u8]);
-
-    /// Deletes all entries with keys in the range [start_key, end_key] in the batch.
-    fn delete_range_raw(&mut self, start_key: &[u8], end_key: &[u8]);
+pub trait BlockDbBatch {
+    /// Stores a block for the specified chain-ID and block number in the batch. The data is
+    /// expected to be a protobuf-encoded block.
+    fn put_bytes(&mut self, chain_id: u64, block_number: u64, data: &[u8]);
 
     /// Returns the size of the serialized batch in bytes.
     fn size(&self) -> usize;
@@ -149,15 +160,29 @@ pub trait BlockDb {
     fn write_batch(&self, batch: Self::Batch) -> Result<(), Error>;
 }
 
-/// A batch of operations for the [BlockDb] that can be written atomically.
-#[cfg_attr(test, mockall::automock)]
-pub trait BlockDbBatch {
-    /// Stores a block for the specified chain-ID and block number in the batch. The data is
-    /// expected to be a protobuf-encoded block.
-    fn put_bytes(&mut self, chain_id: u64, block_number: u64, data: &[u8]);
+/// A wrapper around a [KvDbBatch] that allows writing multiple blocks and their metadata as one
+/// atomic operation.
+#[derive(Debug)]
+pub struct KvDbBatchWrapper<B: KvDbBatch> {
+    /// The batch of the underlying key-value database.
+    kv_batch: B,
+    /// The block ranges of blocks in this batch.
+    block_ranges: HashMap<u64, Vec<BlockRange>>,
+}
 
-    /// Returns the size of the serialized batch in bytes.
-    fn size(&self) -> usize;
+impl<B: KvDbBatch> BlockDbBatch for KvDbBatchWrapper<B> {
+    fn put_bytes(&mut self, chain_id: u64, block_number: u64, data: &[u8]) {
+        self.block_ranges
+            .entry(chain_id)
+            .or_default()
+            .add_range(block_number..=block_number);
+        self.kv_batch
+            .put_raw(&make_block_key(chain_id, block_number), data);
+    }
+
+    fn size(&self) -> usize {
+        self.kv_batch.size()
+    }
 }
 
 #[derive(Debug)]
@@ -182,7 +207,7 @@ where
     }
 
     /// Executes a function that operates on a batch, then writes the batch atomically.
-    fn execute_with_batch<R>(&self, f: impl FnOnce(&mut D::Batch) -> R) -> Result<R, Error> {
+    fn execute_in_batch<R>(&self, f: impl FnOnce(&mut D::Batch) -> R) -> Result<R, Error> {
         let mut batch = self.db.batch_raw();
         let r = f(&mut batch);
         self.db.write_batch_raw(batch)?;
@@ -241,7 +266,7 @@ where
         }
         let mut ranges = self.get_ranges_of_chain_id(chain_id)?;
         ranges.add_range(block_number..=block_number);
-        self.execute_with_batch(|batch| {
+        self.execute_in_batch(|batch| {
             batch.put_raw(&make_block_key(chain_id, block_number), data);
             batch.put_raw(
                 &make_block_ranges_key(chain_id),
@@ -264,7 +289,7 @@ where
         }
         let mut ranges = self.get_ranges_of_chain_id(chain_id)?;
         ranges.subtract_range(&(start_block_number..=end_block_number));
-        self.execute_with_batch(|batch| {
+        self.execute_in_batch(|batch| {
             let start_key = make_block_key(chain_id, start_block_number);
             let end_key = make_block_key(chain_id, end_block_number);
             batch.delete_range_raw(&start_key, &end_key);
@@ -368,31 +393,6 @@ where
             .kv_batch
             .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids(chain_ids));
         self.db.write_batch_raw(batch.kv_batch)
-    }
-}
-
-/// A wrapper around a [KvDbBatch] that allows writing multiple blocks and their metadata as one
-/// atomic operation.
-#[derive(Debug)]
-pub struct KvDbBatchWrapper<B: KvDbBatch> {
-    /// The batch of the underlying key-value database.
-    kv_batch: B,
-    /// The block ranges of blocks in this batch.
-    block_ranges: HashMap<u64, Vec<BlockRange>>,
-}
-
-impl<B: KvDbBatch> BlockDbBatch for KvDbBatchWrapper<B> {
-    fn put_bytes(&mut self, chain_id: u64, block_number: u64, data: &[u8]) {
-        self.block_ranges
-            .entry(chain_id)
-            .or_default()
-            .add_range(block_number..=block_number);
-        self.kv_batch
-            .put_raw(&make_block_key(chain_id, block_number), data);
-    }
-
-    fn size(&self) -> usize {
-        self.kv_batch.size()
     }
 }
 
