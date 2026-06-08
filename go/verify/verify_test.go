@@ -18,6 +18,7 @@ package verify
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"iter"
 	"slices"
@@ -62,9 +63,17 @@ func TestVerify_EmptyDatabase_DoesNotReportIssues(t *testing.T) {
 
 	path := t.TempDir()
 	options := grocksdb.NewDefaultOptions()
+	defer options.Destroy()
 	options.SetCreateIfMissing(true)
 	db, err := grocksdb.OpenDb(options, path)
 	require.NoError(err, "failed to create database")
+
+	writeOptions := grocksdb.NewDefaultWriteOptions()
+	defer writeOptions.Destroy()
+	version := make([]byte, 8)
+	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
+	require.NoError(db.Put(writeOptions, blockdb.MakeVersionKey(), version), "failed to write database version")
+
 	db.Close()
 
 	require.NoError(
@@ -87,11 +96,17 @@ func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
 
 	path := t.TempDir()
 	options := grocksdb.NewDefaultOptions()
+	defer options.Destroy()
 	options.SetCreateIfMissing(true)
 	db, err := grocksdb.OpenDb(options, path)
 	require.NoError(err, "failed to create database")
 
 	writeOptions := grocksdb.NewDefaultWriteOptions()
+	defer writeOptions.Destroy()
+	version := make([]byte, 8)
+	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
+	require.NoError(db.Put(writeOptions, blockdb.MakeVersionKey(), version), "failed to write database version")
+
 	for _, block := range utils.CreateValidBlocks(t, blocks) {
 		key := blockdb.MakeBlockKey(chainID, uint64(block.Number))
 
@@ -99,7 +114,6 @@ func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
 		require.NoError(err, "failed to marshal block")
 		require.NoError(db.Put(writeOptions, key, value))
 	}
-	writeOptions.Destroy()
 
 	db.Close()
 

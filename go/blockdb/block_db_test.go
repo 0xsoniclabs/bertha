@@ -17,6 +17,7 @@
 package blockdb
 
 import (
+	"encoding/binary"
 	"path/filepath"
 	"testing"
 
@@ -32,6 +33,7 @@ func TestOpenRocksDB(t *testing.T) {
 		tests := map[string]func(*testing.T, OpenRocksDBFunc){
 			"opens existing db":                                         testOpenRocksDB_OpensExistingDB,
 			"fails if db does not exist":                                testOpenRocksDB_FailsIfDBDoesNotExist,
+			"verifies block db version":                                 testOpenRocksDB_VerifiesBlockDBVersion,
 			"get returns block if it exists":                            testRocksDB_Get_ReturnsBlockIfItExists,
 			"get returns error if block is invalid":                     testRocksDB_Get_ReturnsErrorIfBlockIsInvalid,
 			"get returns error if block does not exist":                 testRocksDB_Get_ReturnsErrorIfBlockDoesNotExist,
@@ -75,6 +77,64 @@ func testOpenRocksDB_FailsIfDBDoesNotExist(t *testing.T, dbOpener OpenRocksDBFun
 	path := filepath.Join(t.TempDir(), "non-existing-db-path")
 	_, err := dbOpener(path)
 	require.Error(t, err, "opening db did not return an error although path does not exist")
+}
+
+func testOpenRocksDB_VerifiesBlockDBVersion(t *testing.T, dbOpener OpenRocksDBFunc) {
+	tests := map[string]struct {
+		prepareDB func(*testing.T, string)
+		errMsg    string
+	}{
+		"fails when version key is missing": {
+			prepareDB: func(t *testing.T, path string) {
+				db, err := createDBWithoutVersion(path)
+				require.NoError(t, err)
+				db.close()
+			},
+			errMsg: "block database version not found",
+		},
+		"fails when version payload length is invalid": {
+			prepareDB: func(t *testing.T, path string) {
+				db, err := createDBWithoutVersion(path)
+				require.NoError(t, err)
+				require.NoError(t, db.putRaw(MakeVersionKey(), []byte{1, 2, 3}))
+				db.close()
+			},
+			errMsg: "invalid block database version",
+		},
+		"fails when version is unsupported": {
+			prepareDB: func(t *testing.T, path string) {
+				db, err := createDBWithoutVersion(path)
+				require.NoError(t, err)
+				require.NoError(t, db.putVersion(CurrentVersion+1))
+				db.close()
+			},
+			errMsg: "block database version not supported",
+		},
+		"succeeds when version is correct": {
+			prepareDB: func(t *testing.T, path string) {
+				db, err := createDBWithoutVersion(path)
+				require.NoError(t, err)
+				require.NoError(t, db.putVersion(CurrentVersion))
+				db.close()
+			},
+			errMsg: "",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := t.TempDir()
+			test.prepareDB(t, path)
+
+			db, err := dbOpener(path)
+			if test.errMsg == "" {
+				require.NoError(t, err)
+				require.NoError(t, db.Close())
+			} else {
+				require.ErrorContains(t, err, test.errMsg)
+			}
+		})
+	}
 }
 
 func testRocksDB_Get_ReturnsBlockIfItExists(t *testing.T, dbOpener OpenRocksDBFunc) {
@@ -410,8 +470,21 @@ type writeDB struct {
 }
 
 func createDB(path string) (writeDB, error) {
+	db, err := createDBWithoutVersion(path)
+	if err != nil {
+		return writeDB{}, err
+	}
+	if err := db.putVersion(CurrentVersion); err != nil {
+		db.close()
+		return writeDB{}, err
+	}
+	return db, nil
+}
+
+func createDBWithoutVersion(path string) (writeDB, error) {
 	options := grocksdb.NewDefaultOptions()
 	options.SetCreateIfMissing(true)
+	defer options.Destroy()
 	db, err := grocksdb.OpenDb(options, path)
 	if err != nil {
 		return writeDB{}, err
@@ -429,6 +502,12 @@ func (db writeDB) putRaw(key, value []byte) error {
 	writeOptions := grocksdb.NewDefaultWriteOptions()
 	defer writeOptions.Destroy()
 	return db.db.Put(writeOptions, key, value)
+}
+
+func (db writeDB) putVersion(version uint64) error {
+	versionBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(versionBytes, version)
+	return db.putRaw(MakeVersionKey(), versionBytes)
 }
 
 func (db writeDB) putBlock(chainID uint64, block *Block) error {
