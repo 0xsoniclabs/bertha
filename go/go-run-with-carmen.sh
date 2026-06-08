@@ -18,7 +18,7 @@
 
 # Script to run go with local carmen modifications enabled.
 # Usage: ./go-run-with-carmen.sh <go-run-args>
-# e.g. ./go-run-with-carmen.sh ./ replay -g sonic.json -db .blockdb --db-schema 6 --db-variant rust-memory
+# e.g. ./go-run-with-carmen.sh . replay -g sonic.json -db .blockdb --db-schema 6 --db-variant rust-memory
 # It is assumed that the carmen repository is located next to bertha.
 
 # Exit on error.

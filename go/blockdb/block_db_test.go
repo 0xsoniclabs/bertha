@@ -30,17 +30,17 @@ type OpenRocksDBFunc func(path string) (RocksDB, error)
 func TestOpenRocksDB(t *testing.T) {
 	runTests := func(t *testing.T, runner OpenRocksDBFunc) {
 		tests := map[string]func(*testing.T, OpenRocksDBFunc){
-			"opens existing db":                                         opensExistingDB,
-			"fails if db does not exist":                                failsIfDBDoesNotExist,
-			"get returns block if it exists":                            getReturnsBlockIfItExists,
-			"get returns error if block is invalid":                     getReturnsErrorIfBlockIsInvalid,
-			"get returns error if block does not exist":                 getReturnsErrorIfBlockDoesNotExist,
-			"get range returns existing sub range":                      getRangeReturnsExistingSubRange,
-			"get range returns error if block is invalid":               getRangeReturnsErrorIfBlockIsInvalid,
-			"get range stops at non-16-byte key":                        getRangeStopsAtNon16ByteKey,
-			"get range rev returns existing sub range in reverse order": getRangeRevReturnsExistingSubRangeInReverseOrder,
-			"get range rev returns error if block is invalid":           getRangeRevReturnsErrorIfBlockIsInvalid,
-			"get range rev stops at non-16-byte key":                    getRangeRevStopsAtNon16ByteKey,
+			"opens existing db":                                         testOpenRocksDB_OpensExistingDB,
+			"fails if db does not exist":                                testOpenRocksDB_FailsIfDBDoesNotExist,
+			"get returns block if it exists":                            testRocksDB_Get_ReturnsBlockIfItExists,
+			"get returns error if block is invalid":                     testRocksDB_Get_ReturnsErrorIfBlockIsInvalid,
+			"get returns error if block does not exist":                 testRocksDB_Get_ReturnsErrorIfBlockDoesNotExist,
+			"get range returns existing sub range":                      testRocksDB_GetRange_ReturnsExistingSubRange,
+			"get range returns error if block is invalid":               testRocksDB_GetRange_ReturnsErrorIfBlockIsInvalid,
+			"get range stops at non-16-byte key":                        testRocksDB_GetRange_StopsAtNon16ByteKey,
+			"get range rev returns existing sub range in reverse order": testRocksDB_GetRange_RevReturnsExistingSubRangeInReverseOrder,
+			"get range rev returns error if block is invalid":           testRocksDB_GetRange_RevReturnsErrorIfBlockIsInvalid,
+			"get range rev stops at non-16-byte key":                    testRocksDB_GetRange_RevStopsAtNon16ByteKey,
 		}
 
 		for name, test := range tests {
@@ -59,7 +59,7 @@ func TestOpenRocksDB(t *testing.T) {
 	})
 }
 
-func opensExistingDB(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testOpenRocksDB_OpensExistingDB(t *testing.T, dbOpener OpenRocksDBFunc) {
 	path := t.TempDir()
 
 	writeDB, err := createDB(path)
@@ -71,13 +71,13 @@ func opensExistingDB(t *testing.T, dbOpener OpenRocksDBFunc) {
 	require.NoError(t, db.Close(), "failed to close db")
 }
 
-func failsIfDBDoesNotExist(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testOpenRocksDB_FailsIfDBDoesNotExist(t *testing.T, dbOpener OpenRocksDBFunc) {
 	path := filepath.Join(t.TempDir(), "non-existing-db-path")
 	_, err := dbOpener(path)
 	require.Error(t, err, "opening db did not return an error although path does not exist")
 }
 
-func getReturnsBlockIfItExists(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_Get_ReturnsBlockIfItExists(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3}
 
@@ -108,7 +108,7 @@ func getReturnsBlockIfItExists(t *testing.T, dbOpener OpenRocksDBFunc) {
 	}
 }
 
-func getReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_Get_ReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 	blockNumber := uint64(1)
 
@@ -128,7 +128,7 @@ func getReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBFunc) {
 	require.Nil(t, block, "expected nil block when retrieving an invalid block")
 }
 
-func getReturnsErrorIfBlockDoesNotExist(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_Get_ReturnsErrorIfBlockDoesNotExist(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3}
 
@@ -157,7 +157,7 @@ func getReturnsErrorIfBlockDoesNotExist(t *testing.T, dbOpener OpenRocksDBFunc) 
 	}
 }
 
-func getRangeReturnsExistingSubRange(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRange_ReturnsExistingSubRange(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3, 20}
 
@@ -193,7 +193,7 @@ func getRangeReturnsExistingSubRange(t *testing.T, dbOpener OpenRocksDBFunc) {
 	}
 }
 
-func getRangeReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRange_ReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 	blockNumber := uint64(1)
 
@@ -215,7 +215,7 @@ func getRangeReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBFunc
 		1, chainID, blockNumber, blockNumber, count)
 }
 
-func getRangeStopsAtNon16ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRange_StopsAtNon16ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 
 	path := t.TempDir()
@@ -230,7 +230,7 @@ func getRangeStopsAtNon16ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
 	// Insert a key with length != 16 that sorts between block 3 and block 4.
 	// Appending a zero byte to the block-3 key produces a 17-byte key whose
 	// lexicographic position is: block 3 < invalidKey < block 4.
-	invalidKey := append(computeKey(chainID, 3), 0x00)
+	invalidKey := append(MakeBlockKey(chainID, 3), 0x00)
 	require.NoError(t, db.putRaw(invalidKey, []byte{}))
 	db.close()
 
@@ -252,7 +252,7 @@ func getRangeStopsAtNon16ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
 	require.Equal(t, []uint64{1, 2, 3}, got)
 }
 
-func getRangeRevReturnsExistingSubRangeInReverseOrder(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRange_RevReturnsExistingSubRangeInReverseOrder(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3, 20}
 
@@ -288,7 +288,7 @@ func getRangeRevReturnsExistingSubRangeInReverseOrder(t *testing.T, dbOpener Ope
 	}
 }
 
-func getRangeRevStopsAtNon16ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRange_RevStopsAtNon16ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 
 	path := t.TempDir()
@@ -301,7 +301,7 @@ func getRangeRevStopsAtNon16ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
 	}
 
 	// Insert a 17-byte key that sorts between block 3 and block 4.
-	invalidKey := append(computeKey(chainID, 3), 0x00)
+	invalidKey := append(MakeBlockKey(chainID, 3), 0x00)
 	require.NoError(t, db.putRaw(invalidKey, []byte{}))
 	db.close()
 
@@ -324,7 +324,7 @@ func getRangeRevStopsAtNon16ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
 	require.Equal(t, []uint64{5, 4}, got)
 }
 
-func getRangeRevReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRange_RevReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 	blockNumber := uint64(1)
 
@@ -432,7 +432,7 @@ func (db writeDB) putRaw(key, value []byte) error {
 }
 
 func (db writeDB) putBlock(chainID uint64, block *Block) error {
-	key := computeKey(chainID, block.Number)
+	key := MakeBlockKey(chainID, block.Number)
 	data, err := proto.Marshal(block)
 	if err != nil {
 		return err
@@ -468,7 +468,7 @@ func fillDBWithInvalidBlock(t *testing.T, chainID uint64, blockNumber uint64) (s
 	}
 	defer db.close()
 
-	key := computeKey(chainID, blockNumber)
+	key := MakeBlockKey(chainID, blockNumber)
 	value := []byte{0x00} // Invalid block data, just a single byte
 	if err := db.putRaw(key, value); err != nil {
 		return "", err

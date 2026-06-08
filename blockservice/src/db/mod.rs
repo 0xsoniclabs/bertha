@@ -16,7 +16,7 @@
 
 mod blockdb;
 pub mod proto;
-mod rocksblockdb;
+mod rocksdb;
 
 pub use blockdb::{BlockDb, BlockDbBatch, IterationDirection, KvDbBackedBlockDb};
 // By not exposing the KvDb outside of tests, access to the underlying key-value database is
@@ -31,6 +31,6 @@ pub use blockdb::{
     serialize_block_ranges,
     serialize_chain_ids,
 };
-pub use rocksblockdb::RocksDb;
+pub use rocksdb::RocksDb;
 
 pub type RocksBlockDb = KvDbBackedBlockDb<RocksDb>;

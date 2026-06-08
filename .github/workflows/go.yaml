@@ -67,7 +67,7 @@ jobs:
         go-version: "1.26.0"
         cache-dependency-path: utils/scripts/license/go.sum
     - name: check license headers
-      run: go run ./utils/scripts/license/add_license_header.go -dir ./ -check
+      run: go run ./utils/scripts/license/add_license_header.go -dir . -check
 
   test:
     name: test

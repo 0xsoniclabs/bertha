@@ -18,7 +18,6 @@ package verify
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"iter"
 	"slices"
@@ -94,9 +93,7 @@ func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
 
 	writeOptions := grocksdb.NewDefaultWriteOptions()
 	for _, block := range utils.CreateValidBlocks(t, blocks) {
-		key := make([]byte, 16)
-		binary.BigEndian.PutUint64(key[:8], chainID)
-		binary.BigEndian.PutUint64(key[8:], uint64(block.Number))
+		key := blockdb.MakeBlockKey(chainID, uint64(block.Number))
 
 		value, err := proto.Marshal(block)
 		require.NoError(err, "failed to marshal block")
