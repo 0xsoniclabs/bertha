@@ -19,7 +19,11 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{Error, config::Config, db::RocksBlockDb};
+use crate::{
+    Error,
+    config::Config,
+    db::{KvDbBackedBlockDb, RocksBlockDb, RocksDb},
+};
 
 pub const CONFIG_FILE_NAME: &str = "blockservice.toml";
 pub const BLOCK_DB_NAME: &str = ".blockdb";
@@ -84,7 +88,7 @@ pub fn init_app_dir(path: impl AsRef<Path>, mut writer: impl std::io::Write) -> 
             "Creating new block database at: {}",
             db_path.display()
         )?;
-        RocksBlockDb::create(db_path)?;
+        RocksDb::create(db_path)?;
     } else {
         writeln!(
             writer,
@@ -120,12 +124,12 @@ pub fn open_app_dir(
     let cfg = Config::load(cfg_path)?;
 
     let db = if readonly_db {
-        RocksBlockDb::open_for_reading(db_path)?
+        RocksDb::open_for_reading(db_path)?
     } else {
-        RocksBlockDb::open(db_path)?
+        RocksDb::open(db_path)?
     };
 
-    Ok((cfg, db))
+    Ok((cfg, KvDbBackedBlockDb::new(db)))
 }
 
 #[cfg(test)]
@@ -133,7 +137,7 @@ mod tests {
     use super::*;
     use crate::{
         config::ChainConfig,
-        db::BlockDb,
+        db::{BlockDb, KvDbBackedBlockDb},
         utils::test_dir::{Permissions, TestDir},
     };
 
@@ -184,8 +188,9 @@ mod tests {
         }
 
         if db_exists {
-            let db = RocksBlockDb::create(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
-            db.put_raw(123, 456, vec![1, 2, 3].as_slice()).unwrap();
+            let rocks = RocksDb::create(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+            let db = KvDbBackedBlockDb::new(rocks);
+            db.put_bytes(123, 456, &[1, 2, 3]).unwrap();
         }
 
         let mut writer = Vec::new();
@@ -233,8 +238,9 @@ mod tests {
         }
 
         if db_exists {
-            let db = RocksBlockDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
-            assert_eq!(db.get_raw(123, 456).unwrap(), Some(vec![1, 2, 3]));
+            let rocks = RocksDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+            let db = KvDbBackedBlockDb::new(rocks);
+            assert_eq!(db.get_bytes(123, 456).unwrap(), Some(vec![1, 2, 3]));
         }
     }
 
@@ -291,13 +297,14 @@ mod tests {
                 ..ChainConfig::new(123)
             })
             .unwrap();
-            let db = RocksBlockDb::create(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
-            db.put_raw(123, 456, vec![1, 2, 3].as_slice()).unwrap();
+            let rocks = RocksDb::create(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
+            let db = KvDbBackedBlockDb::new(rocks);
+            db.put_bytes(123, 456, &[1, 2, 3]).unwrap();
         }
 
         let (cfg, db) = open_app_dir(tmpdir.path(), false).unwrap();
         assert_eq!(cfg.get_chain_config(123).unwrap().name, "Test Chain");
-        let res = db.get_raw(123, 456).unwrap();
+        let res = db.get_bytes(123, 456).unwrap();
         assert_eq!(res, Some(vec![1, 2, 3]));
     }
 
@@ -317,7 +324,7 @@ mod tests {
     fn open_app_dir_fails_if_config_does_not_exist() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let db_path = tmpdir.path().join(BLOCK_DB_NAME);
-        RocksBlockDb::create(db_path).unwrap();
+        RocksDb::create(db_path).unwrap();
 
         let result = open_app_dir(tmpdir.path(), false);
         assert!(result.is_err());

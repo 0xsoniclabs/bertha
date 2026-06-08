@@ -26,7 +26,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     app_dir::open_app_dir,
     config::ChainConfig,
-    db::BlockDb,
+    db::{BlockDb, IterationDirection},
     grpc::RpcServer,
     json_rpc::{NetworkSource, subscribe_to_blocks},
 };
@@ -107,10 +107,10 @@ async fn sync(
             continue;
         };
         let start_block = db
-            .iterate_reverse(chain_id, u64::MAX)
+            .iterate(chain_id, u64::MAX, IterationDirection::Reverse)
             .next()
             .transpose()?
-            .map(|block| block.number + 1)
+            .map(|(_, block)| block.number + 1)
             .unwrap_or_default();
 
         let source = NetworkSource::try_new(server)?;
@@ -181,7 +181,7 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         {
             let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-            db.put_raw(1, 1, vec![1, 2, 3].as_slice()).unwrap();
+            db.put_bytes(1, 1, &[1, 2, 3]).unwrap();
         }
 
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();

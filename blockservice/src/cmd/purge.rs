@@ -85,7 +85,7 @@ pub fn purge(
 
 #[cfg(test)]
 mod tests {
-    use std::{io::Cursor, vec};
+    use std::io::Cursor;
 
     use bertha_types::Block;
     use rstest::rstest;
@@ -93,6 +93,7 @@ mod tests {
     use super::*;
     use crate::{
         app_dir::init_app_dir,
+        db::{BlockDb, CHAIN_IDS_KEY, KvDb, make_block_ranges_key, serialize_chain_ids},
         utils::test_dir::{Permissions, TestDir},
     };
 
@@ -139,7 +140,12 @@ mod tests {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.put_metadata_raw(42, vec![0].as_slice()).unwrap(); // Invalid metadata length
+        db.kv_db()
+            .put_raw(&make_block_ranges_key(42), &[0]) // invalid value for block ranges
+            .unwrap();
+        db.kv_db()
+            .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids([42]))
+            .unwrap();
         drop(db);
 
         let err = purge(
@@ -153,7 +159,7 @@ mod tests {
         .expect_err("purge should fail");
         assert!(
             err.to_string()
-                .contains("error in underlying storage layer: invalid ranges for chain ID 42")
+                .contains("error in underlying storage layer: invalid block ranges length")
         );
     }
 
@@ -264,7 +270,7 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.put_raw(42, 1, vec![1, 2, 3].as_slice()).unwrap();
+        db.put_bytes(42, 1, &[1, 2, 3]).unwrap();
         drop(db);
 
         let mut output = Vec::new();
@@ -276,7 +282,7 @@ mod tests {
         );
 
         let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
-        assert_eq!(db.get_raw(42, 1).unwrap(), Some(vec![1, 2, 3]));
+        assert_eq!(db.get_bytes(42, 1).unwrap(), Some(vec![1, 2, 3]));
     }
 
     #[test]

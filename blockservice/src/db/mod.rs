@@ -18,24 +18,19 @@ mod blockdb;
 pub mod proto;
 mod rocksblockdb;
 
-pub use blockdb::BlockDb;
+pub use blockdb::{BlockDb, BlockDbBatch, IterationDirection, KvDbBackedBlockDb};
+// By not exposing the KvDb outside of tests, access to the underlying key-value database is
+// only possible through the BlockDb interface.
 #[cfg(test)]
-pub use blockdb::MockBlockDb;
-pub use rocksblockdb::{BlockBatch, RocksBlockDb};
+pub use blockdb::{
+    //TODO make private
+    CHAIN_IDS_KEY,
+    KvDb,
+    MockBlockDb,
+    make_block_ranges_key,
+    serialize_block_ranges,
+    serialize_chain_ids,
+};
+pub use rocksblockdb::RocksDb;
 
-#[cfg(test)]
-mod test_utils {
-    use crate::BlockRange;
-
-    pub fn make_meta_value(value: impl IntoIterator<Item = u64>) -> Vec<u8> {
-        value.into_iter().flat_map(u64::to_be_bytes).collect()
-    }
-
-    pub fn make_range_value(ranges: impl IntoIterator<Item = BlockRange>) -> Vec<u8> {
-        make_meta_value(
-            ranges
-                .into_iter()
-                .flat_map(|range| [*range.start(), *range.end()]),
-        )
-    }
-}
+pub type RocksBlockDb = KvDbBackedBlockDb<RocksDb>;

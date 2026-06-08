@@ -18,7 +18,10 @@ use std::path::Path;
 
 use bertha_types::{Hash, HexConvert};
 
-use crate::{app_dir::open_app_dir, db::BlockDb};
+use crate::{
+    app_dir::open_app_dir,
+    db::{BlockDb, IterationDirection},
+};
 
 pub fn verify(
     app_dir: impl AsRef<Path>,
@@ -58,7 +61,7 @@ pub fn verify(
     let block_number = block_number.unwrap_or_default();
     let mut prev_block_number = block_number;
     let mut prev_block_hash: Option<Hash> = None;
-    for entry in db.iterate_with_block_number(chain_id, block_number) {
+    for entry in db.iterate(chain_id, block_number, IterationDirection::Forward) {
         let (block_number, block) = entry?;
         if block.number != block_number {
             errors += 1;
@@ -237,7 +240,7 @@ mod tests {
             block.number = 1;
             let block_number = 0; // intentionally wrong block number
             let data = proto::Block::from(block.clone()).encode_to_vec();
-            db.put_raw(chain_id, block_number, &data).unwrap();
+            db.put_bytes(chain_id, block_number, &data).unwrap();
             block_number
         };
 
