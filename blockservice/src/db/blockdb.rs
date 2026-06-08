@@ -195,8 +195,35 @@ where
     D::Batch: Send + 'static,
 {
     /// Creates a new [BlockDb] backed by the given [KvDb] implementation.
-    pub fn new(db: D) -> Self {
-        Self { db }
+    pub fn create(db: D) -> Result<Self, Error> {
+        if db
+            .iterate_raw(Box::from([]), IterationDirection::Forward)
+            .next()
+            .transpose()?
+            .is_some()
+        {
+            return Err(Error::StorageLayer(
+                "block database already initialized".to_owned(),
+            ));
+        }
+        db.put_raw(&VERSION_KEY, &serialize_version(CURRENT_VERSION))?;
+        Ok(Self { db })
+    }
+
+    /// Opens an existing [BlockDb] backed by the given [KvDb] implementation.
+    pub fn open(db: D) -> Result<Self, Error> {
+        let Some(version_bytes) = db.get_raw(&VERSION_KEY)? else {
+            return Err(Error::StorageLayer(
+                "block database version not found".to_owned(),
+            ));
+        };
+        let version = deserialize_version(version_bytes)?;
+        if version != CURRENT_VERSION {
+            return Err(Error::StorageLayer(format!(
+                "block database version is not supported: code expects version {CURRENT_VERSION} but database has version {version}",
+            )));
+        }
+        Ok(Self { db })
     }
 
     /// Provides access to the underlying [KvDb] for test setup/verification.
@@ -327,8 +354,8 @@ where
             .iterate_raw(key.into(), direction)
             .map(move |result| match result {
                 Ok((key, value)) => {
-                    if key.len() == 8 {
-                        // metadata, no more data for this chain id
+                    if matches!(key.len(), 1 | 9) {
+                        // global or chain metadata, no more blocks for this chain id
                         return None;
                     }
                     if key.len() != 16 {
@@ -396,8 +423,41 @@ where
     }
 }
 
+// Key/value layout:
+// - Global metadata (1-byte keys):
+//   - 0 => DB format version (u64, big-endian)
+//   - 1 => chain IDs (u64 array, big-endian)
+// - Chain metadata (9-byte keys): [chain_id (8 bytes big endian), suffix]
+//   - suffix 0 => block ranges as (start, end) u64 pairs (big-endian)
+// - Blocks (16-byte keys): [chain_id (8 bytes big endian), block_number (8 bytes big endian)] =>
+//   protobuf block.
+
+/// Key for storing the version of the block database format.
+const VERSION_KEY: [u8; 1] = 0u8.to_be_bytes();
+
+/// The current version of the block database format. This should be incremented whenever a change
+/// is made to the format.
+const CURRENT_VERSION: u64 = 1;
+
+/// Converts the version into the byte format for storage.
+fn serialize_version(version: u64) -> [u8; 8] {
+    version.to_be_bytes()
+}
+
+/// Converts the byte format of the version back into a u64.
+fn deserialize_version(data: impl AsRef<[u8]>) -> Result<u64, Error> {
+    let data = data.as_ref();
+    if data.len() != 8 {
+        return Err(Error::StorageLayer(format!(
+            "invalid block database version length: expected 8 bytes, got {} bytes",
+            data.len()
+        )));
+    }
+    Ok(u64::from_be_bytes(data.try_into().unwrap()))
+}
+
 /// Key for storing the IDs of all chains in the database.
-pub const CHAIN_IDS_KEY: [u8; 8] = 0u64.to_be_bytes();
+pub const CHAIN_IDS_KEY: [u8; 1] = 1u8.to_be_bytes();
 
 /// Converts the chain IDs into the byte format for storage.
 pub fn serialize_chain_ids(value: impl IntoIterator<Item = u64>) -> Vec<u8> {
@@ -420,8 +480,11 @@ fn deserialize_chain_ids(data: impl AsRef<[u8]>) -> Result<Vec<u64>, Error> {
 }
 
 /// Returns the key for storing the block ranges for the given chain ID.
-pub fn make_block_ranges_key(chain_id: u64) -> [u8; 8] {
-    chain_id.to_be_bytes()
+pub fn make_block_ranges_key(chain_id: u64) -> [u8; 9] {
+    let mut key = [0u8; 9];
+    key[0..8].copy_from_slice(&chain_id.to_be_bytes());
+    key[8] = 0;
+    key
 }
 
 /// Converts the block ranges into the byte format for storage.
@@ -466,9 +529,91 @@ pub fn make_block_key(chain_id: u64, block_number: u64) -> [u8; 16] {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Not;
+
     use mockall::predicate::eq;
 
     use super::*;
+
+    #[rstest::rstest]
+    #[case::non_empty_db(
+        false,
+        Err(Error::StorageLayer("block database already initialized".to_owned()))
+    )]
+    #[case::empty_db(true, Ok(()))]
+    fn kv_db_backed_block_db_create_checks_block_db_is_empty_and_writes_version(
+        #[case] db_empty: bool,
+        #[case] expected: Result<(), Error>,
+    ) {
+        let mut kv_db = MockKvDb::new();
+        kv_db
+            .expect_iterate_raw()
+            .with(eq(Box::<[u8]>::from([])), eq(IterationDirection::Forward))
+            .return_once(move |_, _| {
+                Box::new(
+                    db_empty
+                        .not()
+                        .then_some(Ok((Box::from([0]), Box::from([1, 2, 3]))))
+                        .into_iter(),
+                )
+            })
+            .times(1);
+        if expected.is_ok() {
+            kv_db
+                .expect_put_raw()
+                .with(eq(VERSION_KEY), eq(serialize_version(CURRENT_VERSION)))
+                .return_once(|_, _| Ok(()))
+                .times(1);
+        }
+        let result = KvDbBackedBlockDb::create(kv_db);
+        match expected {
+            Ok(()) => assert!(result.is_ok()),
+            Err(expected_err) => {
+                assert!(result.is_err());
+                assert_eq!(result.unwrap_err(), expected_err);
+            }
+        }
+    }
+
+    #[rstest::rstest]
+    #[case::version_missing(None, Some("block database version not found"))]
+    #[case::version_invalid(
+        Some(vec![0]),
+        Some("invalid block database version")
+    )]
+    #[case::version_too_low(
+        Some((CURRENT_VERSION-1).to_be_bytes().to_vec()),
+        Some("block database version is not supported")
+    )]
+    #[case::version_too_high(
+        Some((CURRENT_VERSION+1).to_be_bytes().to_vec()),
+        Some("block database version is not supported")
+    )]
+    #[case::version_valid(
+        Some(CURRENT_VERSION.to_be_bytes().to_vec()),
+        None
+    )]
+    fn kv_db_backed_block_db_open_checks_block_db_version(
+        #[case] version: Option<Vec<u8>>,
+        #[case] expected_err_msg: Option<&str>,
+    ) {
+        let mut kv_db = MockKvDb::new();
+        kv_db
+            .expect_get_raw()
+            .with(eq(VERSION_KEY))
+            .return_once(|_| Ok(version))
+            .times(1);
+        let result = KvDbBackedBlockDb::open(kv_db);
+        match expected_err_msg {
+            None => assert!(result.is_ok()),
+            Some(expected_err) => {
+                assert!(result.is_err());
+                assert!(matches!(
+                    result, Err(Error::StorageLayer(msg)) if msg.contains(expected_err)
+                ));
+            }
+        }
+    }
 
     #[rstest::rstest]
     #[case::valid_chain_ids(
@@ -492,7 +637,7 @@ mod tests {
             .with(eq(CHAIN_IDS_KEY))
             .return_once(move |_| Ok(stored_payload))
             .times(1);
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
         assert_eq!(db.get_chain_ids(), expected);
     }
 
@@ -519,7 +664,7 @@ mod tests {
             .with(eq(make_block_ranges_key(chain_id)))
             .return_once(move |_| Ok(stored_payload))
             .times(1);
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
         assert_eq!(db.get_ranges_of_chain_id(chain_id), expected);
     }
 
@@ -535,7 +680,7 @@ mod tests {
             .with(eq(block_key))
             .return_once(move |_| Ok(Some(encoded)))
             .times(1);
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
         let received = db.get(chain_id, block.number).unwrap().unwrap();
         assert_eq!(received, block);
     }
@@ -551,7 +696,7 @@ mod tests {
             .with(eq(block_key))
             .return_once(|_| Ok(Some(vec![0, 1, 2, 3])))
             .times(1);
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
         let result = db.get(chain_id, block_number);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
@@ -569,7 +714,7 @@ mod tests {
             .with(eq(block_key))
             .return_once(move |_| Ok(Some(raw_data.to_vec())))
             .times(1);
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
         let received = db.get_bytes(chain_id, block_number).unwrap().unwrap();
         assert_eq!(received, raw_data);
     }
@@ -578,7 +723,7 @@ mod tests {
     fn kv_db_backed_block_db_get_bytes_returns_none_for_missing_block() {
         let mut kv_db = MockKvDb::new();
         kv_db.expect_get_raw().return_once(|_| Ok(None)).times(1);
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
         assert_eq!(db.get_bytes(1, 42).unwrap(), None);
     }
 
@@ -635,7 +780,7 @@ mod tests {
             .return_once(|_| Ok(()))
             .times(1);
 
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
         db.put(chain_id, block).unwrap();
     }
 
@@ -700,7 +845,7 @@ mod tests {
             .return_once(|_| Ok(()))
             .times(1);
 
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
         db.put_bytes(chain_id, block_number, b"data").unwrap();
     }
 
@@ -762,14 +907,16 @@ mod tests {
             .return_once(|_| Ok(()))
             .times(1);
 
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
         db.delete_range(chain_id, start_block_number, end_block_number)
             .unwrap();
     }
 
     #[test]
     fn kv_db_backed_block_db_delete_range_returns_error_if_start_is_greater_than_end() {
-        let db = KvDbBackedBlockDb::new(MockKvDb::new());
+        let db = KvDbBackedBlockDb {
+            db: MockKvDb::new(),
+        };
         let result = db.delete_range(1, 10, 5);
         assert_eq!(
             result,
@@ -807,7 +954,7 @@ mod tests {
                 )
             })
             .times(1);
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
 
         let result = db.iterate(chain_id, 1, IterationDirection::Forward).next();
 
@@ -918,7 +1065,7 @@ mod tests {
             )
             .return_once(move |_start, _dir| Box::new(raw_items.into_iter()))
             .times(1);
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
 
         let blocks: Vec<_> = db
             .iterate_bytes(chain_id, start_block_number, IterationDirection::Forward)
@@ -945,7 +1092,7 @@ mod tests {
             )
             .return_once(move |_start, _dir| Box::new(std::iter::empty()))
             .times(1);
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
         assert!(
             db.iterate_bytes(chain_id, start_block_number, direction)
                 .next()
@@ -1021,7 +1168,7 @@ mod tests {
             .return_once(|_| Ok(()))
             .times(1);
 
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
         let mut batch = KvDbBatchWrapper {
             kv_batch: kv_db_batch,
             block_ranges: HashMap::default(),
@@ -1037,7 +1184,7 @@ mod tests {
     fn kv_db_backed_block_db_write_batch_empty_batch_is_noop() {
         let kv_db = MockKvDb::new();
         let kv_db_batch = MockKvDbBatch::new();
-        let db = KvDbBackedBlockDb::new(kv_db);
+        let db = KvDbBackedBlockDb { db: kv_db };
         let batch = KvDbBatchWrapper {
             kv_batch: kv_db_batch,
             block_ranges: HashMap::default(),
@@ -1065,6 +1212,24 @@ mod tests {
         batch.put_bytes(1, 1, b"block");
         batch.put_bytes(1, 2, b"block");
         assert_eq!(batch.block_ranges.get(&1), Some(&vec![1..=2]));
+    }
+
+    #[test]
+    fn serialize_version_returns_8_byte_be_version() {
+        assert_eq!(serialize_version(1), [0, 0, 0, 0, 0, 0, 0, 1]);
+    }
+
+    #[rstest::rstest]
+    #[case::invalid_version(
+        vec![0],
+        Err(Error::StorageLayer("invalid block database version length: expected 8 bytes, got 1 bytes".to_owned()))
+    )]
+    #[case::valid_version(vec![0, 0, 0, 0, 0, 0, 0, 1], Ok(1))]
+    fn deserialize_version_parses_8_byte_be_version(
+        #[case] data: Vec<u8>,
+        #[case] expected: Result<u64, Error>,
+    ) {
+        assert_eq!(deserialize_version(data), expected);
     }
 
     #[test]
@@ -1104,10 +1269,10 @@ mod tests {
     }
 
     #[test]
-    fn make_block_ranges_key_returns_8_byte_be_chain_id() {
+    fn make_block_ranges_key_returns_9_byte_be_chain_id_and_0_byte_key() {
         let chain_id = 258;
         let key = make_block_ranges_key(chain_id);
-        assert_eq!(key, [0, 0, 0, 0, 0, 0, 1, 2]);
+        assert_eq!(key, [0, 0, 0, 0, 0, 0, 1, 2, 0]);
     }
 
     #[test]

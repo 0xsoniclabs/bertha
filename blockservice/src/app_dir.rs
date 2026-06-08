@@ -88,7 +88,8 @@ pub fn init_app_dir(path: impl AsRef<Path>, mut writer: impl std::io::Write) -> 
             "Creating new block database at: {}",
             db_path.display()
         )?;
-        RocksDb::create(db_path)?;
+        let rocks_db = RocksDb::create(db_path)?;
+        KvDbBackedBlockDb::create(rocks_db)?;
     } else {
         writeln!(
             writer,
@@ -129,7 +130,7 @@ pub fn open_app_dir(
         RocksDb::open(db_path)?
     };
 
-    Ok((cfg, KvDbBackedBlockDb::new(db)))
+    Ok((cfg, KvDbBackedBlockDb::open(db)?))
 }
 
 #[cfg(test)]
@@ -189,7 +190,7 @@ mod tests {
 
         if db_exists {
             let rocks = RocksDb::create(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
-            let db = KvDbBackedBlockDb::new(rocks);
+            let db = KvDbBackedBlockDb::create(rocks).unwrap();
             db.put_bytes(123, 456, &[1, 2, 3]).unwrap();
         }
 
@@ -239,7 +240,7 @@ mod tests {
 
         if db_exists {
             let rocks = RocksDb::open(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
-            let db = KvDbBackedBlockDb::new(rocks);
+            let db = KvDbBackedBlockDb::open(rocks).unwrap();
             assert_eq!(db.get_bytes(123, 456).unwrap(), Some(vec![1, 2, 3]));
         }
     }
@@ -298,7 +299,7 @@ mod tests {
             })
             .unwrap();
             let rocks = RocksDb::create(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
-            let db = KvDbBackedBlockDb::new(rocks);
+            let db = KvDbBackedBlockDb::create(rocks).unwrap();
             db.put_bytes(123, 456, &[1, 2, 3]).unwrap();
         }
 
@@ -351,5 +352,12 @@ mod tests {
                 tmpdir.path().to_path_buf()
             ))
         );
+    }
+
+    #[test]
+    fn open_app_dir_can_open_dir_initialized_with_init_app_dir() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        assert!(open_app_dir(tmpdir.path(), false).is_ok());
     }
 }
