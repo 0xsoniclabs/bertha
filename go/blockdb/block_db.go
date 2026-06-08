@@ -21,6 +21,8 @@ package blockdb
 
 import (
 	"encoding/binary"
+	"errors"
+	"fmt"
 	"iter"
 	"os"
 	"slices"
@@ -49,9 +51,14 @@ type RocksDB struct {
 // OpenRocksDBForWriting opens the database.
 func OpenRocksDBForWriting(path string) (RocksDB, error) {
 	options := grocksdb.NewDefaultOptions()
+	defer options.Destroy()
 	options.SetCreateIfMissing(false)
 	db, err := grocksdb.OpenDb(options, path)
 	if err != nil {
+		return RocksDB{}, err
+	}
+	if err := checkVersion(db); err != nil {
+		db.Close()
 		return RocksDB{}, err
 	}
 	return RocksDB{db: db}, nil
@@ -64,8 +71,15 @@ func OpenRocksDBForReading(path string) (RocksDB, error) {
 		return RocksDB{}, err
 	}
 	options := grocksdb.NewDefaultOptions()
+	defer options.Destroy()
 	db, err := grocksdb.OpenDbAsSecondary(options, path, secondaryPath)
 	if err != nil {
+		err = errors.Join(err, os.RemoveAll(secondaryPath))
+		return RocksDB{}, err
+	}
+	if err := checkVersion(db); err != nil {
+		db.Close()
+		err = errors.Join(err, os.RemoveAll(secondaryPath))
 		return RocksDB{}, err
 	}
 	return RocksDB{db: db, secondaryPath: secondaryPath}, nil
@@ -201,10 +215,39 @@ func (db RocksDB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) 
 	}
 }
 
+// CurrentVersion is the current version of the block database format. It is
+// used to check compatibility when opening the database.
+const CurrentVersion uint64 = 1
+
+// MakeVersionKey returns the key used to store the version of the block database format.
+func MakeVersionKey() []byte {
+	return []byte{0}
+}
+
 // MakeBlockKey creates a key for a block based on the chain ID and block number.
 func MakeBlockKey(chainID, blockNumber uint64) []byte {
 	key := make([]byte, 16)
 	binary.BigEndian.PutUint64(key[:8], chainID)
 	binary.BigEndian.PutUint64(key[8:], blockNumber)
 	return key
+}
+
+func checkVersion(db *grocksdb.DB) error {
+	readOptions := grocksdb.NewDefaultReadOptions()
+	defer readOptions.Destroy()
+	versionBytes, err := db.GetBytes(readOptions, MakeVersionKey())
+	if err != nil {
+		return err
+	}
+	if versionBytes == nil {
+		return fmt.Errorf("block database version not found")
+	}
+	if len(versionBytes) != 8 {
+		return fmt.Errorf("invalid block database version")
+	}
+	version := binary.BigEndian.Uint64(versionBytes)
+	if version != CurrentVersion {
+		return fmt.Errorf("block database version not supported: expected %d, got %d", CurrentVersion, version)
+	}
+	return nil
 }
