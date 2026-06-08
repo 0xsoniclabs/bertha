@@ -19,7 +19,6 @@ package replay
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -70,9 +69,7 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 
 	writeOptions := grocksdb.NewDefaultWriteOptions()
 	for _, block := range utils.CreateValidBlocks(t, 10_100) {
-		key := make([]byte, 16)
-		binary.BigEndian.PutUint64(key[:8], chainID)
-		binary.BigEndian.PutUint64(key[8:], uint64(block.Number))
+		key := blockdb.MakeBlockKey(chainID, uint64(block.Number))
 
 		value, err := proto.Marshal(block)
 		require.NoError(err, "failed to marshal block")

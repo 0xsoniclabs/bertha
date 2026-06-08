@@ -84,17 +84,10 @@ func (db RocksDB) Close() error {
 	return nil
 }
 
-func computeKey(chainID, blockNumber uint64) []byte {
-	key := make([]byte, 16)
-	binary.BigEndian.PutUint64(key[:8], chainID)
-	binary.BigEndian.PutUint64(key[8:], blockNumber)
-	return key
-}
-
 // Get retrieves a single block by chain ID and block number.
 // If the block does not exist, it returns nil.
 func (db RocksDB) Get(chainID, blockNumber uint64) (*Block, error) {
-	key := computeKey(chainID, blockNumber)
+	key := MakeBlockKey(chainID, blockNumber)
 
 	readOptions := grocksdb.NewDefaultReadOptions()
 	defer readOptions.Destroy()
@@ -116,7 +109,7 @@ func (db RocksDB) Get(chainID, blockNumber uint64) (*Block, error) {
 
 // Update inserts or updates a block by chain ID and block number.
 func (db RocksDB) Update(chainID uint64, block *Block) error {
-	key := computeKey(chainID, block.Number)
+	key := MakeBlockKey(chainID, block.Number)
 
 	writeOptions := grocksdb.NewDefaultWriteOptions()
 	defer writeOptions.Destroy()
@@ -134,7 +127,7 @@ func (db RocksDB) Update(chainID uint64, block *Block) error {
 // If parsing the block fails, the block will be nil and an error is returned.
 // The iterator needs to be used in a range loop because otherwise the inner iterator will not be closed properly.
 func (db RocksDB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error] {
-	startKey := computeKey(chainID, startBlockNumber)
+	startKey := MakeBlockKey(chainID, startBlockNumber)
 
 	return func(yield func(*Block, error) bool) {
 		readOptions := grocksdb.NewDefaultReadOptions()
@@ -174,7 +167,7 @@ func (db RocksDB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) ite
 // If parsing the block fails, the block will be nil and an error is returned.
 // The iterator needs to be used in a range loop because otherwise the inner iterator will not be closed properly.
 func (db RocksDB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error] {
-	endKey := computeKey(chainID, endBlockNumber)
+	endKey := MakeBlockKey(chainID, endBlockNumber)
 
 	return func(yield func(*Block, error) bool) {
 		readOptions := grocksdb.NewDefaultReadOptions()
@@ -206,4 +199,12 @@ func (db RocksDB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) 
 			it.Prev()
 		}
 	}
+}
+
+// MakeBlockKey creates a key for a block based on the chain ID and block number.
+func MakeBlockKey(chainID, blockNumber uint64) []byte {
+	key := make([]byte, 16)
+	binary.BigEndian.PutUint64(key[:8], chainID)
+	binary.BigEndian.PutUint64(key[8:], blockNumber)
+	return key
 }
