@@ -19,6 +19,7 @@ package replay
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -64,10 +65,17 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 	path := filepath.Join(dir, "small-db")
 	options := grocksdb.NewDefaultOptions()
 	options.SetCreateIfMissing(true)
+	defer options.Destroy()
 	db, err := grocksdb.OpenDb(options, path)
 	require.NoError(err, "failed to create database")
+	defer db.Close()
 
 	writeOptions := grocksdb.NewDefaultWriteOptions()
+	defer writeOptions.Destroy()
+	version := make([]byte, 8)
+	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
+	require.NoError(db.Put(writeOptions, blockdb.MakeVersionKey(), version), "failed to write database version")
+
 	for _, block := range utils.CreateValidBlocks(t, 10_100) {
 		key := blockdb.MakeBlockKey(chainID, uint64(block.Number))
 
@@ -75,9 +83,6 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 		require.NoError(err, "failed to marshal block")
 		require.NoError(db.Put(writeOptions, key, value))
 	}
-	writeOptions.Destroy()
-
-	db.Close()
 
 	require.NoError(
 		Replay(t.Context(), ReplayArgs{
