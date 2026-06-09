@@ -17,7 +17,6 @@
 use alloy_rlp::{Decodable, Encodable};
 use ethbloom::{BloomRef, Input};
 use serde::{Deserialize, Serialize};
-use sha3::Digest;
 
 use crate::{Address, AsHex, Bloom, Hash, U256};
 
@@ -283,9 +282,7 @@ impl BlockHeader {
 
     pub fn compute_hash(&self) -> Hash {
         let rlp = alloy_rlp::encode(self);
-        let mut hasher = sha3::Keccak256::new();
-        hasher.update(rlp);
-        hasher.finalize().into()
+        alloy_primitives::keccak256(rlp).0
     }
 
     /// Checks if it is possible that the block contains logs for the given address and topics.

@@ -28,9 +28,11 @@ alloy-rlp = { version = "0.3.11", features = ["derive"] }
 const-hex = "1.14.0"
 
 # hashing & trie & bloom
-sha3 = "0.12.0"
+alloy-primitives = { version = "1", default-features = false, features = [
+    "std",
+] }
 alloy-trie = "0.9.5"
-ethbloom = "0.14.1"
+ethbloom = { version = "0.14.1", default-features = false, features = ["std"] }
 
 # big int
 bnum = "0.14.4"
