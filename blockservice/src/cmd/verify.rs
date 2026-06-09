@@ -67,7 +67,11 @@ pub fn verify(
         .map(|range| {
             let start = cmp::max(*range.start(), block_number);
             let end = *range.end();
-            if start > end { 0 } else { end - start + 1 }
+            if start > end {
+                0
+            } else {
+                end.saturating_sub(start).saturating_add(1)
+            }
         })
         .sum();
 
