@@ -54,7 +54,7 @@ pub fn make_progress_bar(total: u64) -> Result<ProgressBar, TemplateError> {
     let bar = ProgressBar::new(total);
     bar.set_style(
         indicatif::ProgressStyle::with_template(
-            "[{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} (ETA {eta})",
+            "[{elapsed_precise}] [{wide_bar:.cyan/blue}] {human_pos}/{human_len} (ETA {eta})",
         )?
         .with_key(
             "eta",
