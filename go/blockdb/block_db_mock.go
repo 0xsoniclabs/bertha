@@ -69,6 +69,21 @@ func (mr *MockBlockDBMockRecorder) Get(chainID, blockNumber any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockBlockDB)(nil).Get), chainID, blockNumber)
 }
 
+// GetCorrections mocks base method.
+func (m *MockBlockDB) GetCorrections(chainID uint64) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCorrections", chainID)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCorrections indicates an expected call of GetCorrections.
+func (mr *MockBlockDBMockRecorder) GetCorrections(chainID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCorrections", reflect.TypeOf((*MockBlockDB)(nil).GetCorrections), chainID)
+}
+
 // GetRange mocks base method.
 func (m *MockBlockDB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error] {
 	m.ctrl.T.Helper()
@@ -95,6 +110,35 @@ func (m *MockBlockDB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint
 func (mr *MockBlockDBMockRecorder) GetRangeRev(chainID, startBlockNumber, endBlockNumber any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRangeRev", reflect.TypeOf((*MockBlockDB)(nil).GetRangeRev), chainID, startBlockNumber, endBlockNumber)
+}
+
+// GetUpgradeHeights mocks base method.
+func (m *MockBlockDB) GetUpgradeHeights(chainID uint64) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetUpgradeHeights", chainID)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetUpgradeHeights indicates an expected call of GetUpgradeHeights.
+func (mr *MockBlockDBMockRecorder) GetUpgradeHeights(chainID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUpgradeHeights", reflect.TypeOf((*MockBlockDB)(nil).GetUpgradeHeights), chainID)
+}
+
+// PutUpgradeHeights mocks base method.
+func (m *MockBlockDB) PutUpgradeHeights(chainID uint64, data []byte) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PutUpgradeHeights", chainID, data)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// PutUpgradeHeights indicates an expected call of PutUpgradeHeights.
+func (mr *MockBlockDBMockRecorder) PutUpgradeHeights(chainID, data any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PutUpgradeHeights", reflect.TypeOf((*MockBlockDB)(nil).PutUpgradeHeights), chainID, data)
 }
 
 // Update mocks base method.

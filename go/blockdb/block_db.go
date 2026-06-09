@@ -38,6 +38,9 @@ type BlockDB interface {
 	Update(chainID uint64, block *Block) error
 	GetRange(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error]
 	GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error]
+	GetUpgradeHeights(chainID uint64) ([]byte, error)
+	PutUpgradeHeights(chainID uint64, data []byte) error
+	GetCorrections(chainID uint64) ([]byte, error)
 	Close() error
 }
 
@@ -216,6 +219,29 @@ func (db RocksDB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) 
 	}
 }
 
+// GetUpgradeHeights returns the raw (JSON-encoded) upgrade heights for the given chain ID.
+// Returns nil if no data is stored for the chain ID.
+func (db RocksDB) GetUpgradeHeights(chainID uint64) ([]byte, error) {
+	readOptions := grocksdb.NewDefaultReadOptions()
+	defer readOptions.Destroy()
+	return db.db.GetBytes(readOptions, MakeUpgradeHeightsKey(chainID))
+}
+
+// PutUpgradeHeights stores the raw (JSON-encoded) upgrade heights for the given chain ID.
+func (db RocksDB) PutUpgradeHeights(chainID uint64, data []byte) error {
+	writeOptions := grocksdb.NewDefaultWriteOptions()
+	defer writeOptions.Destroy()
+	return db.db.Put(writeOptions, MakeUpgradeHeightsKey(chainID), data)
+}
+
+// GetCorrections returns the raw (JSON-encoded) corrections for the given chain ID.
+// Returns nil if no data is stored for the chain ID.
+func (db RocksDB) GetCorrections(chainID uint64) ([]byte, error) {
+	readOptions := grocksdb.NewDefaultReadOptions()
+	defer readOptions.Destroy()
+	return db.db.GetBytes(readOptions, MakeCorrectionsKey(chainID))
+}
+
 // CurrentVersion is the current version of the block database format. It is
 // used to check compatibility when opening the database.
 const CurrentVersion uint64 = 2
@@ -223,6 +249,24 @@ const CurrentVersion uint64 = 2
 // MakeVersionKey returns the key used to store the version of the block database format.
 func MakeVersionKey() []byte {
 	return []byte{0x00, 0x00}
+}
+
+// MakeUpgradeHeightsKey creates a 9-byte key for the upgrade heights of the given chain ID.
+// The key layout matches the Rust blockservice: [chain_id (8 bytes BE), 0x01].
+func MakeUpgradeHeightsKey(chainID uint64) []byte {
+	key := make([]byte, 9)
+	binary.BigEndian.PutUint64(key[:8], chainID)
+	key[8] = 1
+	return key
+}
+
+// MakeCorrectionsKey creates a 9-byte key for the corrections of the given chain ID.
+// The key layout matches the Rust blockservice: [chain_id (8 bytes BE), 0x02].
+func MakeCorrectionsKey(chainID uint64) []byte {
+	key := make([]byte, 9)
+	binary.BigEndian.PutUint64(key[:8], chainID)
+	key[8] = 2
+	return key
 }
 
 // MakeBlockKey creates a key for a block based on the chain ID and block number.
