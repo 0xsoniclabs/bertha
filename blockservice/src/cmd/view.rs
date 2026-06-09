@@ -18,6 +18,8 @@ use std::path::Path;
 
 use crate::{app_dir::open_app_dir, db::BlockDb};
 
+/// Writes the pretty-printed JSON representation of the block with the specified `block_number` for
+/// `chain_id` stored in the block database to `writer`.
 pub fn view(
     app_dir: impl AsRef<Path>,
     chain_id: u64,
@@ -84,7 +86,7 @@ mod tests {
     }
 
     #[test]
-    fn prints_block_if_exists() {
+    fn writes_block_if_exists() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
@@ -103,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn prints_error_message_if_not_exists() {
+    fn writes_error_message_if_not_exists() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 

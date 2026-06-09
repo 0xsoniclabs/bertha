@@ -25,18 +25,22 @@ Block Service
 Usage: blockservice [OPTIONS] <COMMAND>
 
 Commands:
-  init                 Initialize a new block database
-  import-gfile         Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
-  import-era1          Import all blocks from the specified directory (which is expected to contain `.era1` files) into the block database, and optionally also verify the parent hashes. The blocks are stored under the specified chain ID
-  import-era           Import all blocks from the specified directory (which is expected to contain `.era` files) into the block database. The blocks are stored under the specified chain ID
-  fetch                Fetch blocks from a remote block service and store them in the local database
-  fetch-state-updates  Fetch state update files from a remote block service
-  list                 List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
-  verify               Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
-  purge                Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
-  view                 Print the block as JSON
-  start                Start the block server
-  help                 Print this message or the help of the given subcommand(s)
+  init                    Initialize a new block database
+  import-gfile            Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
+  import-era1             Import all blocks from the specified directory (which is expected to contain `.era1` files) into the block database, and optionally also verify the parent hashes. The blocks are stored under the specified chain ID
+  import-era              Import all blocks from the specified directory (which is expected to contain `.era` files) into the block database. The blocks are stored under the specified chain ID
+  import-upgrade-heights  Import upgrade heights from a JSON file into the block database for the specified chain ID
+  import-corrections      Import corrections from a JSON file into the block database for the specified chain ID
+  fetch                   Fetch blocks from a remote block service and store them in the local database
+  fetch-state-updates     Fetch state update files from a remote block service
+  list                    List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
+  verify                  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
+  purge                   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
+  view                    Print the block as JSON
+  view-upgrade-heights    Print the upgrade heights stored in the block database for the specified chain ID
+  view-corrections        Print the corrections stored in the block database for the specified chain ID
+  start                   Start the block server
+  help                    Print this message or the help of the given subcommand(s)
 
 Options:
       --dir <DIR>  The path to the blockservice directory [default: .]
@@ -75,6 +79,22 @@ Therefore, `.era` file import does not support parent hash verification, because
 ```sh
 cargo run --release -- import-era1 </path/to/era1_directory> [--verify]
 cargo run --release -- import-era </path/to/era_directory>
+```
+
+Import upgrade heights
+
+*Note: New upgrade heights can be detected and applied automatically for Sonic chains. The import is not mandatory but can be used to verify that the detected upgrade heights match the stored ones.*
+
+```sh
+cargo run --release -- import-upgrade-heights <chain-id> </path/to/upgrade-heights.json>
+```
+
+Import corrections
+
+*Note: Corrections are not needed for all chains.*
+
+```sh
+cargo run --release -- import-corrections <chain-id> </path/to/corrections.json>
 ```
 
 Start the gRPC server (by default the port is 8080, configured in `blockservice.toml`)
