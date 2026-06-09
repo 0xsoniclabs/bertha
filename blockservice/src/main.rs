@@ -33,7 +33,13 @@ async fn main() {
         async move {
             tokio::select! {
                 _ = cancellation_token.cancelled() => {},
-            result = cmd::execute(args.clone(), cancellation_token.clone(), ConfigFileAddressBinder::new(args.dir), std::io::stdout(),  std::io::stdin() ) =>{
+            result = cmd::execute(
+                args.clone(),
+                cancellation_token.clone(),
+                ConfigFileAddressBinder::new(args.dir),
+                std::io::stdout(),
+                std::io::stdin()
+            ) => {
                     if let Err(e) = result {
                         eprintln!("Error: {e}");
                         std::process::exit(1);

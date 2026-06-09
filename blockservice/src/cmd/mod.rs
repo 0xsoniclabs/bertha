@@ -104,6 +104,27 @@ impl AddressBinder for ConfigFileAddressBinder {
     }
 }
 
+#[cfg_attr(test, mockall::automock)]
+pub trait CancelIndicator: Send {
+    fn cancel(&self);
+    fn is_cancelled(&self) -> bool;
+    fn cancelled(&self) -> impl Future<Output = ()> + Send;
+}
+
+impl CancelIndicator for CancellationToken {
+    fn cancel(&self) {
+        CancellationToken::cancel(self);
+    }
+
+    fn is_cancelled(&self) -> bool {
+        CancellationToken::is_cancelled(self)
+    }
+
+    fn cancelled(&self) -> impl Future<Output = ()> + Send {
+        CancellationToken::cancelled(self)
+    }
+}
+
 /// Executes a command with the provided arguments.
 /// Arguments:
 /// - `args`: the command arguments.
@@ -121,16 +142,27 @@ pub async fn execute(
     match args.command {
         Command::Init => cmd::init(args.dir, &mut output),
         Command::ImportGfile { gfile, verify } => {
-            cmd::import_gfile(args.dir, gfile, verify, &mut output)
+            cmd::import_gfile(args.dir, gfile, verify, &cancellation_token, &mut output)
         }
         Command::ImportEra1 {
             era1_dir,
             chain_id,
             verify,
-        } => cmd::import_era1(args.dir, era1_dir, chain_id, verify, &mut output),
-        Command::ImportEra { era_dir, chain_id } => {
-            cmd::import_era(args.dir, era_dir, chain_id, &mut output)
-        }
+        } => cmd::import_era1(
+            args.dir,
+            era1_dir,
+            chain_id,
+            verify,
+            &cancellation_token,
+            &mut output,
+        ),
+        Command::ImportEra { era_dir, chain_id } => cmd::import_era(
+            args.dir,
+            era_dir,
+            chain_id,
+            &cancellation_token,
+            &mut output,
+        ),
         Command::List { chain_id, url } => cmd::list(args.dir, chain_id, url, &mut output).await,
         Command::Fetch {
             url,
@@ -145,7 +177,14 @@ pub async fn execute(
             chain_id,
             block_number,
             block_hash,
-        } => cmd::verify(args.dir, chain_id, block_number, block_hash, &mut output),
+        } => cmd::verify(
+            args.dir,
+            chain_id,
+            block_number,
+            block_hash,
+            &cancellation_token,
+            &mut output,
+        ),
         Command::View {
             chain_id,
             block_number,
@@ -157,7 +196,7 @@ pub async fn execute(
             cmd::start(
                 args.dir,
                 address_binder.bind_address().await?,
-                cancellation_token,
+                cancellation_token.clone(),
                 None,
                 None,
             )

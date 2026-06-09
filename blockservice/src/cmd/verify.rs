@@ -20,6 +20,7 @@ use bertha_types::{Hash, HexConvert};
 
 use crate::{
     app_dir::open_app_dir,
+    cmd::CancelIndicator,
     db::{BlockDb, IterationDirection},
 };
 
@@ -28,6 +29,7 @@ pub fn verify(
     chain_id: u64,
     block_number: Option<u64>,
     block_hash: Option<Hash>,
+    cancellation_token: &impl CancelIndicator,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (_cfg, db) = open_app_dir(app_dir, true)?;
@@ -62,6 +64,11 @@ pub fn verify(
     let mut prev_block_number = block_number;
     let mut prev_block_hash: Option<Hash> = None;
     for entry in db.iterate(chain_id, block_number, IterationDirection::Forward) {
+        if cancellation_token.is_cancelled() {
+            writeln!(writer, "Verification cancelled.")?;
+            break;
+        }
+
         let (block_number, block) = entry?;
         if block.number != block_number {
             errors += 1;
@@ -94,7 +101,7 @@ pub fn verify(
     if errors == 0 {
         writeln!(
             writer,
-            "[chain ID {chain_id}] All blocks verified successfully."
+            "[chain ID {chain_id}] Blocks verified successfully."
         )?;
     } else {
         writeln!(
@@ -110,12 +117,15 @@ pub fn verify(
 mod tests {
 
     use bertha_types::Block;
+    use mockall::Sequence;
     use prost::Message;
     use rstest::rstest;
+    use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::{
         app_dir::init_app_dir,
+        cmd::MockCancelIndicator,
         db::proto,
         utils::test_dir::{Permissions, TestDir},
     };
@@ -124,7 +134,14 @@ mod tests {
     fn fails_if_app_dir_is_not_initialized() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
-        let result = verify(tmpdir.path(), 0, None, None, std::io::sink());
+        let result = verify(
+            tmpdir.path(),
+            0,
+            None,
+            None,
+            &CancellationToken::new(),
+            std::io::sink(),
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no blockservice.toml found at {} - did you forget to run init?",
@@ -142,7 +159,14 @@ mod tests {
         // remove read permissions
         tmpdir.set_permissions(Permissions::WriteOnly).unwrap();
 
-        let result = verify(tmpdir.path(), 0, None, None, std::io::sink());
+        let result = verify(
+            tmpdir.path(),
+            0,
+            None,
+            None,
+            &CancellationToken::new(),
+            std::io::sink(),
+        );
         assert!(result.is_err());
         assert!(
             result
@@ -177,6 +201,7 @@ mod tests {
             chain_id,
             Some(block.number),
             Some(hash),
+            &CancellationToken::new(),
             &mut output,
         );
         assert!(result.is_ok());
@@ -184,7 +209,7 @@ mod tests {
         if correct_hash {
             assert_eq!(
                 output,
-                format!("[chain ID {chain_id}] All blocks verified successfully.\n").as_bytes()
+                format!("[chain ID {chain_id}] Blocks verified successfully.\n").as_bytes()
             );
         } else {
             assert_eq!(output, format!(
@@ -210,6 +235,7 @@ mod tests {
             chain_id,
             Some(block_number),
             Some(Hash::default()),
+            &CancellationToken::new(),
             &mut buf,
         );
         assert!(result.is_ok());
@@ -245,13 +271,20 @@ mod tests {
         };
 
         let mut output = Vec::new();
-        let result = verify(tmpdir.path(), chain_id, None, None, &mut output);
+        let result = verify(
+            tmpdir.path(),
+            chain_id,
+            None,
+            None,
+            &CancellationToken::new(),
+            &mut output,
+        );
         assert!(result.is_ok());
 
         if matching_number {
             assert_eq!(
                 output,
-                format!("[chain ID {chain_id}] All blocks verified successfully.\n").as_bytes()
+                format!("[chain ID {chain_id}] Blocks verified successfully.\n").as_bytes()
             );
         } else {
             assert_eq!(
@@ -292,13 +325,20 @@ mod tests {
         db.put(chain_id, block1.clone()).unwrap();
 
         let mut output = Vec::new();
-        let result = verify(tmpdir.path(), chain_id, None, None, &mut output);
+        let result = verify(
+            tmpdir.path(),
+            chain_id,
+            None,
+            None,
+            &CancellationToken::new(),
+            &mut output,
+        );
         assert!(result.is_ok());
 
         if correct_parent_hash {
             assert_eq!(
                 output,
-                format!("[chain ID {chain_id}] All blocks verified successfully.\n").as_bytes()
+                format!("[chain ID {chain_id}] Blocks verified successfully.\n").as_bytes()
             );
         } else {
             assert_eq!(output, format!(
@@ -337,11 +377,62 @@ mod tests {
         db.put(chain_id, block.clone()).unwrap();
 
         let mut buf = Vec::new();
-        let result = verify(tmpdir.path(), chain_id, None, None, &mut buf);
+        let result = verify(
+            tmpdir.path(),
+            chain_id,
+            None,
+            None,
+            &CancellationToken::new(),
+            &mut buf,
+        );
         assert!(result.is_ok());
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            format!("[chain ID {chain_id}] All blocks verified successfully.\n",)
+            format!("[chain ID {chain_id}] Blocks verified successfully.\n",)
         );
+    }
+
+    #[test]
+    fn stops_verification_when_cancelled() {
+        let chain_id = 146;
+
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+
+        let block0 = Block {
+            number: 0,
+            parent_hash: Hash::default(),
+            ..Block::default()
+        };
+        let block1 = Block {
+            number: 1,
+            parent_hash: block0.to_header().compute_hash(),
+            ..Block::default()
+        };
+        db.put(chain_id, block0).unwrap();
+        db.put(chain_id, block1).unwrap();
+        drop(db);
+
+        let mut token = MockCancelIndicator::new();
+        let mut seq = Sequence::new();
+        token
+            .expect_is_cancelled()
+            .times(1)
+            .return_const(false)
+            .in_sequence(&mut seq);
+        token
+            .expect_is_cancelled()
+            .times(1)
+            .return_const(true)
+            .in_sequence(&mut seq);
+
+        let mut output = Vec::new();
+        let result = verify(tmpdir.path(), chain_id, None, None, &token, &mut output);
+        assert!(result.is_ok());
+
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("Verification cancelled."));
+        assert!(output.contains("Blocks verified successfully"));
     }
 }
