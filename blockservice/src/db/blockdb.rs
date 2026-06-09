@@ -529,7 +529,7 @@ pub fn make_block_key(chain_id: u64, block_number: u64) -> [u8; 16] {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Not;
+    use std::{assert_matches, ops::Not};
 
     use mockall::predicate::eq;
 
@@ -607,10 +607,9 @@ mod tests {
         match expected_err_msg {
             None => assert!(result.is_ok()),
             Some(expected_err) => {
-                assert!(result.is_err());
-                assert!(matches!(
+                assert_matches!(
                     result, Err(Error::StorageLayer(msg)) if msg.contains(expected_err)
-                ));
+                );
             }
         }
     }
@@ -699,7 +698,7 @@ mod tests {
         let db = KvDbBackedBlockDb { db: kv_db };
         let result = db.get(chain_id, block_number);
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), Error::Protobuf(_)));
+        assert_matches!(result.unwrap_err(), Error::Protobuf(_));
     }
 
     #[test]
@@ -960,7 +959,7 @@ mod tests {
 
         match expected_block {
             Some(expected) => assert_eq!(result, Some(Ok(expected))),
-            None => assert!(matches!(result, Some(Err(Error::Protobuf(_))))),
+            None => assert_matches!(result, Some(Err(Error::Protobuf(_)))),
         }
     }
 

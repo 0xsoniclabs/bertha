@@ -116,6 +116,8 @@ impl From<BlobTx> for Transaction {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     #[test]
@@ -136,7 +138,7 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to blob transaction must fail");
-        assert!(matches!(error, TransactionError::ConversionError(_)));
+        assert_matches!(error, TransactionError::ConversionError(_));
 
         // Attempt to convert to BlobTx with to field set to None
         let error = BlobTx::try_from(Transaction {
@@ -145,7 +147,7 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to blob transaction must fail");
-        assert!(matches!(error, TransactionError::ConversionError(_)));
+        assert_matches!(error, TransactionError::ConversionError(_));
     }
 
     #[test]
@@ -166,7 +168,7 @@ mod tests {
             ..Default::default()
         })
         .expect_err("BlobTx should not be constructible from a transaction with a mismatched type");
-        assert!(matches!(err, TransactionError::ConversionError(_)));
+        assert_matches!(err, TransactionError::ConversionError(_));
         // Missing 'to' field
         let err = BlobTx::is_constructible_from(&Transaction {
             transaction_type: TransactionType::Blob,
@@ -176,6 +178,6 @@ mod tests {
         .expect_err(
             "BlobTx should not be constructible from a transaction with a missing 'to' field",
         );
-        assert!(matches!(err, TransactionError::ConversionError(_)));
+        assert_matches!(err, TransactionError::ConversionError(_));
     }
 }

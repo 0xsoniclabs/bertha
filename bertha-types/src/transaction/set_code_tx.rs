@@ -170,6 +170,8 @@ impl From<SetCodeTx> for Transaction {
 
 #[cfg(test)]
 mod tests {
+    use std::assert_matches;
+
     use super::*;
 
     #[test]
@@ -190,7 +192,7 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to set code transaction must fail");
-        assert!(matches!(error, TransactionError::ConversionError(_)));
+        assert_matches!(error, TransactionError::ConversionError(_));
 
         // Attempt to convert to SetCodeTx with to field set to None
         let error = SetCodeTx::try_from(Transaction {
@@ -199,7 +201,7 @@ mod tests {
             ..Default::default()
         })
         .expect_err("Conversion to set code transaction must fail");
-        assert!(matches!(error, TransactionError::ConversionError(_)));
+        assert_matches!(error, TransactionError::ConversionError(_));
     }
 
     #[test]
@@ -222,7 +224,7 @@ mod tests {
         .expect_err(
             "SetCodeTx should not be constructible from a transaction with a mismatched type",
         );
-        assert!(matches!(err, TransactionError::ConversionError(_)));
+        assert_matches!(err, TransactionError::ConversionError(_));
         // Missing 'to' field
         let err = SetCodeTx::is_constructible_from(&Transaction {
             transaction_type: TransactionType::SetCode,
@@ -232,6 +234,6 @@ mod tests {
         .expect_err(
             "SetCodeTx should not be constructible from a transaction with a missing 'to' field",
         );
-        assert!(matches!(err, TransactionError::ConversionError(_)));
+        assert_matches!(err, TransactionError::ConversionError(_));
     }
 }
