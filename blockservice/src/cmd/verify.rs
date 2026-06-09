@@ -14,13 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-use std::path::Path;
+use std::{cmp, path::Path};
 
 use bertha_types::{Hash, HexConvert};
 
 use crate::{
     app_dir::open_app_dir,
-    cmd::CancelIndicator,
+    cmd::{CancelIndicator, make_progress_bar},
     db::{BlockDb, IterationDirection},
 };
 
@@ -61,6 +61,22 @@ pub fn verify(
 
     // start with the first block if no block number is provided
     let block_number = block_number.unwrap_or_default();
+    let total_blocks = db
+        .get_ranges_of_chain_id(chain_id)?
+        .into_iter()
+        .map(|range| {
+            let start = cmp::max(*range.start(), block_number);
+            let end = *range.end();
+            if start > end {
+                0
+            } else {
+                end.saturating_sub(start).saturating_add(1)
+            }
+        })
+        .sum();
+
+    let progress_bar = make_progress_bar(total_blocks)?;
+
     let mut prev_block_number = block_number;
     let mut prev_block_hash: Option<Hash> = None;
     for entry in db.iterate(chain_id, block_number, IterationDirection::Forward) {
@@ -96,7 +112,9 @@ pub fn verify(
         }
         prev_block_number = block_number;
         prev_block_hash = Some(block.to_header().compute_hash());
+        progress_bar.inc(1);
     }
+    progress_bar.finish();
 
     if errors == 0 {
         writeln!(
