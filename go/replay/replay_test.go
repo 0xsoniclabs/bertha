@@ -181,7 +181,7 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 
 	chain := &stateChainAdapter{
 		chainID:          chainID,
-		metadataStore:    &StaticMetadataStore{},
+		metadataStore:    &BlockDBMetadataStore{},
 		blockHashHistory: &blockHashHistory{},
 		state:            state,
 		snapshotHandler:  NewSnapshotHandler(0, 0, math.MaxUint64, 1),
@@ -604,7 +604,7 @@ func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
 
 	chain := &stateChainAdapter{
 		chainID:          chainID,
-		metadataStore:    &StaticMetadataStore{},
+		metadataStore:    &BlockDBMetadataStore{},
 		blockHashHistory: &blockHashHistory{},
 		state:            state,
 	}
@@ -675,11 +675,11 @@ func TestStateChainAdapter_ApplyBlock_CreatesChainConfigAndUpgradesFromMetadataS
 			require.NoError(t, err)
 
 			if tc.isEthereum {
-				mockMetadataStore.EXPECT().GetCorrections(uint64(1))
+				mockMetadataStore.EXPECT().GetCorrectionsAtBlock(uint64(1))
 			} else {
-				mockMetadataStore.EXPECT().GetUpgrades()
+				mockMetadataStore.EXPECT().GetUpgradeHeights()
 				mockMetadataStore.EXPECT().GetUpgradesAtBlock(uint64(1))
-				mockMetadataStore.EXPECT().GetCorrections(uint64(1))
+				mockMetadataStore.EXPECT().GetCorrectionsAtBlock(uint64(1))
 			}
 
 			_, _, err = chain.ApplyBlock(block)
@@ -700,9 +700,9 @@ func TestStateChainAdapter_ApplyBlock_AppliesUpgrades(t *testing.T) {
 	withExcessGasCharges := opera.GetAllegroUpgrades()
 	withExcessGasCharges.SingleProposerBlockFormation = false
 
-	metadataStore := &StaticMetadataStore{
+	metadataStore := &BlockDBMetadataStore{
 		metadata: Metadata{
-			Upgrades: []opera.UpgradeHeight{
+			UpgradeHeights: []opera.UpgradeHeight{
 				{Height: 5, Upgrades: noExcessGasCharges},
 				{Height: 10, Upgrades: withExcessGasCharges},
 				{Height: 15, Upgrades: noExcessGasCharges},
@@ -829,9 +829,9 @@ func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnEpochSeal
 			})
 			require.NoError(t, err)
 
-			mockMetadataStore.EXPECT().GetUpgrades()
+			mockMetadataStore.EXPECT().GetUpgradeHeights()
 			mockMetadataStore.EXPECT().GetUpgradesAtBlock(uint64(5))
-			mockMetadataStore.EXPECT().GetCorrections(uint64(5))
+			mockMetadataStore.EXPECT().GetCorrectionsAtBlock(uint64(5))
 
 			if tc.expectCommitUpgrades {
 				mockMetadataStore.EXPECT().CommitUpgrades(uint64(5)).Return(nil)

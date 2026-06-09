@@ -17,11 +17,13 @@
 package replay
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"math/big"
+	"slices"
 
+	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
@@ -41,80 +43,70 @@ type MetadataStore interface {
 	// PatchUpgrades and will become effective at the next block.
 	CommitUpgrades(blockNumber uint64) error
 
-	// GetUpgrades returns all stored upgrades.
-	GetUpgrades() []opera.UpgradeHeight
+	// GetUpgradeHeights returns all stored upgrade heights.
+	GetUpgradeHeights() []opera.UpgradeHeight
 
 	// GetUpgradesAtBlock returns the effective upgrades at the given block number,
 	// based on all stored upgrades up to and including that block.
 	GetUpgradesAtBlock(blockNumber uint64) opera.Upgrades
 
-	// GetCorrections returns the account corrections to be applied at the
+	// GetCorrectionsAtBlock returns the account corrections to be applied at the
 	// given block number, or nil if there are none.
-	GetCorrections(blockNumber uint64) map[common.Address]Correction
+	GetCorrectionsAtBlock(blockNumber uint64) map[common.Address]Correction
 }
 
-// StaticMetadataStore is a MetadataStore implementation backed by hard-coded
-// data for known chains.
-type StaticMetadataStore struct {
+// BlockDBMetadataStore is a MetadataStore implementation backed by the block database.
+type BlockDBMetadataStore struct {
+	db           blockdb.BlockDB
 	metadata     Metadata
 	nextUpgrades *opera.Upgrades
+	chainID      uint64
+	logger       utils.Logger
 }
 
-// NewStaticMetadataStore creates a new StaticMetadataStore with upgrades
-// for the given chain ID.
-func NewStaticMetadataStore(chainID uint64, logger utils.Logger) (*StaticMetadataStore, error) {
-	allegro := opera.GetAllegroUpgrades()
-	allegro.GasSubsidies = true
-	switch chainID {
-	case SonicMainNetChainID:
-		corrections, err := GetSonicMainnetCorrections()
-		if err != nil {
-			return nil, err
-		}
-		return &StaticMetadataStore{
-			metadata: Metadata{
-				Upgrades: []opera.UpgradeHeight{
-					// Rule update transaction is part of block 56477897,
-					// followed by an Epoch seal in block 56477967.
-					// The upgrade has affect from and including the following block.
-					{Upgrades: allegro, Height: 56477968},
-				},
-				Corrections: corrections,
-			},
-		}, nil
-	case AllegroTestNetChainID:
-		// The Allegro Testnet does not need any corrections, but it does have
-		// several network rule upgrades.
-		allegroSingleProposer := allegro
-		allegroSingleProposer.SingleProposerBlockFormation = true
-		return &StaticMetadataStore{
-			metadata: Metadata{
-				Upgrades: []opera.UpgradeHeight{
-					{Upgrades: allegro, Height: 10517},
-					{Upgrades: allegroSingleProposer, Height: 16848},
-					{Upgrades: allegro, Height: 45517},
-					{Upgrades: allegroSingleProposer, Height: 49189},
-					{Upgrades: allegro, Height: 51558},
-					{Upgrades: allegroSingleProposer, Height: 61156},
-					{Upgrades: allegro, Height: 61595},
-					{Upgrades: allegroSingleProposer, Height: 63080},
-					{Upgrades: allegro, Height: 63374},
-					{Upgrades: allegroSingleProposer, Height: 90410},
-					{Upgrades: allegro, Height: 106861},
-					{Upgrades: allegroSingleProposer, Height: 161033},
-					{Upgrades: allegro, Height: 161900},
-					{Upgrades: allegroSingleProposer, Height: 251426},
-					{Upgrades: allegro, Height: 253299},
-				},
-			},
-		}, nil
-	default:
-		logger.Warn("No metadata available for chain ID, proceeding without upgrades or corrections", "chainId", chainID)
-		return &StaticMetadataStore{}, nil
+// NewBlockDBMetadataStore creates a BlockDBMetadataStore backed by data stored in the
+// given block database.
+func NewBlockDBMetadataStore(db blockdb.BlockDB, chainID uint64, logger utils.Logger) (*BlockDBMetadataStore, error) {
+	upgradesData, err := db.GetUpgradeHeights(chainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get upgrade heights from block db: %w", err)
 	}
+	correctionsData, err := db.GetCorrections(chainID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get corrections from block db: %w", err)
+	}
+
+	var upgrades []opera.UpgradeHeight
+	if upgradesData != nil {
+		if err := json.Unmarshal(upgradesData, &upgrades); err != nil {
+			return nil, fmt.Errorf("failed to parse stored upgrade heights: %w", err)
+		}
+		logger.Info("Loaded upgrade heights from block db", "num_upgrade_heights", len(upgrades))
+	} else {
+		logger.Warn("No upgrade heights available")
+	}
+	var corrections Corrections
+	if correctionsData != nil {
+		if err := json.Unmarshal(correctionsData, &corrections); err != nil {
+			return nil, fmt.Errorf("failed to parse stored corrections: %w", err)
+		}
+		logger.Info("Loaded corrections from block db", "num_corrections", len(corrections))
+	} else {
+		logger.Warn("No corrections available")
+	}
+
+	return &BlockDBMetadataStore{
+		db: db,
+		metadata: Metadata{
+			UpgradeHeights: upgrades,
+			Corrections:    corrections,
+		},
+		chainID: chainID,
+		logger:  logger,
+	}, nil
 }
 
-func (s *StaticMetadataStore) PatchUpgrades(blockNumber uint64, diff []byte) error {
+func (s *BlockDBMetadataStore) PatchUpgrades(blockNumber uint64, diff []byte) error {
 	var upgrades opera.Upgrades
 	if s.nextUpgrades != nil {
 		upgrades = *s.nextUpgrades
@@ -154,7 +146,7 @@ func updateRules(src opera.Rules, diff []byte) (opera.Rules, error) {
 	return changed, nil
 }
 
-func (s *StaticMetadataStore) CommitUpgrades(blockNumber uint64) error {
+func (s *BlockDBMetadataStore) CommitUpgrades(blockNumber uint64) error {
 	if s.nextUpgrades == nil {
 		return nil
 	}
@@ -163,26 +155,42 @@ func (s *StaticMetadataStore) CommitUpgrades(blockNumber uint64) error {
 		Height:   idx.Block(blockNumber + 1), // effective from next block on
 	}
 	s.nextUpgrades = nil
-	// Verify that the upgrade matches one of the hard-coded values
-	for _, existingUpgrade := range s.metadata.Upgrades {
-		if existingUpgrade.Height == upgrade.Height &&
-			existingUpgrade.Upgrades == upgrade.Upgrades {
-			slog.Info("Committed upgrade", "height", upgrade.Height, "upgrades", upgrade.Upgrades)
-			return nil
+	// Check if the upgrade matches one of the known values
+	for _, existingUpgrade := range s.metadata.UpgradeHeights {
+		if existingUpgrade.Height == upgrade.Height {
+			if existingUpgrade.Upgrades == upgrade.Upgrades {
+				s.logger.Info("Detected known upgrade", "block", upgrade.Height)
+				return nil
+			} else {
+				return fmt.Errorf("unexpected upgrade at block %d: upgrade does not match known upgrade", upgrade.Height)
+			}
 		}
 	}
-	return fmt.Errorf("upgrade at height %d does not match any hard-coded values", blockNumber+1)
+	s.logger.Info("Detected new upgrade", "block", upgrade.Height)
+	s.metadata.UpgradeHeights = append(s.metadata.UpgradeHeights, upgrade)
+	slices.SortFunc(s.metadata.UpgradeHeights, func(a, b opera.UpgradeHeight) int {
+		return cmp.Compare(a.Height, b.Height)
+	})
+	data, err := json.Marshal(s.metadata.UpgradeHeights)
+	if err != nil {
+		return fmt.Errorf("failed to marshal upgrade heights: %w", err)
+	}
+	if err := s.db.PutUpgradeHeights(s.chainID, data); err != nil {
+		return fmt.Errorf("failed to store upgrade heights in block db: %w", err)
+	}
+	s.logger.Info("Upgrade stored in block db", "block", upgrade.Height)
+	return nil
 }
 
-// GetUpgrades returns all hard-coded upgrades.
-func (s *StaticMetadataStore) GetUpgrades() []opera.UpgradeHeight {
-	return s.metadata.Upgrades
+// GetUpgradeHeights returns all stored upgrade heights.
+func (s *BlockDBMetadataStore) GetUpgradeHeights() []opera.UpgradeHeight {
+	return s.metadata.UpgradeHeights
 }
 
 // GetUpgradesAtBlock returns the effective upgrades at the given block number.
-func (s *StaticMetadataStore) GetUpgradesAtBlock(blockNumber uint64) opera.Upgrades {
+func (s *BlockDBMetadataStore) GetUpgradesAtBlock(blockNumber uint64) opera.Upgrades {
 	upgrades := opera.Upgrades{}
-	for _, upgrade := range s.metadata.Upgrades {
+	for _, upgrade := range s.metadata.UpgradeHeights {
 		if upgrade.Height <= idx.Block(blockNumber) {
 			upgrades = upgrade.Upgrades
 		}
@@ -190,19 +198,14 @@ func (s *StaticMetadataStore) GetUpgradesAtBlock(blockNumber uint64) opera.Upgra
 	return upgrades
 }
 
-// GetCorrections returns the account corrections for the given block number.
-func (s *StaticMetadataStore) GetCorrections(blockNumber uint64) map[common.Address]Correction {
+// GetCorrectionsAtBlock returns the account corrections for the given block number.
+func (s *BlockDBMetadataStore) GetCorrectionsAtBlock(blockNumber uint64) map[common.Address]Correction {
 	return s.metadata.Corrections[blockNumber]
 }
-
-const (
-	SonicMainNetChainID   = 146
-	AllegroTestNetChainID = 14601
-)
 
 // Metadata holds chain-specific metadata such as upgrades to the EVM rules and
 // corrections to be applied to account states.
 type Metadata struct {
-	Upgrades    []opera.UpgradeHeight
-	Corrections Corrections
+	UpgradeHeights []opera.UpgradeHeight
+	Corrections    Corrections
 }

@@ -17,8 +17,10 @@
 package replay
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
@@ -27,88 +29,109 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
-func TestStaticMetadataStore_GetUpgradesAtBlock_ObtainsUpgradesBasedOnBlockNumber(t *testing.T) {
-	upgrades := []opera.Upgrades{
-		{Sonic: true},
-		{Sonic: true, Allegro: true},
-		{Sonic: true, SingleProposerBlockFormation: true},
+func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
+	upgrades := []opera.UpgradeHeight{{Upgrades: opera.Upgrades{Sonic: true}, Height: 5}}
+	corrections := Corrections{
+		10: {common.HexToAddress("0x123"): {Balance: *uint256.NewInt(100)}},
 	}
 
-	store := &StaticMetadataStore{
-		metadata: Metadata{
-			Upgrades: []opera.UpgradeHeight{
-				{Upgrades: upgrades[0], Height: 5},
-				{Upgrades: upgrades[1], Height: 7},
-				{Upgrades: upgrades[2], Height: 11},
+	upgradesData, err := json.Marshal(upgrades)
+	require.NoError(t, err)
+	correctionsData, err := json.Marshal(corrections)
+	require.NoError(t, err)
+
+	testCases := map[string]struct {
+		upgradesData      []byte
+		correctionsData   []byte
+		expectErr         string
+		expectLog         func(logger *utils.MockLogger)
+		expectUpgrades    []opera.UpgradeHeight
+		expectCorrections Corrections
+	}{
+		"no upgrade heights, no corrections": {
+			expectLog: func(logger *utils.MockLogger) {
+				logger.EXPECT().Warn("No upgrade heights available").Times(1)
+				logger.EXPECT().Warn("No corrections available").Times(1)
+			},
+		},
+		"only upgrade heights": {
+			upgradesData: upgradesData,
+			expectLog: func(logger *utils.MockLogger) {
+				logger.EXPECT().Info("Loaded upgrade heights from block db", "num_upgrade_heights", len(upgrades)).Times(1)
+				logger.EXPECT().Warn("No corrections available").Times(1)
+			},
+			expectUpgrades: upgrades,
+		},
+		"only corrections": {
+			correctionsData: correctionsData,
+			expectLog: func(logger *utils.MockLogger) {
+				logger.EXPECT().Warn("No upgrade heights available").Times(1)
+				logger.EXPECT().Info("Loaded corrections from block db", "num_corrections", len(corrections)).Times(1)
+			},
+			expectCorrections: corrections,
+		},
+		"both": {
+			upgradesData:    upgradesData,
+			correctionsData: correctionsData,
+			expectLog: func(logger *utils.MockLogger) {
+				logger.EXPECT().Info("Loaded upgrade heights from block db", "num_upgrade_heights", len(upgrades)).Times(1)
+				logger.EXPECT().Info("Loaded corrections from block db", "num_corrections", len(corrections)).Times(1)
+			},
+			expectUpgrades:    upgrades,
+			expectCorrections: corrections,
+		},
+		"invalid upgrade heights": {
+			upgradesData:    []byte("not-json"),
+			correctionsData: correctionsData,
+			expectErr:       "failed to parse stored upgrade heights",
+		},
+		"invalid corrections": {
+			upgradesData:    upgradesData,
+			correctionsData: []byte("not-json"),
+			expectErr:       "failed to parse stored corrections",
+			expectLog: func(logger *utils.MockLogger) {
+				logger.EXPECT().Info("Loaded upgrade heights from block db", "num_upgrade_heights", len(upgrades)).Times(1)
 			},
 		},
 	}
 
-	for blockNr := range 20 {
-		var expect opera.Upgrades
-		if blockNr >= 11 {
-			expect = upgrades[2]
-		} else if blockNr >= 7 {
-			expect = upgrades[1]
-		} else if blockNr >= 5 {
-			expect = upgrades[0]
-		}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			db := blockdb.NewMockBlockDB(ctrl)
+			logger := utils.NewMockLogger(ctrl)
+			chainID := uint64(146)
 
-		got := store.GetUpgradesAtBlock(uint64(blockNr))
-		require.Equal(t, expect, got, "block number %d", blockNr)
+			db.EXPECT().GetUpgradeHeights(chainID).Return(tc.upgradesData, nil).Times(1)
+			db.EXPECT().GetCorrections(chainID).Return(tc.correctionsData, nil).Times(1)
+
+			if tc.expectLog != nil {
+				tc.expectLog(logger)
+			}
+
+			store, err := NewBlockDBMetadataStore(db, chainID, logger)
+			if tc.expectErr != "" {
+				require.ErrorContains(t, err, tc.expectErr)
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, tc.expectUpgrades, store.metadata.UpgradeHeights)
+			require.Equal(t, tc.expectCorrections, store.metadata.Corrections)
+		})
 	}
 }
 
-func TestNewStaticMetadataStore_SonicChain_ContainsCorrections(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	logger := utils.NewMockLogger(ctrl)
-
-	store, err := NewStaticMetadataStore(SonicMainNetChainID, logger)
-	require.NoError(t, err)
-	require.NotEmpty(t, store.metadata.Corrections)
-}
-
-func TestNewStaticMetadataStore_AllegroTestChain_NoCorrectionsButUpgrades(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	logger := utils.NewMockLogger(ctrl)
-
-	store, err := NewStaticMetadataStore(AllegroTestNetChainID, logger)
-	require.NoError(t, err)
-	require.NotEmpty(t, store.GetUpgrades())
-	require.Empty(t, store.metadata.Corrections)
-
-	// Make sure the upgrades are in ascending order.
-	last := 0
-	for _, upgrade := range store.GetUpgrades() {
-		require.Greater(t, int(upgrade.Height), last)
-		last = int(upgrade.Height)
-	}
-}
-
-func TestNewStaticMetadataStore_UnknownChainID_LogsWarningAndReturnsEmptyMetadata(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	logger := utils.NewMockLogger(ctrl)
-
-	chainID := uint64(12345)
-
-	logger.EXPECT().Warn("No metadata available for chain ID, proceeding without upgrades or corrections", "chainId", chainID).Times(1)
-
-	store, err := NewStaticMetadataStore(chainID, logger)
-	require.NoError(t, err)
-	require.Empty(t, store.metadata.Upgrades)
-	require.Empty(t, store.metadata.Corrections)
-}
-
-func TestStaticMetadataStore_PatchUpgrades_ReturnsErrorForInvalidDiff(t *testing.T) {
-	store := &StaticMetadataStore{}
+func TestBlockDBMetadataStore_PatchUpgrades_ReturnsErrorForInvalidDiff(t *testing.T) {
+	store := &BlockDBMetadataStore{}
 	err := store.PatchUpgrades(0, []byte("not valid json {{{"))
 	require.Error(t, err)
 }
 
-func TestStaticMetadataStore_PatchUpgrades_IgnoresUpdatesWithoutChanges(t *testing.T) {
-	store := &StaticMetadataStore{
+func TestBlockDBMetadataStore_PatchUpgrades_IgnoresUpdatesWithoutChanges(t *testing.T) {
+	store := &BlockDBMetadataStore{
 		metadata: Metadata{
-			Upgrades: []opera.UpgradeHeight{
+			UpgradeHeights: []opera.UpgradeHeight{
 				{Upgrades: opera.Upgrades{Sonic: true}, Height: 2},
 			},
 		},
@@ -120,8 +143,8 @@ func TestStaticMetadataStore_PatchUpgrades_IgnoresUpdatesWithoutChanges(t *testi
 	require.Nil(t, store.nextUpgrades)
 }
 
-func TestStaticMetadataStore_PatchUpgrades_AppliesDiffToNextUpgrades(t *testing.T) {
-	store := &StaticMetadataStore{}
+func TestBlockDBMetadataStore_PatchUpgrades_AppliesDiffToNextUpgrades(t *testing.T) {
+	store := &BlockDBMetadataStore{}
 	require.Nil(t, store.nextUpgrades)
 
 	diff := []byte(`{"Upgrades":{"Allegro":true}}`)
@@ -146,64 +169,135 @@ func TestStaticMetadataStore_PatchUpgrades_AppliesDiffToNextUpgrades(t *testing.
 	require.True(t, store.nextUpgrades.Brio)
 }
 
-func TestStaticMetadataStore_CommitUpgrades_VerifiesUpgradeExists(t *testing.T) {
-	sonicUpgrades := opera.UpgradeHeight{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}, Height: 4}
-	store := &StaticMetadataStore{
-		metadata: Metadata{
-			Upgrades: []opera.UpgradeHeight{
-				sonicUpgrades,
-			},
-		},
-	}
-
-	// correct upgrade and height
-	store.nextUpgrades = &sonicUpgrades.Upgrades
-	require.NoError(t, store.CommitUpgrades(uint64(sonicUpgrades.Height-1)))
-
-	// no upgrade
-	store.nextUpgrades = nil
-	require.NoError(t, store.CommitUpgrades(2))
-
-	// wrong upgrade
-	store.nextUpgrades = &opera.Upgrades{Sonic: false}
-	require.Error(t, store.CommitUpgrades(uint64(sonicUpgrades.Height-1)))
-
-	// wrong height
-	store.nextUpgrades = &sonicUpgrades.Upgrades
-	require.Error(t, store.CommitUpgrades(0))
+func TestBlockDBMetadataStore_CommitUpgrades_NoNextUpgrades_IsNoOp(t *testing.T) {
+	store := &BlockDBMetadataStore{}
+	require.NoError(t, store.CommitUpgrades(5))
 }
 
-func TestStaticMetadataStore_CommitUpgrades_ClearsNextUpgradesAfterSuccess(t *testing.T) {
-	store := &StaticMetadataStore{
+func TestBlockDBMetadataStore_CommitUpgrades_KnownUpgradeIsNotStoredAgain(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	logger := utils.NewMockLogger(ctrl)
+
+	knownUpgrade := opera.UpgradeHeight{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}, Height: 4}
+	store := &BlockDBMetadataStore{
 		metadata: Metadata{
-			Upgrades: []opera.UpgradeHeight{
-				{Upgrades: opera.Upgrades{Sonic: true}, Height: 2},
+			UpgradeHeights: []opera.UpgradeHeight{
+				knownUpgrade,
 			},
 		},
+		logger: logger,
 	}
 
-	sonicUpgrades := opera.Upgrades{Sonic: true}
-	store.nextUpgrades = &sonicUpgrades
-	require.NoError(t, store.CommitUpgrades(1))
-	// nextUpgrades must be cleared after a successful commit
+	logger.EXPECT().Info("Detected known upgrade", "block", knownUpgrade.Height).Times(1)
+
+	store.nextUpgrades = &knownUpgrade.Upgrades
+	require.NoError(t, store.CommitUpgrades(uint64(knownUpgrade.Height-1)))
+	require.Nil(t, store.nextUpgrades)
+	require.Len(t, store.metadata.UpgradeHeights, 1)
+}
+
+func TestBlockDBMetadataStore_CommitUpgrades_KnownHeightWithDifferentUpgrade_ReturnsError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	logger := utils.NewMockLogger(ctrl)
+
+	knownUpgrade := opera.UpgradeHeight{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}, Height: 4}
+	store := &BlockDBMetadataStore{
+		metadata: Metadata{
+			UpgradeHeights: []opera.UpgradeHeight{
+				knownUpgrade,
+			},
+		},
+		logger: logger,
+	}
+
+	mismatch := opera.Upgrades{Sonic: true, Brio: true}
+	store.nextUpgrades = &mismatch
+	err := store.CommitUpgrades(uint64(knownUpgrade.Height - 1))
+	require.ErrorContains(t, err, "unexpected upgrade at block 4")
 	require.Nil(t, store.nextUpgrades)
 }
 
-func TestStaticMetadataStore_GetCorrections_ReturnsCorrections(t *testing.T) {
-	corrections := Corrections{
-		10: {
-			common.HexToAddress("0x123"): Correction{Balance: uint256.Int{100}},
-		},
-		20: {
-			common.HexToAddress("0x456"): Correction{Balance: uint256.Int{200}},
+func TestBlockDBMetadataStore_CommitUpgrades_NewUpgradeIsStored(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	db := blockdb.NewMockBlockDB(ctrl)
+	logger := utils.NewMockLogger(ctrl)
+
+	newUpgrades := opera.Upgrades{Sonic: true, Brio: true}
+	store := &BlockDBMetadataStore{
+		db:      db,
+		chainID: 146,
+		logger:  logger,
+		metadata: Metadata{UpgradeHeights: []opera.UpgradeHeight{
+			{Upgrades: opera.Upgrades{Sonic: true}, Height: 5},
+			{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}, Height: 20},
+		}},
+	}
+
+	logger.EXPECT().Info("Detected new upgrade", "block", gomock.Any()).Times(1)
+	db.EXPECT().PutUpgradeHeights(store.chainID, gomock.Any()).DoAndReturn(func(chainID uint64, data []byte) error {
+		var got []opera.UpgradeHeight
+		require.NoError(t, json.Unmarshal(data, &got))
+		require.Len(t, got, 3)
+		require.Equal(t, uint64(5), uint64(got[0].Height))
+		require.Equal(t, uint64(16), uint64(got[1].Height))
+		require.Equal(t, newUpgrades, got[1].Upgrades)
+		require.Equal(t, uint64(20), uint64(got[2].Height))
+		return nil
+	}).Times(1)
+	logger.EXPECT().Info("Upgrade stored in block db", "block", gomock.Any()).Times(1)
+
+	store.nextUpgrades = &newUpgrades
+	require.NoError(t, store.CommitUpgrades(15))
+	require.Nil(t, store.nextUpgrades)
+}
+
+func TestBlockDBMetadataStore_GetUpgradesAtBlock_ObtainsUpgradesFromCachedValuesBasedOnBlockNumber(t *testing.T) {
+	upgrades := []opera.Upgrades{
+		{Sonic: true},
+		{Sonic: true, Allegro: true},
+		{Sonic: true, SingleProposerBlockFormation: true},
+	}
+
+	store := &BlockDBMetadataStore{
+		metadata: Metadata{
+			UpgradeHeights: []opera.UpgradeHeight{
+				{Upgrades: upgrades[0], Height: 5},
+				{Upgrades: upgrades[1], Height: 7},
+				{Upgrades: upgrades[2], Height: 11},
+			},
 		},
 	}
 
-	store := &StaticMetadataStore{
+	for blockNr := range 20 {
+		var expect opera.Upgrades
+		if blockNr >= 11 {
+			expect = upgrades[2]
+		} else if blockNr >= 7 {
+			expect = upgrades[1]
+		} else if blockNr >= 5 {
+			expect = upgrades[0]
+		}
+
+		got := store.GetUpgradesAtBlock(uint64(blockNr))
+		require.Equal(t, expect, got, "block number %d", blockNr)
+	}
+}
+
+func TestBlockDBMetadataStore_GetCorrectionsAtBlock_ReturnsCorrections(t *testing.T) {
+	corrections := Corrections{
+		10: {
+			common.HexToAddress("0x123"): {Balance: *uint256.NewInt(100)},
+		},
+		20: {
+			common.HexToAddress("0x456"): {Balance: *uint256.NewInt(200)},
+		},
+	}
+
+	store := &BlockDBMetadataStore{
 		metadata: Metadata{Corrections: corrections},
 	}
 
-	require.Equal(t, corrections[10], store.GetCorrections(10))
-	require.Equal(t, corrections[20], store.GetCorrections(20))
-	require.Nil(t, store.GetCorrections(30))
+	require.Equal(t, corrections[10], store.GetCorrectionsAtBlock(10))
+	require.Equal(t, corrections[20], store.GetCorrectionsAtBlock(20))
+	require.Nil(t, store.GetCorrectionsAtBlock(30))
 }
