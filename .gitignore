@@ -1,8 +1,12 @@
 # Rust files
 /target
 /build
+
+/go/build
+
 # Vscode files
 .vscode/launch.json
+
 # Created by blockservice
 .blockdb/
 blockservice.toml
