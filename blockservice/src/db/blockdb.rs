@@ -354,21 +354,18 @@ where
             .iterate_raw(key.into(), direction)
             .map(move |result| match result {
                 Ok((key, value)) => {
-                    if matches!(key.len(), 1 | 9) {
+                    if matches!(key.len(), 2 | 10) {
                         // global or chain metadata, no more blocks for this chain id
                         return None;
                     }
-                    if key.len() != 16 {
-                        return Some(Err(Error::StorageLayer(format!(
-                            "unexpected key length {}",
-                            key.len()
-                        ))));
+                    if key.len() != 17 || key[0] != 0x02 {
+                        return Some(Err(Error::StorageLayer(format!("unexpected key {key:?}",))));
                     }
-                    let cid = u64::from_be_bytes(key[0..8].try_into().unwrap());
+                    let cid = u64::from_be_bytes(key[1..9].try_into().unwrap());
                     if cid != chain_id {
                         return None;
                     }
-                    let block_number = u64::from_be_bytes(key[8..16].try_into().unwrap());
+                    let block_number = u64::from_be_bytes(key[9..17].try_into().unwrap());
                     Some(Ok((block_number, value)))
                 }
                 Err(e) => Some(Err(e)),
@@ -424,20 +421,20 @@ where
 }
 
 // Key/value layout:
-// - Global metadata (1-byte keys):
-//   - 0 => DB format version (u64, big-endian)
-//   - 1 => chain IDs (u64 array, big-endian)
-// - Chain metadata (9-byte keys): [chain_id (8 bytes big endian), suffix]
-//   - suffix 0 => block ranges as (start, end) u64 pairs (big-endian)
-// - Blocks (16-byte keys): [chain_id (8 bytes big endian), block_number (8 bytes big endian)] =>
-//   protobuf block.
+// - Global metadata (2-byte keys): [0x00 prefix, suffix]
+//   - 0x00 => DB format version (u64, big-endian)
+//   - 0x01 => chain IDs (u64 array, big-endian)
+// - Chain metadata (10-byte keys): [0x01 prefix, chain_id (8 bytes big endian), suffix]
+//   - suffix 0x00 => block ranges as (start, end) u64 pairs (big-endian)
+// - Blocks (17-byte keys): [0x02 prefix, chain_id (8 bytes big endian), block_number (8 bytes big
+//   endian)] => protobuf block.
 
 /// Key for storing the version of the block database format.
-const VERSION_KEY: [u8; 1] = 0u8.to_be_bytes();
+const VERSION_KEY: [u8; 2] = [0x00, 0x00];
 
 /// The current version of the block database format. This should be incremented whenever a change
 /// is made to the format.
-const CURRENT_VERSION: u64 = 1;
+const CURRENT_VERSION: u64 = 2;
 
 /// Converts the version into the byte format for storage.
 fn serialize_version(version: u64) -> [u8; 8] {
@@ -457,7 +454,7 @@ fn deserialize_version(data: impl AsRef<[u8]>) -> Result<u64, Error> {
 }
 
 /// Key for storing the IDs of all chains in the database.
-pub const CHAIN_IDS_KEY: [u8; 1] = 1u8.to_be_bytes();
+pub const CHAIN_IDS_KEY: [u8; 2] = [0x00, 0x01];
 
 /// Converts the chain IDs into the byte format for storage.
 pub fn serialize_chain_ids(value: impl IntoIterator<Item = u64>) -> Vec<u8> {
@@ -480,10 +477,11 @@ fn deserialize_chain_ids(data: impl AsRef<[u8]>) -> Result<Vec<u64>, Error> {
 }
 
 /// Returns the key for storing the block ranges for the given chain ID.
-pub fn make_block_ranges_key(chain_id: u64) -> [u8; 9] {
-    let mut key = [0u8; 9];
-    key[0..8].copy_from_slice(&chain_id.to_be_bytes());
-    key[8] = 0;
+pub fn make_block_ranges_key(chain_id: u64) -> [u8; 10] {
+    let mut key = [0u8; 10];
+    key[0] = 0x01;
+    key[1..9].copy_from_slice(&chain_id.to_be_bytes());
+    key[9] = 0x00;
     key
 }
 
@@ -520,10 +518,11 @@ fn deserialize_block_ranges(data: impl AsRef<[u8]>) -> Result<Vec<BlockRange>, E
 }
 
 /// Returns the key for storing a block for the given chain ID and block number.
-pub fn make_block_key(chain_id: u64, block_number: u64) -> [u8; 16] {
-    let mut key = [0u8; 16];
-    key[0..8].copy_from_slice(&chain_id.to_be_bytes());
-    key[8..16].copy_from_slice(&block_number.to_be_bytes());
+pub fn make_block_key(chain_id: u64, block_number: u64) -> [u8; 17] {
+    let mut key = [0u8; 17];
+    key[0] = 0x02;
+    key[1..9].copy_from_slice(&chain_id.to_be_bytes());
+    key[9..17].copy_from_slice(&block_number.to_be_bytes());
     key
 }
 
@@ -1273,16 +1272,11 @@ mod tests {
     type ByteVecTuple = (Vec<u8>, Vec<u8>);
 
     #[rstest::rstest]
-    #[case::until_no_more_blocks(
-        vec![
-            Ok((make_block_key(1, 1).to_vec(), b"block1".to_vec())),
-            Ok((make_block_key(1, 3).to_vec(), b"block3".to_vec())),
-        ],
-        vec![
-            Ok((1, Box::from(b"block1".as_slice()))),
-            Ok((3, Box::from(b"block3".as_slice()))),
-        ]
-    )]
+    // case starting_at_block_number does not make sense for a mock backed DB because the mock can
+    // be set up to return any sequence of items regardless of the start key
+    // case until_no_more_blocks does not make sense for a mock backed DB because the mock stops
+    // returning items depending on how it's set up, not based on the presence or absence of block
+    // keys.
     #[case::until_chain_boundary(
         vec![
             Ok((make_block_key(1, 1).to_vec(), b"chain1-block1".to_vec())),
@@ -1298,7 +1292,7 @@ mod tests {
         ],
         vec![Ok((1, Box::from(b"chain1-block1".as_slice())))]
     )]
-    #[case::until_invalid_key(
+    #[case::until_key_of_wrong_length(
         vec![
             Ok((make_block_key(1, 1).to_vec(), b"block1-1".to_vec())),
             Ok(([make_block_key(1, 1).as_slice(), &[0]].concat(), b"invalid".to_vec())),
@@ -1306,7 +1300,27 @@ mod tests {
         ],
         vec![
             Ok((1, Box::from(b"block1-1".as_slice()))),
-            Err(Error::StorageLayer("unexpected key length 17".to_owned())),
+            Err(Error::StorageLayer(
+                "unexpected key [2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0]"
+                    .to_owned(),
+            )),
+        ]
+    )]
+    #[case::until_key_with_wrong_prefix(
+        vec![
+            Ok((make_block_key(1, 1).to_vec(), b"block1-1".to_vec())),
+            Ok((
+                [[0x01u8].as_slice(), make_block_key(1, 2)[1..].as_ref()].concat(),
+                b"invalid".to_vec(),
+            )),
+            Ok((make_block_key(1, 2).to_vec(), b"block1-2".to_vec())),
+        ],
+        vec![
+            Ok((1, Box::from(b"block1-1".as_slice()))),
+            Err(Error::StorageLayer(
+                "unexpected key [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2]"
+                    .to_owned(),
+            )),
         ]
     )]
     #[case::until_db_error(
@@ -1352,6 +1366,17 @@ mod tests {
     }
 
     #[rstest::rstest]
+    #[case::starting_at_block_number(
+        vec![
+            (make_block_key(1, 0).to_vec(), b"block0".to_vec()),
+            (make_block_key(1, 1).to_vec(), b"block1".to_vec()),
+            (make_block_key(1, 2).to_vec(), b"block2".to_vec()),
+        ],
+        vec![
+            Ok((1, Box::from(b"block1".as_slice()))),
+            Ok((2, Box::from(b"block2".as_slice()))),
+        ]
+    )]
     #[case::until_no_more_blocks(
         vec![
             (make_block_key(1, 1).to_vec(), b"block1".to_vec()),
@@ -1369,14 +1394,9 @@ mod tests {
         ],
         vec![Ok((1, Box::from(b"chain1-block1".as_slice())))]
     )]
-    #[case::until_metadata_key(
-        vec![
-            (make_block_key(1, 1).to_vec(), b"chain1-block1".to_vec()),
-            (make_block_ranges_key(2).to_vec(), b"metadata".to_vec()),
-        ],
-        vec![Ok((1, Box::from(b"chain1-block1".as_slice())))]
-    )]
-    #[case::until_invalid_key(
+    // case until_metadata_key does not make sense for forward iteration because metadata keys are
+    // always before block keys
+    #[case::until_key_with_wrong_length(
         vec![
             (make_block_key(1, 1).to_vec(), b"block1-1".to_vec()),
             ([make_block_key(1, 1).as_slice(), &[0]].concat(), b"invalid".to_vec()),
@@ -1384,11 +1404,30 @@ mod tests {
         ],
         vec![
             Ok((1, Box::from(b"block1-1".as_slice()))),
-            Err(Error::StorageLayer("unexpected key length 17".to_owned())),
+            Err(Error::StorageLayer(
+                "unexpected key [2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0]"
+                    .to_owned(),
+            )),
+        ]
+    )]
+    #[case::until_key_with_wrong_prefix(
+        vec![
+            (make_block_key(1, 1).to_vec(), b"block1-1".to_vec()),
+            (
+                [[0x03u8].as_slice(), make_block_key(1, 2)[1..].as_ref()].concat(),
+                b"invalid".to_vec(),
+            ),
+        ],
+        vec![
+            Ok((1, Box::from(b"block1-1".as_slice()))),
+            Err(Error::StorageLayer(
+                "unexpected key [3, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2]"
+                    .to_owned(),
+            )),
         ]
     )]
     fn rocks_block_db_iterate_bytes_iterates_over_all_valid_blocks_for_chain_id(
-        #[case] raw_items: Vec<(Vec<u8>, Vec<u8>)>,
+        #[case] raw_items: Vec<ByteVecTuple>,
         #[case] expected: Vec<Result<IterBytesItem, Error>>,
     ) {
         let chain_id = 1;
@@ -1400,6 +1439,171 @@ mod tests {
 
         let result: Vec<_> = db
             .iterate_bytes(chain_id, start_block_number, IterationDirection::Forward)
+            .collect();
+        assert_eq!(result, expected);
+    }
+
+    #[rstest::rstest]
+    // case starting_at_block_number does not make sense for a mock backed DB because the mock can
+    // be set up to return any sequence of items regardless of the start key
+    // case until_no_more_blocks does not make sense for a mock backed DB because the mock stops
+    // returning items depending on how it's set up, not based on the presence or absence of block
+    // keys.
+    #[case::until_chain_boundary(
+        vec![
+            Ok((make_block_key(1, 1).to_vec(), b"chain1-block1".to_vec())),
+            Ok((make_block_key(0, 1).to_vec(), b"chain0-block1".to_vec())),
+        ],
+        vec![Ok((1, Box::from(b"chain1-block1".as_slice())))]
+    )]
+    #[case::until_metadata_key(
+        vec![
+            Ok((make_block_key(1, 1).to_vec(), b"chain1-block1".to_vec())),
+            Ok((make_block_ranges_key(1).to_vec(), b"metadata".to_vec())),
+        ],
+        vec![Ok((1, Box::from(b"chain1-block1".as_slice())))]
+    )]
+    #[case::until_key_with_wrong_length(
+        vec![
+            Ok((make_block_key(1, 2).to_vec(), b"block1-2".to_vec())),
+            Ok(([make_block_key(1, 1).as_slice(), &[0]].concat(), b"invalid".to_vec())),
+            Ok((make_block_key(1, 1).to_vec(), b"block1-1".to_vec())),
+        ],
+        vec![
+            Ok((2, Box::from(b"block1-2".as_slice()))),
+            Err(Error::StorageLayer(
+                "unexpected key [2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0]"
+                    .to_owned(),
+            )),
+        ]
+    )]
+    #[case::until_key_with_wrong_prefix(
+        vec![
+            Ok((make_block_key(1, 2).to_vec(), b"block1-2".to_vec())),
+            Ok((
+                [[0x01u8].as_slice(), make_block_key(1, 1)[1..].as_ref()].concat(),
+                b"invalid".to_vec(),
+            )),
+            Ok((make_block_key(1, 1).to_vec(), b"block1-1".to_vec())),
+        ],
+        vec![
+            Ok((2, Box::from(b"block1-2".as_slice()))),
+            Err(Error::StorageLayer(
+                "unexpected key [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1]"
+                    .to_owned(),
+            )),
+        ]
+    )]
+    fn kv_db_backed_block_db_iterate_bytes_reverse_iterates_over_all_valid_blocks_for_chain_id_in_reverse(
+        #[case] raw_items: Vec<Result<ByteVecTuple, Error>>,
+        #[case] expected: Vec<Result<IterBytesItem, Error>>,
+    ) {
+        let chain_id = 1;
+        let start_block_number = 3;
+        let mut kv_db = MockKvDb::new();
+        kv_db
+            .expect_iterate_raw()
+            .with(
+                eq(Box::<[u8]>::from(
+                    make_block_key(chain_id, start_block_number).as_slice(),
+                )),
+                eq(IterationDirection::Reverse),
+            )
+            .return_once(move |_start, _dir| {
+                Box::new(
+                    raw_items
+                        .into_iter()
+                        .map(|res| res.map(|(k, v)| (k.into_boxed_slice(), v.into_boxed_slice()))),
+                )
+            })
+            .times(1);
+        let db = KvDbBackedBlockDb { db: kv_db };
+
+        let blocks: Vec<_> = db
+            .iterate_bytes(chain_id, start_block_number, IterationDirection::Reverse)
+            .collect();
+        assert_eq!(blocks, expected);
+    }
+
+    #[rstest::rstest]
+    #[case::starting_at_block_number(
+        vec![
+            (make_block_key(1, 2).to_vec(), b"block2".to_vec()),
+            (make_block_key(1, 3).to_vec(), b"block3".to_vec()),
+            (make_block_key(1, 4).to_vec(), b"block4".to_vec()),
+        ],
+        vec![
+            Ok((3, Box::from(b"block3".as_slice()))),
+            Ok((2, Box::from(b"block2".as_slice()))),
+        ]
+    )]
+    #[case::until_no_more_blocks(
+        vec![
+            (make_block_key(1, 1).to_vec(), b"block1".to_vec()),
+            (make_block_key(1, 3).to_vec(), b"block3".to_vec()),
+        ],
+        vec![
+            Ok((3, Box::from(b"block3".as_slice()))),
+            Ok((1, Box::from(b"block1".as_slice()))),
+        ]
+    )]
+    #[case::until_chain_boundary(
+        vec![
+            (make_block_key(0, 1).to_vec(), b"chain0-block1".to_vec()),
+            (make_block_key(1, 1).to_vec(), b"chain1-block1".to_vec()),
+        ],
+        vec![Ok((1, Box::from(b"chain1-block1".as_slice())))]
+    )]
+    #[case::until_metadata_key(
+        vec![
+            (make_block_key(1, 1).to_vec(), b"chain1-block1".to_vec()),
+            (make_block_ranges_key(1).to_vec(), b"metadata".to_vec()),
+        ],
+        vec![Ok((1, Box::from(b"chain1-block1".as_slice())))]
+    )]
+    #[case::until_key_with_wrong_length(
+        vec![
+            (make_block_key(1, 1).to_vec(), b"block1-1".to_vec()),
+            ([make_block_key(1, 1).as_slice(), &[0]].concat(), b"invalid".to_vec()),
+            (make_block_key(1, 2).to_vec(), b"block1-2".to_vec()),
+        ],
+        vec![
+            Ok((2, Box::from(b"block1-2".as_slice()))),
+            Err(Error::StorageLayer(
+                "unexpected key [2, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0]"
+                    .to_owned(),
+            )),
+        ]
+    )]
+    #[case::until_key_with_wrong_prefix(
+        vec![
+            (
+                [[0x01u8].as_slice(), make_block_key(1, 2)[1..].as_ref()].concat(),
+                b"invalid".to_vec(),
+            ),
+            (make_block_key(1, 2).to_vec(), b"block1-2".to_vec()),
+        ],
+        vec![
+            Ok((2, Box::from(b"block1-2".as_slice()))),
+            Err(Error::StorageLayer(
+                "unexpected key [1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 2]"
+                    .to_owned(),
+            )),
+        ]
+    )]
+    fn rocks_block_db_iterate_bytes_reverse_iterates_over_all_valid_blocks_for_chain_id_in_reverse(
+        #[case] raw_items: Vec<ByteVecTuple>,
+        #[case] expected: Vec<Result<IterBytesItem, Error>>,
+    ) {
+        let chain_id = 1;
+        let start_block_number = 3;
+        let (_tmpdir, db) = create_rocks_block_db();
+        for (key, value) in raw_items {
+            db.kv_db().put_raw(&key, &value).unwrap();
+        }
+
+        let result: Vec<_> = db
+            .iterate_bytes(chain_id, start_block_number, IterationDirection::Reverse)
             .collect();
         assert_eq!(result, expected);
     }
@@ -1688,10 +1892,18 @@ mod tests {
     }
 
     #[test]
-    fn make_block_ranges_key_returns_9_byte_be_chain_id_and_0_byte_key() {
+    fn make_block_ranges_key_returns_10_byte_key_consisting_of_prefix_0x01_and_be_chain_id_and_suffix_0x00()
+     {
         let chain_id = 258;
         let key = make_block_ranges_key(chain_id);
-        assert_eq!(key, [0, 0, 0, 0, 0, 0, 1, 2, 0]);
+        assert_eq!(
+            key,
+            [
+                1, // prefix
+                0, 0, 0, 0, 0, 0, 1, 2, // chain ID
+                0, // suffix
+            ]
+        );
     }
 
     #[test]
@@ -1733,16 +1945,38 @@ mod tests {
     }
 
     #[test]
-    fn make_block_key_returns_8_byte_be_chain_id_concat_8_byte_be_block_number() {
+    fn make_block_key_returns_17_byte_key_consisting_of_prefix_0x02_and_be_chain_id_and_be_block_number()
+     {
         let chain_id = 258;
         let block_number = 259;
         assert_eq!(
             make_block_key(chain_id, block_number),
             [
+                2, // prefix
                 0, 0, 0, 0, 0, 0, 1, 2, // chain ID
                 0, 0, 0, 0, 0, 0, 1, 3, // block number
             ]
         );
+    }
+
+    #[test]
+    fn global_metadata_is_stored_before_chain_metadata() {
+        let global_metadata_keys = [VERSION_KEY, CHAIN_IDS_KEY];
+        let chain_metadata_keys = [make_block_ranges_key(0)];
+        for global_metadata_key in global_metadata_keys {
+            for chain_metadata_key in chain_metadata_keys {
+                assert!(global_metadata_key.as_slice() < chain_metadata_key.as_slice());
+            }
+        }
+    }
+
+    #[test]
+    fn chain_metadata_is_stored_before_blocks() {
+        let chain_metadata_keys = [make_block_ranges_key(u64::MAX)];
+        let block_data_key = make_block_key(u64::MIN, 0);
+        for chain_metadata_key in chain_metadata_keys {
+            assert!(chain_metadata_key.as_slice() < block_data_key.as_slice());
+        }
     }
 
     const UNIQUE_IDENTIFIER: usize = 12345;

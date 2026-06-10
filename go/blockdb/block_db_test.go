@@ -39,10 +39,12 @@ func TestOpenRocksDB(t *testing.T) {
 			"get returns error if block does not exist":                 testRocksDB_Get_ReturnsErrorIfBlockDoesNotExist,
 			"get range returns existing sub range":                      testRocksDB_GetRange_ReturnsExistingSubRange,
 			"get range returns error if block is invalid":               testRocksDB_GetRange_ReturnsErrorIfBlockIsInvalid,
-			"get range stops at non-16-byte key":                        testRocksDB_GetRange_StopsAtNon16ByteKey,
+			"get range stops at non-17-byte key":                        testRocksDB_GetRange_StopsAtNon17ByteKey,
+			"get range stops at wrong prefix key":                       testRocksDB_GetRange_StopsAtWrongPrefixKey,
 			"get range rev returns existing sub range in reverse order": testRocksDB_GetRange_RevReturnsExistingSubRangeInReverseOrder,
 			"get range rev returns error if block is invalid":           testRocksDB_GetRange_RevReturnsErrorIfBlockIsInvalid,
-			"get range rev stops at non-16-byte key":                    testRocksDB_GetRange_RevStopsAtNon16ByteKey,
+			"get range rev stops at non-17-byte key":                    testRocksDB_GetRange_RevStopsAtNon17ByteKey,
+			"get range rev stops at wrong prefix key":                   testRocksDB_GetRange_RevStopsAtWrongPrefixKey,
 		}
 
 		for name, test := range tests {
@@ -275,7 +277,7 @@ func testRocksDB_GetRange_ReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener Op
 		1, chainID, blockNumber, blockNumber, count)
 }
 
-func testRocksDB_GetRange_StopsAtNon16ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRange_StopsAtNon17ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 
 	path := t.TempDir()
@@ -287,14 +289,14 @@ func testRocksDB_GetRange_StopsAtNon16ByteKey(t *testing.T, dbOpener OpenRocksDB
 		require.NoError(t, db.putBlock(chainID, &Block{Number: num}))
 	}
 
-	// Insert a key with length != 16 that sorts between block 3 and block 4.
-	// Appending a zero byte to the block-3 key produces a 17-byte key whose
+	// Insert a key with length != 17 that sorts between block 3 and block 4.
+	// Appending a zero byte to the block-3 key produces an 18-byte key whose
 	// lexicographic position is: block 3 < invalidKey < block 4.
 	invalidKey := append(MakeBlockKey(chainID, 3), 0x00)
 	require.NoError(t, db.putRaw(invalidKey, []byte{}))
 	db.close()
 
-	// db now contains blocks 1-4 for chainID 3, with a 17-byte key between 3 and 4
+	// db now contains blocks 1-4 for chainID 3, with a 18-byte key between 3 and 4
 
 	rocksDB, err := dbOpener(path)
 	require.NoError(t, err, "failed to open db")
@@ -303,6 +305,44 @@ func testRocksDB_GetRange_StopsAtNon16ByteKey(t *testing.T, dbOpener OpenRocksDB
 	}()
 
 	// GetRange should stop at the invalid key and yield only blocks 1, 2, 3.
+	var got []uint64
+	for block, err := range rocksDB.GetRange(chainID, 1, 10) {
+		require.NoError(t, err, "expected no error when retrieving a block")
+		require.NotNil(t, block, "expected block to be non-nil")
+		got = append(got, block.Number)
+	}
+	require.Equal(t, []uint64{1, 2, 3}, got)
+}
+
+func testRocksDB_GetRange_StopsAtWrongPrefixKey(t *testing.T, dbOpener OpenRocksDBFunc) {
+	chainID := uint64(3)
+
+	path := t.TempDir()
+
+	db, err := createDB(path)
+	require.NoError(t, err, "failed to create db")
+
+	for _, num := range []uint64{1, 2, 3} {
+		require.NoError(t, db.putBlock(chainID, &Block{Number: num}))
+	}
+
+	// Insert a 17-byte key with prefix 0x03 that looks like block 4 for chainID 3 if the
+	// prefix were 0x02. Since 0x03 > 0x02, it sorts after all block keys. Without the
+	// prefix check, the iteration would mistake it for block 4 and yield a parse error.
+	wrongPrefixKey := MakeBlockKey(chainID, 4)
+	wrongPrefixKey[0] = 0x03
+	require.NoError(t, db.putRaw(wrongPrefixKey, []byte{0x00}))
+	db.close()
+
+	// db now contains blocks 1-3 for chainID 3, with a wrong-prefix key after block 3
+
+	rocksDB, err := dbOpener(path)
+	require.NoError(t, err, "failed to open db")
+	defer func() {
+		require.NoError(t, rocksDB.Close(), "failed to close db")
+	}()
+
+	// GetRange should stop at the wrong-prefix key and yield only blocks 1, 2, 3.
 	var got []uint64
 	for block, err := range rocksDB.GetRange(chainID, 1, 10) {
 		require.NoError(t, err, "expected no error when retrieving a block")
@@ -348,7 +388,7 @@ func testRocksDB_GetRange_RevReturnsExistingSubRangeInReverseOrder(t *testing.T,
 	}
 }
 
-func testRocksDB_GetRange_RevStopsAtNon16ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRange_RevStopsAtNon17ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 
 	path := t.TempDir()
@@ -360,12 +400,12 @@ func testRocksDB_GetRange_RevStopsAtNon16ByteKey(t *testing.T, dbOpener OpenRock
 		require.NoError(t, db.putBlock(chainID, &Block{Number: num}))
 	}
 
-	// Insert a 17-byte key that sorts between block 3 and block 4.
+	// Insert an 18-byte key that sorts between block 3 and block 4.
 	invalidKey := append(MakeBlockKey(chainID, 3), 0x00)
 	require.NoError(t, db.putRaw(invalidKey, []byte{}))
 	db.close()
 
-	// db now contains blocks 2-5 for chainID 3, with a 17-byte key between 3 and 4
+	// db now contains blocks 2-5 for chainID 3, with a 18-byte key between 3 and 4
 
 	rocksDB, err := dbOpener(path)
 	require.NoError(t, err, "failed to open db")
@@ -405,6 +445,47 @@ func testRocksDB_GetRange_RevReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener
 	require.Equal(t, 1, count, "expected %d blocks for chainID %d from %d to %d, got %d",
 		1, chainID, blockNumber, blockNumber, count)
 
+}
+
+func testRocksDB_GetRange_RevStopsAtWrongPrefixKey(t *testing.T, dbOpener OpenRocksDBFunc) {
+	chainID := uint64(3)
+
+	path := t.TempDir()
+
+	db, err := createDB(path)
+	require.NoError(t, err, "failed to create db")
+
+	for _, num := range []uint64{1, 2, 3} {
+		require.NoError(t, db.putBlock(chainID, &Block{Number: num}))
+	}
+
+	// Insert a 17-byte key with prefix 0x01 that looks like block 0 for chainID 3 if the
+	// prefix were 0x02. Since 0x01 < 0x02, it sorts before all block keys. In reverse
+	// iteration from block 10, after yielding blocks 3, 2, 1, the wrong-prefix key is
+	// encountered and stops the iteration. Without the prefix check, it would be mistaken
+	// for block 0 and yield a parse error.
+	wrongPrefixKey := MakeBlockKey(chainID, 0)
+	wrongPrefixKey[0] = 0x01
+	require.NoError(t, db.putRaw(wrongPrefixKey, []byte{0x00}))
+	db.close()
+
+	// db now contains blocks 1-3 for chainID 3, with a wrong-prefix key before block 1
+
+	rocksDB, err := dbOpener(path)
+	require.NoError(t, err, "failed to open db")
+	defer func() {
+		require.NoError(t, rocksDB.Close(), "failed to close db")
+	}()
+
+	// GetRangeRev iterates from block 10 backwards: yields 3, 2, 1, then hits the
+	// wrong-prefix key and stops.
+	var got []uint64
+	for block, err := range rocksDB.GetRangeRev(chainID, 0, 10) {
+		require.NoError(t, err, "expected no error when retrieving a block")
+		require.NotNil(t, block, "expected block to be non-nil")
+		got = append(got, block.Number)
+	}
+	require.Equal(t, []uint64{3, 2, 1}, got)
 }
 
 func TestRocksDB_Update_CreatesNewBlock(t *testing.T) {
