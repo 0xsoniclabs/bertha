@@ -55,32 +55,32 @@ func (mr *MockMetadataStoreMockRecorder) CommitUpgrades(blockNumber any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitUpgrades", reflect.TypeOf((*MockMetadataStore)(nil).CommitUpgrades), blockNumber)
 }
 
-// GetCorrections mocks base method.
-func (m *MockMetadataStore) GetCorrections(blockNumber uint64) map[common.Address]Correction {
+// GetCorrectionsAtBlock mocks base method.
+func (m *MockMetadataStore) GetCorrectionsAtBlock(blockNumber uint64) map[common.Address]Correction {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetCorrections", blockNumber)
+	ret := m.ctrl.Call(m, "GetCorrectionsAtBlock", blockNumber)
 	ret0, _ := ret[0].(map[common.Address]Correction)
 	return ret0
 }
 
-// GetCorrections indicates an expected call of GetCorrections.
-func (mr *MockMetadataStoreMockRecorder) GetCorrections(blockNumber any) *gomock.Call {
+// GetCorrectionsAtBlock indicates an expected call of GetCorrectionsAtBlock.
+func (mr *MockMetadataStoreMockRecorder) GetCorrectionsAtBlock(blockNumber any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCorrections", reflect.TypeOf((*MockMetadataStore)(nil).GetCorrections), blockNumber)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCorrectionsAtBlock", reflect.TypeOf((*MockMetadataStore)(nil).GetCorrectionsAtBlock), blockNumber)
 }
 
-// GetUpgrades mocks base method.
-func (m *MockMetadataStore) GetUpgrades() []opera.UpgradeHeight {
+// GetUpgradeHeights mocks base method.
+func (m *MockMetadataStore) GetUpgradeHeights() []opera.UpgradeHeight {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetUpgrades")
+	ret := m.ctrl.Call(m, "GetUpgradeHeights")
 	ret0, _ := ret[0].([]opera.UpgradeHeight)
 	return ret0
 }
 
-// GetUpgrades indicates an expected call of GetUpgrades.
-func (mr *MockMetadataStoreMockRecorder) GetUpgrades() *gomock.Call {
+// GetUpgradeHeights indicates an expected call of GetUpgradeHeights.
+func (mr *MockMetadataStoreMockRecorder) GetUpgradeHeights() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUpgrades", reflect.TypeOf((*MockMetadataStore)(nil).GetUpgrades))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUpgradeHeights", reflect.TypeOf((*MockMetadataStore)(nil).GetUpgradeHeights))
 }
 
 // GetUpgradesAtBlock mocks base method.

@@ -251,25 +251,28 @@ func MakeVersionKey() []byte {
 	return []byte{0x00, 0x00}
 }
 
-// MakeUpgradeHeightsKey creates a 9-byte key for the upgrade heights of the given chain ID.
-// The key layout matches the Rust blockservice: [chain_id (8 bytes BE), 0x01].
+// MakeUpgradeHeightsKey creates a 10-byte key for the upgrade heights of the given chain ID.
+// The key layout matches the Rust blockservice: [0x01, chain_id (8 bytes BE), 0x01].
 func MakeUpgradeHeightsKey(chainID uint64) []byte {
-	key := make([]byte, 9)
-	binary.BigEndian.PutUint64(key[:8], chainID)
-	key[8] = 1
+	key := make([]byte, 10)
+	key[0] = 0x01
+	binary.BigEndian.PutUint64(key[1:9], chainID)
+	key[9] = 0x01
 	return key
 }
 
-// MakeCorrectionsKey creates a 9-byte key for the corrections of the given chain ID.
-// The key layout matches the Rust blockservice: [chain_id (8 bytes BE), 0x02].
+// MakeCorrectionsKey creates a 10-byte key for the corrections of the given chain ID.
+// The key layout matches the Rust blockservice: [0x01, chain_id (8 bytes BE), 0x02].
 func MakeCorrectionsKey(chainID uint64) []byte {
-	key := make([]byte, 9)
-	binary.BigEndian.PutUint64(key[:8], chainID)
-	key[8] = 2
+	key := make([]byte, 10)
+	key[0] = 0x01
+	binary.BigEndian.PutUint64(key[1:9], chainID)
+	key[9] = 0x02
 	return key
 }
 
 // MakeBlockKey creates a key for a block based on the chain ID and block number.
+// The key layout matches the Rust blockservice: [0x02, chain_id (8 bytes BE), block_number (8 bytes BE)].
 func MakeBlockKey(chainID, blockNumber uint64) []byte {
 	key := make([]byte, 17)
 	key[0] = 0x02

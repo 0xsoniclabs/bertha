@@ -17,21 +17,11 @@
 package replay
 
 import (
-	_ "embed"
 	"encoding/json"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
 )
-
-// GetSonicMainnetCorrections retrieves the corrections for the Sonic Mainnet.
-// These are modifications to be added to blocks outside of the effects of
-// transactions, such as balance corrections for accounts.
-func GetSonicMainnetCorrections() (Corrections, error) {
-	res := Corrections{}
-	err := json.Unmarshal(sonicMainnetCorrections, &res)
-	return res, err
-}
 
 // Corrections map block numbers to a map of addresses and their corresponding
 // account corrections at the end of the respective blocks.
@@ -43,5 +33,23 @@ type Correction struct {
 	Balance uint256.Int
 }
 
-//go:embed corrections.json
-var sonicMainnetCorrections []byte
+func (c Correction) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&struct {
+		Balance *uint256.Int
+	}{Balance: &c.Balance})
+}
+
+func (c *Correction) UnmarshalJSON(data []byte) error {
+	var tmp struct {
+		Balance *uint256.Int
+	}
+	if err := json.Unmarshal(data, &tmp); err != nil {
+		return err
+	}
+	if tmp.Balance != nil {
+		c.Balance = *tmp.Balance
+	} else {
+		c.Balance = *uint256.NewInt(0)
+	}
+	return nil
+}

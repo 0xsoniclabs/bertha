@@ -17,13 +17,61 @@
 package replay
 
 import (
+	"encoding/json"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetSonicMainnetCorrections_CanBeLoaded(t *testing.T) {
-	corrections, err := GetSonicMainnetCorrections()
+func TestCorrection_JSONRoundTrip(t *testing.T) {
+	tests := map[string]struct {
+		correction Correction
+		json       string
+	}{
+		"non-zero balance": {
+			correction: Correction{Balance: *uint256.NewInt(12345)},
+			json:       `{"Balance":"12345"}`,
+		},
+		"zero balance": {
+			correction: Correction{Balance: *uint256.NewInt(0)},
+			json:       `{"Balance":"0"}`,
+		},
+		"missing balance defaults to zero": {
+			correction: Correction{},
+			json:       `{}`,
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			got, err := json.Marshal(tc.correction)
+			require.NoError(t, err)
+			if tc.json != `{}` {
+				require.JSONEq(t, tc.json, string(got))
+			}
+
+			var decoded Correction
+			require.NoError(t, json.Unmarshal([]byte(tc.json), &decoded))
+			require.Equal(t, tc.correction, decoded)
+		})
+	}
+}
+
+func TestCorrections_JSONRoundTrip_WorksWithMapValues(t *testing.T) {
+	// Map values are not addressable, so this exercises the custom JSON methods
+	// working correctly when Correction is used as a map value.
+	original := Corrections{
+		5: {
+			common.HexToAddress("0xabc"): {Balance: *uint256.NewInt(999)},
+		},
+	}
+
+	data, err := json.Marshal(original)
 	require.NoError(t, err)
-	require.NotEmpty(t, corrections)
+
+	var decoded Corrections
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.Equal(t, original, decoded)
 }

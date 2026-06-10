@@ -173,7 +173,20 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 	chainID := genesis.ChainID
 
-	metadataStore, err := NewStaticMetadataStore(chainID, slog.Default())
+	if args.OverwriteStateRoot {
+		slog.Info("State root overwriting enabled")
+	}
+	// Open the block database.
+	slog.Info("Opening block database", "directory", args.BlockDBDir)
+	database, err := blockdb.OpenRocksDBForWriting(args.BlockDBDir)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer func() {
+		err = errors.Join(err, database.Close())
+	}()
+
+	metadataStore, err := NewBlockDBMetadataStore(database, chainID, slog.Default())
 	if err != nil {
 		return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
 	}
@@ -217,23 +230,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to get state root: %w", err)
 	}
-	slog.Info("Loaded state", "chain_id", chainID, "root_hash", stateRoot)
-
-	// Open the block database.
-	slog.Info("Opening block database", "directory", args.BlockDBDir)
-	var database blockdb.BlockDB
-	if args.OverwriteStateRoot {
-		slog.Info("State root overwriting enabled")
-		database, err = blockdb.OpenRocksDBForWriting(args.BlockDBDir)
-	} else {
-		database, err = blockdb.OpenRocksDBForReading(args.BlockDBDir)
-	}
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer func() {
-		err = errors.Join(err, database.Close())
-	}()
+	slog.Info("Loaded state", "root_hash", stateRoot)
 
 	// Prepare the progress logger.
 	progress := startProgressLogger(slog.Default(), state, args.StateDBDir, args.LogDBSize)
@@ -641,7 +638,7 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	} else {
 		chainConfig = opera.CreateTransientEvmChainConfig(
 			a.chainID,
-			a.metadataStore.GetUpgrades(),
+			a.metadataStore.GetUpgradeHeights(),
 			idx.Block(block.NumberU64()),
 		)
 		upgrades = a.metadataStore.GetUpgradesAtBlock(block.NumberU64())
@@ -653,7 +650,7 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 		upgrades,
 	)
 
-	corrections := a.metadataStore.GetCorrections(block.NumberU64())
+	corrections := a.metadataStore.GetCorrectionsAtBlock(block.NumberU64())
 
 	onLog := func(l *core_types.Log) { onNewLog(a.metadataStore, block.NumberU64(), l) }
 
