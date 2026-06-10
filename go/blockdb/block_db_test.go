@@ -41,10 +41,14 @@ func TestOpenRocksDB(t *testing.T) {
 			"get range returns error if block is invalid":               testRocksDB_GetRange_ReturnsErrorIfBlockIsInvalid,
 			"get range stops at non-17-byte key":                        testRocksDB_GetRange_StopsAtNon17ByteKey,
 			"get range stops at wrong prefix key":                       testRocksDB_GetRange_StopsAtWrongPrefixKey,
-			"get range rev returns existing sub range in reverse order": testRocksDB_GetRange_RevReturnsExistingSubRangeInReverseOrder,
-			"get range rev returns error if block is invalid":           testRocksDB_GetRange_RevReturnsErrorIfBlockIsInvalid,
-			"get range rev stops at non-17-byte key":                    testRocksDB_GetRange_RevStopsAtNon17ByteKey,
-			"get range rev stops at wrong prefix key":                   testRocksDB_GetRange_RevStopsAtWrongPrefixKey,
+			"get range rev returns existing sub range in reverse order": testRocksDB_GetRangeRev_ReturnsExistingSubRangeInReverseOrder,
+			"get range rev returns error if block is invalid":           testRocksDB_GetRangeRev_ReturnsErrorIfBlockIsInvalid,
+			"get range rev stops at non-17-byte key":                    testRocksDB_GetRangeRev_StopsAtNon17ByteKey,
+			"get range rev stops at wrong prefix key":                   testRocksDB_GetRangeRev_StopsAtWrongPrefixKey,
+			"get upgrade heights returns stored data":                   testRocksDB_GetUpgradeHeights_ReturnsStoredData,
+			"get upgrade heights returns nil when not stored":           testRocksDB_GetUpgradeHeights_ReturnsNilWhenNotStored,
+			"get corrections returns stored data":                       testRocksDB_GetCorrections_ReturnsStoredData,
+			"get corrections returns nil when not stored":               testRocksDB_GetCorrections_ReturnsNilWhenNotStored,
 		}
 
 		for name, test := range tests {
@@ -352,7 +356,7 @@ func testRocksDB_GetRange_StopsAtWrongPrefixKey(t *testing.T, dbOpener OpenRocks
 	require.Equal(t, []uint64{1, 2, 3}, got)
 }
 
-func testRocksDB_GetRange_RevReturnsExistingSubRangeInReverseOrder(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRangeRev_ReturnsExistingSubRangeInReverseOrder(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 	blockNumbers := []uint64{1, 2, 3, 20}
 
@@ -388,7 +392,7 @@ func testRocksDB_GetRange_RevReturnsExistingSubRangeInReverseOrder(t *testing.T,
 	}
 }
 
-func testRocksDB_GetRange_RevStopsAtNon17ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRangeRev_StopsAtNon17ByteKey(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 
 	path := t.TempDir()
@@ -424,7 +428,7 @@ func testRocksDB_GetRange_RevStopsAtNon17ByteKey(t *testing.T, dbOpener OpenRock
 	require.Equal(t, []uint64{5, 4}, got)
 }
 
-func testRocksDB_GetRange_RevReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRangeRev_ReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 	blockNumber := uint64(1)
 
@@ -447,7 +451,7 @@ func testRocksDB_GetRange_RevReturnsErrorIfBlockIsInvalid(t *testing.T, dbOpener
 
 }
 
-func testRocksDB_GetRange_RevStopsAtWrongPrefixKey(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRangeRev_StopsAtWrongPrefixKey(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
 
 	path := t.TempDir()
@@ -542,6 +546,123 @@ func TestRocksDB_Update_OverwritesExistingBlock(t *testing.T) {
 	require.NotNil(t, retrievedBlock, "retrieved block is nil")
 	require.Equal(t, updatedBlock.Number, retrievedBlock.Number, "retrieved block number does not match after update")
 	require.Equal(t, updatedBlock.StateRoot, retrievedBlock.StateRoot, "retrieved block state root does not match after update")
+}
+
+func testRocksDB_GetUpgradeHeights_ReturnsStoredData(t *testing.T, dbOpener OpenRocksDBFunc) {
+	chainID := uint64(3)
+	data := []byte(`upgrade heights data`)
+
+	path := t.TempDir()
+	db, err := createDB(path)
+	require.NoError(t, err)
+	require.NoError(t, db.putRaw(MakeUpgradeHeightsKey(chainID), data))
+	db.close()
+
+	rocksDB, err := dbOpener(path)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, rocksDB.Close())
+	}()
+
+	got, err := rocksDB.GetUpgradeHeights(chainID)
+	require.NoError(t, err)
+	require.Equal(t, data, got)
+}
+
+func testRocksDB_GetUpgradeHeights_ReturnsNilWhenNotStored(t *testing.T, dbOpener OpenRocksDBFunc) {
+	path := t.TempDir()
+	db, err := createDB(path)
+	require.NoError(t, err)
+	db.close()
+
+	rocksDB, err := dbOpener(path)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, rocksDB.Close())
+	}()
+
+	got, err := rocksDB.GetUpgradeHeights(3)
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
+func TestRocksDB_PutUpgradeHeights_StoresData(t *testing.T) {
+	chainID := uint64(3)
+	data := []byte(`upgrade heights data`)
+
+	path := t.TempDir()
+	db, err := createDB(path)
+	require.NoError(t, err)
+	db.close()
+
+	rocksDB, err := OpenRocksDBForWriting(path)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, rocksDB.Close())
+	}()
+
+	require.NoError(t, rocksDB.PutUpgradeHeights(chainID, data))
+
+	got, err := rocksDB.GetUpgradeHeights(chainID)
+	require.NoError(t, err)
+	require.Equal(t, data, got)
+}
+
+func TestRocksDB_PutUpgradeHeights_ReturnsErrorIfDBIsReadOnly(t *testing.T) {
+	chainID := uint64(3)
+	data := []byte(`upgrade heights data`)
+
+	path := t.TempDir()
+	db, err := createDB(path)
+	require.NoError(t, err)
+	db.close()
+
+	rocksDB, err := OpenRocksDBForReading(path)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, rocksDB.Close())
+	}()
+
+	err = rocksDB.PutUpgradeHeights(chainID, data)
+	require.ErrorContains(t, err, "Not supported operation in secondary mode")
+}
+
+func testRocksDB_GetCorrections_ReturnsStoredData(t *testing.T, dbOpener OpenRocksDBFunc) {
+	chainID := uint64(3)
+	data := []byte(`corrections data`)
+
+	path := t.TempDir()
+	db, err := createDB(path)
+	require.NoError(t, err)
+	require.NoError(t, db.putRaw(MakeCorrectionsKey(chainID), data))
+	db.close()
+
+	rocksDB, err := dbOpener(path)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, rocksDB.Close())
+	}()
+
+	got, err := rocksDB.GetCorrections(chainID)
+	require.NoError(t, err)
+	require.Equal(t, data, got)
+}
+
+func testRocksDB_GetCorrections_ReturnsNilWhenNotStored(t *testing.T, dbOpener OpenRocksDBFunc) {
+	path := t.TempDir()
+	db, err := createDB(path)
+	require.NoError(t, err)
+	db.close()
+
+	rocksDB, err := dbOpener(path)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, rocksDB.Close())
+	}()
+
+	got, err := rocksDB.GetCorrections(3)
+	require.NoError(t, err)
+	require.Nil(t, got)
 }
 
 // writeDB is a wrapper around grocksdb.DB that provides methods to write blocks to the database.
