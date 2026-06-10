@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"iter"
 	"os"
-	"slices"
 
 	"github.com/linxGnu/grocksdb"
 	"google.golang.org/protobuf/proto"
@@ -153,12 +152,13 @@ func (db RocksDB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) ite
 		for it.Valid() {
 			key := it.Key().Data()
 			// Stop if the key is not a valid block key
-			if len(key) != 16 {
+			if len(key) != 17 || key[0] != 0x02 {
 				break
 			}
 			// Stop if we reach a key that has a different chain ID or a key number that is greater than the end block number
-			keyNum := binary.BigEndian.Uint64(key[8:])
-			if !slices.Equal(key[:8], startKey[:8]) || keyNum > endBlockNumber {
+			keyChainID := binary.BigEndian.Uint64(key[1:9])
+			keyBlockNumber := binary.BigEndian.Uint64(key[9:17])
+			if keyChainID != chainID || keyBlockNumber > endBlockNumber {
 				break
 			}
 			value := it.Value().Data()
@@ -193,12 +193,13 @@ func (db RocksDB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) 
 		for it.Valid() {
 			key := it.Key().Data()
 			// Stop if the key is not a valid block key
-			if len(key) != 16 {
+			if len(key) != 17 || key[0] != 0x02 {
 				break
 			}
 			// Stop if we reach a key that has a different chain ID or a key number that is less than the start block number
-			keyNum := binary.BigEndian.Uint64(key[8:])
-			if !slices.Equal(key[:8], endKey[:8]) || keyNum < startBlockNumber {
+			keyChainID := binary.BigEndian.Uint64(key[1:9])
+			keyBlockNumber := binary.BigEndian.Uint64(key[9:17])
+			if keyChainID != chainID || keyBlockNumber < startBlockNumber {
 				break
 			}
 			value := it.Value().Data()
@@ -217,18 +218,19 @@ func (db RocksDB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) 
 
 // CurrentVersion is the current version of the block database format. It is
 // used to check compatibility when opening the database.
-const CurrentVersion uint64 = 1
+const CurrentVersion uint64 = 2
 
 // MakeVersionKey returns the key used to store the version of the block database format.
 func MakeVersionKey() []byte {
-	return []byte{0}
+	return []byte{0x00, 0x00}
 }
 
 // MakeBlockKey creates a key for a block based on the chain ID and block number.
 func MakeBlockKey(chainID, blockNumber uint64) []byte {
-	key := make([]byte, 16)
-	binary.BigEndian.PutUint64(key[:8], chainID)
-	binary.BigEndian.PutUint64(key[8:], blockNumber)
+	key := make([]byte, 17)
+	key[0] = 0x02
+	binary.BigEndian.PutUint64(key[1:9], chainID)
+	binary.BigEndian.PutUint64(key[9:17], blockNumber)
 	return key
 }
 
