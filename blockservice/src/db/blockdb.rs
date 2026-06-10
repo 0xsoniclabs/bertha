@@ -529,11 +529,19 @@ pub fn make_block_key(chain_id: u64, block_number: u64) -> [u8; 16] {
 
 #[cfg(test)]
 mod tests {
+    // Note: The block db is tested with two backends:
+    // - a mocked KvDb to test which functions get called on the underlying KvDb
+    // - the RocksDb implementation to test the expected effects on the database
+
     use std::{assert_matches, ops::Not};
 
     use mockall::predicate::eq;
 
     use super::*;
+    use crate::{
+        db::RocksDb,
+        utils::test_dir::{Permissions, TestDir},
+    };
 
     #[rstest::rstest]
     #[case::non_empty_db(
@@ -541,7 +549,7 @@ mod tests {
         Err(Error::StorageLayer("block database already initialized".to_owned()))
     )]
     #[case::empty_db(true, Ok(()))]
-    fn kv_db_backed_block_db_create_checks_block_db_is_empty_and_writes_version(
+    fn kv_db_backed_block_db_create_checks_that_block_db_is_empty_and_writes_version(
         #[case] db_empty: bool,
         #[case] expected: Result<(), Error>,
     ) {
@@ -568,6 +576,38 @@ mod tests {
         let result = KvDbBackedBlockDb::create(kv_db);
         match expected {
             Ok(()) => assert!(result.is_ok()),
+            Err(expected_err) => {
+                assert!(result.is_err());
+                assert_eq!(result.unwrap_err(), expected_err);
+            }
+        }
+    }
+
+    #[rstest::rstest]
+    #[case::non_empty_db(
+        false,
+        Err(Error::StorageLayer("block database already initialized".to_owned()))
+    )]
+    #[case::empty_db(true, Ok(()))]
+    fn rocks_block_db_create_checks_that_block_db_is_empty_and_writes_version(
+        #[case] db_empty: bool,
+        #[case] expected: Result<(), Error>,
+    ) {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        let rocks = RocksDb::create(tmpdir.path()).unwrap();
+        if !db_empty {
+            rocks.put_raw(b"key", b"value").unwrap();
+        }
+        let result = KvDbBackedBlockDb::create(rocks);
+        match expected {
+            Ok(()) => {
+                assert!(result.is_ok());
+                let db = result.unwrap();
+                assert_eq!(
+                    db.kv_db().get_raw(&VERSION_KEY).unwrap(),
+                    Some(serialize_version(CURRENT_VERSION).to_vec())
+                );
+            }
             Err(expected_err) => {
                 assert!(result.is_err());
                 assert_eq!(result.unwrap_err(), expected_err);
@@ -615,6 +655,44 @@ mod tests {
     }
 
     #[rstest::rstest]
+    #[case::version_missing(None, Some("block database version not found"))]
+    #[case::version_invalid(
+        Some(vec![0]),
+        Some("invalid block database version")
+    )]
+    #[case::version_too_low(
+        Some((CURRENT_VERSION-1).to_be_bytes().to_vec()),
+        Some("block database version is not supported")
+    )]
+    #[case::version_too_high(
+        Some((CURRENT_VERSION+1).to_be_bytes().to_vec()),
+        Some("block database version is not supported")
+    )]
+    #[case::version_valid(
+        Some(CURRENT_VERSION.to_be_bytes().to_vec()),
+        None
+    )]
+    fn rocks_block_db_open_checks_block_db_version(
+        #[case] version: Option<Vec<u8>>,
+        #[case] expected_err_msg: Option<&str>,
+    ) {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        let rocks = RocksDb::create(tmpdir.path()).unwrap();
+        if let Some(v) = version {
+            rocks.put_raw(&VERSION_KEY, &v).unwrap();
+        }
+        let result = KvDbBackedBlockDb::open(rocks);
+        match expected_err_msg {
+            None => assert!(result.is_ok()),
+            Some(expected_err) => {
+                assert_matches!(
+                    result, Err(Error::StorageLayer(msg)) if msg.contains(expected_err)
+                );
+            }
+        }
+    }
+
+    #[rstest::rstest]
     #[case::valid_chain_ids(
         Some(serialize_chain_ids([1u64, 2u64])),
         Ok(vec![1u64, 2u64]),
@@ -637,6 +715,29 @@ mod tests {
             .return_once(move |_| Ok(stored_payload))
             .times(1);
         let db = KvDbBackedBlockDb { db: kv_db };
+        assert_eq!(db.get_chain_ids(), expected);
+    }
+
+    #[rstest::rstest]
+    #[case::valid_chain_ids(
+        Some(serialize_chain_ids([1u64, 2u64])),
+        Ok(vec![1u64, 2u64]),
+    )]
+    #[case::no_chain_ids(None, Ok(vec![]))]
+    #[case::invalid_chain_ids(
+        Some(vec![0]),
+        Err(Error::StorageLayer(
+            "invalid chain IDs length: data length 1 not a multiple of 8 bytes".to_owned()
+        )),
+    )]
+    fn rocks_block_db_get_chain_ids_returns_chain_ids_stored_at_chain_ids_key(
+        #[case] stored_payload: Option<Vec<u8>>,
+        #[case] expected: Result<Vec<u64>, Error>,
+    ) {
+        let (_tmpdir, db) = create_rocks_block_db();
+        if let Some(payload) = stored_payload {
+            db.kv_db().put_raw(&CHAIN_IDS_KEY, &payload).unwrap();
+        }
         assert_eq!(db.get_chain_ids(), expected);
     }
 
@@ -667,6 +768,32 @@ mod tests {
         assert_eq!(db.get_ranges_of_chain_id(chain_id), expected);
     }
 
+    #[rstest::rstest]
+    #[case::valid_ranges(
+        Some(serialize_block_ranges(vec![0..=1, 2..=3])),
+        Ok(vec![0..=1, 2..=3]),
+    )]
+    #[case::no_ranges(None, Ok(vec![]))]
+    #[case::invalid_ranges(
+        Some(vec![0; 8]),
+        Err(Error::StorageLayer(
+            "invalid block ranges length: data length 8 not a multiple of 16 bytes".to_owned()
+        )),
+    )]
+    fn rocks_block_db_get_ranges_of_chain_id_returns_ranges_stored_at_key(
+        #[case] stored_payload: Option<Vec<u8>>,
+        #[case] expected: Result<Vec<BlockRange>, Error>,
+    ) {
+        let chain_id = 1;
+        let (_tmpdir, db) = create_rocks_block_db();
+        if let Some(payload) = stored_payload {
+            db.kv_db()
+                .put_raw(&make_block_ranges_key(chain_id), &payload)
+                .unwrap();
+        }
+        assert_eq!(db.get_ranges_of_chain_id(chain_id), expected);
+    }
+
     #[test]
     fn kv_db_backed_block_db_get_returns_parsed_block() {
         let chain_id = 1;
@@ -685,6 +812,19 @@ mod tests {
     }
 
     #[test]
+    fn rocks_block_db_get_returns_parsed_block() {
+        let chain_id = 1;
+        let block = some_block();
+        let encoded = proto::Block::from(block.clone()).encode_to_vec();
+        let (_tmpdir, db) = create_rocks_block_db();
+        db.kv_db()
+            .put_raw(&make_block_key(chain_id, block.number), &encoded)
+            .unwrap();
+        let received = db.get(chain_id, block.number).unwrap().unwrap();
+        assert_eq!(received, block);
+    }
+
+    #[test]
     fn kv_db_backed_block_db_get_returns_error_if_parsing_fails() {
         let chain_id = 1;
         let block_number = 0;
@@ -697,8 +837,19 @@ mod tests {
             .times(1);
         let db = KvDbBackedBlockDb { db: kv_db };
         let result = db.get(chain_id, block_number);
-        assert!(result.is_err());
-        assert_matches!(result.unwrap_err(), Error::Protobuf(_));
+        assert_matches!(result, Err(Error::Protobuf(_)));
+    }
+
+    #[test]
+    fn rocks_block_db_get_returns_error_if_parsing_fails() {
+        let chain_id = 1;
+        let block_number = 0;
+        let (_tmpdir, db) = create_rocks_block_db();
+        db.kv_db()
+            .put_raw(&make_block_key(chain_id, block_number), &[1, 2, 3])
+            .unwrap();
+        let result = db.get(chain_id, block_number);
+        assert_matches!(result, Err(Error::Protobuf(_)));
     }
 
     #[test]
@@ -719,15 +870,34 @@ mod tests {
     }
 
     #[test]
+    fn rocks_block_db_get_bytes_returns_raw_data() {
+        let chain_id = 1;
+        let block_number = 2;
+        let raw_data = [0, 1, 2];
+        let (_tmpdir, db) = create_rocks_block_db();
+        db.kv_db()
+            .put_raw(&make_block_key(chain_id, block_number), &raw_data)
+            .unwrap();
+        let received = db.get_bytes(chain_id, block_number).unwrap().unwrap();
+        assert_eq!(received, raw_data);
+    }
+
+    #[test]
     fn kv_db_backed_block_db_get_bytes_returns_none_for_missing_block() {
         let mut kv_db = MockKvDb::new();
         kv_db.expect_get_raw().return_once(|_| Ok(None)).times(1);
         let db = KvDbBackedBlockDb { db: kv_db };
-        assert_eq!(db.get_bytes(1, 42).unwrap(), None);
+        assert_eq!(db.get_bytes(1, 2).unwrap(), None);
     }
 
     #[test]
-    fn kv_db_backed_block_db_put_stores_encodes_block_as_protobuf_using_number_from_block_as_key() {
+    fn rocks_block_db_get_bytes_returns_none_for_missing_block() {
+        let (_tmpdir, db) = create_rocks_block_db();
+        assert_eq!(db.get_bytes(1, 2).unwrap(), None);
+    }
+
+    #[test]
+    fn kv_db_backed_block_db_put_stores_encoded_block_as_protobuf_using_number_from_block_as_key() {
         let chain_id: u64 = 1;
         let block = some_block();
         let encoded = proto::Block::from(block.clone()).encode_to_vec();
@@ -781,6 +951,23 @@ mod tests {
 
         let db = KvDbBackedBlockDb { db: kv_db };
         db.put(chain_id, block).unwrap();
+    }
+
+    #[test]
+    fn rocks_block_db_put_stores_encoded_block_as_protobuf_using_number_from_block_as_key() {
+        let chain_id: u64 = 1;
+        let block = some_block();
+        let encoded = proto::Block::from(block.clone()).encode_to_vec();
+
+        let (_tmpdir, db) = create_rocks_block_db();
+        db.put(chain_id, block.clone()).unwrap();
+
+        assert_eq!(
+            db.kv_db()
+                .get_raw(&make_block_key(chain_id, block.number))
+                .unwrap(),
+            Some(encoded)
+        );
     }
 
     #[rstest::rstest]
@@ -849,18 +1036,61 @@ mod tests {
     }
 
     #[rstest::rstest]
-    #[case::no_existing_ranges_for_chain_id(
-        None,
-        2,
-        3,
-        vec![],
-    )]
-    #[case::existing_ranges_for_chain_id_delete_middle(
-        Some(vec![0..=5]),
-        2,
-        3,
-        vec![0..=1, 4..=5],
-    )]
+    #[case::no_existing_metadata(None, None, 1, 11, vec![1], vec![11..=11])]
+    #[case::no_ranges(Some(vec![1, 3]), None, 2, 11, vec![1, 2, 3], vec![11..=11])]
+    #[case::empty_existing_metadata(Some(vec![]), Some(vec![]), 1, 11, vec![1], vec![11..=11])]
+    #[case::empty_ranges(Some(vec![1, 3]), Some(vec![]), 2, 11, vec![1, 2, 3], vec![11..=11])]
+    #[case::same_chain_id(Some(vec![1, 2]), Some(vec![]), 2, 11, vec![1, 2], vec![11..=11])]
+    #[case::same_chain_id_with_overlapping_ranges(Some(vec![1, 2]), Some(vec![11..=12, 14..=15]), 2, 13, vec![1, 2], vec![11..=15])]
+    #[case::same_chain_id_with_non_overlapping_ranges(Some(vec![1, 2]), Some(vec![11..=12, 16..=17]), 2, 14, vec![1, 2], vec![11..=12, 14..=14, 16..=17])]
+    fn rocks_block_db_put_bytes_stores_data_and_updates_metadata(
+        #[case] existing_chain_ids: Option<Vec<u64>>,
+        #[case] existing_ranges: Option<Vec<BlockRange>>,
+        #[case] chain_id: u64,
+        #[case] block_number: u64,
+        #[case] new_chain_ids: Vec<u64>,
+        #[case] new_ranges: Vec<BlockRange>,
+    ) {
+        let (_tmpdir, db) = create_rocks_block_db();
+
+        if let Some(existing_chain_ids) = existing_chain_ids {
+            db.kv_db()
+                .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids(existing_chain_ids))
+                .unwrap();
+        }
+        if let Some(existing_ranges) = existing_ranges {
+            db.kv_db()
+                .put_raw(
+                    &make_block_ranges_key(chain_id),
+                    &serialize_block_ranges(existing_ranges.clone()),
+                )
+                .unwrap();
+        }
+
+        db.put_bytes(chain_id, block_number, b"data").unwrap();
+
+        assert_eq!(
+            db.kv_db()
+                .get_raw(&make_block_key(chain_id, block_number))
+                .unwrap(),
+            Some(b"data".to_vec())
+        );
+        assert_eq!(
+            db.kv_db()
+                .get_raw(&make_block_ranges_key(chain_id))
+                .unwrap(),
+            Some(serialize_block_ranges(new_ranges))
+        );
+        assert_eq!(
+            db.kv_db().get_raw(&CHAIN_IDS_KEY).unwrap(),
+            Some(serialize_chain_ids(new_chain_ids))
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::no_existing_ranges_for_chain_id(None, 2, 3, vec![])]
+    #[case::existing_ranges_for_chain_id_delete_parts_of_multiple(Some(vec![0..=1, 3..=4, 6..=7]), 1, 6, vec![0..=0, 7..=7])]
+    #[case::existing_ranges_for_chain_id_delete_middle(Some(vec![0..=5]), 2, 3, vec![0..=1, 4..=5])]
     fn kv_db_backed_block_db_delete_range_deletes_blocks_in_range_and_updates_metadata(
         #[case] existing_ranges: Option<Vec<BlockRange>>,
         #[case] start_block_number: u64,
@@ -911,11 +1141,61 @@ mod tests {
             .unwrap();
     }
 
+    #[rstest::rstest]
+    #[case::no_existing_ranges_for_chain_id(vec![], 2, 3, vec![])]
+    #[case::existing_ranges_for_chain_id_delete_parts_of_multiple(vec![0..=1, 3..=4, 6..=7], 1, 6, vec![0..=0, 7..=7])]
+    #[case::existing_ranges_for_chain_id_delete_middle(vec![0..=5], 2, 3, vec![0..=1, 4..=5])]
+    fn rocks_block_db_delete_range_deletes_blocks_in_range_and_updates_metadata(
+        #[case] existing_ranges: Vec<BlockRange>,
+        #[case] start_block_number: u64,
+        #[case] end_block_number: u64,
+        #[case] expected_ranges: Vec<BlockRange>,
+    ) {
+        let chain_id: u64 = 11;
+        let (_tmpdir, db) = create_rocks_block_db();
+
+        for range in &existing_ranges {
+            for block_num in range.clone() {
+                db.put_bytes(chain_id, block_num, b"block").unwrap();
+            }
+        }
+
+        db.delete_range(chain_id, start_block_number, end_block_number)
+            .unwrap();
+
+        for range in existing_ranges {
+            for block_num in range {
+                assert_eq!(
+                    db.get_bytes(chain_id, block_num).unwrap().is_some(),
+                    !(start_block_number..=end_block_number).contains(&block_num)
+                );
+            }
+        }
+
+        assert_eq!(
+            db.get_ranges_of_chain_id(chain_id).unwrap(),
+            expected_ranges
+        );
+    }
+
     #[test]
     fn kv_db_backed_block_db_delete_range_returns_error_if_start_is_greater_than_end() {
         let db = KvDbBackedBlockDb {
             db: MockKvDb::new(),
         };
+        let result = db.delete_range(1, 10, 5);
+        assert_eq!(
+            result,
+            Err(Error::StorageLayer(
+                "invalid block range: start block number 10 is greater than end block number 5"
+                    .to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn rocks_block_db_delete_range_returns_error_if_start_is_greater_than_end() {
+        let (_tmpdir, db) = create_rocks_block_db();
         let result = db.delete_range(1, 10, 5);
         assert_eq!(
             result,
@@ -964,16 +1244,39 @@ mod tests {
     }
 
     #[rstest::rstest]
+    #[case::valid_raw_block(
+        Box::from(proto::Block::from(some_block()).encode_to_vec()),
+        Some((1, some_block())),
+    )]
+    #[case::invalid_raw_block(
+        Box::from([0u8, 1, 2, 3].as_slice()),
+        None,
+    )]
+    fn rocks_block_db_iterate_parses_blocks(
+        #[case] raw_block: Box<[u8]>,
+        #[case] expected_block: Option<(u64, Block)>,
+    ) {
+        let chain_id = 1;
+        let (_tmpdir, db) = create_rocks_block_db();
+        db.kv_db()
+            .put_raw(&make_block_key(chain_id, 1), &raw_block)
+            .unwrap();
+
+        let result = db.iterate(chain_id, 1, IterationDirection::Forward).next();
+
+        match expected_block {
+            Some(expected) => assert_eq!(result, Some(Ok(expected))),
+            None => assert_matches!(result, Some(Err(Error::Protobuf(_)))),
+        }
+    }
+
+    type ByteVecTuple = (Vec<u8>, Vec<u8>);
+
+    #[rstest::rstest]
     #[case::until_no_more_blocks(
         vec![
-            Ok((
-                make_block_key(1, 1).to_vec().into_boxed_slice(),
-                Box::from(b"block1".as_slice()),
-            )),
-            Ok((
-                make_block_key(1, 3).to_vec().into_boxed_slice(),
-                Box::from(b"block3".as_slice()),
-            )),
+            Ok((make_block_key(1, 1).to_vec(), b"block1".to_vec())),
+            Ok((make_block_key(1, 3).to_vec(), b"block3".to_vec())),
         ],
         vec![
             Ok((1, Box::from(b"block1".as_slice()))),
@@ -982,48 +1285,24 @@ mod tests {
     )]
     #[case::until_chain_boundary(
         vec![
-            Ok((
-                make_block_key(1, 1).to_vec().into_boxed_slice(),
-                Box::from(b"chain1-block1".as_slice()),
-            )),
-            Ok((
-                make_block_key(2, 1).to_vec().into_boxed_slice(),
-                Box::from(b"chain2-block1".as_slice()),
-            )),
+            Ok((make_block_key(1, 1).to_vec(), b"chain1-block1".to_vec())),
+            Ok((make_block_key(2, 1).to_vec(), b"chain2-block1".to_vec())),
         ],
         vec![Ok((1, Box::from(b"chain1-block1".as_slice())))]
     )]
     #[case::until_metadata_key(
         vec![
-            Ok((
-                make_block_key(1, 1).to_vec().into_boxed_slice(),
-                Box::from(b"chain1-block1".as_slice()),
-            )),
-            Ok((
-                make_block_ranges_key(1).to_vec().into_boxed_slice(),
-                Box::from(b"metadata".as_slice()),
-            )),
-            Ok((
-                make_block_key(1, 2).to_vec().into_boxed_slice(),
-                Box::from(b"chain1-block2".as_slice()),
-            )),
+            Ok((make_block_key(1, 1).to_vec(), b"chain1-block1".to_vec())),
+            Ok((make_block_ranges_key(1).to_vec(), b"metadata".to_vec())),
+            Ok((make_block_key(1, 2).to_vec(), b"chain1-block2".to_vec())),
         ],
         vec![Ok((1, Box::from(b"chain1-block1".as_slice())))]
     )]
     #[case::until_invalid_key(
         vec![
-            Ok((
-                make_block_key(1, 1).to_vec().into_boxed_slice(),
-                Box::from(b"block1-1".as_slice()),
-            )),
-            Ok((
-                vec![0u8; 17].into_boxed_slice(),
-                Box::from(b"invalid".as_slice()),
-            )),
-            Ok((
-                make_block_key(1, 2).to_vec().into_boxed_slice(),
-                Box::from(b"block1-2".as_slice()),
-            )),
+            Ok((make_block_key(1, 1).to_vec(), b"block1-1".to_vec())),
+            Ok(([make_block_key(1, 1).as_slice(), &[0]].concat(), b"invalid".to_vec())),
+            Ok((make_block_key(1, 2).to_vec(), b"block1-2".to_vec())),
         ],
         vec![
             Ok((1, Box::from(b"block1-1".as_slice()))),
@@ -1032,15 +1311,9 @@ mod tests {
     )]
     #[case::until_db_error(
         vec![
-            Ok((
-                make_block_key(1, 4).to_vec().into_boxed_slice(),
-                Box::from(b"block1-4".as_slice()),
-            )),
+            Ok((make_block_key(1, 4).to_vec(), b"block1-4".to_vec())),
             Err(Error::StorageLayer("boom".to_owned())),
-            Ok((
-                make_block_key(1, 5).to_vec().into_boxed_slice(),
-                Box::from(b"block1-5".as_slice()),
-            )),
+            Ok((make_block_key(1, 5).to_vec(), b"block1-5".to_vec())),
         ],
         vec![
             Ok((4, Box::from(b"block1-4".as_slice()))),
@@ -1048,7 +1321,7 @@ mod tests {
         ]
     )]
     fn kv_db_backed_block_db_iterate_bytes_iterates_over_all_valid_blocks_for_chain_id(
-        #[case] raw_items: Vec<Result<RawEntry, Error>>,
+        #[case] raw_items: Vec<Result<ByteVecTuple, Error>>,
         #[case] expected: Vec<Result<IterBytesItem, Error>>,
     ) {
         let chain_id = 1;
@@ -1062,7 +1335,13 @@ mod tests {
                 )),
                 eq(IterationDirection::Forward),
             )
-            .return_once(move |_start, _dir| Box::new(raw_items.into_iter()))
+            .return_once(move |_start, _dir| {
+                Box::new(
+                    raw_items
+                        .into_iter()
+                        .map(|res| res.map(|(k, v)| (k.into_boxed_slice(), v.into_boxed_slice()))),
+                )
+            })
             .times(1);
         let db = KvDbBackedBlockDb { db: kv_db };
 
@@ -1070,6 +1349,59 @@ mod tests {
             .iterate_bytes(chain_id, start_block_number, IterationDirection::Forward)
             .collect();
         assert_eq!(blocks, expected);
+    }
+
+    #[rstest::rstest]
+    #[case::until_no_more_blocks(
+        vec![
+            (make_block_key(1, 1).to_vec(), b"block1".to_vec()),
+            (make_block_key(1, 3).to_vec(), b"block3".to_vec()),
+        ],
+        vec![
+            Ok((1, Box::from(b"block1".as_slice()))),
+            Ok((3, Box::from(b"block3".as_slice()))),
+        ]
+    )]
+    #[case::until_chain_boundary(
+        vec![
+            (make_block_key(1, 1).to_vec(), b"chain1-block1".to_vec()),
+            (make_block_key(2, 1).to_vec(), b"chain2-block1".to_vec()),
+        ],
+        vec![Ok((1, Box::from(b"chain1-block1".as_slice())))]
+    )]
+    #[case::until_metadata_key(
+        vec![
+            (make_block_key(1, 1).to_vec(), b"chain1-block1".to_vec()),
+            (make_block_ranges_key(2).to_vec(), b"metadata".to_vec()),
+        ],
+        vec![Ok((1, Box::from(b"chain1-block1".as_slice())))]
+    )]
+    #[case::until_invalid_key(
+        vec![
+            (make_block_key(1, 1).to_vec(), b"block1-1".to_vec()),
+            ([make_block_key(1, 1).as_slice(), &[0]].concat(), b"invalid".to_vec()),
+            (make_block_key(1, 2).to_vec(), b"block1-2".to_vec()),
+        ],
+        vec![
+            Ok((1, Box::from(b"block1-1".as_slice()))),
+            Err(Error::StorageLayer("unexpected key length 17".to_owned())),
+        ]
+    )]
+    fn rocks_block_db_iterate_bytes_iterates_over_all_valid_blocks_for_chain_id(
+        #[case] raw_items: Vec<(Vec<u8>, Vec<u8>)>,
+        #[case] expected: Vec<Result<IterBytesItem, Error>>,
+    ) {
+        let chain_id = 1;
+        let start_block_number = 1;
+        let (_tmpdir, db) = create_rocks_block_db();
+        for (key, value) in raw_items {
+            db.kv_db().put_raw(&key, &value).unwrap();
+        }
+
+        let result: Vec<_> = db
+            .iterate_bytes(chain_id, start_block_number, IterationDirection::Forward)
+            .collect();
+        assert_eq!(result, expected);
     }
 
     #[rstest::rstest]
@@ -1096,6 +1428,36 @@ mod tests {
             db.iterate_bytes(chain_id, start_block_number, direction)
                 .next()
                 .is_none()
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::forward(IterationDirection::Forward, vec![0, 1, 2], 1, vec![1, 2])]
+    #[case::reverse(IterationDirection::Reverse, vec![0, 1, 2], 1, vec![1, 0])]
+    fn rocks_block_db_iterate_bytes_passes_start_key_and_direction(
+        #[case] direction: IterationDirection,
+        #[case] block_numbers: Vec<u64>,
+        #[case] iter_start_block_number: u64,
+        #[case] iter_block_numbers: Vec<u64>,
+    ) {
+        let chain_id = 1;
+        let (_tmpdir, db) = create_rocks_block_db();
+        for i in block_numbers {
+            db.put(
+                chain_id,
+                Block {
+                    number: i,
+                    ..Block::default()
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            db.iterate_bytes(chain_id, iter_start_block_number, direction)
+                .map(|res| res.map(|(num, _)| num))
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap(),
+            iter_block_numbers
         );
     }
 
@@ -1180,6 +1542,57 @@ mod tests {
     }
 
     #[test]
+    fn rocks_block_db_write_batch_writes_all_blocks_and_updates_metadata() {
+        let (_tmpdir, db) = create_rocks_block_db();
+
+        // Set up existing state via kv_db
+        db.kv_db()
+            .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids([1, 2]))
+            .unwrap();
+        db.kv_db()
+            .put_raw(&make_block_ranges_key(2), &serialize_block_ranges([1..=2]))
+            .unwrap();
+        let existing_blocks = [
+            (1, 0, b"existing"),
+            (2, 1, b"existing"),
+            (2, 2, b"existing"),
+        ];
+        for (cid, bn, data) in existing_blocks {
+            db.kv_db().put_raw(&make_block_key(cid, bn), data).unwrap();
+        }
+
+        let new_blocks = [(2, 2, b"block"), (2, 3, b"block"), (3, 1, b"block")];
+        let mut batch = db.batch();
+        for (chain_id, block_number, data) in new_blocks {
+            batch.put_bytes(chain_id, block_number, data);
+        }
+        db.write_batch(batch).unwrap();
+
+        // Verify data
+        for (chain_id, block_number, data) in new_blocks {
+            assert_eq!(
+                db.kv_db()
+                    .get_raw(&make_block_key(chain_id, block_number))
+                    .unwrap(),
+                Some(data.to_vec())
+            );
+        }
+        // Verify metadata
+        assert_eq!(
+            db.kv_db().get_raw(&CHAIN_IDS_KEY).unwrap(),
+            Some(serialize_chain_ids([1, 2, 3]))
+        );
+        assert_eq!(
+            db.kv_db().get_raw(&make_block_ranges_key(2)).unwrap(),
+            Some(serialize_block_ranges([1..=3]))
+        );
+        assert_eq!(
+            db.kv_db().get_raw(&make_block_ranges_key(3)).unwrap(),
+            Some(serialize_block_ranges([1..=1]))
+        );
+    }
+
+    #[test]
     fn kv_db_backed_block_db_write_batch_empty_batch_is_noop() {
         let kv_db = MockKvDb::new();
         let kv_db_batch = MockKvDbBatch::new();
@@ -1188,6 +1601,13 @@ mod tests {
             kv_batch: kv_db_batch,
             block_ranges: HashMap::default(),
         };
+        db.write_batch(batch).unwrap();
+    }
+
+    #[test]
+    fn rocks_block_db_write_batch_empty_batch_is_noop() {
+        let (_tmpdir, db) = create_rocks_block_db();
+        let batch = db.batch();
         db.write_batch(batch).unwrap();
     }
 
@@ -1326,6 +1746,14 @@ mod tests {
     }
 
     const UNIQUE_IDENTIFIER: usize = 12345;
+
+    /// Creates a new [KvDbBackedBlockDb] backed by a fresh [RocksDb] in a temporary directory.
+    fn create_rocks_block_db() -> (TestDir, KvDbBackedBlockDb<RocksDb>) {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        let rocks = RocksDb::create(tmpdir.path()).unwrap();
+        let db = KvDbBackedBlockDb::create(rocks).unwrap();
+        (tmpdir, db)
+    }
 
     // Returns a non-default block for testing purposes.
     fn some_block() -> Block {
