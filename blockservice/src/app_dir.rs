@@ -190,7 +190,7 @@ mod tests {
 
         if db_exists {
             let rocks = RocksDb::create(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
-            let db = KvDbBackedBlockDb::create(rocks).unwrap();
+            let mut db = KvDbBackedBlockDb::create(rocks).unwrap();
             db.put_bytes(123, 456, &[1, 2, 3]).unwrap();
         }
 
@@ -299,7 +299,7 @@ mod tests {
             })
             .unwrap();
             let rocks = RocksDb::create(tmpdir.path().join(BLOCK_DB_NAME)).unwrap();
-            let db = KvDbBackedBlockDb::create(rocks).unwrap();
+            let mut db = KvDbBackedBlockDb::create(rocks).unwrap();
             db.put_bytes(123, 456, &[1, 2, 3]).unwrap();
         }
 

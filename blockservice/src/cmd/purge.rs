@@ -37,7 +37,7 @@ pub fn purge(
         return Err("chain ID cannot be 0".into());
     }
     // Guard the purge command
-    let (_, db) = open_app_dir(app_dir, false)?;
+    let (_, mut db) = open_app_dir(app_dir, false)?;
     let block_ranges = db.get_ranges_of_chain_id(chain_id)?;
     // Nothing to do
     if block_ranges.is_empty() {
@@ -178,7 +178,7 @@ mod tests {
     fn fails_for_invalid_range() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
         db.put(1, Block::default_sonic()).unwrap();
         drop(db);
 
@@ -213,7 +213,7 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let chain_id = 146;
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let mut block = Block::default();
         db.put(chain_id, block.clone()).unwrap();
@@ -269,7 +269,7 @@ mod tests {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
         db.put_bytes(42, 1, &[1, 2, 3]).unwrap();
         drop(db);
 
@@ -303,7 +303,7 @@ mod tests {
     fn cancel_operation_if_range_to_purge_is_empty() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
         db.put(
             42,
             Block {
@@ -338,7 +338,7 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let set_elem = || {
-            let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+            let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
             db.put(
                 42,
                 Block {

@@ -26,7 +26,7 @@ pub fn import_upgrade_heights(
     file: impl AsRef<Path>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (_cfg, db) = open_app_dir(app_dir, false)?;
+    let (_cfg, mut db) = open_app_dir(app_dir, false)?;
 
     let data = std::fs::read(file)?;
     db.put_upgrade_heights(chain_id, &data)?;
@@ -45,7 +45,7 @@ pub fn import_corrections(
     file: impl AsRef<Path>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (_cfg, db) = open_app_dir(app_dir, false)?;
+    let (_cfg, mut db) = open_app_dir(app_dir, false)?;
 
     let data = std::fs::read(file)?;
     db.put_corrections(chain_id, &data)?;

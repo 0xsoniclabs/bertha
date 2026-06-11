@@ -276,7 +276,7 @@ mod tests {
             description: "A test chain".to_string(),
             ..ChainConfig::new(32)
         };
-        let (mut cfg, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (mut cfg, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
         cfg.add_chain(chain_cfg.clone()).unwrap();
 
         // Add ranges for chain 7 w/o adding to config file

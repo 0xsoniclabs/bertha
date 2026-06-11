@@ -32,7 +32,7 @@ pub async fn fetch(
     to: Option<u64>,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (cfg, db) = open_app_dir(app_dir, false)?;
+    let (cfg, mut db) = open_app_dir(app_dir, false)?;
 
     let auth_token = cfg.get_auth_token().cloned();
 
@@ -446,7 +446,7 @@ mod tests {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let clear_db = || {
-            let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+            let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
             db.delete_range(1, 0, u64::MAX).unwrap(); // Clear the database
             assert!(db.get_ranges_of_chain_id(1).unwrap().is_empty()); // make sure the database is empty
         };
@@ -637,7 +637,7 @@ mod tests {
         }
         let init_db = || {
             // Initialize the database
-            let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+            let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
             db.delete_range(1, 0, u64::MAX).unwrap(); // Clear the database
             assert!(db.get_ranges_of_chain_id(1).unwrap().is_empty()); // make sure the database is empty
             // Insert the local blocks into the database
