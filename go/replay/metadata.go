@@ -57,16 +57,18 @@ type MetadataStore interface {
 
 // BlockDBMetadataStore is a MetadataStore implementation backed by the block database.
 type BlockDBMetadataStore struct {
-	db           blockdb.BlockDB
-	metadata     Metadata
-	nextUpgrades *opera.Upgrades
-	chainID      uint64
-	logger       utils.Logger
+	db                  blockdb.BlockDB
+	metadata            Metadata
+	nextUpgrades        *opera.Upgrades
+	chainID             uint64
+	logger              utils.Logger
+	writeUpgradeHeights bool
 }
 
 // NewBlockDBMetadataStore creates a BlockDBMetadataStore backed by data stored in the
-// given block database.
-func NewBlockDBMetadataStore(db blockdb.BlockDB, chainID uint64, logger utils.Logger) (*BlockDBMetadataStore, error) {
+// given block database. If writeUpgradeHeights is true, newly detected upgrade heights
+// are persisted to the block database.
+func NewBlockDBMetadataStore(db blockdb.BlockDB, chainID uint64, logger utils.Logger, writeUpgradeHeights bool) (*BlockDBMetadataStore, error) {
 	upgradesData, err := db.GetUpgradeHeights(chainID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get upgrade heights from block db: %w", err)
@@ -101,8 +103,9 @@ func NewBlockDBMetadataStore(db blockdb.BlockDB, chainID uint64, logger utils.Lo
 			UpgradeHeights: upgrades,
 			Corrections:    corrections,
 		},
-		chainID: chainID,
-		logger:  logger,
+		chainID:             chainID,
+		logger:              logger,
+		writeUpgradeHeights: writeUpgradeHeights,
 	}, nil
 }
 
@@ -166,11 +169,14 @@ func (s *BlockDBMetadataStore) CommitUpgrades(blockNumber uint64) error {
 			}
 		}
 	}
-	s.logger.Info("Detected new upgrade", "block", upgrade.Height)
 	s.metadata.UpgradeHeights = append(s.metadata.UpgradeHeights, upgrade)
 	slices.SortFunc(s.metadata.UpgradeHeights, func(a, b opera.UpgradeHeight) int {
 		return cmp.Compare(a.Height, b.Height)
 	})
+	if !s.writeUpgradeHeights {
+		s.logger.Warn("New upgrade detected but not stored in the block db (use --write-upgrade-heights to persist)", "block", upgrade.Height)
+		return nil
+	}
 	data, err := json.Marshal(s.metadata.UpgradeHeights)
 	if err != nil {
 		return fmt.Errorf("failed to marshal upgrade heights: %w", err)
@@ -178,7 +184,7 @@ func (s *BlockDBMetadataStore) CommitUpgrades(blockNumber uint64) error {
 	if err := s.db.PutUpgradeHeights(s.chainID, data); err != nil {
 		return fmt.Errorf("failed to store upgrade heights in block db: %w", err)
 	}
-	s.logger.Info("Upgrade stored in block db", "block", upgrade.Height)
+	s.logger.Info("New upgrade detected and stored in the block db", "block", upgrade.Height)
 	return nil
 }
 

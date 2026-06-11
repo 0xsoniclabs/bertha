@@ -109,7 +109,7 @@ func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
 				tc.expectLog(logger)
 			}
 
-			store, err := NewBlockDBMetadataStore(db, chainID, logger)
+			store, err := NewBlockDBMetadataStore(db, chainID, logger, false)
 			if tc.expectErr != "" {
 				require.ErrorContains(t, err, tc.expectErr)
 				return
@@ -217,38 +217,55 @@ func TestBlockDBMetadataStore_CommitUpgrades_KnownHeightWithDifferentUpgrade_Ret
 	require.Nil(t, store.nextUpgrades)
 }
 
-func TestBlockDBMetadataStore_CommitUpgrades_NewUpgradeIsStored(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	db := blockdb.NewMockBlockDB(ctrl)
-	logger := utils.NewMockLogger(ctrl)
-
-	newUpgrades := opera.Upgrades{Sonic: true, Brio: true}
-	store := &BlockDBMetadataStore{
-		db:      db,
-		chainID: 146,
-		logger:  logger,
-		metadata: Metadata{UpgradeHeights: []opera.UpgradeHeight{
-			{Upgrades: opera.Upgrades{Sonic: true}, Height: 5},
-			{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}, Height: 20},
-		}},
+func TestBlockDBMetadataStore_CommitUpgrades_NewUpgradeIsStoredWhenWriteEnabled(t *testing.T) {
+	cases := map[string]struct {
+		writeUpgradeHeights bool
+	}{
+		"write enabled":  {writeUpgradeHeights: true},
+		"write disabled": {writeUpgradeHeights: false},
 	}
 
-	logger.EXPECT().Info("Detected new upgrade", "block", gomock.Any()).Times(1)
-	db.EXPECT().PutUpgradeHeights(store.chainID, gomock.Any()).DoAndReturn(func(chainID uint64, data []byte) error {
-		var got []opera.UpgradeHeight
-		require.NoError(t, json.Unmarshal(data, &got))
-		require.Len(t, got, 3)
-		require.Equal(t, uint64(5), uint64(got[0].Height))
-		require.Equal(t, uint64(16), uint64(got[1].Height))
-		require.Equal(t, newUpgrades, got[1].Upgrades)
-		require.Equal(t, uint64(20), uint64(got[2].Height))
-		return nil
-	}).Times(1)
-	logger.EXPECT().Info("Upgrade stored in block db", "block", gomock.Any()).Times(1)
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			db := blockdb.NewMockBlockDB(ctrl)
+			logger := utils.NewMockLogger(ctrl)
 
-	store.nextUpgrades = &newUpgrades
-	require.NoError(t, store.CommitUpgrades(15))
-	require.Nil(t, store.nextUpgrades)
+			newUpgrades := opera.Upgrades{Sonic: true, Allegro: true, Brio: true}
+			store := &BlockDBMetadataStore{
+				db:                  db,
+				chainID:             146,
+				logger:              logger,
+				writeUpgradeHeights: tc.writeUpgradeHeights,
+				metadata: Metadata{UpgradeHeights: []opera.UpgradeHeight{
+					{Upgrades: opera.Upgrades{Sonic: true}, Height: 5},
+					{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}, Height: 10},
+				}},
+			}
+
+			if tc.writeUpgradeHeights {
+				db.EXPECT().PutUpgradeHeights(store.chainID, gomock.Any()).DoAndReturn(func(chainID uint64, data []byte) error {
+					var got []opera.UpgradeHeight
+					require.NoError(t, json.Unmarshal(data, &got))
+					require.Len(t, got, 3)
+					require.Equal(t, uint64(5), uint64(got[0].Height))
+					require.Equal(t, uint64(10), uint64(got[1].Height))
+					require.Equal(t, uint64(15+1), uint64(got[2].Height))
+					require.Equal(t, newUpgrades, got[2].Upgrades)
+					return nil
+				}).Times(1)
+				logger.EXPECT().Info("New upgrade detected and stored in the block db", "block", gomock.Any()).Times(1)
+			} else {
+				logger.EXPECT().Warn("New upgrade detected but not stored in the block db (use --write-upgrade-heights to persist)", "block", gomock.Any()).Times(1)
+			}
+
+			store.nextUpgrades = &newUpgrades
+			require.NoError(t, store.CommitUpgrades(15))
+			require.Nil(t, store.nextUpgrades)
+			// Upgrade is always tracked in-memory.
+			require.Len(t, store.metadata.UpgradeHeights, 3)
+		})
+	}
 }
 
 func TestBlockDBMetadataStore_GetUpgradesAtBlock_ObtainsUpgradesFromCachedValuesBasedOnBlockNumber(t *testing.T) {
