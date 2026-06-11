@@ -68,6 +68,7 @@ func getApp() *cli.Command {
 					snapshotStartBlock,
 					snapshotEndBlock,
 					snapshotNumToKeep,
+					writeUpgradeHeights,
 					overwriteStateRoot,
 					noStateRootCheck,
 					noReceiptsCheck,
@@ -246,6 +247,12 @@ var (
 		Value: 1,
 	}
 
+	writeUpgradeHeights = &cli.BoolFlag{
+		Name:  "write-upgrade-heights",
+		Usage: "Write newly detected upgrade heights to the block database",
+		Value: false,
+	}
+
 	overwriteStateRoot = &cli.BoolFlag{
 		Name:  "overwrite-state-roots",
 		Usage: "Overwrite the state roots in the block database with the ones computed from the state",
@@ -290,26 +297,27 @@ func getListOfCarmenVariants() []string {
 
 func parseReplayArgsAndRunReplay(ctx context.Context, c *cli.Command) error {
 	args := replay.ReplayArgs{
-		JSONGenesisFile:    c.String(jsonGenesisFlag.Name),
-		BlockDBDir:         c.String(blockDatabaseDirectoryFlag.Name),
-		StateDBDir:         c.String(stateDBDirectoryFlag.Name),
-		InitDBDir:          c.String(initDBFlag.Name),
-		KeepDB:             c.Bool(keepDBFlag.Name),
-		WithArchive:        c.Bool(withArchiveFlag.Name),
-		DBSchema:           carmen.Schema(c.Int(dbSchema.Name)),
-		DBVariant:          carmen.Variant(c.String(dbVariant.Name)),
-		UsePipeline:        c.Bool(usePipelineFlag.Name),
-		StartBlock:         c.Uint64(startBlockFlag.Name),
-		EndBlock:           c.Uint64(endBlockFlag.Name),
-		SnapshotInterval:   c.Uint64(snapshotInterval.Name),
-		SnapshotStartBlock: c.Uint64(snapshotStartBlock.Name),
-		SnapshotEndBlock:   c.Uint64(snapshotEndBlock.Name),
-		SnapshotNumToKeep:  c.Uint64(snapshotNumToKeep.Name),
-		OverwriteStateRoot: c.Bool(overwriteStateRoot.Name),
-		NoStateRootCheck:   c.Bool(noStateRootCheck.Name),
-		NoReceiptsCheck:    c.Bool(noReceiptsCheck.Name),
-		LogDBSize:          c.Bool(logDBSize.Name),
-		ConfirmAllPrompts:  c.Bool(confirmAllPromptsFlag.Name),
+		JSONGenesisFile:     c.String(jsonGenesisFlag.Name),
+		BlockDBDir:          c.String(blockDatabaseDirectoryFlag.Name),
+		StateDBDir:          c.String(stateDBDirectoryFlag.Name),
+		InitDBDir:           c.String(initDBFlag.Name),
+		KeepDB:              c.Bool(keepDBFlag.Name),
+		WithArchive:         c.Bool(withArchiveFlag.Name),
+		DBSchema:            carmen.Schema(c.Int(dbSchema.Name)),
+		DBVariant:           carmen.Variant(c.String(dbVariant.Name)),
+		UsePipeline:         c.Bool(usePipelineFlag.Name),
+		StartBlock:          c.Uint64(startBlockFlag.Name),
+		EndBlock:            c.Uint64(endBlockFlag.Name),
+		SnapshotInterval:    c.Uint64(snapshotInterval.Name),
+		SnapshotStartBlock:  c.Uint64(snapshotStartBlock.Name),
+		SnapshotEndBlock:    c.Uint64(snapshotEndBlock.Name),
+		SnapshotNumToKeep:   c.Uint64(snapshotNumToKeep.Name),
+		WriteUpgradeHeights: c.Bool(writeUpgradeHeights.Name),
+		OverwriteStateRoot:  c.Bool(overwriteStateRoot.Name),
+		NoStateRootCheck:    c.Bool(noStateRootCheck.Name),
+		NoReceiptsCheck:     c.Bool(noReceiptsCheck.Name),
+		LogDBSize:           c.Bool(logDBSize.Name),
+		ConfirmAllPrompts:   c.Bool(confirmAllPromptsFlag.Name),
 	}
 	return replay.Replay(ctx, args)
 }

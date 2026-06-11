@@ -58,26 +58,27 @@ import (
 //go:generate mockgen -source=replay.go -destination=replay_mock.go -package=replay
 
 type ReplayArgs struct {
-	JSONGenesisFile    string
-	BlockDBDir         string
-	StateDBDir         string
-	InitDBDir          string
-	KeepDB             bool
-	WithArchive        bool
-	DBSchema           carmen.Schema
-	DBVariant          carmen.Variant
-	UsePipeline        bool
-	StartBlock         uint64
-	EndBlock           uint64
-	SnapshotInterval   uint64
-	SnapshotStartBlock uint64
-	SnapshotEndBlock   uint64
-	SnapshotNumToKeep  uint64
-	OverwriteStateRoot bool
-	NoStateRootCheck   bool
-	NoReceiptsCheck    bool
-	LogDBSize          bool
-	ConfirmAllPrompts  bool
+	JSONGenesisFile     string
+	BlockDBDir          string
+	StateDBDir          string
+	InitDBDir           string
+	KeepDB              bool
+	WithArchive         bool
+	DBSchema            carmen.Schema
+	DBVariant           carmen.Variant
+	UsePipeline         bool
+	StartBlock          uint64
+	EndBlock            uint64
+	SnapshotInterval    uint64
+	SnapshotStartBlock  uint64
+	SnapshotEndBlock    uint64
+	SnapshotNumToKeep   uint64
+	WriteUpgradeHeights bool
+	OverwriteStateRoot  bool
+	NoStateRootCheck    bool
+	NoReceiptsCheck     bool
+	LogDBSize           bool
+	ConfirmAllPrompts   bool
 }
 
 func Replay(ctx context.Context, args ReplayArgs) (err error) {
@@ -173,12 +174,20 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 	chainID := genesis.ChainID
 
+	// Open the block database.
+	slog.Info("Opening block database", "directory", args.BlockDBDir)
+	if args.WriteUpgradeHeights {
+		slog.Info("Upgrade heights writing enabled")
+	}
 	if args.OverwriteStateRoot {
 		slog.Info("State root overwriting enabled")
 	}
-	// Open the block database.
-	slog.Info("Opening block database", "directory", args.BlockDBDir)
-	database, err := blockdb.OpenRocksDBForWriting(args.BlockDBDir)
+	var database blockdb.BlockDB
+	if args.OverwriteStateRoot || args.WriteUpgradeHeights {
+		database, err = blockdb.OpenRocksDBForWriting(args.BlockDBDir)
+	} else {
+		database, err = blockdb.OpenRocksDBForReading(args.BlockDBDir)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
@@ -186,7 +195,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		err = errors.Join(err, database.Close())
 	}()
 
-	metadataStore, err := NewBlockDBMetadataStore(database, chainID, slog.Default())
+	metadataStore, err := NewBlockDBMetadataStore(database, chainID, slog.Default(), args.WriteUpgradeHeights)
 	if err != nil {
 		return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
 	}
