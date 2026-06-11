@@ -22,6 +22,7 @@ use std::{
 pub use fetch::fetch;
 pub use fetch_state_updates::fetch_state_updates;
 pub use import::{import_era, import_era1, import_gfile};
+pub use import_metadata::{import_corrections, import_upgrade_heights};
 use indicatif::{ProgressBar, style::TemplateError};
 pub use init::init;
 pub use list::list;
@@ -31,6 +32,7 @@ use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 pub use verify::verify;
 pub use view::view;
+pub use view_metadata::{view_corrections, view_upgrade_heights};
 
 use crate::{
     app_dir::open_app_dir,
@@ -42,12 +44,14 @@ use crate::{
 mod fetch;
 mod fetch_state_updates;
 mod import;
+mod import_metadata;
 mod init;
 mod list;
 mod purge;
 mod start;
 mod verify;
 mod view;
+mod view_metadata;
 
 /// Creates a new progress bar with a custom style and an ETA display.
 pub fn make_progress_bar(total: u64) -> Result<ProgressBar, TemplateError> {
@@ -163,6 +167,12 @@ pub async fn execute(
             &cancellation_token,
             &mut output,
         ),
+        Command::ImportUpgradeHeights { chain_id, file } => {
+            cmd::import_upgrade_heights(args.dir, chain_id, file, &mut output)
+        }
+        Command::ImportCorrections { chain_id, file } => {
+            cmd::import_corrections(args.dir, chain_id, file, &mut output)
+        }
         Command::List { chain_id, url } => cmd::list(args.dir, chain_id, url, &mut output).await,
         Command::Fetch {
             url,
@@ -189,6 +199,12 @@ pub async fn execute(
             chain_id,
             block_number,
         } => cmd::view(args.dir, chain_id, block_number, &mut output),
+        Command::ViewUpgradeHeights { chain_id } => {
+            cmd::view_upgrade_heights(args.dir, chain_id, &mut output)
+        }
+        Command::ViewCorrections { chain_id } => {
+            cmd::view_corrections(args.dir, chain_id, &mut output)
+        }
         Command::FetchStateUpdates { url, chain_id } => {
             cmd::fetch_state_updates(args.dir, url, chain_id, &mut output).await
         }
