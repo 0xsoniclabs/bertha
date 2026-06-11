@@ -202,7 +202,7 @@ mod tests {
 
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let block = Block::default();
         db.put(chain_id, block.clone()).unwrap();
@@ -273,7 +273,7 @@ mod tests {
 
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let mut block = Block::default();
         let block_number = if matching_number {
@@ -324,7 +324,7 @@ mod tests {
 
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let block0 = Block::default();
         db.put(chain_id, block0.clone()).unwrap();
@@ -374,7 +374,7 @@ mod tests {
 
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let mut block = Block::default();
         db.put(chain_id, block.clone()).unwrap();
@@ -416,7 +416,7 @@ mod tests {
 
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let block0 = Block {
             number: 0,

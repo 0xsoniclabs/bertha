@@ -44,14 +44,14 @@ pub fn import_era1(
         "WARNING: `.era1` file import is still experimental and might store invalid data."
     )?;
 
-    let (cfg, db) = open_app_dir(app_dir, false)?;
+    let (cfg, mut db) = open_app_dir(app_dir, false)?;
 
     let era_dir = EraDir::<Era1FileReader>::open(era_dir_path, chain_id)?;
     let blocks = era_dir.blocks();
 
     import(
         cfg,
-        &db,
+        &mut db,
         blocks,
         chain_id,
         verify,
@@ -73,14 +73,14 @@ pub fn import_era(
         "WARNING: `.era` file import is still experimental and might store invalid data."
     )?;
 
-    let (cfg, db) = open_app_dir(app_dir, false)?;
+    let (cfg, mut db) = open_app_dir(app_dir, false)?;
 
     let era_dir = EraDir::<EraFileReader>::open(era_dir_path, chain_id)?;
     let blocks = era_dir.blocks();
 
     import(
         cfg,
-        &db,
+        &mut db,
         blocks,
         chain_id,
         false,
@@ -98,7 +98,7 @@ pub fn import_gfile(
     cancel_indicator: &impl CancelIndicator,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (cfg, db) = open_app_dir(app_dir, false)?;
+    let (cfg, mut db) = open_app_dir(app_dir, false)?;
 
     let file = File::open(&gfile_path)?;
     let reader = BufReader::new(file);
@@ -108,7 +108,7 @@ pub fn import_gfile(
 
     import(
         cfg,
-        &db,
+        &mut db,
         blocks,
         chain_id,
         verify,
@@ -119,7 +119,7 @@ pub fn import_gfile(
 
 fn import(
     mut cfg: Config,
-    db: &RocksBlockDb,
+    db: &mut RocksBlockDb,
     blocks: impl Iterator<Item = Result<Block, genesis_parser::Error>>,
     chain_id: u64,
     verify: bool,
@@ -332,7 +332,7 @@ mod tests {
         let mut genesis_blocks = all_blocks.clone();
 
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
         for block in db_blocks {
             db.put(chain_id, block.clone()).unwrap();
         }
@@ -447,7 +447,7 @@ mod tests {
         let genesis_file = tmpdir.path().join("genesis.g");
         let genesis_data = genesis_parser::test_utils::generate_test_genesis(chain_id, 2, &[]);
         std::fs::write(&genesis_file, genesis_data).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
         db.put(
             chain_id,
             Block {
@@ -642,7 +642,7 @@ mod tests {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (config, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (config, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let mut token = MockCancelIndicator::new();
         let mut seq = Sequence::new();
@@ -668,7 +668,15 @@ mod tests {
         });
 
         let mut writer = Vec::new();
-        let result = import(config, &db, blocks, chain_id, false, &token, &mut writer);
+        let result = import(
+            config,
+            &mut db,
+            blocks,
+            chain_id,
+            false,
+            &token,
+            &mut writer,
+        );
         assert!(result.is_ok());
 
         let output = String::from_utf8(writer).unwrap();

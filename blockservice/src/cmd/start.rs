@@ -15,9 +15,9 @@
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
 use std::{
-    ops::Deref,
     path::Path,
     sync::{Arc, atomic::AtomicU64},
+    time::Duration,
 };
 
 use tokio::task::JoinSet;
@@ -32,6 +32,8 @@ use crate::{
     json_rpc::{NetworkSource, subscribe_to_blocks},
 };
 
+const CATCH_UP_INTERVAL: Duration = Duration::from_secs(1);
+
 /// Starts the block service server.
 ///
 /// The `_test_notify_tasks_spawned` parameter is used in tests to notify when the internal async
@@ -43,16 +45,16 @@ pub async fn start(
     _test_notify: Option<tokio::sync::mpsc::Sender<StartCmdStatusMsg>>,
     _test_sync_block_count: Option<Arc<AtomicU64>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let (cfg, db) = open_app_dir(app_dir, false)?;
-    // Put the db in an Arc to share it between multiple tasks
-    let db = Arc::new(db);
+    let app_dir = app_dir.as_ref();
+    let (cfg, mut write_db) = open_app_dir(app_dir, false)?;
+    let (_, read_db) = open_app_dir(app_dir, true)?;
+    let read_db = Arc::new(read_db);
 
     let mut join_set = JoinSet::new();
 
     // Spawn task to sync blocks from the JSON-RPC servers.
     join_set.spawn({
         let cancellation_token = cancellation_token.clone();
-        let db = Arc::clone(&db);
         let chain_configs = cfg.get_chain_configs().to_owned();
         let _test_notify = _test_notify.clone();
         async move {
@@ -61,7 +63,24 @@ pub async fn start(
                 // NOTE: Even though `sync` internally spawns another task (via `subscribe_to_blocks`),
                 // we don't have to pass a cancellation token to it, as the task will exit once
                 // the read-end of the stream is closed.
-                r = sync(&chain_configs, db.deref(), _test_sync_block_count) => r
+                r = sync(&chain_configs, &mut write_db, _test_sync_block_count) => r
+            }
+        }
+    });
+
+    // Spawn task to sync the secondary db with the primary db.
+    join_set.spawn({
+        let cancellation_token = cancellation_token.clone();
+        let read_db = Arc::clone(&read_db);
+        async move {
+            tokio::select! {
+                _ = cancellation_token.cancelled() => Ok(()),
+                r = async {
+                    loop {
+                        read_db.try_catch_up_with_primary()?;
+                        tokio::time::sleep(CATCH_UP_INTERVAL).await;
+                    }
+                } => r
             }
         }
     });
@@ -69,12 +88,12 @@ pub async fn start(
     // Spawn task to run the RPC server.
     join_set.spawn({
         let cancellation_token = cancellation_token.clone();
-        let db = Arc::clone(&db);
+        let read_db = Arc::clone(&read_db);
         async move {
             tokio::select! {
                 _ = cancellation_token.cancelled() => Ok(()),
                 r = {
-                    let server = RpcServer::new(db, cfg);
+                    let server = RpcServer::new(read_db, cfg);
                     server.serve(listener)
                 } => r
             }
@@ -108,7 +127,7 @@ pub async fn start(
 
 async fn sync(
     chain_configs: &[ChainConfig],
-    db: &impl BlockDb,
+    db: &mut impl BlockDb,
     _test_num_blocks_written: Option<Arc<AtomicU64>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut streams = StreamMap::new();
@@ -189,7 +208,7 @@ mod tests {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         {
-            let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+            let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
             db.put_bytes(1, 1, &[1, 2, 3]).unwrap();
         }
 
@@ -312,18 +331,23 @@ mod tests {
             }
         }
 
-        let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap(), None).await;
-        assert!(client.is_ok());
-        let mut client = client.unwrap();
-        let mut res = client
-            .get_block_range(chain_id, block_number, block_number)
+        let mut client = RpcClient::try_new(format!("http://{addr}").parse().unwrap(), None)
             .await
             .unwrap();
-        let block = res
-            .next()
-            .await
-            .expect("stream should not be empty")
-            .expect("block should be valid");
+        let start = Instant::now();
+        let block = loop {
+            let mut blocks = client
+                .get_block_range(chain_id, block_number, block_number)
+                .await
+                .unwrap();
+            if let Some(block) = blocks.next().await {
+                break block.unwrap();
+            }
+            if start.elapsed() >= 2 * CATCH_UP_INTERVAL {
+                panic!("RPC server did not return block within 2*CATCH_UP_INTERVAL");
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        };
         let block = Block::try_from(proto::Block::decode(block.data.as_slice()).unwrap()).unwrap();
         assert_eq!(
             block,
@@ -424,14 +448,14 @@ mod tests {
     async fn sync_fails_if_server_url_is_invalid() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
 
         let chain_configs = vec![ChainConfig {
             json_rpc: Some("invalid_url".to_string()),
             ..ChainConfig::new(1)
         }];
 
-        let result = sync(&chain_configs, &db, None).await;
+        let result = sync(&chain_configs, &mut db, None).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid URL"));
     }
@@ -441,7 +465,7 @@ mod tests {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), true).unwrap();
 
         let mock_server = MockServer::start().await;
 
@@ -480,7 +504,7 @@ mod tests {
             ..ChainConfig::new(1)
         }];
 
-        let result = sync(&chain_configs, &db, None).await;
+        let result = sync(&chain_configs, &mut db, None).await;
         assert!(result.is_err());
         assert!(
             result
@@ -495,8 +519,6 @@ mod tests {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
-        let db = Arc::new(db);
 
         let mock_server = MockServer::start().await;
 
@@ -563,10 +585,11 @@ mod tests {
 
         let block_count = Arc::new(AtomicU64::new(0));
         let task = tokio::spawn({
-            let db = Arc::clone(&db);
+            let (_, mut write_db) = open_app_dir(tmpdir.path(), false).unwrap();
             let block_count = block_count.clone();
+            let chain_configs = chain_configs.clone();
             async move {
-                sync(&chain_configs, db.deref(), Some(block_count))
+                sync(&chain_configs, &mut write_db, Some(block_count))
                     .await
                     .unwrap();
             }
@@ -575,12 +598,14 @@ mod tests {
         while block_count.load(Ordering::Relaxed) < 2 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
+        task.abort();
+        let _ = task.await; // wait for the task to finish so the write db is dropped
 
         // check that block 0 for chain 1 and 2 is in the db
-        let block = db.get(1, 0);
+        let (_, read_db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let block = read_db.get(1, 0);
         assert!(block.is_ok_and(|b| b.is_some()));
-        let block = db.get(2, 0);
+        let block = read_db.get(2, 0);
         assert!(block.is_ok_and(|b| b.is_some()));
-        task.abort();
     }
 }

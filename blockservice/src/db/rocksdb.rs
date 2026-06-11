@@ -136,6 +136,13 @@ impl KvDb for RocksDb {
     fn write_batch_raw(&self, batch: Self::Batch) -> Result<(), Error> {
         self.db.write(batch.batch).map_err(Error::from)
     }
+
+    fn try_catch_up_with_primary(&self) -> Result<(), Error> {
+        if self._secondary_path.is_some() {
+            return self.db.try_catch_up_with_primary().map_err(Error::from);
+        }
+        Ok(())
+    }
 }
 
 /// A batch of write/ delete operations to be written to the database.
@@ -460,6 +467,18 @@ mod tests {
 
         assert_eq!(db.db.get(b"key1").unwrap(), Some(b"value1".to_vec()));
         assert_eq!(db.db.get(b"key2").unwrap(), Some(b"value2".to_vec()));
+    }
+
+    #[test]
+    fn rocksdb_try_catch_up_with_primary_pulls_in_changes_of_primary() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        let write_db = RocksDb::create(tmpdir.path()).unwrap();
+        let read_db = RocksDb::open_for_reading(tmpdir.path()).unwrap();
+
+        write_db.db.put(b"key", b"value").unwrap();
+        assert_eq!(read_db.db.get(b"key").unwrap(), None);
+        read_db.try_catch_up_with_primary().unwrap();
+        assert_eq!(read_db.db.get(b"key").unwrap(), Some(b"value".to_vec()));
     }
 
     #[test]

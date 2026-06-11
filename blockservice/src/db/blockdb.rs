@@ -77,6 +77,10 @@ pub trait KvDb {
 
     /// Writes the batch to the database atomically.
     fn write_batch_raw(&self, batch: Self::Batch) -> Result<(), Error>;
+
+    /// Attempts to catch up with the primary instance by applying any new data written by the
+    /// primary since the last catch-up. This is a no-op for primary instances.
+    fn try_catch_up_with_primary(&self) -> Result<(), Error>;
 }
 
 /// A batch of operations for the [BlockDb] that can be written atomically.
@@ -95,6 +99,16 @@ pub trait BlockDbBatch {
 ///
 /// Implementations have to ensure that all operations that modify the block database also update
 /// the metadata as one atomic operation, ensuring metadata is always consistent.
+///
+/// All operations that modify the database require a mutable reference to the database, which
+/// ensures that other operations that read or modify the database cannot run concurrently.
+/// Implementations can rely on this to ensure thread safety without needing to implement additional
+/// synchronization. In particular, methods that have to read, update and write data can do so
+/// without needing to worry about concurrent modifications.
+/// The only exception is the `try_catch_up_with_primary` method, which is intended to be called on
+/// a secondary instance while the primary instance is running. But since the secondary instance
+/// only allows reading the database, it is still guaranteed that the database is always in a
+/// consistent state.
 #[cfg_attr(test, mockall::automock(type Batch = MockBlockDbBatch;))]
 pub trait BlockDb {
     type Batch: BlockDbBatch;
@@ -110,13 +124,13 @@ pub trait BlockDb {
     fn get_upgrade_heights(&self, chain_id: u64) -> Result<Option<Vec<u8>>, Error>;
 
     /// Stores the JSON-encoded upgrade heights for the specified chain-ID.
-    fn put_upgrade_heights(&self, chain_id: u64, data: &[u8]) -> Result<(), Error>;
+    fn put_upgrade_heights(&mut self, chain_id: u64, data: &[u8]) -> Result<(), Error>;
 
     /// Retrieves the JSON-encoded corrections for the specified chain-ID.
     fn get_corrections(&self, chain_id: u64) -> Result<Option<Vec<u8>>, Error>;
 
     /// Stores the JSON-encoded corrections for the specified chain-ID.
-    fn put_corrections(&self, chain_id: u64, data: &[u8]) -> Result<(), Error>;
+    fn put_corrections(&mut self, chain_id: u64, data: &[u8]) -> Result<(), Error>;
 
     /// Retrieves a block for the specified chain-ID and block number.
     /// Returns [None] if the block does not exist.
@@ -128,16 +142,16 @@ pub trait BlockDb {
 
     /// Stores a block for the specified chain-ID and updates the metadata.
     /// The block number is obtained from the block itself.
-    fn put(&self, chain_id: u64, block: Block) -> Result<(), Error>;
+    fn put(&mut self, chain_id: u64, block: Block) -> Result<(), Error>;
 
     /// Stores a block for the specified chain-ID and block number and updates the metadata.
     /// The data is expected to be a protobuf-encoded block.
-    fn put_bytes(&self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error>;
+    fn put_bytes(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error>;
 
     /// Deletes blocks in the specified block number range (inclusive) for the specified chain-ID
     /// and updates the metadata.
     fn delete_range(
-        &self,
+        &mut self,
         chain_id: u64,
         start_block_number: u64,
         end_block_number: u64,
@@ -169,7 +183,11 @@ pub trait BlockDb {
 
     /// Writes a batch to the database atomically. Updates metadata (ranges and chain IDs)
     /// based on the blocks in the batch.
-    fn write_batch(&self, batch: Self::Batch) -> Result<(), Error>;
+    fn write_batch(&mut self, batch: Self::Batch) -> Result<(), Error>;
+
+    /// Attempts to catch up with the primary instance by applying any new data written by the
+    /// primary since the last catch-up. This is a no-op for primary instances.
+    fn try_catch_up_with_primary(&self) -> Result<(), Error>;
 }
 
 /// A wrapper around a [KvDbBatch] that allows writing multiple blocks and their metadata as one
@@ -246,7 +264,7 @@ where
     }
 
     /// Executes a function that operates on a batch, then writes the batch atomically.
-    fn execute_in_batch<R>(&self, f: impl FnOnce(&mut D::Batch) -> R) -> Result<R, Error> {
+    fn execute_in_batch<R>(&mut self, f: impl FnOnce(&mut D::Batch) -> R) -> Result<R, Error> {
         let mut batch = self.db.batch_raw();
         let r = f(&mut batch);
         self.db.write_batch_raw(batch)?;
@@ -282,7 +300,7 @@ where
         self.db.get_raw(&make_upgrade_heights_key(chain_id))
     }
 
-    fn put_upgrade_heights(&self, chain_id: u64, data: &[u8]) -> Result<(), Error> {
+    fn put_upgrade_heights(&mut self, chain_id: u64, data: &[u8]) -> Result<(), Error> {
         let mut chain_ids = self.get_chain_ids()?;
         if let Err(idx) = chain_ids.binary_search(&chain_id) {
             chain_ids.insert(idx, chain_id);
@@ -298,7 +316,7 @@ where
         self.db.get_raw(&make_corrections_key(chain_id))
     }
 
-    fn put_corrections(&self, chain_id: u64, data: &[u8]) -> Result<(), Error> {
+    fn put_corrections(&mut self, chain_id: u64, data: &[u8]) -> Result<(), Error> {
         let mut chain_ids = self.get_chain_ids()?;
         if let Err(idx) = chain_ids.binary_search(&chain_id) {
             chain_ids.insert(idx, chain_id);
@@ -324,13 +342,13 @@ where
         self.db.get_raw(&make_block_key(chain_id, block_number))
     }
 
-    fn put(&self, chain_id: u64, block: Block) -> Result<(), Error> {
+    fn put(&mut self, chain_id: u64, block: Block) -> Result<(), Error> {
         let number = block.number;
         let data = proto::Block::from(block).encode_to_vec();
         self.put_bytes(chain_id, number, &data)
     }
 
-    fn put_bytes(&self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
+    fn put_bytes(&mut self, chain_id: u64, block_number: u64, data: &[u8]) -> Result<(), Error> {
         let mut chain_ids = self.get_chain_ids()?;
         if let Err(idx) = chain_ids.binary_search(&chain_id) {
             chain_ids.insert(idx, chain_id);
@@ -348,7 +366,7 @@ where
     }
 
     fn delete_range(
-        &self,
+        &mut self,
         chain_id: u64,
         start_block_number: u64,
         end_block_number: u64,
@@ -435,7 +453,7 @@ where
         }
     }
 
-    fn write_batch(&self, mut batch: Self::Batch) -> Result<(), Error> {
+    fn write_batch(&mut self, mut batch: Self::Batch) -> Result<(), Error> {
         if batch.block_ranges.is_empty() {
             return Ok(());
         }
@@ -461,6 +479,10 @@ where
             .kv_batch
             .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids(chain_ids));
         self.db.write_batch_raw(batch.kv_batch)
+    }
+
+    fn try_catch_up_with_primary(&self) -> Result<(), Error> {
+        self.db.try_catch_up_with_primary()
     }
 }
 
@@ -933,7 +955,7 @@ mod tests {
             .withf(move |b| b.size() == UNIQUE_IDENTIFIER)
             .return_once(|_| Ok(()))
             .times(1);
-        let db = KvDbBackedBlockDb { db: kv_db };
+        let mut db = KvDbBackedBlockDb { db: kv_db };
         assert!(db.put_upgrade_heights(chain_id, &data).is_ok());
     }
 
@@ -945,7 +967,7 @@ mod tests {
     ) {
         let chain_id = 2;
         let data = vec![1, 2, 3];
-        let (_tmpdir, db) = create_rocks_block_db();
+        let (_tmpdir, mut db) = create_rocks_block_db();
         db.kv_db()
             .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids(existing_chain_ids))
             .unwrap();
@@ -1039,7 +1061,7 @@ mod tests {
             .withf(move |b| b.size() == UNIQUE_IDENTIFIER)
             .return_once(|_| Ok(()))
             .times(1);
-        let db = KvDbBackedBlockDb { db: kv_db };
+        let mut db = KvDbBackedBlockDb { db: kv_db };
         assert!(db.put_corrections(chain_id, &data).is_ok());
     }
 
@@ -1051,7 +1073,7 @@ mod tests {
     ) {
         let chain_id = 2;
         let data = vec![1, 2, 3];
-        let (_tmpdir, db) = create_rocks_block_db();
+        let (_tmpdir, mut db) = create_rocks_block_db();
         db.kv_db()
             .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids(existing_chain_ids))
             .unwrap();
@@ -1222,7 +1244,7 @@ mod tests {
             .return_once(|_| Ok(()))
             .times(1);
 
-        let db = KvDbBackedBlockDb { db: kv_db };
+        let mut db = KvDbBackedBlockDb { db: kv_db };
         db.put(chain_id, block).unwrap();
     }
 
@@ -1232,7 +1254,7 @@ mod tests {
         let block = some_block();
         let encoded = proto::Block::from(block.clone()).encode_to_vec();
 
-        let (_tmpdir, db) = create_rocks_block_db();
+        let (_tmpdir, mut db) = create_rocks_block_db();
         db.put(chain_id, block.clone()).unwrap();
 
         assert_eq!(
@@ -1304,7 +1326,7 @@ mod tests {
             .return_once(|_| Ok(()))
             .times(1);
 
-        let db = KvDbBackedBlockDb { db: kv_db };
+        let mut db = KvDbBackedBlockDb { db: kv_db };
         db.put_bytes(chain_id, block_number, b"data").unwrap();
     }
 
@@ -1324,7 +1346,7 @@ mod tests {
         #[case] new_chain_ids: Vec<u64>,
         #[case] new_ranges: Vec<BlockRange>,
     ) {
-        let (_tmpdir, db) = create_rocks_block_db();
+        let (_tmpdir, mut db) = create_rocks_block_db();
 
         if let Some(existing_chain_ids) = existing_chain_ids {
             db.kv_db()
@@ -1409,7 +1431,7 @@ mod tests {
             .return_once(|_| Ok(()))
             .times(1);
 
-        let db = KvDbBackedBlockDb { db: kv_db };
+        let mut db = KvDbBackedBlockDb { db: kv_db };
         db.delete_range(chain_id, start_block_number, end_block_number)
             .unwrap();
     }
@@ -1425,7 +1447,7 @@ mod tests {
         #[case] expected_ranges: Vec<BlockRange>,
     ) {
         let chain_id: u64 = 11;
-        let (_tmpdir, db) = create_rocks_block_db();
+        let (_tmpdir, mut db) = create_rocks_block_db();
 
         for range in &existing_ranges {
             for block_num in range.clone() {
@@ -1453,7 +1475,7 @@ mod tests {
 
     #[test]
     fn kv_db_backed_block_db_delete_range_returns_error_if_start_is_greater_than_end() {
-        let db = KvDbBackedBlockDb {
+        let mut db = KvDbBackedBlockDb {
             db: MockKvDb::new(),
         };
         let result = db.delete_range(1, 10, 5);
@@ -1468,7 +1490,7 @@ mod tests {
 
     #[test]
     fn rocks_block_db_delete_range_returns_error_if_start_is_greater_than_end() {
-        let (_tmpdir, db) = create_rocks_block_db();
+        let (_tmpdir, mut db) = create_rocks_block_db();
         let result = db.delete_range(1, 10, 5);
         assert_eq!(
             result,
@@ -1919,7 +1941,7 @@ mod tests {
         #[case] iter_block_numbers: Vec<u64>,
     ) {
         let chain_id = 1;
-        let (_tmpdir, db) = create_rocks_block_db();
+        let (_tmpdir, mut db) = create_rocks_block_db();
         for i in block_numbers {
             db.put(
                 chain_id,
@@ -2007,7 +2029,7 @@ mod tests {
             .return_once(|_| Ok(()))
             .times(1);
 
-        let db = KvDbBackedBlockDb { db: kv_db };
+        let mut db = KvDbBackedBlockDb { db: kv_db };
         let mut batch = KvDbBatchWrapper {
             kv_batch: kv_db_batch,
             block_ranges: HashMap::default(),
@@ -2021,7 +2043,7 @@ mod tests {
 
     #[test]
     fn rocks_block_db_write_batch_writes_all_blocks_and_updates_metadata() {
-        let (_tmpdir, db) = create_rocks_block_db();
+        let (_tmpdir, mut db) = create_rocks_block_db();
 
         // Set up existing state via kv_db
         db.kv_db()
@@ -2074,7 +2096,7 @@ mod tests {
     fn kv_db_backed_block_db_write_batch_empty_batch_is_noop() {
         let kv_db = MockKvDb::new();
         let kv_db_batch = MockKvDbBatch::new();
-        let db = KvDbBackedBlockDb { db: kv_db };
+        let mut db = KvDbBackedBlockDb { db: kv_db };
         let batch = KvDbBatchWrapper {
             kv_batch: kv_db_batch,
             block_ranges: HashMap::default(),
@@ -2084,9 +2106,48 @@ mod tests {
 
     #[test]
     fn rocks_block_db_write_batch_empty_batch_is_noop() {
-        let (_tmpdir, db) = create_rocks_block_db();
+        let (_tmpdir, mut db) = create_rocks_block_db();
         let batch = db.batch();
         db.write_batch(batch).unwrap();
+    }
+
+    #[test]
+    fn kv_db_backed_block_db_try_catch_up_with_primary_calls_try_catch_up_with_primary_on_kv_db() {
+        let mut kv_db = MockKvDb::new();
+        kv_db
+            .expect_try_catch_up_with_primary()
+            .return_once(|| Ok(()))
+            .times(1);
+        let db = KvDbBackedBlockDb { db: kv_db };
+        db.try_catch_up_with_primary().unwrap();
+    }
+
+    #[test]
+    fn rocks_block_db_try_catch_up_with_primary_pulls_in_changes_of_primary() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        let write_rocks_db = RocksDb::create(tmpdir.path()).unwrap();
+        let mut write_block_db = KvDbBackedBlockDb::create(write_rocks_db).unwrap();
+        let read_rocks_db = RocksDb::open_for_reading(tmpdir.path()).unwrap();
+        let read_block_db = KvDbBackedBlockDb::open(read_rocks_db).unwrap();
+
+        write_block_db
+            .put(
+                1,
+                Block {
+                    number: 1,
+                    ..Block::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(read_block_db.get(1, 1).unwrap(), None);
+        read_block_db.try_catch_up_with_primary().unwrap();
+        assert_eq!(
+            read_block_db.get(1, 1).unwrap(),
+            Some(Block {
+                number: 1,
+                ..Block::default()
+            })
+        );
     }
 
     #[test]

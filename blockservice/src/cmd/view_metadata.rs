@@ -89,7 +89,7 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let data = b"upgrade-heights";
-        let (_, db) = crate::app_dir::open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = crate::app_dir::open_app_dir(tmpdir.path(), false).unwrap();
         db.put_upgrade_heights(1, data).unwrap();
 
         let mut buf = Vec::new();
@@ -129,7 +129,7 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let data = b"corrections";
-        let (_, db) = crate::app_dir::open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = crate::app_dir::open_app_dir(tmpdir.path(), false).unwrap();
         db.put_corrections(1, data).unwrap();
 
         let mut buf = Vec::new();

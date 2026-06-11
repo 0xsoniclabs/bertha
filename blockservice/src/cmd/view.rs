@@ -92,7 +92,7 @@ mod tests {
 
         let chain_id = 1;
         let block = Block::default();
-        let (_, db) = open_app_dir(tmpdir.path(), false).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
         db.put(chain_id, block.clone()).unwrap();
 
         let mut buf = Vec::new();
