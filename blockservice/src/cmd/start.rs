@@ -20,6 +20,7 @@ use std::{
     sync::{Arc, atomic::AtomicU64},
 };
 
+use tokio::task::JoinSet;
 use tokio_stream::{StreamExt, StreamMap};
 use tokio_util::sync::CancellationToken;
 
@@ -46,39 +47,36 @@ pub async fn start(
     // Put the db in an Arc to share it between multiple tasks
     let db = Arc::new(db);
 
-    // NOTE: This is a dummy task used to demonstrate graceful shutdown via cancellation token.
-    // TODO: Replace with telemetry task (#66)
-    tokio::spawn({
-        let cancellation_token = cancellation_token.clone();
-        async move {
-            tokio::select! {
-                _ = cancellation_token.cancelled() => {},
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(60)) => {},
-            }
-        }
-    });
+    let mut join_set = JoinSet::new();
 
     // Spawn task to sync blocks from the JSON-RPC servers.
-    tokio::spawn({
+    join_set.spawn({
         let cancellation_token = cancellation_token.clone();
         let db = Arc::clone(&db);
         let chain_configs = cfg.get_chain_configs().to_owned();
         let _test_notify = _test_notify.clone();
         async move {
             tokio::select! {
-                _ = cancellation_token.cancelled() => {},
+                _ = cancellation_token.cancelled() => Ok(()),
                 // NOTE: Even though `sync` internally spawns another task (via `subscribe_to_blocks`),
                 // we don't have to pass a cancellation token to it, as the task will exit once
                 // the read-end of the stream is closed.
-                r = sync(&chain_configs, db.deref(), _test_sync_block_count) => {
-                    if let Err(err) = r {
-                        println!("error in block sync task: {err}");
-                        #[cfg(test)]
-                        if let Some(notify) = _test_notify {
-                            notify.send(StartCmdStatusMsg::SyncError(err.to_string())).await.unwrap();
-                        }
-                    }
-                },
+                r = sync(&chain_configs, db.deref(), _test_sync_block_count) => r
+            }
+        }
+    });
+
+    // Spawn task to run the RPC server.
+    join_set.spawn({
+        let cancellation_token = cancellation_token.clone();
+        let db = Arc::clone(&db);
+        async move {
+            tokio::select! {
+                _ = cancellation_token.cancelled() => Ok(()),
+                r = {
+                    let server = RpcServer::new(db, cfg);
+                    server.serve(listener)
+                } => r
             }
         }
     });
@@ -91,8 +89,21 @@ pub async fn start(
         }
     }
 
-    let server = RpcServer::new(db, cfg);
-    server.serve(listener).await
+    while let Some(result) = join_set.join_next().await {
+        match result {
+            Ok(Ok(())) => (),
+            Ok(Err(e)) => {
+                cancellation_token.cancel();
+                return Err(e);
+            }
+            Err(join_err) => {
+                cancellation_token.cancel();
+                return Err(join_err.into());
+            }
+        }
+    }
+
+    Ok(())
 }
 
 async fn sync(
@@ -102,12 +113,11 @@ async fn sync(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut streams = StreamMap::new();
     for chain_config in chain_configs {
-        let chain_id = chain_config.id;
         let Some(server) = chain_config.json_rpc.as_ref() else {
             continue;
         };
         let start_block = db
-            .iterate(chain_id, u64::MAX, IterationDirection::Reverse)
+            .iterate(chain_config.id, u64::MAX, IterationDirection::Reverse)
             .next()
             .transpose()?
             .map(|(_, block)| block.number + 1)
@@ -115,21 +125,19 @@ async fn sync(
 
         let source = NetworkSource::try_new(server)?;
         let block_stream = subscribe_to_blocks(start_block, source);
-        streams.insert(chain_id, block_stream);
+        streams.insert(chain_config.id, block_stream);
     }
 
     while let Some((chain_id, block)) = streams.next().await {
-        match block {
-            Ok(block) => {
-                db.put(chain_id, block)?;
-                #[cfg(test)]
-                {
-                    if let Some(num_blocks_written) = &_test_num_blocks_written {
-                        num_blocks_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-                }
+        let block = block?;
+        // If insertion should become a bottleneck, we can consider batching multiple blocks
+        // together before writing to the db.
+        db.put(chain_id, block)?;
+        #[cfg(test)]
+        {
+            if let Some(num_blocks_written) = &_test_num_blocks_written {
+                num_blocks_written.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
-            Err(err) => println!("[chain ID {chain_id}] error fetching next block: {err}"),
         }
     }
 
@@ -155,6 +163,7 @@ mod tests {
 
     use bertha_types::{Block, BlockHeader, HexConvert, TransactionReceipt};
     use prost::Message;
+    use tokio::time::Instant;
     use tonic::metadata::{Ascii, MetadataValue};
     use wiremock::MockServer;
 
@@ -188,7 +197,7 @@ mod tests {
         let addr = listener.local_addr().unwrap();
 
         let token = CancellationToken::new();
-        let job = tokio::spawn({
+        let task = tokio::spawn({
             let token = token.clone();
             async move {
                 start(tmpdir.path(), listener, token, None, None)
@@ -211,7 +220,143 @@ mod tests {
             vec![1, 2, 3]
         );
         token.cancel();
-        job.abort(); // Stop the server
+        task.abort(); // Stop the server
+    }
+
+    #[tokio::test]
+    async fn start_starts_sync_and_rpc_clients_can_query_synchronized_blocks() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+
+        let mock_server = MockServer::start().await;
+
+        let chain_id = 1;
+        let block_number: u64 = 0;
+        let block_header = BlockHeader::default();
+        let transactions = Vec::new();
+        let withdrawals = Vec::new();
+        let block_receipts = vec![TransactionReceipt::default()];
+        let block_header_with_transactions = BlockHeaderWithTransactionsAndWithdrawals {
+            block_header: block_header.clone(),
+            transactions: transactions.clone(),
+            withdrawals: withdrawals.clone(),
+        };
+
+        mock_server
+            .register(
+                build_mock_server_request_handler_for_infinitely_many_requests(
+                    "eth_getBlockByNumber",
+                    vec![
+                        serde_json::to_value(block_number.to_hex()).unwrap(),
+                        serde_json::to_value(true).unwrap(),
+                    ],
+                    block_header_with_transactions.clone(),
+                ),
+            )
+            .await;
+        mock_server
+            .register(
+                build_mock_server_request_handler_for_infinitely_many_requests(
+                    "eth_getBlockReceipts",
+                    vec![serde_json::to_value(block_number.to_hex()).unwrap()],
+                    block_receipts.clone(),
+                ),
+            )
+            .await;
+
+        // Register a mock for block 1 that returns null, so the sync task retries
+        // (interprets it as NotFound) instead of failing with a 404.
+        let next_block_number: u64 = 1;
+        mock_server
+            .register(
+                build_mock_server_request_handler_for_infinitely_many_requests(
+                    "eth_getBlockByNumber",
+                    vec![
+                        serde_json::to_value(next_block_number.to_hex()).unwrap(),
+                        serde_json::to_value(true).unwrap(),
+                    ],
+                    None::<()>,
+                ),
+            )
+            .await;
+
+        let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
+
+        let chain_config = ChainConfig {
+            json_rpc: Some(mock_server.uri()),
+            ..ChainConfig::new(chain_id)
+        };
+
+        cfg.add_chain(chain_config).unwrap();
+
+        let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let token = CancellationToken::new();
+        let sync_block_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let task = tokio::spawn({
+            let token = token.clone();
+            let sync_block_count = sync_block_count.clone();
+            async move {
+                start(tmpdir.path(), listener, token, None, Some(sync_block_count))
+                    .await
+                    .unwrap();
+            }
+        });
+        // wait for the sync task to fetch the header, transactions and receipts for the first block
+        let start = Instant::now();
+        while sync_block_count.load(std::sync::atomic::Ordering::Relaxed) < 1 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            if start.elapsed() >= Duration::from_secs(1) {
+                panic!("sync task did not fetch block within 1 second");
+            }
+        }
+
+        let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap(), None).await;
+        assert!(client.is_ok());
+        let mut client = client.unwrap();
+        let mut res = client
+            .get_block_range(chain_id, block_number, block_number)
+            .await
+            .unwrap();
+        let block = res
+            .next()
+            .await
+            .expect("stream should not be empty")
+            .expect("block should be valid");
+        let block = Block::try_from(proto::Block::decode(block.data.as_slice()).unwrap()).unwrap();
+        assert_eq!(
+            block,
+            Block::from_parts(block_header, transactions, block_receipts, withdrawals)
+        );
+        token.cancel();
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn start_returns_error_if_sync_fails() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+
+        // Configure a chain with an invalid URL so sync fails
+        let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
+        cfg.add_chain(ChainConfig {
+            json_rpc: Some("invalid_url".to_string()),
+            ..ChainConfig::new(1)
+        })
+        .unwrap();
+
+        let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
+        let result = start(
+            tmpdir.path(),
+            listener,
+            CancellationToken::new(),
+            None,
+            None,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid URL"));
     }
 
     #[tokio::test]
@@ -225,7 +370,7 @@ mod tests {
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
         let token = CancellationToken::new();
-        let job = tokio::spawn({
+        tokio::spawn({
             let token = token.clone();
             async move {
                 start(tmpdir.path(), listener, token, Some(tx), None)
@@ -244,27 +389,20 @@ mod tests {
         }
 
         let metrics = tokio::runtime::Handle::current().metrics();
-        let num_tasks_now = metrics.num_alive_tasks();
-        assert!(num_tasks_now > num_tasks_before);
-        // Aborting the local task does not suffice, as we spawn additional tasks internally.
-        job.abort();
-        job.await.unwrap_err(); // JoinError
-        let num_tasks_now = metrics.num_alive_tasks();
-        assert!(num_tasks_now > num_tasks_before);
+        assert!(metrics.num_alive_tasks() > num_tasks_before);
         token.cancel();
 
-        let mut elapsed_time = Duration::from_millis(0);
+        let start = Instant::now();
         while metrics.num_alive_tasks() > num_tasks_before {
             tokio::time::sleep(Duration::from_millis(10)).await;
-            elapsed_time += Duration::from_millis(10);
-            if elapsed_time >= Duration::from_secs(1) {
+            if start.elapsed() >= Duration::from_secs(1) {
                 panic!("task did not stop after 1 second");
             }
         }
     }
 
     #[tokio::test]
-    async fn fails_if_app_dir_is_not_initialized() {
+    async fn start_fails_if_app_dir_is_not_initialized() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
         let result = start(
@@ -392,6 +530,22 @@ mod tests {
             )
             .await;
 
+        // Register a mock for block 1 that returns null, so the sync task retries
+        // (interprets it as NotFound) instead of failing with a 404.
+        let next_block_number: u64 = 1;
+        mock_server
+            .register(
+                build_mock_server_request_handler_for_infinitely_many_requests(
+                    "eth_getBlockByNumber",
+                    vec![
+                        serde_json::to_value(next_block_number.to_hex()).unwrap(),
+                        serde_json::to_value(true).unwrap(),
+                    ],
+                    None::<()>,
+                ),
+            )
+            .await;
+
         let chain_configs = vec![
             ChainConfig {
                 json_rpc: Some(mock_server.uri()),
@@ -427,150 +581,6 @@ mod tests {
         assert!(block.is_ok_and(|b| b.is_some()));
         let block = db.get(2, 0);
         assert!(block.is_ok_and(|b| b.is_some()));
-        task.abort();
-    }
-
-    #[tokio::test]
-    async fn start_starts_sync_and_rpc_clients_can_query_synchronized_blocks() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
-        let mock_server = MockServer::start().await;
-
-        let chain_id = 1;
-        let block_number: u64 = 0;
-        let block_header = BlockHeader::default();
-        let transactions = Vec::new();
-        let withdrawals = Vec::new();
-        let block_receipts = vec![TransactionReceipt::default()];
-        let block_header_with_transactions = BlockHeaderWithTransactionsAndWithdrawals {
-            block_header: block_header.clone(),
-            transactions: transactions.clone(),
-            withdrawals: withdrawals.clone(),
-        };
-
-        mock_server
-            .register(
-                build_mock_server_request_handler_for_infinitely_many_requests(
-                    "eth_getBlockByNumber",
-                    vec![
-                        serde_json::to_value(block_number.to_hex()).unwrap(),
-                        serde_json::to_value(true).unwrap(),
-                    ],
-                    block_header_with_transactions.clone(),
-                ),
-            )
-            .await;
-        mock_server
-            .register(
-                build_mock_server_request_handler_for_infinitely_many_requests(
-                    "eth_getBlockReceipts",
-                    vec![serde_json::to_value(block_number.to_hex()).unwrap()],
-                    block_receipts.clone(),
-                ),
-            )
-            .await;
-
-        let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
-
-        let chain_config = ChainConfig {
-            json_rpc: Some(mock_server.uri()),
-            ..ChainConfig::new(chain_id)
-        };
-
-        cfg.add_chain(chain_config).unwrap();
-
-        let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let token = CancellationToken::new();
-        let sync_block_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
-        let task = tokio::spawn({
-            let token = token.clone();
-            let sync_block_count = sync_block_count.clone();
-            async move {
-                start(tmpdir.path(), listener, token, None, Some(sync_block_count))
-                    .await
-                    .unwrap();
-            }
-        });
-        // wait for the sync task to fetch the header, transactions and receipts for the first block
-        while sync_block_count.load(std::sync::atomic::Ordering::Relaxed) < 1 {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-
-        let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap(), None).await;
-        assert!(client.is_ok());
-        let mut client = client.unwrap();
-        let mut res = client
-            .get_block_range(chain_id, block_number, block_number)
-            .await
-            .unwrap();
-        let block = res
-            .next()
-            .await
-            .expect("stream should not be empty")
-            .expect("block should be valid");
-        let block = Block::try_from(proto::Block::decode(block.data.as_slice()).unwrap()).unwrap();
-        assert_eq!(
-            block,
-            Block::from_parts(block_header, transactions, block_receipts, withdrawals)
-        );
-        token.cancel();
-        task.abort();
-    }
-
-    #[tokio::test]
-    async fn start_continues_to_run_if_sync_failed() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-
-        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-
-        let chain_id = 1;
-
-        {
-            let (mut cfg, db) = open_app_dir(tmpdir.path(), false).unwrap();
-            db.put(chain_id, Block::default()).unwrap();
-
-            let chain_config = ChainConfig {
-                json_rpc: Some("invalid#url".to_string()), // no server running here
-                ..ChainConfig::new(chain_id)
-            };
-
-            cfg.add_chain(chain_config).unwrap();
-        }
-
-        let (tx, mut rx) = tokio::sync::mpsc::channel(10);
-        let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let token = CancellationToken::new();
-        let task = tokio::spawn({
-            let token = token.clone();
-            async move {
-                start(tmpdir.path(), listener, token, Some(tx), None)
-                    .await
-                    .unwrap();
-            }
-        });
-
-        // wait for the sync task to fail
-        loop {
-            match rx.recv().await {
-                Some(StartCmdStatusMsg::SyncError(_)) => break,
-                Some(_) => continue,
-                _ => panic!("Expected SyncStarted message"),
-            }
-        }
-
-        let client = RpcClient::try_new(format!("http://{addr}").parse().unwrap(), None).await;
-        assert!(client.is_ok());
-        let mut client = client.unwrap();
-        let mut res = client.get_block_range(chain_id, 0, 0).await.unwrap();
-        res.next()
-            .await
-            .expect("stream should not be empty")
-            .expect("block should be valid");
-        token.cancel();
         task.abort();
     }
 }
