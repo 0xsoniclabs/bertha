@@ -74,7 +74,7 @@ func TestConvertToGethBlock_ConvertsBlockToGethBlock(t *testing.T) {
 
 	receipts := types.Receipts{}
 	for _, receipt := range input.Receipts {
-		receipts = append(receipts, toGethReceipt(receipt))
+		receipts = append(receipts, ToGethReceipt(receipt))
 	}
 
 	withdrawals := types.Withdrawals{}
@@ -569,7 +569,7 @@ func TestToGethReceipt_ConvertsReceiptToGethReceipt(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			got := toGethReceipt(tc.input)
+			got := ToGethReceipt(tc.input)
 			want := tc.want
 			if want != nil {
 				want.Bloom = types.CreateBloom(want)
@@ -581,7 +581,7 @@ func TestToGethReceipt_ConvertsReceiptToGethReceipt(t *testing.T) {
 
 func TestToGethReceipt_PanicsOnPreEIP658Receipt(t *testing.T) {
 	require.Panics(t, func() {
-		toGethReceipt(&blockdb.TransactionReceipt{
+		ToGethReceipt(&blockdb.TransactionReceipt{
 			PostStateOrStatus: &blockdb.TransactionReceipt_PostState{PostState: make([]byte, 32)},
 		})
 	})
