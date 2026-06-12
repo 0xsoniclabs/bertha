@@ -54,7 +54,7 @@ func ConvertToGethBlock(block *blockdb.Block) (*types.Block, error) {
 	// Convert the receipts.
 	receipts := types.Receipts{}
 	for _, receipt := range block.Receipts {
-		receipts = append(receipts, toGethReceipt(receipt))
+		receipts = append(receipts, ToGethReceipt(receipt))
 	}
 	receiptsHash := types.DeriveSha(receipts, trie.NewStackTrie(nil))
 	bloom := types.MergeBloom(receipts)
@@ -247,7 +247,7 @@ func toGethAuthorizationList(authorizations []*blockdb.SetCodeAuthorization) []t
 	return res
 }
 
-func toGethReceipt(receipt *blockdb.TransactionReceipt) *types.Receipt {
+func ToGethReceipt(receipt *blockdb.TransactionReceipt) *types.Receipt {
 	if receipt == nil {
 		return nil
 	}

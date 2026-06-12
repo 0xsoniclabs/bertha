@@ -18,6 +18,7 @@
 package replay
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -50,6 +52,7 @@ import (
 	"github.com/0xsoniclabs/tracy"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
@@ -484,6 +487,7 @@ func checkBlockResults(
 		}
 		for i, receipt := range receipts {
 			want := block.Receipts[i]
+			// check all fields which contribute to the block hash via the receipts root (are part of receiptRLP)
 			if receipt.Status != want.GetStatus() {
 				return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
 					block.Number, i, want.GetStatus(), receipt.Status)
@@ -492,12 +496,39 @@ func checkBlockResults(
 				return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
 					block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
 			}
-			// TODO: check all receipt fields if needed.
+			if len(receipt.Logs) != len(want.Logs) {
+				return fmt.Errorf("receipt logs length mismatch for block %d, tx %d: expected %d, got %d",
+					block.Number, i, len(want.Logs), len(receipt.Logs))
+			}
+			for j, log := range receipt.Logs {
+				wantLog := want.Logs[j]
+				// check all fields which contribute to the receipts root
+				if !slices.Equal(log.Address.Bytes(), wantLog.Address) {
+					return fmt.Errorf("receipt log address mismatch for block %d, tx %d, log %d: expected %s, got %s",
+						block.Number, i, j, hexutil.Encode(wantLog.Address), hexutil.Encode(log.Address.Bytes()))
+				}
+				if len(log.Topics) != len(wantLog.Topics) {
+					return fmt.Errorf("receipt log topics length mismatch for block %d, tx %d, log %d: expected %d, got %d",
+						block.Number, i, j, len(wantLog.Topics), len(log.Topics))
+				}
+				for k, topic := range log.Topics {
+					if !slices.Equal(topic.Bytes(), wantLog.Topics[k]) {
+						return fmt.Errorf("receipt log topic mismatch for block %d, tx %d, log %d, topic %d: expected %s, got %s",
+							block.Number, i, j, k, hexutil.Encode(wantLog.Topics[k]), hexutil.Encode(topic.Bytes()))
+					}
+				}
+				if !bytes.Equal(log.Data, wantLog.Data) {
+					return fmt.Errorf("receipt log data mismatch for block %d, tx %d, log %d: expected %s, got %s",
+						block.Number, i, j, hexutil.Encode(wantLog.Data), hexutil.Encode(log.Data))
+				}
+			}
+			expectedBloom := convert.ToGethReceipt(want).Bloom
+			if receipt.Bloom != expectedBloom {
+				return fmt.Errorf("receipt bloom mismatch for block %d, tx %d: expected %s, got %s",
+					block.Number, i, hexutil.Encode(expectedBloom[:]), hexutil.Encode(receipt.Bloom[:]))
+			}
 		}
 	}
-
-	// TODO:
-	// - check logs
 
 	// Check resulting state root.
 	computedStateRoot, err := stateRootFuture.Await().Get()
