@@ -218,10 +218,6 @@ pub struct ChainConfig {
 
     /// Optional JSON RPC endpoint for this chain.
     pub json_rpc: Option<String>,
-
-    /// An optional list of paths to state update files for this chain.
-    /// Can be transferred to other blockservice instances using the `fetch-state-updates` command.
-    pub state_updates: Option<Vec<PathBuf>>,
 }
 
 impl ChainConfig {
@@ -233,7 +229,6 @@ impl ChainConfig {
             name: String::default(),
             description: String::default(),
             json_rpc: None,
-            state_updates: None,
         }
     }
 
@@ -275,7 +270,6 @@ mod tests {
                 name: "Example chain".to_string(),
                 description: "An example blockchain".to_string(),
                 json_rpc: Some("https://example.com/jsonrpc".to_string()),
-                state_updates: Some(vec![PathBuf::from("./state_updates_133337.json")])
             }]
         );
     }
@@ -339,7 +333,6 @@ mod tests {
             name: "Example chain".to_string(),
             description: "An example blockchain".to_string(),
             json_rpc: Some("https://example.com/jsonrpc".to_string()),
-            state_updates: None,
         };
         let my_cfg = Config {
             port: 42,
@@ -467,7 +460,6 @@ mod tests {
             name: "Example chain".to_string(),
             description: "An example blockchain".to_string(),
             json_rpc: Some("https://example.com/jsonrpc".to_string()),
-            state_updates: None,
         };
         config.add_chain(chain.clone()).unwrap();
         assert_eq!(config.chains.len(), 1);

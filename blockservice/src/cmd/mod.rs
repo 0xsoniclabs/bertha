@@ -20,7 +20,7 @@ use std::{
 };
 
 pub use fetch::fetch;
-pub use fetch_state_updates::fetch_state_updates;
+pub use fetch_metadata::fetch_metadata;
 pub use import::{import_era, import_era1, import_gfile};
 pub use import_metadata::{import_corrections, import_upgrade_heights};
 use indicatif::{ProgressBar, style::TemplateError};
@@ -42,7 +42,7 @@ use crate::{
 };
 
 mod fetch;
-mod fetch_state_updates;
+mod fetch_metadata;
 mod import;
 mod import_metadata;
 mod init;
@@ -173,16 +173,16 @@ pub async fn execute(
         Command::ImportCorrections { chain_id, file } => {
             cmd::import_corrections(args.dir, chain_id, file, &mut output)
         }
-        Command::List { chain_id, url } => cmd::list(args.dir, chain_id, url, &mut output).await,
         Command::Fetch {
             url,
             chain_id,
             from,
             to,
         } => cmd::fetch(args.dir, url, chain_id, from, to, &mut output).await,
-        Command::Purge { chain_id, from, to } => {
-            cmd::purge(args.dir, chain_id, from, to, &mut output, &input)
+        Command::FetchMetadata { url, chain_id } => {
+            cmd::fetch_metadata(args.dir, url, chain_id, &mut output).await
         }
+        Command::List { chain_id, url } => cmd::list(args.dir, chain_id, url, &mut output).await,
         Command::Verify {
             chain_id,
             block_number,
@@ -195,6 +195,9 @@ pub async fn execute(
             &cancellation_token,
             &mut output,
         ),
+        Command::Purge { chain_id, from, to } => {
+            cmd::purge(args.dir, chain_id, from, to, &mut output, &input)
+        }
         Command::View {
             chain_id,
             block_number,
@@ -204,9 +207,6 @@ pub async fn execute(
         }
         Command::ViewCorrections { chain_id } => {
             cmd::view_corrections(args.dir, chain_id, &mut output)
-        }
-        Command::FetchStateUpdates { url, chain_id } => {
-            cmd::fetch_state_updates(args.dir, url, chain_id, &mut output).await
         }
         Command::Start => {
             cmd::start(

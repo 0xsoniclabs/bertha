@@ -246,7 +246,6 @@ pub fn make_default_sonic_chain_config() -> ChainConfig {
         name: "SONIC".to_string(),
         description: "SONIC test chain".to_string(),
         json_rpc: None,
-        state_updates: None,
     }
 }
 
@@ -270,7 +269,6 @@ mod tests {
                 id: 1,
                 name: "Test Chain".to_string(),
                 json_rpc: None,
-                state_updates: None,
             }],
         )
         .await
@@ -314,7 +312,6 @@ mod tests {
             name: "Test Chain".to_string(),
             description: "A Test Chain".to_string(),
             json_rpc: None,
-            state_updates: None,
         };
         let temp_dir = tempfile::tempdir().unwrap();
         let dir = temp_dir.path();
@@ -547,14 +544,12 @@ mod tests {
                 name: "Chain1".to_string(),
                 description: "Test Chain 1".to_string(),
                 json_rpc: None,
-                state_updates: None,
             },
             ChainConfig {
                 id: 2,
                 name: "Chain2".to_string(),
                 description: "Test Chain 2".to_string(),
                 json_rpc: None,
-                state_updates: None,
             },
         ];
 
@@ -606,7 +601,6 @@ mod tests {
             name: "Chain1".to_string(),
             description: "Test Chain 1".to_string(),
             json_rpc: None,
-            state_updates: None,
         };
         add_chain_configs_to_config_file(slice::from_ref(&chain_config), temp_dir.path())
             .expect("adding chain config should succeed");
@@ -623,6 +617,5 @@ mod tests {
         assert_eq!(config.name, "SONIC");
         assert_eq!(config.description, "SONIC test chain");
         assert!(config.json_rpc.is_none());
-        assert!(config.state_updates.is_none());
     }
 }

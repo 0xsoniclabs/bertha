@@ -19,5 +19,5 @@ mod client_fetches_and_prints_out_a_block;
 mod client_fetches_and_purges_data_and_fetches_again_to_restore_db;
 mod client_fetches_and_verifies_blocks;
 mod client_fetches_blocks_already_in_local_db;
-mod client_fetches_state_updates;
+mod client_fetches_metadata;
 mod multiple_clients_fetch_blocks_from_the_same_server_concurrently;

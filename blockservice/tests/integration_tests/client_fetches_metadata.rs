@@ -14,52 +14,47 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-use std::{io::Write, vec};
-
-use blockservice::{cli::Command, config::ChainConfig};
+use blockservice::{app_dir::open_app_dir, cli::Command, db::BlockDb};
 
 use crate::test_utils::{
     CommandExecutionOutput, IntegrationTestServer, execute_command, init_blockservice,
-    make_default_sonic_chain_config, make_snapshot_file,
+    make_default_sonic_chain_config,
 };
 
 /// Using multi-threaded runtime so that client and server are executed in parallel and not just
 /// concurrently because this simulates the real world usage.
 #[tokio::test(flavor = "multi_thread")]
-async fn client_fetches_state_updates() {
+async fn client_fetches_metadata() {
     const CHAIN_ID: u64 = 146;
-    let file_content = vec![1, 2, 3];
     let server_dir = tempfile::tempdir().unwrap();
-    // Make a stub file for state updates
-    let filepath = server_dir.path().join("state_updates.json");
+
+    // Initialize the server blockservice
+    init_blockservice(
+        Some(server_dir.path()),
+        &[make_default_sonic_chain_config()],
+    )
+    .await
+    .expect("blockservice should initialize");
+
+    // Write metadata directly into the server's block database
     {
-        let mut file = std::fs::File::create(filepath.as_path()).unwrap();
-        file.write_all(file_content.clone().as_slice()).unwrap();
+        let (_cfg, mut db) = open_app_dir(server_dir.path(), false).unwrap();
+        db.put_upgrade_heights(CHAIN_ID, b"upgrade-heights")
+            .unwrap();
+        db.put_corrections(CHAIN_ID, b"corrections").unwrap();
     }
 
-    let server = IntegrationTestServer::new(
-        server_dir.path(),
-        vec![make_snapshot_file(
-            server_dir.path(), // workdir
-            CHAIN_ID,          // CHAIN_ID
-            10,                // num_blocks
-            &[],               // extra_blocks
-        )],
-        Some(vec![ChainConfig {
-            state_updates: Some(vec![filepath]),
-            ..make_default_sonic_chain_config()
-        }]), // Chain config
-    )
-    .await;
+    // Start the server
+    let server = IntegrationTestServer::new(server_dir.path(), vec![], None).await;
 
     // Init client
     let client_dir = init_blockservice(None, [make_default_sonic_chain_config()].as_slice())
         .await
         .expect("blockservice should initialize");
 
-    // Fetch state updates for the SONIC chain
+    // Fetch metadata
     let CommandExecutionOutput { result, log } = execute_command(
-        Command::FetchStateUpdates {
+        Command::FetchMetadata {
             url: server.uri(),
             chain_id: CHAIN_ID,
         },
@@ -69,15 +64,22 @@ async fn client_fetches_state_updates() {
         None,
     )
     .await;
-    assert!(result.is_ok(), "fetch state updates should succeed");
-    assert_eq!(
-        String::from_utf8_lossy(&log),
-        indoc::indoc! {"
-        Received 1 state update files for chain ID 146
-        state_updates.json
-        "}
-    );
+    assert!(result.is_ok());
 
-    let result_file_content = std::fs::read(client_dir.join("state_updates.json")).unwrap();
-    assert_eq!(result_file_content, file_content);
+    // Verify metadata was persisted in the client's block database
+    {
+        let (_cfg, db) = open_app_dir(client_dir, true).unwrap();
+        assert_eq!(
+            db.get_upgrade_heights(CHAIN_ID).unwrap(),
+            Some(b"upgrade-heights".to_vec())
+        );
+        assert_eq!(
+            db.get_corrections(CHAIN_ID).unwrap(),
+            Some(b"corrections".to_vec())
+        );
+    }
+
+    let log_str = String::from_utf8_lossy(&log);
+    assert!(log_str.contains("Stored upgrade heights for chain ID 146"));
+    assert!(log_str.contains("Stored corrections for chain ID 146"));
 }

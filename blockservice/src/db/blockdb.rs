@@ -224,7 +224,7 @@ impl<D: KvDb> KvDbBackedBlockDb<D>
 where
     D::Batch: Send + 'static,
 {
-    /// Creates a new [BlockDb] backed by the given [KvDb] implementation.
+    /// Creates a new [BlockDb] backed by the given key-value store implementation.
     pub fn create(db: D) -> Result<Self, Error> {
         if db
             .iterate_raw(Box::from([]), IterationDirection::Forward)
@@ -240,7 +240,7 @@ where
         Ok(Self { db })
     }
 
-    /// Opens an existing [BlockDb] backed by the given [KvDb] implementation.
+    /// Opens an existing [BlockDb] backed by the given key-value store implementation.
     pub fn open(db: D) -> Result<Self, Error> {
         let Some(version_bytes) = db.get_raw(&VERSION_KEY)? else {
             return Err(Error::StorageLayer(
