@@ -20,7 +20,7 @@ pub mod app_dir;
 pub mod cli;
 pub mod cmd;
 pub mod config;
-mod db;
+pub mod db;
 mod error;
 pub mod grpc;
 mod utils;

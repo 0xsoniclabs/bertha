@@ -24,8 +24,8 @@ use crate::grpc::{
     GRPC_COMPRESSION_ALGORITHM,
     auth::AUTHORIZATION_HEADER_NAME,
     proto_rpc::{
-        BlockRangeRequest, ChainRanges, EncodedBlock, ListRequest, StateUpdates,
-        StateUpdatesRequest, block_rpc_client::BlockRpcClient,
+        BlockRangeRequest, ChainRanges, EncodedBlock, ListRequest, Metadata, MetadataRequest,
+        block_rpc_client::BlockRpcClient,
     },
 };
 
@@ -90,11 +90,8 @@ impl RpcClient {
         Ok(response.into_inner())
     }
 
-    pub async fn get_state_updates(
-        &mut self,
-        chain_id: u64,
-    ) -> Result<StateUpdates, tonic::Status> {
-        let mut request = Request::new(StateUpdatesRequest { chain_id });
+    pub async fn get_metadata(&mut self, chain_id: u64) -> Result<Metadata, tonic::Status> {
+        let mut request = Request::new(MetadataRequest { chain_id });
 
         if let Some(token) = &self.auth_token {
             request
@@ -102,7 +99,7 @@ impl RpcClient {
                 .insert(AUTHORIZATION_HEADER_NAME, token.clone());
         }
 
-        let response = self.client.get_state_updates(request).await?;
+        let response = self.client.get_metadata(request).await?;
         Ok(response.into_inner())
     }
 }
@@ -114,7 +111,7 @@ pub mod tests {
     use super::*;
     use crate::grpc::{
         auth,
-        proto_rpc::{BlockRange, ChainRange, StateUpdate},
+        proto_rpc::{BlockRange, ChainRange, Metadata},
         test_utils::{MockRpcServer, TestServer, get_mock_server_and_client},
     };
 
@@ -336,51 +333,41 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn get_state_updates_returns_updates_successfully() {
-        let expected_updates = vec![
-            StateUpdate {
-                filename: "update1.json".to_string(),
-                data: "data1".to_string(),
-            },
-            StateUpdate {
-                filename: "update2.json".to_string(),
-                data: "data2".to_string(),
-            },
-        ];
+    async fn get_metadata_returns_metadata_successfully() {
+        let expected_metadata = Metadata {
+            upgrade_heights: Some(b"upgrade-heights".to_vec()),
+            corrections: Some(b"corrections".to_vec()),
+        };
 
         let mut mock_server = MockRpcServer::new();
-        mock_server.expect_get_state_updates().returning({
-            let updates = expected_updates.clone();
-            move |_| {
-                Ok(tonic::Response::new(StateUpdates {
-                    updates: updates.clone(),
-                }))
-            }
+        mock_server.expect_get_metadata().returning({
+            let metadata = expected_metadata.clone();
+            move |_| Ok(tonic::Response::new(metadata.clone()))
         });
         let mut rpc_client = get_mock_server_and_client(mock_server, None).await;
-        let updates = rpc_client.get_state_updates(1).await.unwrap();
-        assert_eq!(updates.updates, expected_updates);
+        let metadata = rpc_client.get_metadata(1).await.unwrap();
+        assert_eq!(metadata, expected_metadata);
     }
 
     #[tokio::test]
-    async fn get_state_updates_propagates_error() {
+    async fn get_metadata_propagates_error() {
         let mut mock_server = MockRpcServer::new();
         mock_server
-            .expect_get_state_updates()
+            .expect_get_metadata()
             .returning(|_| Err(tonic::Status::internal("Internal error")));
         let mut rpc_client = get_mock_server_and_client(mock_server, None).await;
-        let result = rpc_client.get_state_updates(1).await;
+        let result = rpc_client.get_metadata(1).await;
         let err = result.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Internal);
         assert!(err.message().contains("Internal error"));
     }
 
     #[tokio::test]
-    async fn get_state_updates_sets_auth_token() {
+    async fn get_metadata_sets_auth_token() {
         let auth_token = Some(auth::token_to_metadata_value("my-token").unwrap());
         let mut mock_rpc_server = MockRpcServer::new();
         mock_rpc_server
-            .expect_get_state_updates()
+            .expect_get_metadata()
             .withf({
                 let auth_token = auth_token.clone();
                 move |request| {
@@ -394,17 +381,15 @@ pub mod tests {
             })
             .returning({
                 move |_| {
-                    Ok(tonic::Response::new(StateUpdates {
-                        updates: Vec::new(),
+                    Ok(tonic::Response::new(Metadata {
+                        upgrade_heights: None,
+                        corrections: None,
                     }))
                 }
             });
 
         let mut rpc_client = get_mock_server_and_client(mock_rpc_server, auth_token).await;
-        let result = rpc_client.get_state_updates(1).await;
-        assert!(
-            result.is_ok(),
-            "Failed to get state updates with auth token"
-        );
+        let result = rpc_client.get_metadata(1).await;
+        assert!(result.is_ok(), "Failed to get metadata with auth token");
     }
 }

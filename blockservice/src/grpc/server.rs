@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-use std::{fs, sync::Arc};
+use std::sync::Arc;
 
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{service::interceptor::InterceptedService, transport::Server};
@@ -25,8 +25,8 @@ use crate::{
     grpc::{
         GRPC_COMPRESSION_ALGORITHM, auth,
         proto_rpc::{
-            BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock, ListRequest, StateUpdate,
-            StateUpdates, StateUpdatesRequest,
+            BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock, ListRequest, Metadata,
+            MetadataRequest,
             block_rpc_server::{BlockRpc, BlockRpcServer},
         },
     },
@@ -169,54 +169,43 @@ where
         }
     }
 
-    /// Returns all state update files (filename and contents) for a given chain ID,
-    /// if any are configured.
-    async fn get_state_updates(
+    /// Returns the upgrade heights and corrections metadata for a given chain ID,
+    /// if any are stored in the database.
+    async fn get_metadata(
         &self,
-        request: tonic::Request<StateUpdatesRequest>,
-    ) -> Result<tonic::Response<StateUpdates>, tonic::Status> {
+        request: tonic::Request<MetadataRequest>,
+    ) -> Result<tonic::Response<Metadata>, tonic::Status> {
         let remote_addr = request.remote_addr();
         let chain_id = request.into_inner().chain_id;
 
         match remote_addr {
             Some(addr) => {
-                println!("Received state updates request for chain ID {chain_id} from {addr}");
+                println!("Received metadata request for chain ID {chain_id} from {addr}");
             }
-            None => println!("Received state updates request for chain ID {chain_id}"),
+            None => println!("Received metadata request for chain ID {chain_id}"),
         }
 
-        let state_updates = self
-            .cfg
-            .get_chain_config(chain_id)
-            .and_then(|cfg| cfg.state_updates)
-            .unwrap_or_default();
+        let upgrade_heights = self
+            .db
+            .get_upgrade_heights(chain_id)
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
-        let updates = state_updates
-            .into_iter()
-            .map(|path| -> Result<StateUpdate, tonic::Status> {
-                let data = fs::read_to_string(&path).map_err(|_| {
-                    tonic::Status::new(
-                        tonic::Code::Internal,
-                        format!("failed to read file {}", &path.display()),
-                    )
-                })?;
-                Ok(StateUpdate {
-                    // Safe to unwrap because reading would've already failed if this was not a
-                    // file path.
-                    filename: path.file_name().unwrap().to_string_lossy().into_owned(),
-                    data,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let corrections = self
+            .db
+            .get_corrections(chain_id)
+            .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
-        Ok(tonic::Response::new(StateUpdates { updates }))
+        Ok(tonic::Response::new(Metadata {
+            upgrade_heights,
+            corrections,
+        }))
     }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use std::{path::PathBuf, vec};
+    use std::vec;
 
     use mockall::predicate::eq;
     use tokio_stream::StreamExt;
@@ -226,12 +215,11 @@ mod tests {
     use crate::{
         Error,
         app_dir::{init_app_dir, open_app_dir},
-        config::ChainConfig,
         db::MockBlockDb,
         grpc::{
             auth,
             client::RpcClient,
-            proto_rpc::{self, BlockRangeRequest, block_rpc_server::BlockRpc},
+            proto_rpc::{self, BlockRangeRequest, MetadataRequest, block_rpc_server::BlockRpc},
         },
         utils::test_dir::{Permissions, TestDir},
     };
@@ -529,74 +517,49 @@ mod tests {
         assert!(error.message().contains("DB error"));
     }
 
+    #[rstest::rstest]
+    #[case::no_metadata(None, None)]
+    #[case::only_upgrade_heights(Some(b"upgrade-heights".to_vec()), None)]
+    #[case::only_corrections(None, Some(b"corrections".to_vec()))]
+    #[case::both_metadata(Some(b"upgrade-heights".to_vec()), Some(b"corrections".to_vec()))]
     #[tokio::test]
-    async fn get_state_updates_returns_state_updates_for_chain() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let mut cfg = Config::create_default(tmpdir.path().join("config.toml")).unwrap();
+    async fn get_metadata_returns_expected_data(
+        #[case] upgrade_heights: Option<Vec<u8>>,
+        #[case] corrections: Option<Vec<u8>>,
+    ) {
+        let chain_id = 1;
+        let mut db = MockBlockDb::new();
+        let expected_upgrade_heights = upgrade_heights.clone();
+        let expected_corrections = corrections.clone();
+        db.expect_get_upgrade_heights()
+            .with(eq(chain_id))
+            .returning(move |_| Ok(upgrade_heights.clone()));
+        db.expect_get_corrections()
+            .with(eq(chain_id))
+            .returning(move |_| Ok(corrections.clone()));
 
-        let file1 = tmpdir.path().join("state_update_1.json");
-        let file2 = tmpdir.path().join("./state_update_2.json");
-        let file3 = tmpdir.path().join("./state_update_3.json");
-        fs::write(&file1, "123").unwrap();
-        fs::write(&file2, "456").unwrap();
-        fs::write(&file3, "789").unwrap();
+        let server = RpcServer::new(Arc::new(db), Config::default());
 
-        cfg.add_chain(ChainConfig {
-            state_updates: Some(vec![file1, file2]),
-            ..ChainConfig::new(5)
-        })
-        .unwrap();
-        cfg.add_chain(ChainConfig {
-            state_updates: Some(vec![file3.canonicalize().unwrap()]), // use absolute path
-            ..ChainConfig::new(42)
-        })
-        .unwrap();
-        cfg.add_chain(ChainConfig {
-            state_updates: None,
-            ..ChainConfig::new(77)
-        })
-        .unwrap();
-
-        let server = RpcServer::new(Arc::new(MockBlockDb::new()), cfg);
-
-        let req = Request::new(StateUpdatesRequest { chain_id: 5 });
-        let res = server.get_state_updates(req).await.unwrap();
-        let updates = res.into_inner().updates;
-        assert_eq!(updates.len(), 2);
-        assert_eq!(updates[0].filename, "state_update_1.json");
-        assert_eq!(updates[0].data, "123");
-        assert_eq!(updates[1].filename, "state_update_2.json"); // without leading "./"
-        assert_eq!(updates[1].data, "456");
-
-        let req = Request::new(StateUpdatesRequest { chain_id: 42 });
-        let res = server.get_state_updates(req).await.unwrap();
-        let updates = res.into_inner().updates;
-        assert_eq!(updates.len(), 1);
-        assert_eq!(updates[0].filename, "state_update_3.json"); // filename only (not absolute path)
-        assert_eq!(updates[0].data, "789");
-
-        let req = Request::new(StateUpdatesRequest { chain_id: 77 });
-        let res = server.get_state_updates(req).await.unwrap();
-        let updates = res.into_inner().updates;
-        assert_eq!(updates.len(), 0);
+        let req = Request::new(MetadataRequest { chain_id });
+        let res = server.get_metadata(req).await.unwrap();
+        let metadata = res.into_inner();
+        assert_eq!(metadata.upgrade_heights, expected_upgrade_heights);
+        assert_eq!(metadata.corrections, expected_corrections);
     }
 
     #[tokio::test]
-    async fn get_state_updates_returns_error_if_file_cannot_be_read() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-        let mut cfg = Config::create_default(tmpdir.path().join("config.toml")).unwrap();
+    async fn get_metadata_forwards_db_errors() {
+        let chain_id = 1;
+        let mut db = MockBlockDb::new();
+        db.expect_get_upgrade_heights()
+            .with(eq(chain_id))
+            .returning(|_| Err(Error::StorageLayer("DB error".to_owned())));
 
-        cfg.add_chain(ChainConfig {
-            state_updates: Some(vec![PathBuf::from("nonexisting.json")]),
-            ..ChainConfig::new(5)
-        })
-        .unwrap();
-
-        let server = RpcServer::new(Arc::new(MockBlockDb::new()), cfg);
-        let req = Request::new(StateUpdatesRequest { chain_id: 5 });
-        let res = server.get_state_updates(req).await;
+        let server = RpcServer::new(Arc::new(db), Config::default());
+        let req = Request::new(MetadataRequest { chain_id });
+        let res = server.get_metadata(req).await;
         let err = res.unwrap_err();
         assert_eq!(err.code(), tonic::Code::Internal);
-        assert_eq!(err.message(), "failed to read file nonexisting.json",);
+        assert!(err.message().contains("DB error"));
     }
 }

@@ -71,11 +71,9 @@ pub enum Command {
         #[arg(short, long)]
         to: Option<u64>,
     },
-    /// Fetch state update files from a remote block service.
-    ///
-    /// Fetches all available state update files for the specified chain ID and writes them to the
-    /// application directory. If a file with the same name already exists, it will be skipped.
-    FetchStateUpdates { url: String, chain_id: u64 },
+    /// Fetch metadata (upgrade heights and corrections) from a remote block service and store them
+    /// in the local database.
+    FetchMetadata { url: String, chain_id: u64 },
     /// List all block ranges for all chains or only for the specific chain if specified. If url is
     /// not set this lists the locally stored block ranges, otherwise the block ranges of the remote
     /// block service.
@@ -134,7 +132,7 @@ Commands:
   import-upgrade-heights  Import upgrade heights from a JSON file into the block database for the specified chain ID
   import-corrections      Import corrections from a JSON file into the block database for the specified chain ID
   fetch                   Fetch blocks from a remote block service and store them in the local database
-  fetch-state-updates     Fetch state update files from a remote block service
+  fetch-metadata          Fetch metadata (upgrade heights and corrections) from a remote block service and store them in the local database
   list                    List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
   verify                  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge                   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
@@ -180,7 +178,7 @@ Commands:
   import-upgrade-heights  Import upgrade heights from a JSON file into the block database for the specified chain ID
   import-corrections      Import corrections from a JSON file into the block database for the specified chain ID
   fetch                   Fetch blocks from a remote block service and store them in the local database
-  fetch-state-updates     Fetch state update files from a remote block service
+  fetch-metadata          Fetch metadata (upgrade heights and corrections) from a remote block service and store them in the local database
   list                    List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
   verify                  Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
   purge                   Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`

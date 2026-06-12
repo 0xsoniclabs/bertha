@@ -6,4 +6,3 @@ port = 8080
 # name = "Example chain"
 # description = "An example blockchain"
 # json_rpc = "https://example.com/jsonrpc"
-# state_updates = ["./state_updates_133337.json"] # optional
