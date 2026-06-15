@@ -16,7 +16,7 @@
 
 use std::path::Path;
 
-use crate::{app_dir::open_app_dir, config::ChainConfig, db::BlockDb, grpc::RpcClient};
+use crate::{BlockRange, app_dir::open_app_dir, config::ChainConfig, db::BlockDb, grpc::RpcClient};
 
 pub async fn list(
     app_dir: impl AsRef<Path>,
@@ -29,11 +29,11 @@ pub async fn list(
     }
     let (cfg, db) = open_app_dir(app_dir, true)?;
     let auth_token = cfg.get_auth_token().cloned();
-    let chain_ranges = if let Some(url) = url {
+    let chain_listings: Vec<(u64, Vec<BlockRange>, bool, bool)> = if let Some(url) = url {
         let mut client = RpcClient::try_new(url, auth_token).await?;
-        let remote_ranges = client.list(chain_id).await?;
-        remote_ranges
-            .chain_ranges
+        let chain_listings = client.list(chain_id).await?;
+        chain_listings
+            .chain_listings
             .into_iter()
             .map(|chain_range| {
                 (
@@ -43,6 +43,8 @@ pub async fn list(
                         .into_iter()
                         .map(From::from)
                         .collect(),
+                    chain_range.has_upgrade_heights,
+                    chain_range.has_corrections,
                 )
             })
             .collect()
@@ -61,30 +63,38 @@ pub async fn list(
         chain_ids
             .into_iter()
             .map(|chain_id| {
-                db.get_ranges_of_chain_id(chain_id)
-                    .map(|ranges| (chain_id, ranges))
+                let ranges = db.get_ranges_of_chain_id(chain_id)?;
+                let has_upgrade_heights = db.get_upgrade_heights(chain_id)?.is_some();
+                let has_corrections = db.get_corrections(chain_id)?.is_some();
+                Ok((chain_id, ranges, has_upgrade_heights, has_corrections))
             })
-            .collect::<Result<Vec<_>, _>>()?
+            .collect::<Result<_, crate::error::Error>>()?
     };
 
-    for (chain_id, ranges) in chain_ranges {
+    for (chain_id, ranges, has_upgrade_heights, has_corrections) in chain_listings {
         let chain_cfg = cfg
             .get_chain_config(chain_id)
             .unwrap_or(ChainConfig::new(chain_id));
 
         writeln!(writer, "{}", chain_cfg.pretty_name())?;
 
+        let has_upgrade_heights_str = if has_upgrade_heights { "yes" } else { "no" };
+        let has_corrections_str = if has_corrections { "yes" } else { "no" };
+        writeln!(writer, "├── upgrade heights: {has_upgrade_heights_str}")?;
+        writeln!(writer, "├── corrections: {has_corrections_str}")?;
+
         if ranges.is_empty() {
             writeln!(writer, "└── no blocks")?;
-        }
-        for (i, range) in ranges.iter().enumerate() {
-            let (start, end) = (range.start(), range.end());
-            let symbol = if i == ranges.len() - 1 {
-                "└──"
-            } else {
-                "├──"
-            };
-            writeln!(writer, "{symbol} {start} - {end}")?;
+        } else {
+            for (i, range) in ranges.iter().enumerate() {
+                let (start, end) = (range.start(), range.end());
+                let symbol = if i == ranges.len() - 1 {
+                    "└──"
+                } else {
+                    "├──"
+                };
+                writeln!(writer, "{symbol} {start} - {end}")?;
+            }
         }
     }
 
@@ -105,7 +115,7 @@ mod tests {
         },
         grpc::{
             auth::{self, AUTHORIZATION_HEADER_NAME},
-            proto_rpc::{self, BlockRange, ChainRange, ChainRanges},
+            proto_rpc::{self, BlockRange, ChainListing, ChainListings},
             test_utils::{MockRpcServer, TestServer},
         },
         test_templates::auth_token,
@@ -188,16 +198,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prints_message_for_each_range() {
+    async fn print_availability_of_upgrade_heights_and_corrections() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
-        let chain_cfg = ChainConfig {
-            name: "Test Chain".to_string(),
-            ..ChainConfig::new(1)
-        };
-        let (mut cfg, _) = open_app_dir(tmpdir.path(), true).unwrap();
-        cfg.add_chain(chain_cfg.clone()).unwrap();
+        let mut buf = Vec::new();
+        let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
+        assert!(result.is_ok());
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            indoc::indoc! {"
+                [1] (no name): (no description)
+                ├── upgrade heights: no
+                ├── corrections: no
+                └── no blocks
+                ",
+            }
+        );
+
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
+        db.put_upgrade_heights(1, b"upgrade-heights").unwrap();
+        db.put_corrections(1, b"corrections").unwrap();
+        drop(db);
+
+        let mut buf = Vec::new();
+        let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
+        assert!(result.is_ok());
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            indoc::indoc! {"
+                [1] (no name): (no description)
+                ├── upgrade heights: yes
+                ├── corrections: yes
+                └── no blocks
+                ",
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn prints_all_stored_ranges() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         // no blocks for chain id
         let mut buf = Vec::new();
@@ -206,7 +248,9 @@ mod tests {
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
-                [1] Test Chain: (no description)
+                [1] (no name): (no description)
+                ├── upgrade heights: no
+                ├── corrections: no
                 └── no blocks
                ",
             }
@@ -232,7 +276,9 @@ mod tests {
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
-                [1] Test Chain: (no description)
+                [1] (no name): (no description)
+                ├── upgrade heights: no
+                ├── corrections: no
                 ├── 2 - 4
                 └── 6 - 8
                 "
@@ -255,11 +301,57 @@ mod tests {
         assert_eq!(
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
-                [1] Test Chain: (no description)
+                [1] (no name): (no description)
+                ├── upgrade heights: no
+                ├── corrections: no
                 ├── 2 - 4
                 └── 6 - 8
                 [3] (no name): (no description)
+                ├── upgrade heights: no
+                ├── corrections: no
                 └── 3 - 5
+                ",
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn uses_config_file_name_and_description_if_available() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+
+        let mut buf = Vec::new();
+        let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
+        assert!(result.is_ok());
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            indoc::indoc! {"
+                [1] (no name): (no description)
+                ├── upgrade heights: no
+                ├── corrections: no
+                └── no blocks
+                ",
+            }
+        );
+
+        let chain_cfg = ChainConfig {
+            name: "Test Chain".to_string(),
+            description: "A test chain".to_string(),
+            ..ChainConfig::new(1)
+        };
+        let (mut cfg, _db) = open_app_dir(tmpdir.path(), false).unwrap();
+        cfg.add_chain(chain_cfg.clone()).unwrap();
+
+        let mut buf = Vec::new();
+        let result = list(tmpdir.path(), Some(1), None, &mut buf).await;
+        assert!(result.is_ok());
+        assert_eq!(
+            String::from_utf8(buf).unwrap(),
+            indoc::indoc! {"
+                [1] Test Chain: A test chain
+                ├── upgrade heights: no
+                ├── corrections: no
+                └── no blocks
                 ",
             }
         );
@@ -292,9 +384,13 @@ mod tests {
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
                 [7] (no name): (no description)
+                ├── upgrade heights: no
+                ├── corrections: no
                 ├── 2 - 4
                 └── 6 - 8
                 [32] Test Chain: A test chain
+                ├── upgrade heights: no
+                ├── corrections: no
                 └── no blocks
                 ",
             }
@@ -308,10 +404,12 @@ mod tests {
 
         {
             // no blocks for chain id
-            let list_response = ChainRanges {
-                chain_ranges: vec![ChainRange {
+            let list_response = ChainListings {
+                chain_listings: vec![ChainListing {
                     chain_id: 1,
                     block_ranges: vec![],
+                    has_upgrade_heights: false,
+                    has_corrections: false,
                 }],
             };
             let mut mock_server = MockRpcServer::new();
@@ -333,20 +431,24 @@ mod tests {
                 String::from_utf8(buf).unwrap(),
                 indoc::indoc! {"
                     [1] (no name): (no description)
+                    ├── upgrade heights: no
+                    ├── corrections: no
                     └── no blocks
                     "
                 }
             );
         }
         {
-            // block ranges for chain id
-            let list_response = ChainRanges {
-                chain_ranges: vec![ChainRange {
+            // metadata and block ranges for chain id
+            let list_response = ChainListings {
+                chain_listings: vec![ChainListing {
                     chain_id: 1,
                     block_ranges: vec![
                         BlockRange { from: 2, to: 4 },
                         BlockRange { from: 6, to: 8 },
                     ],
+                    has_upgrade_heights: true,
+                    has_corrections: true,
                 }],
             };
             let mut mock_server = MockRpcServer::new();
@@ -362,6 +464,8 @@ mod tests {
                 String::from_utf8(buf).unwrap(),
                 indoc::indoc! {"
                     [1] (no name): (no description)
+                    ├── upgrade heights: yes
+                    ├── corrections: yes
                     ├── 2 - 4
                     └── 6 - 8
                     "
@@ -370,18 +474,22 @@ mod tests {
         }
         {
             // block ranges for multiple chain ids
-            let list_response = ChainRanges {
-                chain_ranges: vec![
-                    ChainRange {
+            let list_response = ChainListings {
+                chain_listings: vec![
+                    ChainListing {
                         chain_id: 1,
                         block_ranges: vec![
                             BlockRange { from: 2, to: 4 },
                             BlockRange { from: 6, to: 8 },
                         ],
+                        has_upgrade_heights: true,
+                        has_corrections: false,
                     },
-                    ChainRange {
+                    ChainListing {
                         chain_id: 3,
                         block_ranges: vec![BlockRange { from: 3, to: 5 }],
+                        has_upgrade_heights: false,
+                        has_corrections: true,
                     },
                 ],
             };
@@ -398,9 +506,13 @@ mod tests {
                 String::from_utf8(buf).unwrap(),
                 indoc::indoc! {"
                     [1] (no name): (no description)
+                    ├── upgrade heights: yes
+                    ├── corrections: no
                     ├── 2 - 4
                     └── 6 - 8
                     [3] (no name): (no description)
+                    ├── upgrade heights: no
+                    ├── corrections: yes
                     └── 3 - 5
                     "
                 }
@@ -432,10 +544,12 @@ mod tests {
                 }
             })
             .returning(|_| {
-                Ok(tonic::Response::new(ChainRanges {
-                    chain_ranges: vec![ChainRange {
+                Ok(tonic::Response::new(ChainListings {
+                    chain_listings: vec![ChainListing {
                         chain_id: 1,
                         block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 0 }],
+                        has_upgrade_heights: false,
+                        has_corrections: false,
                     }],
                 }))
             });

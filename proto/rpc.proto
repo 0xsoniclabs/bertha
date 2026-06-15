@@ -21,8 +21,9 @@ package rpc;
 service BlockRpc {
   // Retrieves a range of blocks for a specific chain ID and returns them as a stream of encoded blocks.
   rpc GetBlockRange (BlockRangeRequest) returns (stream EncodedBlock);
-  // Retrieves the list of block ranges stored on the block service for all chains or a specific chain ID.
-  rpc List (ListRequest) returns (ChainRanges);
+  // Retrieves the list of block ranges and metadata for all chains or a specific chain ID.
+  rpc List (ListRequest) returns (ChainListings);
+  // Retrieves the metadata for a specific chain ID.
   rpc GetMetadata (MetadataRequest) returns (Metadata);
 }
 
@@ -45,15 +46,17 @@ message ListRequest {
   optional uint64 chainId = 1;
 }
 
-// The list of block ranges for the requested chains, returned by the List RPC endpoint.
-message ChainRanges {
-  repeated ChainRange chainRanges = 1;
+// The list of block ranges and metadata for the requested chains, returned by the List RPC endpoint.
+message ChainListings {
+  repeated ChainListing chainListings = 1;
 }
 
-// The block ranges for a specific chain.
-message ChainRange {
+// The block ranges and metadata for a specific chain.
+message ChainListing {
   uint64 chainId = 1;
   repeated BlockRange blockRanges = 2;
+  bool hasUpgradeHeights = 3;
+  bool hasCorrections = 4;
 }
 
 // A block range, consisting of the start and end block numbers (both inclusive).
@@ -62,11 +65,13 @@ message BlockRange {
   uint64 to = 2;
 }
 
+// The request for the GetMetadata endpoint.
 message MetadataRequest {
-    uint64 chainId = 1;
+  uint64 chainId = 1;
 }
 
+// The metadata of a chain.
 message Metadata {
-    optional bytes upgrade_heights = 1;
-    optional bytes corrections = 2;
+  optional bytes upgradeHeights = 1;
+  optional bytes corrections = 2;
 }

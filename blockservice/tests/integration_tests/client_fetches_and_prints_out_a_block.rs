@@ -67,6 +67,8 @@ async fn client_fetches_and_prints_out_a_block() {
         String::from_utf8_lossy(&log),
         indoc::indoc! {"
         [146] SONIC: SONIC test chain
+        ├── upgrade heights: no
+        ├── corrections: no
         └── 0 - 5
         "}
     );

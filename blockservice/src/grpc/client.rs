@@ -24,7 +24,7 @@ use crate::grpc::{
     GRPC_COMPRESSION_ALGORITHM,
     auth::AUTHORIZATION_HEADER_NAME,
     proto_rpc::{
-        BlockRangeRequest, ChainRanges, EncodedBlock, ListRequest, Metadata, MetadataRequest,
+        BlockRangeRequest, ChainListings, EncodedBlock, ListRequest, Metadata, MetadataRequest,
         block_rpc_client::BlockRpcClient,
     },
 };
@@ -56,7 +56,7 @@ impl RpcClient {
         Self { client, auth_token }
     }
 
-    /// Query a range of blocks by chain ID, from block number to block number.
+    /// Fetches a range of blocks by chain ID, from block number to block number.
     pub async fn get_block_range(
         &mut self,
         chain_id: u64,
@@ -76,8 +76,8 @@ impl RpcClient {
         Ok(stream)
     }
 
-    /// Queries the available block ranges of all chains or a specific chain.
-    pub async fn list(&mut self, chain_id: Option<u64>) -> Result<ChainRanges, tonic::Status> {
+    /// Queries the available metadata and block ranges of all chains or a specific chain.
+    pub async fn list(&mut self, chain_id: Option<u64>) -> Result<ChainListings, tonic::Status> {
         let mut request = Request::new(ListRequest { chain_id });
 
         if let Some(token) = &self.auth_token {
@@ -90,6 +90,7 @@ impl RpcClient {
         Ok(response.into_inner())
     }
 
+    /// Fetches the upgrade heights and corrections for a specific chain ID.
     pub async fn get_metadata(&mut self, chain_id: u64) -> Result<Metadata, tonic::Status> {
         let mut request = Request::new(MetadataRequest { chain_id });
 
@@ -111,7 +112,7 @@ pub mod tests {
     use super::*;
     use crate::grpc::{
         auth,
-        proto_rpc::{BlockRange, ChainRange, Metadata},
+        proto_rpc::{BlockRange, ChainListing, Metadata},
         test_utils::{MockRpcServer, TestServer, get_mock_server_and_client},
     };
 
@@ -251,10 +252,11 @@ pub mod tests {
     async fn list_returns_chain_ranges_successfully() {
         // ranges exist
         {
-            let encoded_chain_ranges = ChainRanges {
-                chain_ranges: vec![ChainRange {
+            let encoded_chain_ranges = ChainListings {
+                chain_listings: vec![ChainListing {
                     chain_id: 1,
                     block_ranges: vec![BlockRange { from: 0, to: 10 }],
+                    ..Default::default()
                 }],
             };
             let mut mock_rpc_server = MockRpcServer::new();
@@ -271,16 +273,16 @@ pub mod tests {
         {
             let mut mock_rpc_server = MockRpcServer::new();
             mock_rpc_server.expect_list().returning(|_| {
-                Ok(tonic::Response::new(ChainRanges {
-                    chain_ranges: Vec::new(),
+                Ok(tonic::Response::new(ChainListings {
+                    chain_listings: Vec::new(),
                 }))
             });
             let mut rpc_client = get_mock_server_and_client(mock_rpc_server, None).await;
             let ranges = rpc_client.list(Some(1)).await.unwrap();
             assert_eq!(
                 ranges,
-                ChainRanges {
-                    chain_ranges: Vec::new()
+                ChainListings {
+                    chain_listings: Vec::new()
                 },
                 "Chain ranges should be empty"
             );
@@ -290,10 +292,11 @@ pub mod tests {
     #[tokio::test]
     async fn list_sets_auth_token() {
         let auth_token = Some(auth::token_to_metadata_value("my-token").unwrap());
-        let encoded_chain_ranges = ChainRanges {
-            chain_ranges: vec![ChainRange {
+        let encoded_chain_ranges = ChainListings {
+            chain_listings: vec![ChainListing {
                 chain_id: 1,
                 block_ranges: vec![BlockRange { from: 0, to: 10 }],
+                ..Default::default()
             }],
         };
         let mut mock_rpc_server = MockRpcServer::new();

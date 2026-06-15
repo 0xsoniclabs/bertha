@@ -64,6 +64,8 @@ async fn client_fetches_blocks_already_in_local_db() {
         String::from_utf8_lossy(&log),
         indoc::indoc! {"
         [146] SONIC: SONIC test chain
+        ├── upgrade heights: no
+        ├── corrections: no
         └── 0 - 9
         "}
     );
