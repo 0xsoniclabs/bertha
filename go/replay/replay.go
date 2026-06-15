@@ -115,11 +115,14 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 	chainID := genesis.ChainID
 
+	// Create the metadata store
+	slog.Info("Initializing metadata store")
 	metadataStore, err := NewBlockDBMetadataStore(blockDb, chainID, slog.Default(), args.WriteUpgradeHeights)
 	if err != nil {
 		return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
 	}
 
+	// Create the interpreter
 	interpreter, err := tosca.NewInterpreter(args.Interpreter)
 	if err != nil {
 		return fmt.Errorf("failed to create interpreter %q: %w", args.Interpreter, err)
@@ -139,14 +142,13 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 
 	// Open the state database
-	params := StateParameters{
+	slog.Info("Opening state database", "directory", args.StateDBDir)
+	state, err := NewState(StateParameters{
 		Directory:   args.StateDBDir,
 		WithArchive: args.WithArchive,
 		Schema:      args.DBSchema,
 		Variant:     args.DBVariant,
-	}
-
-	state, err := NewState(params)
+	})
 	if err != nil {
 		return fmt.Errorf("failed to open state database: %w", err)
 	}
@@ -159,7 +161,6 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		schema:           args.DBSchema,
 		snapshotHandler:  snapshotHandler,
 	}
-	// Because snapshots invalidate the state, we need to close it here.
 	defer func() {
 		slog.Info("Closing state database", "directory", args.StateDBDir)
 		// The state needs to be accessed through the stateChainAdapter
@@ -179,7 +180,12 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	if args.LogDBSize {
 		slog.Warn("DB size log enabled. This will trigger a flush with every progress report and reduce performance")
 	}
-	progressLogger := startProgressLogger(slog.Default(), chain.state, args.StateDBDir, args.LogDBSize)
+	runWithState := func(f func(*State) error) error {
+		chain.stateRwMutex.Lock()
+		defer chain.stateRwMutex.Unlock()
+		return f(chain.state)
+	}
+	progressLogger := startProgressLogger(slog.Default(), runWithState, args.StateDBDir, args.LogDBSize)
 	onBlockDone := func(block *types.Block) error { return progressLogger.LogProgress(block) }
 	defer func() { progressLogger.LogSummary() }()
 
