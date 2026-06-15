@@ -52,8 +52,31 @@ async fn client_fetches_metadata() {
         .await
         .expect("blockservice should initialize");
 
-    // Fetch metadata
+    // list remote chains
     let CommandExecutionOutput { result, log } = execute_command(
+        Command::List {
+            chain_id: None,
+            url: Some(server.uri()),
+        },
+        &client_dir,
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert!(result.is_ok());
+    assert_eq!(
+        String::from_utf8_lossy(&log),
+        indoc::indoc! {"
+        [146] SONIC: SONIC test chain
+        ├── upgrade heights: yes
+        ├── corrections: yes
+        └── no blocks
+        "}
+    );
+
+    // Fetch metadata
+    let CommandExecutionOutput { result, .. } = execute_command(
         Command::FetchMetadata {
             url: server.uri(),
             chain_id: CHAIN_ID,
@@ -66,20 +89,50 @@ async fn client_fetches_metadata() {
     .await;
     assert!(result.is_ok());
 
-    // Verify metadata was persisted in the client's block database
-    {
-        let (_cfg, db) = open_app_dir(client_dir, true).unwrap();
-        assert_eq!(
-            db.get_upgrade_heights(CHAIN_ID).unwrap(),
-            Some(b"upgrade-heights".to_vec())
-        );
-        assert_eq!(
-            db.get_corrections(CHAIN_ID).unwrap(),
-            Some(b"corrections".to_vec())
-        );
-    }
+    // List local chains
+    let CommandExecutionOutput { result, log } = execute_command(
+        Command::List {
+            chain_id: None,
+            url: None,
+        },
+        &client_dir,
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert!(result.is_ok());
+    assert_eq!(
+        String::from_utf8_lossy(&log),
+        indoc::indoc! {"
+        [146] SONIC: SONIC test chain
+        ├── upgrade heights: yes
+        ├── corrections: yes
+        └── no blocks
+        "}
+    );
 
-    let log_str = String::from_utf8_lossy(&log);
-    assert!(log_str.contains("Stored upgrade heights for chain ID 146"));
-    assert!(log_str.contains("Stored corrections for chain ID 146"));
+    // Print the upgrade-heights
+    let CommandExecutionOutput { result, log } = execute_command(
+        Command::ViewUpgradeHeights { chain_id: CHAIN_ID },
+        &client_dir,
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert!(result.is_ok());
+    assert_eq!(log, b"upgrade-heights\n");
+
+    // Print the corrections
+    let CommandExecutionOutput { result, log } = execute_command(
+        Command::ViewCorrections { chain_id: CHAIN_ID },
+        &client_dir,
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert!(result.is_ok());
+    assert_eq!(log, b"corrections\n");
 }

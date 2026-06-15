@@ -41,7 +41,7 @@ pub async fn fetch(
     // Get remote chain ranges
     let remote_ranges = client.list(Some(chain_id)).await?;
     let chain_id_remote_ranges = remote_ranges
-        .chain_ranges
+        .chain_listings
         .into_iter()
         .find(|r| r.chain_id == chain_id)
         .map(|r| {
@@ -169,7 +169,7 @@ mod tests {
         db::{BlockDb, KvDb, make_block_ranges_key, proto},
         grpc::{
             auth::{self, AUTHORIZATION_HEADER_NAME},
-            proto_rpc::{self, BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock},
+            proto_rpc::{self, BlockRangeRequest, ChainListing, ChainListings, EncodedBlock},
             test_utils::{MockRpcServer, TestServer},
         },
         test_templates::auth_token,
@@ -220,10 +220,11 @@ mod tests {
         }
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
-            Ok(tonic::Response::new(ChainRanges {
-                chain_ranges: vec![ChainRange {
+            Ok(tonic::Response::new(ChainListings {
+                chain_listings: vec![ChainListing {
                     chain_id: 1,
                     block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 10 }],
+                    ..Default::default()
                 }],
             }))
         });
@@ -250,10 +251,11 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
-            Ok(tonic::Response::new(ChainRanges {
-                chain_ranges: vec![ChainRange {
+            Ok(tonic::Response::new(ChainListings {
+                chain_listings: vec![ChainListing {
                     chain_id: 1,
                     block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 10 }],
+                    ..Default::default()
                 }],
             }))
         });
@@ -282,10 +284,11 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut server = MockRpcServer::new();
         server.expect_list().returning(|_| {
-            Ok(tonic::Response::new(ChainRanges {
-                chain_ranges: vec![ChainRange {
+            Ok(tonic::Response::new(ChainListings {
+                chain_listings: vec![ChainListing {
                     chain_id: 1,
                     block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 10 }],
+                    ..Default::default()
                 }],
             }))
         });
@@ -314,10 +317,11 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
-            Ok(tonic::Response::new(ChainRanges {
-                chain_ranges: vec![ChainRange {
+            Ok(tonic::Response::new(ChainListings {
+                chain_listings: vec![ChainListing {
                     chain_id: 2,
                     block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 10 }],
+                    ..Default::default()
                 }],
             }))
         });
@@ -351,10 +355,11 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(move |_| {
-            Ok(tonic::Response::new(ChainRanges {
-                chain_ranges: vec![ChainRange {
+            Ok(tonic::Response::new(ChainListings {
+                chain_listings: vec![ChainListing {
                     chain_id: 1,
                     block_ranges: block_ranges.clone(),
+                    ..Default::default()
                 }],
             }))
         });
@@ -378,10 +383,11 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
-            Ok(tonic::Response::new(ChainRanges {
-                chain_ranges: vec![ChainRange {
+            Ok(tonic::Response::new(ChainListings {
+                chain_listings: vec![ChainListing {
                     chain_id: 1,
                     block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 10 }],
+                    ..Default::default()
                 }],
             }))
         });
@@ -417,10 +423,11 @@ mod tests {
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
         let mut mock_server = MockRpcServer::new();
         mock_server.expect_list().returning(|_| {
-            Ok(tonic::Response::new(ChainRanges {
-                chain_ranges: vec![ChainRange {
+            Ok(tonic::Response::new(ChainListings {
+                chain_listings: vec![ChainListing {
                     chain_id: 1,
                     block_ranges: vec![proto_rpc::BlockRange { from: 5, to: 10 }],
+                    ..Default::default()
                 }],
             }))
         });
@@ -454,10 +461,11 @@ mod tests {
         {
             let mut mock_server = MockRpcServer::new();
             mock_server.expect_list().returning(|_| {
-                Ok(tonic::Response::new(ChainRanges {
-                    chain_ranges: vec![ChainRange {
+                Ok(tonic::Response::new(ChainListings {
+                    chain_listings: vec![ChainListing {
                         chain_id: 1,
                         block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 10 }],
+                        ..Default::default()
                     }],
                 }))
             });
@@ -506,10 +514,11 @@ mod tests {
         {
             let mut mock_server = MockRpcServer::new();
             mock_server.expect_list().returning(|_| {
-                Ok(tonic::Response::new(ChainRanges {
-                    chain_ranges: vec![ChainRange {
+                Ok(tonic::Response::new(ChainListings {
+                    chain_listings: vec![ChainListing {
                         chain_id: 1,
                         block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 10 }],
+                        ..Default::default()
                     }],
                 }))
             });
@@ -552,10 +561,11 @@ mod tests {
         {
             let mut mock_server = MockRpcServer::new();
             mock_server.expect_list().returning(|_| {
-                Ok(tonic::Response::new(ChainRanges {
-                    chain_ranges: vec![ChainRange {
+                Ok(tonic::Response::new(ChainListings {
+                    chain_listings: vec![ChainListing {
                         chain_id: 1,
                         block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 10 }],
+                        ..Default::default()
                     }],
                 }))
             });
@@ -707,10 +717,11 @@ mod tests {
 
         for remote_block_range in remote_blocks_ranges_cases {
             // Set what the server will return
-            let list_response = ChainRanges {
-                chain_ranges: vec![ChainRange {
+            let list_response = ChainListings {
+                chain_listings: vec![ChainListing {
                     chain_id: 1,
                     block_ranges: remote_block_range,
+                    ..Default::default()
                 }],
             };
             for TestCase {
@@ -811,10 +822,11 @@ mod tests {
                 }
             })
             .returning(|_| {
-                Ok(tonic::Response::new(ChainRanges {
-                    chain_ranges: vec![ChainRange {
+                Ok(tonic::Response::new(ChainListings {
+                    chain_listings: vec![ChainListing {
                         chain_id: 1,
                         block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 0 }],
+                        ..Default::default()
                     }],
                 }))
             });

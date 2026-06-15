@@ -28,7 +28,7 @@ use tower::service_fn;
 use crate::grpc::{
     client::RpcClient,
     proto_rpc::{
-        BlockRangeRequest, ChainRanges, EncodedBlock, ListRequest, Metadata, MetadataRequest,
+        BlockRangeRequest, ChainListings, EncodedBlock, ListRequest, Metadata, MetadataRequest,
         block_rpc_client::BlockRpcClient,
         block_rpc_server::{BlockRpc, BlockRpcServer},
     },
@@ -54,7 +54,7 @@ mock!(
         async fn list(
             &self,
             request: tonic::Request<ListRequest>,
-        ) -> Result<tonic::Response<ChainRanges>, tonic::Status>;
+        ) -> Result<tonic::Response<ChainListings>, tonic::Status>;
 
         async fn get_metadata(
             &self,

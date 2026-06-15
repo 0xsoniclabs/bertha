@@ -25,7 +25,7 @@ use crate::{
     grpc::{
         GRPC_COMPRESSION_ALGORITHM, auth,
         proto_rpc::{
-            BlockRangeRequest, ChainRange, ChainRanges, EncodedBlock, ListRequest, Metadata,
+            BlockRangeRequest, ChainListing, ChainListings, EncodedBlock, ListRequest, Metadata,
             MetadataRequest,
             block_rpc_server::{BlockRpc, BlockRpcServer},
         },
@@ -133,7 +133,7 @@ where
     async fn list(
         &self,
         request: tonic::Request<ListRequest>,
-    ) -> Result<tonic::Response<ChainRanges>, tonic::Status> {
+    ) -> Result<tonic::Response<ChainListings>, tonic::Status> {
         let remote_addr = request.remote_addr();
         let chain_id = request.into_inner().chain_id;
 
@@ -153,18 +153,21 @@ where
                 chain_ids
                     .into_iter()
                     .map(|chain_id| {
-                        self.db
-                            .get_ranges_of_chain_id(chain_id)
-                            .map(|ranges| ChainRange {
-                                chain_id,
-                                block_ranges: ranges.into_iter().map(From::from).collect(),
-                            })
+                        let ranges = self.db.get_ranges_of_chain_id(chain_id)?;
+                        let has_upgrade_heights = self.db.get_upgrade_heights(chain_id)?.is_some();
+                        let has_corrections = self.db.get_corrections(chain_id)?.is_some();
+                        Ok(ChainListing {
+                            chain_id,
+                            block_ranges: ranges.into_iter().map(From::from).collect(),
+                            has_upgrade_heights,
+                            has_corrections,
+                        })
                     })
                     .collect()
             });
 
         match ranges {
-            Ok(chain_ranges) => Ok(tonic::Response::new(ChainRanges { chain_ranges })),
+            Ok(chain_listings) => Ok(tonic::Response::new(ChainListings { chain_listings })),
             Err(e) => Err(tonic::Status::internal(e.to_string())),
         }
     }
@@ -426,45 +429,61 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_returns_ranges_for_chains() {
-        // single chain ID
+    async fn list_returns_metadata_availability_and_ranges_for_chains() {
+        // metadata and block ranges for single chain ID
         {
             let mut db = MockBlockDb::new();
             db.expect_get_ranges_of_chain_id()
                 .with(eq(1))
                 .returning(|_| Ok(vec![1..=2, 3..=4]));
+            db.expect_get_upgrade_heights()
+                .with(eq(1))
+                .returning(|_| Ok(Some(b"data".to_vec())));
+            db.expect_get_corrections()
+                .with(eq(1))
+                .returning(|_| Ok(Some(b"data".to_vec())));
             let server = RpcServer::new(Arc::new(db), Config::default());
 
             let req = Request::new(ListRequest { chain_id: Some(1) });
             let res = server.list(req).await.unwrap();
-            let chain_ranges = res.into_inner().chain_ranges;
+            let chain_listings = res.into_inner().chain_listings;
             assert_eq!(
-                chain_ranges,
-                vec![ChainRange {
+                chain_listings,
+                vec![ChainListing {
                     chain_id: 1,
                     block_ranges: vec![
                         proto_rpc::BlockRange { from: 1, to: 2 },
                         proto_rpc::BlockRange { from: 3, to: 4 }
-                    ]
+                    ],
+                    has_upgrade_heights: true,
+                    has_corrections: true,
                 }]
             );
         }
-        // non-existing chain ID
+        // no metadata and ranges for chain ID
         {
             let mut db = MockBlockDb::new();
             db.expect_get_ranges_of_chain_id()
                 .with(eq(1))
                 .returning(|_| Ok(vec![]));
+            db.expect_get_upgrade_heights()
+                .with(eq(1))
+                .returning(|_| Ok(None));
+            db.expect_get_corrections()
+                .with(eq(1))
+                .returning(|_| Ok(None));
             let server = RpcServer::new(Arc::new(db), Config::default());
 
             let req = Request::new(ListRequest { chain_id: Some(1) });
             let res = server.list(req).await.unwrap();
-            let chain_ranges = res.into_inner().chain_ranges;
+            let chain_listings = res.into_inner().chain_listings;
             assert_eq!(
-                chain_ranges,
-                vec![ChainRange {
+                chain_listings,
+                vec![ChainListing {
                     chain_id: 1,
-                    block_ranges: Vec::new()
+                    block_ranges: Vec::new(),
+                    has_upgrade_heights: false,
+                    has_corrections: false,
                 }]
             );
         }
@@ -478,24 +497,40 @@ mod tests {
             db.expect_get_ranges_of_chain_id()
                 .with(eq(2))
                 .returning(|_| Ok(vec![5..=6]));
+            db.expect_get_upgrade_heights()
+                .with(eq(1))
+                .returning(|_| Ok(Some(b"data".to_vec())));
+            db.expect_get_corrections()
+                .with(eq(1))
+                .returning(|_| Ok(None));
+            db.expect_get_upgrade_heights()
+                .with(eq(2))
+                .returning(|_| Ok(None));
+            db.expect_get_corrections()
+                .with(eq(2))
+                .returning(|_| Ok(Some(b"data".to_vec())));
             let server = RpcServer::new(Arc::new(db), Config::default());
 
             let req = Request::new(ListRequest { chain_id: None });
             let res = server.list(req).await.unwrap();
-            let chain_ranges = res.into_inner().chain_ranges;
+            let chain_listings = res.into_inner().chain_listings;
             assert_eq!(
-                chain_ranges,
+                chain_listings,
                 vec![
-                    ChainRange {
+                    ChainListing {
                         chain_id: 1,
                         block_ranges: vec![
                             proto_rpc::BlockRange { from: 1, to: 2 },
                             proto_rpc::BlockRange { from: 3, to: 4 }
-                        ]
+                        ],
+                        has_upgrade_heights: true,
+                        has_corrections: false,
                     },
-                    ChainRange {
+                    ChainListing {
                         chain_id: 2,
-                        block_ranges: vec![proto_rpc::BlockRange { from: 5, to: 6 }]
+                        block_ranges: vec![proto_rpc::BlockRange { from: 5, to: 6 }],
+                        has_upgrade_heights: false,
+                        has_corrections: true,
                     }
                 ]
             );
