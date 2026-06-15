@@ -87,12 +87,25 @@ type ReplayArgs struct {
 }
 
 func Replay(ctx context.Context, args ReplayArgs) (err error) {
+	endBlock := fmt.Sprintf("%d", args.EndBlock)
+	if args.EndBlock == math.MaxUint64 {
+		endBlock = "max"
+	}
 	slog.Info("Replay configuration",
 		"interpreter", args.Interpreter,
 		"db_schema", args.DBSchema,
 		"db_variant", args.DBVariant,
 		"pipeline", args.UsePipeline,
+		"start_block", args.StartBlock,
+		"end_block", endBlock,
 	)
+
+	// Open the block database
+	blockDb, blockDbCleanup, err := openBlockDb(&args)
+	if err != nil {
+		return fmt.Errorf("failed to open block database: %w", err)
+	}
+	defer func() { err = errors.Join(err, blockDbCleanup()) }()
 
 	snapshotHandler := NewSnapshotHandler(args.SnapshotInterval, args.SnapshotStartBlock, args.SnapshotEndBlock, args.SnapshotNumToKeep)
 
@@ -186,28 +199,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 	chainID := genesis.ChainID
 
-	// Open the block database.
-	slog.Info("Opening block database", "directory", args.BlockDBDir)
-	if args.WriteUpgradeHeights {
-		slog.Info("Upgrade heights writing enabled")
-	}
-	if args.OverwriteStateRoot {
-		slog.Info("State root overwriting enabled")
-	}
-	var database blockdb.BlockDB
-	if args.OverwriteStateRoot || args.WriteUpgradeHeights {
-		database, err = blockdb.OpenRocksDBForWriting(args.BlockDBDir)
-	} else {
-		database, err = blockdb.OpenRocksDBForReading(args.BlockDBDir)
-	}
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer func() {
-		err = errors.Join(err, database.Close())
-	}()
-
-	metadataStore, err := NewBlockDBMetadataStore(database, chainID, slog.Default(), args.WriteUpgradeHeights)
+	metadataStore, err := NewBlockDBMetadataStore(blockDb, chainID, slog.Default(), args.WriteUpgradeHeights)
 	if err != nil {
 		return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
 	}
@@ -275,7 +267,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 
 	// ---- Start Replay ----
-	blocks := database.GetRange(chainID, args.StartBlock, args.EndBlock)
+	blocks := blockDb.GetRange(chainID, args.StartBlock, args.EndBlock)
 
 	replayLoopContext := ReplayLoopContext{
 		overwriteStateRoot: New(args.OverwriteStateRoot, args.ConfirmAllPrompts),
@@ -285,9 +277,34 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 
 	return run(
-		ctx, blocks, chain, database, replayLoopContext,
+		ctx, blocks, chain, blockDb, replayLoopContext,
 		func(block *types.Block) error { return progress.LogProgress(block) },
 	)
+
+}
+
+func openBlockDb(args *ReplayArgs) (blockdb.BlockDB, func() error, error) {
+	slog.Info("Opening block database", "directory", args.BlockDBDir)
+	if args.WriteUpgradeHeights {
+		slog.Info("Upgrade heights writing enabled")
+	}
+	if args.OverwriteStateRoot {
+		slog.Info("State root overwriting enabled")
+	}
+	var dbOpener func(string) (blockdb.RocksDB, error)
+	if args.OverwriteStateRoot || args.WriteUpgradeHeights {
+		dbOpener = blockdb.OpenRocksDBForWriting
+	} else {
+		dbOpener = blockdb.OpenRocksDBForReading
+	}
+	blockDb, err := dbOpener(args.BlockDBDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open database: %w", err)
+	}
+	cleanup := func() error {
+		return blockDb.Close()
+	}
+	return blockDb, cleanup, nil
 }
 
 // runReplayLoop processes the blocks from the given iterator, applying them

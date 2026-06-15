@@ -109,7 +109,32 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 
 func TestReplay_FailsIfStartBlockIsProvidedWithoutStateDbDir(t *testing.T) {
 	require := require.New(t)
-	err := Replay(t.Context(), ReplayArgs{StartBlock: 1000, Interpreter: "sfvm"})
+
+	dir := t.TempDir()
+	genesis := filepath.Join(dir, "genesis.json")
+	require.NoError(os.WriteFile(genesis, []byte(`{"Rules": {"NetworkID": 123}}`), 0644))
+
+	dbPath := filepath.Join(dir, "block-db")
+	options := grocksdb.NewDefaultOptions()
+	options.SetCreateIfMissing(true)
+	defer options.Destroy()
+	db, err := grocksdb.OpenDb(options, dbPath)
+	require.NoError(err)
+
+	writeOptions := grocksdb.NewDefaultWriteOptions()
+	defer writeOptions.Destroy()
+	version := make([]byte, 8)
+	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
+	require.NoError(db.Put(writeOptions, blockdb.MakeVersionKey(), version))
+
+	db.Close()
+
+	err = Replay(t.Context(), ReplayArgs{
+		BlockDBDir:      dbPath,
+		JSONGenesisFile: genesis,
+		StartBlock:      1000,
+		Interpreter:     "sfvm",
+	})
 	require.ErrorContains(
 		err,
 		"existing state or initial database directory must be specified when starting from a non-genesis block",
