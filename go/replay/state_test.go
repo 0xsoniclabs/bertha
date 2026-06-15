@@ -32,6 +32,7 @@ import (
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/opera"
+	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
@@ -210,7 +211,7 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	receipts, err := state.ApplyBlock(block, processor, opera.Upgrades{}, nil, chainConfig, nil)
+	receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 }
@@ -244,7 +245,7 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, processor, opera.Upgrades{}, nil, chainConfig, nil)
+	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil)
 	require.ErrorContains(t, err, "skipped txs")
 }
 
@@ -278,7 +279,7 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	receipts, err := state.ApplyBlock(block, processor, opera.Upgrades{}, corrections[17], chainConfig, nil)
+	receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, corrections[17], chainConfig, nil)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 
@@ -368,7 +369,7 @@ func TestState_ApplyBlock_BlobBaseFeeIsCalculatedFromHeaderForEthereum(t *testin
 				tt.upgrades,
 			)
 
-			_, err = state.ApplyBlock(block, processor, tt.upgrades, nil, tt.chainConfig, nil)
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, tt.upgrades, nil, tt.chainConfig, nil)
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)
 			} else {
@@ -426,7 +427,7 @@ func TestState_ApplyBlock_ApplySonicVmConfigIfNotEthereumChain(t *testing.T) {
 
 			processor := evmcore.NewStateProcessorForReplay(tt.chainConfig, &blockHashHistory{}, opera.Upgrades{})
 
-			receipts, err := state.ApplyBlock(block, processor, opera.Upgrades{}, nil, tt.chainConfig, nil)
+			receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, tt.chainConfig, nil)
 			if tt.wantSkipped {
 				require.ErrorContains(t, err, "skipped txs")
 			} else {
@@ -475,7 +476,7 @@ func TestState_ApplyBlock_EthereumCancunBlock_AppliesEIP4788(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, processor, opera.Upgrades{}, nil, chainConfig, nil)
+	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil)
 	require.NoError(t, err)
 
 	// EIP-4788 stores the beacon root at storage slot (timestamp % 8191) + 8191.
@@ -528,7 +529,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7002(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, processor, opera.Upgrades{}, nil, chainConfig, nil)
+	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil)
 	require.NoError(t, err)
 
 	// Verify the main side effects of the system calls:
@@ -582,7 +583,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7251(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, processor, opera.Upgrades{}, nil, chainConfig, nil)
+	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil)
 	require.NoError(t, err)
 
 	// Verify the main side effects of the system calls:
@@ -645,7 +646,7 @@ func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChains(t *testing.T) {
 				tt.upgrades,
 			)
 
-			_, err = state.ApplyBlock(block, processor, tt.upgrades, nil, tt.chainConfig, nil)
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, tt.upgrades, nil, tt.chainConfig, nil)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.wantBalanceWei, state.db.GetBalance(cc.Address(withdrawalAddr)).Uint64())
@@ -679,4 +680,11 @@ func TestState_setBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
 	state.setBalance(addr, balance)
 	have = state.db.GetBalance(cc.Address(addr))
 	require.Equal(t, uint64(750), have.Uint64())
+}
+
+func testInterpreter(t *testing.T) tosca.Interpreter {
+	t.Helper()
+	interpreter, err := tosca.NewInterpreter("sfvm")
+	require.NoError(t, err)
+	return interpreter
 }

@@ -32,6 +32,7 @@ import (
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/bertha/verify"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
+	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/0xsoniclabs/tracy"
 	"github.com/urfave/cli/v3"
 )
@@ -59,6 +60,7 @@ func getApp() *cli.Command {
 					initDBFlag,
 					keepDBFlag,
 					withArchiveFlag,
+					interpreterFlag,
 					dbSchema,
 					dbVariant,
 					startBlockFlag,
@@ -225,6 +227,12 @@ var (
 		Value: true,
 	}
 
+	interpreterFlag = &cli.StringFlag{
+		Name:  "interpreter",
+		Usage: "Interpreter to use (" + strings.Join(getListOfInterpreters(), ", ") + ")",
+		Value: "sfvm",
+	}
+
 	snapshotInterval = &cli.Uint64Flag{
 		Name:    "snapshot-interval",
 		Aliases: []string{"si"},
@@ -295,6 +303,15 @@ func getListOfCarmenVariants() []string {
 	return slices.Sorted(maps.Keys(variants))
 }
 
+// getListOfInterpreters returns a sorted list of all registered interpreters.
+func getListOfInterpreters() []string {
+	interpreters := map[string]struct{}{}
+	for name := range tosca.GetAllRegisteredInterpreters() {
+		interpreters[name] = struct{}{}
+	}
+	return slices.Sorted(maps.Keys(interpreters))
+}
+
 func parseReplayArgsAndRunReplay(ctx context.Context, c *cli.Command) error {
 	args := replay.ReplayArgs{
 		JSONGenesisFile:     c.String(jsonGenesisFlag.Name),
@@ -306,6 +323,7 @@ func parseReplayArgsAndRunReplay(ctx context.Context, c *cli.Command) error {
 		DBSchema:            carmen.Schema(c.Int(dbSchema.Name)),
 		DBVariant:           carmen.Variant(c.String(dbVariant.Name)),
 		UsePipeline:         c.Bool(usePipelineFlag.Name),
+		Interpreter:         c.String(interpreterFlag.Name),
 		StartBlock:          c.Uint64(startBlockFlag.Name),
 		EndBlock:            c.Uint64(endBlockFlag.Name),
 		SnapshotInterval:    c.Uint64(snapshotInterval.Name),
