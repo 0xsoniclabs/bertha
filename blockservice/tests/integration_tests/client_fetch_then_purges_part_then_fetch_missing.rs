@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-use std::{io::Cursor, vec};
+use std::io::Cursor;
 
 use blockservice::cli::Command;
 
@@ -26,7 +26,7 @@ use crate::test_utils::{
 /// Using multi-threaded runtime so that client and server are executed in parallel and not just
 /// concurrently because this simulates the real world usage.
 #[tokio::test(flavor = "multi_thread")]
-async fn client_fetches_and_purges_data_and_fetches_again() {
+async fn client_fetch_then_purges_part_then_fetch_missing() {
     const CHAIN_ID: u64 = 146;
     let server_dir = tempfile::tempdir().unwrap();
     let server = IntegrationTestServer::new(
@@ -42,7 +42,7 @@ async fn client_fetches_and_purges_data_and_fetches_again() {
     .await;
 
     // Init client
-    let client_dir = init_blockservice(None, [make_default_sonic_chain_config()].as_slice())
+    let client_dir = init_blockservice(None, &[make_default_sonic_chain_config()])
         .await
         .expect("blockservice should initialize");
 
@@ -69,7 +69,7 @@ async fn client_fetches_and_purges_data_and_fetches_again() {
         "}
     );
 
-    // Fetch all SONIC blocks from the server
+    // Fetch blocks from the server
     let CommandExecutionOutput { result, log } = execute_command(
         Command::Fetch {
             url: server.uri(),
@@ -85,8 +85,8 @@ async fn client_fetches_and_purges_data_and_fetches_again() {
     .await;
     assert!(result.is_ok(), "fetch should succeed");
     assert_eq!(
-        String::from_utf8_lossy(&log),
-        "Fetched and wrote 10 blocks, total uncompressed size: 0 MiB\n"
+        log,
+        b"Fetched and wrote 10 blocks, total uncompressed size: 0 MiB\n"
     );
 
     // List blocks in the client
@@ -127,8 +127,8 @@ async fn client_fetches_and_purges_data_and_fetches_again() {
     .await;
     assert!(result.is_ok(), "purge should succeed");
     assert_eq!(
-        String::from_utf8_lossy(&log),
-        "Purging 4 blocks in range 5 - 8 for chain ID 146. Are you sure you want to continue? (y/n): Blocks successfully purged\n"
+        log,
+        b"Purging 4 blocks in range 5 - 8 for chain ID 146. Are you sure you want to continue? (y/n): Blocks successfully purged\n"
     );
 
     // List blocks in the client after purge
@@ -155,7 +155,7 @@ async fn client_fetches_and_purges_data_and_fetches_again() {
         "}
     );
 
-    // Repeat the fetch command to fix the local database
+    // Fetch blocks again from the server, which should only fetch the missing blocks (5-8)
     let CommandExecutionOutput { result, log } = execute_command(
         Command::Fetch {
             url: server.uri(),
@@ -171,8 +171,8 @@ async fn client_fetches_and_purges_data_and_fetches_again() {
     .await;
     assert!(result.is_ok(), "fetch should succeed");
     assert_eq!(
-        String::from_utf8_lossy(&log),
-        "Fetched and wrote 4 blocks, total uncompressed size: 0 MiB\n"
+        log,
+        b"Fetched and wrote 4 blocks, total uncompressed size: 0 MiB\n"
     );
 
     // List blocks in the client

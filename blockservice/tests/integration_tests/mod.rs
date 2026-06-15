@@ -14,10 +14,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-mod client_connects_to_unavailable_server;
-mod client_fetches_and_prints_out_a_block;
-mod client_fetches_and_purges_data_and_fetches_again_to_restore_db;
-mod client_fetches_and_verifies_blocks;
-mod client_fetches_blocks_already_in_local_db;
-mod client_fetches_metadata_and_prints;
+mod client_connect_to_unavailable_server_fails;
+mod client_fetch_then_fetch_again_is_noop;
+mod client_fetch_then_purges_part_then_fetch_missing;
+mod client_fetch_then_verify_then_fetch_more_then_verify;
+mod client_list_remote_then_fetch_metadata_then_list_then_view_metadata;
+mod client_list_remote_then_fetch_then_list_then_view;
 mod multiple_clients_fetch_blocks_from_the_same_server_concurrently;

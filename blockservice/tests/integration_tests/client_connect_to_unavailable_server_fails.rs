@@ -21,7 +21,7 @@ use crate::test_utils::{
 };
 
 #[tokio::test]
-async fn client_connects_to_unavailable_server() {
+async fn client_connect_to_unavailable_server_fails() {
     let client_dir = init_blockservice(None, &[make_default_sonic_chain_config()])
         .await
         .expect("blockservice should initialize");

@@ -16,7 +16,6 @@
 
 use std::vec;
 
-use bertha_types::Block;
 use blockservice::cli::Command;
 
 use crate::test_utils::{
@@ -27,7 +26,7 @@ use crate::test_utils::{
 /// Using multi-threaded runtime so that client and server are executed in parallel and not just
 /// concurrently because this simulates the real world usage.
 #[tokio::test(flavor = "multi_thread")]
-async fn client_fetches_and_prints_out_a_block() {
+async fn client_fetch_then_verify_then_fetch_more_then_verify() {
     const CHAIN_ID: u64 = 146;
     let server_dir = tempfile::tempdir().unwrap();
     let server = IntegrationTestServer::new(
@@ -35,11 +34,8 @@ async fn client_fetches_and_prints_out_a_block() {
         vec![make_snapshot_file(
             server_dir.path(), // workdir
             CHAIN_ID,          // CHAIN_ID
-            5,                 // num_blocks
-            &[Block {
-                number: 5,
-                ..Block::default_sonic()
-            }], // extra_blocks
+            30,                // num_blocks
+            &[],               // extra_blocks
         )],
         None, // Chain config
     )
@@ -53,7 +49,7 @@ async fn client_fetches_and_prints_out_a_block() {
     // List remote chains
     let CommandExecutionOutput { result, log } = execute_command(
         Command::List {
-            chain_id: Some(CHAIN_ID),
+            chain_id: None,
             url: Some(server.uri()),
         },
         &client_dir,
@@ -69,17 +65,17 @@ async fn client_fetches_and_prints_out_a_block() {
         [146] SONIC: SONIC test chain
         ├── upgrade heights: no
         ├── corrections: no
-        └── 0 - 5
+        └── 0 - 29
         "}
     );
 
-    // Fetch block 5
+    // Fetch the first 10 blocks
     let CommandExecutionOutput { result, log } = execute_command(
         Command::Fetch {
             url: server.uri(),
             chain_id: CHAIN_ID,
-            from: Some(5),
-            to: Some(5),
+            from: None,
+            to: Some(9),
         },
         &client_dir,
         None,
@@ -89,15 +85,16 @@ async fn client_fetches_and_prints_out_a_block() {
     .await;
     assert!(result.is_ok(), "fetch should succeed");
     assert_eq!(
-        String::from_utf8_lossy(&log),
-        "Fetched and wrote 1 blocks, total uncompressed size: 0 MiB\n"
+        log,
+        b"Fetched and wrote 10 blocks, total uncompressed size: 0 MiB\n"
     );
 
-    // Visualize the block
+    // Verify the fetched blocks
     let CommandExecutionOutput { result, log } = execute_command(
-        Command::View {
+        Command::Verify {
             chain_id: CHAIN_ID,
-            block_number: 5,
+            block_number: Some(0),
+            block_hash: None,
         },
         &client_dir,
         None,
@@ -105,32 +102,42 @@ async fn client_fetches_and_prints_out_a_block() {
         None,
     )
     .await;
-    assert!(result.is_ok(), "view should succeed");
-    //
+    assert!(result.is_ok(), "verify should succeed");
+    assert_eq!(log, b"[chain ID 146] Blocks verified successfully.\n");
+
+    // Fetch the next 20 blocks
+    let CommandExecutionOutput { result, log } = execute_command(
+        Command::Fetch {
+            url: server.uri(),
+            chain_id: CHAIN_ID,
+            from: Some(10),
+            to: Some(29),
+        },
+        &client_dir,
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert!(result.is_ok(), "fetch should succeed");
     assert_eq!(
-        String::from_utf8_lossy(&log),
-        r#"{
-  "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-  "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
-  "miner": "0x0000000000000000000000000000000000000000",
-  "stateRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
-  "difficulty": "0x0",
-  "number": "0x5",
-  "gasLimit": "0x0",
-  "timestamp": "0x0",
-  "extraData": "0x000000000000000000000000",
-  "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-  "nonce": "0x0000000000000000",
-  "transactions": [],
-  "receipts": [],
-  "baseFeePerGas": "0x0",
-  "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-  "blobGasUsed": "0x0",
-  "excessBlobGas": "0x0",
-  "parentBeaconBlockRoot": null,
-  "requestsHash": null,
-  "withdrawals": []
-}
-"#
+        log,
+        b"Fetched and wrote 20 blocks, total uncompressed size: 0 MiB\n"
     );
+
+    // Verify the fetched SONIC blocks
+    let CommandExecutionOutput { result, log } = execute_command(
+        Command::Verify {
+            chain_id: CHAIN_ID,
+            block_number: Some(10),
+            block_hash: None,
+        },
+        &client_dir,
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert!(result.is_ok(), "verify should succeed");
+    assert_eq!(log, b"[chain ID 146] Blocks verified successfully.\n");
 }
