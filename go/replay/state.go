@@ -34,6 +34,8 @@ import (
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"
 	"github.com/0xsoniclabs/sonic/inter"
 	"github.com/0xsoniclabs/sonic/opera"
+	"github.com/0xsoniclabs/tosca/go/geth_adapter"
+	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/0xsoniclabs/tracy"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
@@ -157,6 +159,7 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 // in the block, or an error if the block could not be processed.
 func (s *State) ApplyBlock(
 	block *types.Block,
+	interpreter tosca.Interpreter,
 	processor *evmcore.StateProcessor,
 	upgrades opera.Upgrades,
 	corrections map[common.Address]Correction,
@@ -188,6 +191,7 @@ func (s *State) ApplyBlock(
 		// Apply Sonic-specific VM settings that are not applicable to Ethereum chains.
 		vmConfig = opera.GetVmConfig(opera.Rules{Upgrades: upgrades})
 	}
+	vmConfig.Interpreter = geth_adapter.NewGethInterpreterFactory(interpreter)
 
 	zone := tracy.ZoneBegin("TransactionProcessing")
 	s.db.BeginBlock()

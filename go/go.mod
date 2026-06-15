@@ -22,6 +22,7 @@ require github.com/linxGnu/grocksdb v1.8.12
 
 require (
 	github.com/0xsoniclabs/carmen/go v0.0.0-20260512102324-2d892af38ce4
+	github.com/0xsoniclabs/tosca v0.0.0-20260429071638-3f4119284c42
 	github.com/0xsoniclabs/sonic v0.0.0-20260609140915-f1d673a668b6
 	github.com/0xsoniclabs/tracy v0.0.0-20251027125423-00a5ab7968fb
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
@@ -34,7 +35,6 @@ require (
 )
 
 require (
-	github.com/0xsoniclabs/tosca v0.0.0-20260429071638-3f4119284c42 // indirect
 	github.com/DataDog/zstd v1.5.7 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/ProjectZKM/Ziren/crates/go-runtime/zkvm_runtime v0.0.0-20260416073033-7c2071eaa8d4 // indirect

@@ -49,6 +49,7 @@ import (
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver/drivercall"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver/driverpos"
+	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/0xsoniclabs/tracy"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
@@ -70,6 +71,7 @@ type ReplayArgs struct {
 	DBSchema            carmen.Schema
 	DBVariant           carmen.Variant
 	UsePipeline         bool
+	Interpreter         string
 	StartBlock          uint64
 	EndBlock            uint64
 	SnapshotInterval    uint64
@@ -85,6 +87,13 @@ type ReplayArgs struct {
 }
 
 func Replay(ctx context.Context, args ReplayArgs) (err error) {
+	slog.Info("Replay configuration",
+		"interpreter", args.Interpreter,
+		"db_schema", args.DBSchema,
+		"db_variant", args.DBVariant,
+		"pipeline", args.UsePipeline,
+	)
+
 	snapshotHandler := NewSnapshotHandler(args.SnapshotInterval, args.SnapshotStartBlock, args.SnapshotEndBlock, args.SnapshotNumToKeep)
 
 	slog.Info("Loading genesis file", "file", args.JSONGenesisFile)
@@ -203,6 +212,11 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
 	}
 
+	interpreter, err := tosca.NewInterpreter(args.Interpreter)
+	if err != nil {
+		return fmt.Errorf("failed to create interpreter %q: %w", args.Interpreter, err)
+	}
+
 	// Open State Database in new directory.
 	params := StateParameters{
 		Directory:   args.StateDBDir,
@@ -219,6 +233,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		chainID:          chainID,
 		metadataStore:    metadataStore,
 		blockHashHistory: &blockHashHistory{},
+		interpreter:      interpreter,
 		state:            state,
 		schema:           args.DBSchema,
 		snapshotHandler:  snapshotHandler,
@@ -607,6 +622,7 @@ type stateChainAdapter struct {
 	chainID          uint64
 	metadataStore    MetadataStore
 	blockHashHistory *blockHashHistory
+	interpreter      tosca.Interpreter
 	state            *State
 	stateRwMutex     sync.Mutex
 	schema           carmen.Schema
@@ -695,7 +711,7 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	onLog := func(l *core_types.Log) { onNewLog(a.metadataStore, block.NumberU64(), l) }
 
 	// Apply the block to the state database.
-	receipts, err := a.state.ApplyBlock(block, processor, upgrades, corrections, chainConfig, onLog)
+	receipts, err := a.state.ApplyBlock(block, a.interpreter, processor, upgrades, corrections, chainConfig, onLog)
 	if err != nil {
 		stateRoot := future.Future[result.Result[common.Hash]]{}
 		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)

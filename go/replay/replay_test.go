@@ -89,6 +89,7 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 		Replay(t.Context(), ReplayArgs{
 			BlockDBDir:      path,
 			JSONGenesisFile: genesis,
+			Interpreter:     "sfvm",
 			DBSchema:        5,
 			DBVariant:       "go-file",
 		}),
@@ -99,6 +100,7 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 			BlockDBDir:      path,
 			JSONGenesisFile: genesis,
 			WithArchive:     true,
+			Interpreter:     "sfvm",
 			DBSchema:        5,
 			DBVariant:       "go-file",
 		}),
@@ -107,7 +109,7 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 
 func TestReplay_FailsIfStartBlockIsProvidedWithoutStateDbDir(t *testing.T) {
 	require := require.New(t)
-	err := Replay(t.Context(), ReplayArgs{StartBlock: 1000})
+	err := Replay(t.Context(), ReplayArgs{StartBlock: 1000, Interpreter: "sfvm"})
 	require.ErrorContains(
 		err,
 		"existing state or initial database directory must be specified when starting from a non-genesis block",
