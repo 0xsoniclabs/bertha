@@ -107,88 +107,8 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 	defer func() { err = errors.Join(err, blockDbCleanup()) }()
 
-	snapshotHandler := NewSnapshotHandler(args.SnapshotInterval, args.SnapshotStartBlock, args.SnapshotEndBlock, args.SnapshotNumToKeep)
-
+	// Load genesis data
 	slog.Info("Loading genesis file", "file", args.JSONGenesisFile)
-	// Create a temporary directory for the state database
-	if args.StateDBDir == "" {
-		if args.StartBlock > 0 && args.InitDBDir == "" {
-			return fmt.Errorf("existing state or initial database directory must be specified when starting from a non-genesis block")
-		}
-		args.StateDBDir = os.TempDir()
-		args.StateDBDir, err = os.MkdirTemp(args.StateDBDir, "replay_chain_state_")
-	}
-	if err != nil {
-		return fmt.Errorf("failed to create temporary state database directory: %w", err)
-	}
-	slog.Info("Creating state database", "directory", args.StateDBDir)
-	if args.InitDBDir != "" {
-		slog.Info("Copying initial state database", "source_directory", args.InitDBDir, "destination_directory", args.StateDBDir)
-		if isEmpty, err := utils.IsEmptyOrMissingDir(args.StateDBDir); err != nil {
-			return fmt.Errorf("failed to check if state database directory %q is empty: %w", args.StateDBDir, err)
-		} else if !isEmpty {
-			return fmt.Errorf("state database directory %q is not empty. Please specify an empty directory to be initialized or use a temporary directory", args.StateDBDir)
-		}
-		err = os.CopyFS(args.StateDBDir, os.DirFS(args.InitDBDir))
-		if err != nil {
-			return fmt.Errorf("failed to copy initial state database %q in destination directory %q: %w", args.InitDBDir, args.StateDBDir, err)
-		}
-	}
-
-	if !args.KeepDB {
-		slog.Warn("State database will be deleted after replay (use --keep-db to keep it)")
-		defer func() {
-			slog.Info("Removing state database directory", "directory", args.StateDBDir)
-			err = errors.Join(err, os.RemoveAll(args.StateDBDir))
-			snapshotDirs := snapshotHandler.GetSnapshotDirs(args.StateDBDir)
-			if len(snapshotDirs) > 0 {
-				if err == nil || errors.Is(err, context.Canceled) {
-					for _, dir := range snapshotDirs {
-						slog.Info("Removing state database snapshot directory", "directory", dir)
-						err = errors.Join(err, os.RemoveAll(dir))
-					}
-				} else {
-					slog.Info("Replay terminated with error")
-					for _, dir := range snapshotDirs {
-						slog.Info("Available snapshot", "directory", dir)
-					}
-				}
-			}
-		}()
-
-	}
-
-	if args.SnapshotInterval > 0 {
-		matches, err := filepath.Glob(args.StateDBDir + "_snapshot_*")
-		if err != nil {
-			return fmt.Errorf("failed to check existing snapshots in state database directory %q: %w", args.StateDBDir, err)
-		}
-		if len(matches) > 0 {
-			slog.Warn("Existing snapshots found for state database directory", "directory", args.StateDBDir, "snapshots_found", len(matches))
-			if !args.ConfirmAllPrompts {
-				fmt.Printf("Do you want to delete the existing snapshots and continue (y/n)? ")
-				var response string
-				if _, err := fmt.Scanln(&response); err != nil {
-					return fmt.Errorf("failed to read user input: %w", err)
-				}
-				if strings.ToLower(strings.TrimSpace(response)) != "y" {
-					slog.Error("Execution aborted by the user")
-					return nil
-				}
-			}
-		}
-
-		end := fmt.Sprintf("%d", args.SnapshotEndBlock)
-		if args.SnapshotEndBlock == math.MaxUint64 {
-			end = "max"
-		}
-		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", args.SnapshotInterval, "start_block", args.SnapshotStartBlock, "end_block", end, "snapshots_to_keep", args.SnapshotNumToKeep)
-		if strings.Contains(string(args.DBVariant), "flat") {
-			slog.Warn("Snapshots are currently not supported with flat database variants; consider disabling snapshots or using a different variant")
-		}
-	}
-
-	// Load genesis data from the specified file.
 	genesis, err := ReadGenesisFromFile(args.JSONGenesisFile)
 	if err != nil {
 		return fmt.Errorf("failed to read genesis file %q: %w", args.JSONGenesisFile, err)
@@ -205,7 +125,20 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		return fmt.Errorf("failed to create interpreter %q: %w", args.Interpreter, err)
 	}
 
-	// Open State Database in new directory.
+	// Prepare the state database directory
+	snapshotHandler, err := prepareStateDbDir(&args)
+	if err != nil {
+		return fmt.Errorf("failed to prepare state database directory: %w", err)
+	}
+	if snapshotHandler == nil {
+		return // aborted by user input
+	}
+	if !args.KeepDB {
+		slog.Warn("State database will be deleted after replay (use --keep-db to keep it)")
+		defer func() { err = errors.Join(err, cleanupStateDbDir(&args, snapshotHandler, err)) }()
+	}
+
+	// Open the state database
 	params := StateParameters{
 		Directory:   args.StateDBDir,
 		WithArchive: args.WithArchive,
@@ -215,7 +148,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 
 	state, err := NewState(params)
 	if err != nil {
-		return fmt.Errorf("failed to create state: %w", err)
+		return fmt.Errorf("failed to open state database: %w", err)
 	}
 	chain := &stateChainAdapter{
 		chainID:          chainID,
@@ -229,7 +162,12 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	// Because snapshots invalidate the state, we need to close it here.
 	defer func() {
 		slog.Info("Closing state database", "directory", args.StateDBDir)
-		err = errors.Join(err, chain.state.Close())
+		// The state needs to be accessed through the stateChainAdapter
+		// because it might have been closed and reopened for a snapshot creation.
+		// The stateChainAdapter always holds the currently open state.
+		if chain.state != nil {
+			err = errors.Join(err, chain.state.Close())
+		}
 	}()
 
 	// Prepare the state
@@ -285,6 +223,91 @@ func openBlockDb(args *ReplayArgs) (blockdb.BlockDB, func() error, error) {
 		return blockDb.Close()
 	}
 	return blockDb, cleanup, nil
+}
+
+func prepareStateDbDir(args *ReplayArgs) (*SnapshotHandler, error) {
+	if args.SnapshotInterval > 0 && args.SnapshotNumToKeep == 0 {
+		return nil, fmt.Errorf("snapshot interval %d is incompatible with --snapshot-num-to-keep=0", args.SnapshotInterval)
+	}
+
+	// If the state database directory is not specified, create a temporary directory.
+	var err error
+	if args.StateDBDir == "" {
+		if args.StartBlock > 0 && args.InitDBDir == "" {
+			return nil, fmt.Errorf("existing state or initial database directory must be specified when starting from a non-genesis block")
+		}
+		args.StateDBDir = os.TempDir()
+		args.StateDBDir, err = os.MkdirTemp(args.StateDBDir, "replay_chain_state_")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temporary state database directory: %w", err)
+		}
+	}
+	slog.Info("Creating state database", "directory", args.StateDBDir)
+	if args.InitDBDir != "" {
+		slog.Info("Copying initial state database", "src", args.InitDBDir, "dest", args.StateDBDir)
+		if isEmpty, err := utils.IsEmptyOrMissingDir(args.StateDBDir); err != nil {
+			return nil, fmt.Errorf("failed to check if state database directory %q is empty: %w", args.StateDBDir, err)
+		} else if !isEmpty {
+			return nil, fmt.Errorf("state database directory %q is not empty. Please specify an empty directory to be initialized or use a temporary directory", args.StateDBDir)
+		}
+		err = os.CopyFS(args.StateDBDir, os.DirFS(args.InitDBDir))
+		if err != nil {
+			return nil, fmt.Errorf("failed to copy initial state database %q in destination directory %q: %w", args.InitDBDir, args.StateDBDir, err)
+		}
+	}
+
+	snapshotHandler := NewSnapshotHandler(args.SnapshotInterval, args.SnapshotStartBlock, args.SnapshotEndBlock, args.SnapshotNumToKeep)
+
+	if args.SnapshotInterval > 0 {
+		matches, err := filepath.Glob(args.StateDBDir + "_snapshot_*")
+		if err != nil {
+			return nil, fmt.Errorf("failed to check existing snapshots in state database directory %q: %w", args.StateDBDir, err)
+		}
+		if len(matches) > 0 {
+			slog.Warn("Existing snapshots found for state database directory", "directory", args.StateDBDir, "snapshots_found", len(matches))
+			if !args.ConfirmAllPrompts {
+				fmt.Printf("Do you want to delete the existing snapshots and continue (y/n)? ")
+				var response string
+				if _, err := fmt.Scanln(&response); err != nil {
+					return nil, fmt.Errorf("failed to read user input: %w", err)
+				}
+				if strings.ToLower(strings.TrimSpace(response)) != "y" {
+					slog.Error("Execution aborted by the user")
+					return nil, nil
+				}
+			}
+		}
+
+		end := fmt.Sprintf("%d", args.SnapshotEndBlock)
+		if args.SnapshotEndBlock == math.MaxUint64 {
+			end = "max"
+		}
+		slog.Info("Intermediate state database snapshots enabled", "interval_blocks", args.SnapshotInterval, "start_block", args.SnapshotStartBlock, "end_block", end, "snapshots_to_keep", args.SnapshotNumToKeep)
+		if strings.Contains(string(args.DBVariant), "flat") {
+			slog.Warn("Snapshots are currently not supported with flat database variants; consider disabling snapshots or using a different variant")
+		}
+	}
+	return snapshotHandler, nil
+}
+
+func cleanupStateDbDir(args *ReplayArgs, snapshotHandler *SnapshotHandler, outerError error) error {
+	slog.Info("Removing state database directory", "directory", args.StateDBDir)
+	err := os.RemoveAll(args.StateDBDir)
+	snapshotDirs := snapshotHandler.GetSnapshotDirs(args.StateDBDir)
+	if len(snapshotDirs) > 0 {
+		if outerError == nil || errors.Is(outerError, context.Canceled) {
+			for _, dir := range snapshotDirs {
+				slog.Info("Removing state database snapshot directory", "directory", dir)
+				err = errors.Join(err, os.RemoveAll(dir))
+			}
+		} else {
+			slog.Info("Replay terminated with error")
+			for _, dir := range snapshotDirs {
+				slog.Info("Available snapshot", "directory", dir)
+			}
+		}
+	}
+	return err
 }
 
 func prepareState(args *ReplayArgs, chain *stateChainAdapter, genesis *Genesis) error {
