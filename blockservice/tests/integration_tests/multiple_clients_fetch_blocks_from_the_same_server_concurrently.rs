@@ -44,7 +44,7 @@ async fn multiple_clients_fetch_blocks_from_the_same_server_concurrently() {
 
     let url = server.uri();
     let fetch_blocks = async |from, to| {
-        let client_dir = init_blockservice(None, [make_default_sonic_chain_config()].as_slice())
+        let client_dir = init_blockservice(None, &[make_default_sonic_chain_config()])
             .await
             .expect("blockservice should initialize");
 

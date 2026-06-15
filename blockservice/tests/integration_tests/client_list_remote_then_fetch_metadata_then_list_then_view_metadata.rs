@@ -14,36 +14,65 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Sonic. If not, see <http://www.gnu.org/licenses/>.
 
-use std::vec;
-
 use blockservice::cli::Command;
 
 use crate::test_utils::{
     CommandExecutionOutput, IntegrationTestServer, execute_command, init_blockservice,
-    make_default_sonic_chain_config, make_snapshot_file,
+    make_default_sonic_chain_config,
 };
 
 /// Using multi-threaded runtime so that client and server are executed in parallel and not just
 /// concurrently because this simulates the real world usage.
 #[tokio::test(flavor = "multi_thread")]
-async fn client_fetches_and_verifies_blocks() {
+async fn client_list_remote_then_fetch_metadata_then_list_then_view_metadata() {
     const CHAIN_ID: u64 = 146;
     let server_dir = tempfile::tempdir().unwrap();
-    let server = IntegrationTestServer::new(
+
+    // Initialize the server blockservice
+    init_blockservice(
+        Some(server_dir.path()),
+        &[make_default_sonic_chain_config()],
+    )
+    .await
+    .expect("blockservice should initialize");
+
+    // Import upgrade heights
+    let file = server_dir.path().join("upgrade-heights");
+    std::fs::write(&file, b"upgrade-heights").unwrap();
+    let CommandExecutionOutput { result, .. } = execute_command(
+        Command::ImportUpgradeHeights {
+            chain_id: CHAIN_ID,
+            file,
+        },
         server_dir.path(),
-        vec![make_snapshot_file(
-            server_dir.path(), // workdir
-            CHAIN_ID,          // CHAIN_ID
-            30,                // num_blocks
-            &[],               // extra_blocks
-        )],
-        None, // Chain config
+        None,
+        None,
+        None,
     )
     .await;
+    assert!(result.is_ok());
+
+    // Import corrections
+    let file = server_dir.path().join("corrections");
+    std::fs::write(&file, b"corrections").unwrap();
+    let CommandExecutionOutput { result, .. } = execute_command(
+        Command::ImportCorrections {
+            chain_id: CHAIN_ID,
+            file,
+        },
+        server_dir.path(),
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert!(result.is_ok());
+
+    // Start the server
+    let server = IntegrationTestServer::new(server_dir.path(), vec![], None).await;
 
     // Init client
-
-    let client_dir = init_blockservice(None, [make_default_sonic_chain_config()].as_slice())
+    let client_dir = init_blockservice(None, &[make_default_sonic_chain_config()])
         .await
         .expect("blockservice should initialize");
 
@@ -59,24 +88,22 @@ async fn client_fetches_and_verifies_blocks() {
         None,
     )
     .await;
-    assert!(result.is_ok(), "list should succeed");
+    assert!(result.is_ok());
     assert_eq!(
         String::from_utf8_lossy(&log),
         indoc::indoc! {"
         [146] SONIC: SONIC test chain
-        ├── upgrade heights: no
-        ├── corrections: no
-        └── 0 - 29
+        ├── upgrade heights: yes
+        ├── corrections: yes
+        └── no blocks
         "}
     );
 
-    // Fetch the first 10 blocks from the SONIC chain
-    let CommandExecutionOutput { result, log } = execute_command(
-        Command::Fetch {
+    // Fetch metadata
+    let CommandExecutionOutput { result, .. } = execute_command(
+        Command::FetchMetadata {
             url: server.uri(),
             chain_id: CHAIN_ID,
-            from: None,
-            to: Some(9),
         },
         &client_dir,
         None,
@@ -84,67 +111,52 @@ async fn client_fetches_and_verifies_blocks() {
         None,
     )
     .await;
-    assert!(result.is_ok(), "fetch should succeed");
+    assert!(result.is_ok());
+
+    // List local chains
+    let CommandExecutionOutput { result, log } = execute_command(
+        Command::List {
+            chain_id: None,
+            url: None,
+        },
+        &client_dir,
+        None,
+        None,
+        None,
+    )
+    .await;
+    assert!(result.is_ok());
     assert_eq!(
         String::from_utf8_lossy(&log),
-        "Fetched and wrote 10 blocks, total uncompressed size: 0 MiB\n"
+        indoc::indoc! {"
+        [146] SONIC: SONIC test chain
+        ├── upgrade heights: yes
+        ├── corrections: yes
+        └── no blocks
+        "}
     );
 
-    // Verify the fetched SONIC blocks
+    // Print the upgrade-heights
     let CommandExecutionOutput { result, log } = execute_command(
-        Command::Verify {
-            chain_id: CHAIN_ID,
-            block_number: Some(0),
-            block_hash: None,
-        },
+        Command::ViewUpgradeHeights { chain_id: CHAIN_ID },
         &client_dir,
         None,
         None,
         None,
     )
     .await;
-    assert!(result.is_ok(), "verify should succeed");
-    assert_eq!(
-        String::from_utf8_lossy(&log),
-        "[chain ID 146] Blocks verified successfully.\n"
-    );
+    assert!(result.is_ok());
+    assert_eq!(log, b"upgrade-heights\n");
 
-    // Fetch the next 20 blocks from the SONIC chain
+    // Print the corrections
     let CommandExecutionOutput { result, log } = execute_command(
-        Command::Fetch {
-            url: server.uri(),
-            chain_id: CHAIN_ID,
-            from: Some(10),
-            to: Some(29),
-        },
+        Command::ViewCorrections { chain_id: CHAIN_ID },
         &client_dir,
         None,
         None,
         None,
     )
     .await;
-    assert!(result.is_ok(), "fetch should succeed");
-    assert_eq!(
-        String::from_utf8_lossy(&log),
-        "Fetched and wrote 20 blocks, total uncompressed size: 0 MiB\n"
-    );
-
-    // Verify the fetched SONIC blocks
-    let CommandExecutionOutput { result, log } = execute_command(
-        Command::Verify {
-            chain_id: CHAIN_ID,
-            block_number: Some(10),
-            block_hash: None,
-        },
-        &client_dir,
-        None,
-        None,
-        None,
-    )
-    .await;
-    assert!(result.is_ok(), "verify should succeed");
-    assert_eq!(
-        String::from_utf8_lossy(&log),
-        "[chain ID 146] Blocks verified successfully.\n"
-    );
+    assert!(result.is_ok());
+    assert_eq!(log, b"corrections\n");
 }
