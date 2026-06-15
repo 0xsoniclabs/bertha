@@ -236,20 +236,10 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		err = errors.Join(err, chain.state.Close())
 	}()
 
-	if args.StartBlock == 0 {
-		slog.Info("Starting replay from genesis")
-		// Apply genesis data to the state database.
-		if err := state.ApplyGenesis(genesis); err != nil {
-			return fmt.Errorf("failed to apply genesis data: %w", err)
-		}
-	} else {
-		slog.Info("Starting replay from block", "block_number", args.StartBlock)
+	// Prepare the state
+	if err := prepareState(&args, chain, genesis); err != nil {
+		return fmt.Errorf("failed to prepare state: %w", err)
 	}
-	stateRoot, err := state.GetStateRoot().Await().Get()
-	if err != nil {
-		return fmt.Errorf("failed to get state root: %w", err)
-	}
-	slog.Info("Loaded state", "root_hash", stateRoot)
 
 	// Prepare the progress logger.
 	progress := startProgressLogger(slog.Default(), state, args.StateDBDir, args.LogDBSize)
@@ -305,6 +295,22 @@ func openBlockDb(args *ReplayArgs) (blockdb.BlockDB, func() error, error) {
 		return blockDb.Close()
 	}
 	return blockDb, cleanup, nil
+}
+
+func prepareState(args *ReplayArgs, chain *stateChainAdapter, genesis *Genesis) error {
+	if args.StartBlock == 0 {
+		slog.Info("Applying genesis")
+		// Apply genesis data to the state database.
+		if err := chain.state.ApplyGenesis(genesis); err != nil {
+			return fmt.Errorf("failed to apply genesis data: %w", err)
+		}
+	}
+	stateRoot, err := chain.state.GetStateRoot().Await().Get()
+	if err != nil {
+		return fmt.Errorf("failed to get state root: %w", err)
+	}
+	slog.Info("Loaded state", "root_hash", stateRoot)
+	return nil
 }
 
 // runReplayLoop processes the blocks from the given iterator, applying them
