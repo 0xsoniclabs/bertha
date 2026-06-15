@@ -188,10 +188,6 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		}
 	}
 
-	if args.LogDBSize {
-		slog.Warn("DB size log enabled. This will trigger a flush with every progress report and reduce performance")
-	}
-
 	// Load genesis data from the specified file.
 	genesis, err := ReadGenesisFromFile(args.JSONGenesisFile)
 	if err != nil {
@@ -241,22 +237,14 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		return fmt.Errorf("failed to prepare state: %w", err)
 	}
 
-	// Prepare the progress logger.
-	progress := startProgressLogger(slog.Default(), state, args.StateDBDir, args.LogDBSize)
-	defer func() {
-		progress.LogSummary()
-	}()
-
-	// Pick the replay method.
-	run := runReplayLoop
-	if args.UsePipeline {
-		slog.Info("Using replay pipeline")
-		run = runReplayPipeline
-	} else {
-		slog.Info("Using simple replay loop")
+	// Create the progress logger
+	if args.LogDBSize {
+		slog.Warn("DB size log enabled. This will trigger a flush with every progress report and reduce performance")
 	}
+	progressLogger := startProgressLogger(slog.Default(), chain.state, args.StateDBDir, args.LogDBSize)
+	onBlockDone := func(block *types.Block) error { return progressLogger.LogProgress(block) }
+	defer func() { progressLogger.LogSummary() }()
 
-	// ---- Start Replay ----
 	blocks := blockDb.GetRange(chainID, args.StartBlock, args.EndBlock)
 
 	replayLoopContext := ReplayLoopContext{
@@ -266,11 +254,13 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		skipReceiptsCheck:  args.NoReceiptsCheck,
 	}
 
-	return run(
-		ctx, blocks, chain, blockDb, replayLoopContext,
-		func(block *types.Block) error { return progress.LogProgress(block) },
-	)
+	// Pick the replay method.
+	run := runReplayLoop
+	if args.UsePipeline {
+		run = runReplayPipeline
+	}
 
+	return run(ctx, blocks, chain, blockDb, replayLoopContext, onBlockDone)
 }
 
 func openBlockDb(args *ReplayArgs) (blockdb.BlockDB, func() error, error) {
