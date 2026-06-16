@@ -22,8 +22,8 @@ require github.com/linxGnu/grocksdb v1.8.12
 
 require (
 	github.com/0xsoniclabs/carmen/go v0.0.0-20260512102324-2d892af38ce4
-	github.com/0xsoniclabs/tosca v0.0.0-20260429071638-3f4119284c42
 	github.com/0xsoniclabs/sonic v0.0.0-20260609140915-f1d673a668b6
+	github.com/0xsoniclabs/tosca v0.0.0-20260429071638-3f4119284c42
 	github.com/0xsoniclabs/tracy v0.0.0-20251027125423-00a5ab7968fb
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
 	github.com/ethereum/go-ethereum v1.17.2
@@ -33,6 +33,8 @@ require (
 	go.uber.org/mock v0.6.0
 	google.golang.org/protobuf v1.36.11
 )
+
+require github.com/ethereum/evmc/v11 v11.0.0 // indirect
 
 require (
 	github.com/DataDog/zstd v1.5.7 // indirect
@@ -127,4 +129,6 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
 //
 //replace github.com/0xsoniclabs/tracy => ../../tracy
 
-//replace github.com/0xsoniclabs/tosca => ../../tosca
+replace github.com/0xsoniclabs/tosca => ../../tosca
+
+replace github.com/ethereum/evmc/v11 => ../../tosca/third_party/evmc
