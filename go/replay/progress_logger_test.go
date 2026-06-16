@@ -113,7 +113,7 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 	require.NoError(err)
 
 	mockLogger := utils.NewMockLogger(ctrl)
-	logger := startProgressLogger(mockLogger, state, dir, true)
+	logger := startProgressLogger(mockLogger, func(f func(*State) error) error { return f(state) }, dir, true)
 	mockLogger.EXPECT().Info(
 		"Processing block",
 		"block", uint64(10000),
@@ -135,7 +135,7 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 	require.NoError(err)
 
 	mockLogger2 := utils.NewMockLogger(ctrl)
-	logger = startProgressLogger(mockLogger2, state, dir, true)
+	logger = startProgressLogger(mockLogger2, func(f func(*State) error) error { return f(state) }, dir, true)
 	mockLogger2.EXPECT().Info(
 		"Processing block",
 		"block", uint64(10000),

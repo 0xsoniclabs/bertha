@@ -109,11 +109,257 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 
 func TestReplay_FailsIfStartBlockIsProvidedWithoutStateDbDir(t *testing.T) {
 	require := require.New(t)
-	err := Replay(t.Context(), ReplayArgs{StartBlock: 1000, Interpreter: "sfvm"})
+
+	dir := t.TempDir()
+	genesis := filepath.Join(dir, "genesis.json")
+	require.NoError(os.WriteFile(genesis, []byte(`{"Rules": {"NetworkID": 123}}`), 0644))
+
+	dbPath := filepath.Join(dir, "block-db")
+	options := grocksdb.NewDefaultOptions()
+	options.SetCreateIfMissing(true)
+	defer options.Destroy()
+	db, err := grocksdb.OpenDb(options, dbPath)
+	require.NoError(err)
+
+	writeOptions := grocksdb.NewDefaultWriteOptions()
+	defer writeOptions.Destroy()
+	version := make([]byte, 8)
+	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
+	require.NoError(db.Put(writeOptions, blockdb.MakeVersionKey(), version))
+
+	db.Close()
+
+	err = Replay(t.Context(), ReplayArgs{
+		BlockDBDir:      dbPath,
+		JSONGenesisFile: genesis,
+		StartBlock:      1000,
+		Interpreter:     "sfvm",
+	})
 	require.ErrorContains(
 		err,
 		"existing state or initial database directory must be specified when starting from a non-genesis block",
 	)
+}
+
+func TestReplay_StateDbAndSnapshotCleanupBehavior(t *testing.T) {
+	chainID := uint64(123)
+
+	cases := map[string]struct {
+		keepDB                bool
+		invalidReplay         bool
+		cancelContext         bool
+		expectStateDBDeleted  bool
+		expectSnapshotDeleted bool
+	}{
+		"SuccessfulReplayWithNoKeepDBThenDbAndSnapshotsDeleted": {
+			keepDB:                false,
+			expectStateDBDeleted:  true,
+			expectSnapshotDeleted: true,
+		},
+		"SuccessfulReplayWithKeepDBThenDbAndSnapshotsPreserved": {
+			keepDB:                true,
+			expectStateDBDeleted:  false,
+			expectSnapshotDeleted: false,
+		},
+		"CanceledWithNoKeepDBThenDbAndSnapshotsDeleted": {
+			keepDB:                false,
+			cancelContext:         true,
+			expectStateDBDeleted:  true,
+			expectSnapshotDeleted: true,
+		},
+		"CanceledWithKeepDBThenDbPreserved": {
+			keepDB:                true,
+			cancelContext:         true,
+			expectStateDBDeleted:  false,
+			expectSnapshotDeleted: true, // snapshots are also preserved, but since the replay is canceled before the first snapshot, there is no snapshot at the end of the test
+		},
+		"FailedReplayWithNoKeepDBThenDbDeletedButSnapshotsPreserved": {
+			keepDB:                false,
+			invalidReplay:         true,
+			expectStateDBDeleted:  true,
+			expectSnapshotDeleted: false,
+		},
+		"FailedReplayWithKeepDBThenDbAndSnapshotsPreserved": {
+			keepDB:                true,
+			invalidReplay:         true,
+			expectStateDBDeleted:  false,
+			expectSnapshotDeleted: false,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			// Create block DB with enough blocks for snapshots
+			numBlocks := 20
+			blocks := utils.CreateValidBlocks(t, numBlocks)
+			if tc.invalidReplay {
+				// Tamper with a block after a snapshot to trigger a state root mismatch
+				blocks[15].StateRoot = common.Hash{0xFF}.Bytes()
+			}
+
+			path := filepath.Join(dir, "block-db")
+			options := grocksdb.NewDefaultOptions()
+			options.SetCreateIfMissing(true)
+			defer options.Destroy()
+			db, err := grocksdb.OpenDb(options, path)
+			require.NoError(t, err)
+
+			writeOptions := grocksdb.NewDefaultWriteOptions()
+			defer writeOptions.Destroy()
+			version := make([]byte, 8)
+			binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
+			require.NoError(t, db.Put(writeOptions, blockdb.MakeVersionKey(), version))
+
+			for _, block := range blocks {
+				key := blockdb.MakeBlockKey(chainID, uint64(block.Number))
+				value, err := proto.Marshal(block)
+				require.NoError(t, err)
+				require.NoError(t, db.Put(writeOptions, key, value))
+			}
+			db.Close()
+
+			genesisPath := filepath.Join(dir, "genesis.json")
+			require.NoError(t, os.WriteFile(genesisPath, []byte(fmt.Sprintf(`{"Rules": {"NetworkID": %d}}`, chainID)), 0644))
+			stateDBDir := filepath.Join(dir, "state-db")
+
+			ctx := t.Context()
+			if tc.cancelContext {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+
+			err = Replay(ctx, ReplayArgs{
+				BlockDBDir:        path,
+				JSONGenesisFile:   genesisPath,
+				StateDBDir:        stateDBDir,
+				KeepDB:            tc.keepDB,
+				Interpreter:       "sfvm",
+				DBSchema:          5,
+				DBVariant:         "go-file",
+				EndBlock:          uint64(numBlocks),
+				SnapshotInterval:  10,
+				SnapshotNumToKeep: 1,
+				SnapshotEndBlock:  math.MaxUint64,
+				NoReceiptsCheck:   true,
+			})
+
+			if tc.cancelContext {
+				require.ErrorIs(t, err, context.Canceled)
+			} else if tc.invalidReplay {
+				require.ErrorContains(t, err, "state root mismatch")
+			} else {
+				require.NoError(t, err)
+			}
+
+			_, statErr := os.Stat(stateDBDir)
+			if tc.expectStateDBDeleted {
+				require.True(t, os.IsNotExist(statErr), "state DB dir should be removed")
+			} else {
+				require.NoError(t, statErr, "state DB dir should still exist")
+			}
+
+			// Check snapshot directories (pattern: stateDBDir_snapshot_*)
+			matches, err := filepath.Glob(stateDBDir + "_snapshot_*")
+			require.NoError(t, err)
+			if tc.expectSnapshotDeleted {
+				require.Empty(t, matches, "snapshot dirs should be removed")
+			} else {
+				require.NotEmpty(t, matches, "snapshot dirs should still exist")
+			}
+		})
+	}
+}
+
+func TestReplay_BlockDBAccessMode(t *testing.T) {
+	chainID := uint64(123)
+
+	cases := map[string]struct {
+		overwriteStateRoot  bool
+		writeUpgradeHeights bool
+		requiresWriteAccess bool
+	}{
+		"NoOverwriteStateRootAndNoWriteUpgradeHeightsRequiresOnlyReadAccess": {
+			overwriteStateRoot:  false,
+			writeUpgradeHeights: false,
+			requiresWriteAccess: false,
+		},
+		"OverwriteStateRootRequiresWriteAccess": {
+			overwriteStateRoot:  true,
+			writeUpgradeHeights: false,
+			requiresWriteAccess: true,
+		},
+		"WriteUpgradeHeightsRequiresWriteAccess": {
+			overwriteStateRoot:  false,
+			writeUpgradeHeights: true,
+			requiresWriteAccess: true,
+		},
+		"OverwriteStateRootAndWriteUpgradeHeightsRequiresWriteAccess": {
+			overwriteStateRoot:  true,
+			writeUpgradeHeights: true,
+			requiresWriteAccess: true,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+
+			numBlocks := 20
+			blockDBPath := filepath.Join(dir, "block-db")
+			options := grocksdb.NewDefaultOptions()
+			options.SetCreateIfMissing(true)
+			defer options.Destroy()
+			db, err := grocksdb.OpenDb(options, blockDBPath)
+			require.NoError(t, err)
+
+			writeOptions := grocksdb.NewDefaultWriteOptions()
+			defer writeOptions.Destroy()
+			version := make([]byte, 8)
+			binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
+			require.NoError(t, db.Put(writeOptions, blockdb.MakeVersionKey(), version))
+
+			for _, block := range utils.CreateValidBlocks(t, numBlocks) {
+				key := blockdb.MakeBlockKey(chainID, uint64(block.Number))
+				value, err := proto.Marshal(block)
+				require.NoError(t, err)
+				require.NoError(t, db.Put(writeOptions, key, value))
+			}
+			db.Close()
+
+			genesis := filepath.Join(dir, "genesis.json")
+			require.NoError(t, os.WriteFile(genesis, []byte(fmt.Sprintf(`{"Rules": {"NetworkID": %d}}`, chainID)), 0644))
+
+			for _, readOnly := range []bool{false, true} {
+				if readOnly {
+					require.NoError(t, os.Chmod(blockDBPath, 0555))
+					t.Cleanup(func() {
+						// Restore write permissions for cleanup
+						_ = os.Chmod(blockDBPath, 0755)
+					})
+				}
+
+				err := Replay(t.Context(), ReplayArgs{
+					BlockDBDir:          blockDBPath,
+					JSONGenesisFile:     genesis,
+					Interpreter:         "sfvm",
+					DBSchema:            5,
+					DBVariant:           "go-file",
+					OverwriteStateRoot:  tc.overwriteStateRoot,
+					WriteUpgradeHeights: tc.writeUpgradeHeights,
+					EndBlock:            uint64(numBlocks),
+				})
+
+				if tc.requiresWriteAccess && readOnly {
+					require.Error(t, err)
+				} else {
+					require.NoError(t, err)
+				}
+			}
+		})
+	}
 }
 
 func TestReplayLoop(t *testing.T) {

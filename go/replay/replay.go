@@ -87,68 +87,187 @@ type ReplayArgs struct {
 }
 
 func Replay(ctx context.Context, args ReplayArgs) (err error) {
+	endBlock := fmt.Sprintf("%d", args.EndBlock)
+	if args.EndBlock == math.MaxUint64 {
+		endBlock = "max"
+	}
 	slog.Info("Replay configuration",
 		"interpreter", args.Interpreter,
 		"db_schema", args.DBSchema,
 		"db_variant", args.DBVariant,
 		"pipeline", args.UsePipeline,
+		"start_block", args.StartBlock,
+		"end_block", endBlock,
 	)
 
-	snapshotHandler := NewSnapshotHandler(args.SnapshotInterval, args.SnapshotStartBlock, args.SnapshotEndBlock, args.SnapshotNumToKeep)
+	// Open the block database
+	blockDb, blockDbCleanup, err := openBlockDb(&args)
+	if err != nil {
+		return fmt.Errorf("failed to open block database: %w", err)
+	}
+	defer func() { err = errors.Join(err, blockDbCleanup()) }()
 
+	// Load genesis data
 	slog.Info("Loading genesis file", "file", args.JSONGenesisFile)
-	// Create a temporary directory for the state database
+	genesis, err := ReadGenesisFromFile(args.JSONGenesisFile)
+	if err != nil {
+		return fmt.Errorf("failed to read genesis file %q: %w", args.JSONGenesisFile, err)
+	}
+	chainID := genesis.ChainID
+
+	// Create the metadata store
+	slog.Info("Initializing metadata store")
+	metadataStore, err := NewBlockDBMetadataStore(blockDb, chainID, slog.Default(), args.WriteUpgradeHeights)
+	if err != nil {
+		return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
+	}
+
+	// Create the interpreter
+	interpreter, err := tosca.NewInterpreter(args.Interpreter)
+	if err != nil {
+		return fmt.Errorf("failed to create interpreter %q: %w", args.Interpreter, err)
+	}
+
+	// Prepare the state database directory
+	snapshotHandler, err := prepareStateDbDir(&args)
+	if err != nil {
+		return fmt.Errorf("failed to prepare state database directory: %w", err)
+	}
+	if snapshotHandler == nil {
+		return // aborted by user input
+	}
+	if !args.KeepDB {
+		slog.Warn("State database will be deleted after replay (use --keep-db to keep it)")
+		defer func() { err = errors.Join(err, cleanupStateDbDir(&args, snapshotHandler, err)) }()
+	}
+
+	// Open the state database
+	slog.Info("Opening state database", "directory", args.StateDBDir)
+	state, err := NewState(StateParameters{
+		Directory:   args.StateDBDir,
+		WithArchive: args.WithArchive,
+		Schema:      args.DBSchema,
+		Variant:     args.DBVariant,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to open state database: %w", err)
+	}
+	chain := &stateChainAdapter{
+		chainID:          chainID,
+		metadataStore:    metadataStore,
+		blockHashHistory: &blockHashHistory{},
+		interpreter:      interpreter,
+		state:            state,
+		schema:           args.DBSchema,
+		snapshotHandler:  snapshotHandler,
+	}
+	defer func() {
+		slog.Info("Closing state database", "directory", args.StateDBDir)
+		// The state needs to be accessed through the stateChainAdapter
+		// because it might have been closed and reopened for a snapshot creation.
+		// The stateChainAdapter always holds the currently open state.
+		if chain.state != nil {
+			err = errors.Join(err, chain.state.Close())
+		}
+	}()
+
+	// Prepare the state
+	if err := prepareState(&args, chain, genesis); err != nil {
+		return fmt.Errorf("failed to prepare state: %w", err)
+	}
+
+	// Create the progress logger
+	if args.LogDBSize {
+		slog.Warn("DB size log enabled. This will trigger a flush with every progress report and reduce performance")
+	}
+	runWithState := func(f func(*State) error) error {
+		chain.stateRwMutex.Lock()
+		defer chain.stateRwMutex.Unlock()
+		return f(chain.state)
+	}
+	progressLogger := startProgressLogger(slog.Default(), runWithState, args.StateDBDir, args.LogDBSize)
+	onBlockDone := func(block *types.Block) error { return progressLogger.LogProgress(block) }
+	defer func() { progressLogger.LogSummary() }()
+
+	blocks := blockDb.GetRange(chainID, args.StartBlock, args.EndBlock)
+
+	replayLoopContext := ReplayLoopContext{
+		overwriteStateRoot: New(args.OverwriteStateRoot, args.ConfirmAllPrompts),
+		skipStateRootCheck: args.NoStateRootCheck,
+		stateRootNotSet:    false,
+		skipReceiptsCheck:  args.NoReceiptsCheck,
+	}
+
+	// Pick the replay method.
+	run := runReplayLoop
+	if args.UsePipeline {
+		run = runReplayPipeline
+	}
+
+	return run(ctx, blocks, chain, blockDb, replayLoopContext, onBlockDone)
+}
+
+func openBlockDb(args *ReplayArgs) (blockdb.BlockDB, func() error, error) {
+	slog.Info("Opening block database", "directory", args.BlockDBDir)
+	if args.WriteUpgradeHeights {
+		slog.Info("Upgrade heights writing enabled")
+	}
+	if args.OverwriteStateRoot {
+		slog.Info("State root overwriting enabled")
+	}
+	var dbOpener func(string) (blockdb.RocksDB, error)
+	if args.OverwriteStateRoot || args.WriteUpgradeHeights {
+		dbOpener = blockdb.OpenRocksDBForWriting
+	} else {
+		dbOpener = blockdb.OpenRocksDBForReading
+	}
+	blockDb, err := dbOpener(args.BlockDBDir)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to open database: %w", err)
+	}
+	cleanup := func() error {
+		return blockDb.Close()
+	}
+	return blockDb, cleanup, nil
+}
+
+func prepareStateDbDir(args *ReplayArgs) (*SnapshotHandler, error) {
+	if args.SnapshotInterval > 0 && args.SnapshotNumToKeep == 0 {
+		return nil, fmt.Errorf("snapshot interval %d is incompatible with --snapshot-num-to-keep=0", args.SnapshotInterval)
+	}
+
+	// If the state database directory is not specified, create a temporary directory.
+	var err error
 	if args.StateDBDir == "" {
 		if args.StartBlock > 0 && args.InitDBDir == "" {
-			return fmt.Errorf("existing state or initial database directory must be specified when starting from a non-genesis block")
+			return nil, fmt.Errorf("existing state or initial database directory must be specified when starting from a non-genesis block")
 		}
 		args.StateDBDir = os.TempDir()
 		args.StateDBDir, err = os.MkdirTemp(args.StateDBDir, "replay_chain_state_")
-	}
-	if err != nil {
-		return fmt.Errorf("failed to create temporary state database directory: %w", err)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create temporary state database directory: %w", err)
+		}
 	}
 	slog.Info("Creating state database", "directory", args.StateDBDir)
 	if args.InitDBDir != "" {
-		slog.Info("Copying initial state database", "source_directory", args.InitDBDir, "destination_directory", args.StateDBDir)
+		slog.Info("Copying initial state database", "src", args.InitDBDir, "dest", args.StateDBDir)
 		if isEmpty, err := utils.IsEmptyOrMissingDir(args.StateDBDir); err != nil {
-			return fmt.Errorf("failed to check if state database directory %q is empty: %w", args.StateDBDir, err)
+			return nil, fmt.Errorf("failed to check if state database directory %q is empty: %w", args.StateDBDir, err)
 		} else if !isEmpty {
-			return fmt.Errorf("state database directory %q is not empty. Please specify an empty directory to be initialized or use a temporary directory", args.StateDBDir)
+			return nil, fmt.Errorf("state database directory %q is not empty. Please specify an empty directory to be initialized or use a temporary directory", args.StateDBDir)
 		}
 		err = os.CopyFS(args.StateDBDir, os.DirFS(args.InitDBDir))
 		if err != nil {
-			return fmt.Errorf("failed to copy initial state database %q in destination directory %q: %w", args.InitDBDir, args.StateDBDir, err)
+			return nil, fmt.Errorf("failed to copy initial state database %q in destination directory %q: %w", args.InitDBDir, args.StateDBDir, err)
 		}
 	}
 
-	if !args.KeepDB {
-		slog.Warn("State database will be deleted after replay (use --keep-db to keep it)")
-		defer func() {
-			slog.Info("Removing state database directory", "directory", args.StateDBDir)
-			err = errors.Join(err, os.RemoveAll(args.StateDBDir))
-			snapshotDirs := snapshotHandler.GetSnapshotDirs(args.StateDBDir)
-			if len(snapshotDirs) > 0 {
-				if err == nil || errors.Is(err, context.Canceled) {
-					for _, dir := range snapshotDirs {
-						slog.Info("Removing state database snapshot directory", "directory", dir)
-						err = errors.Join(err, os.RemoveAll(dir))
-					}
-				} else {
-					slog.Info("Replay terminated with error")
-					for _, dir := range snapshotDirs {
-						slog.Info("Available snapshot", "directory", dir)
-					}
-				}
-			}
-		}()
-
-	}
+	snapshotHandler := NewSnapshotHandler(args.SnapshotInterval, args.SnapshotStartBlock, args.SnapshotEndBlock, args.SnapshotNumToKeep)
 
 	if args.SnapshotInterval > 0 {
 		matches, err := filepath.Glob(args.StateDBDir + "_snapshot_*")
 		if err != nil {
-			return fmt.Errorf("failed to check existing snapshots in state database directory %q: %w", args.StateDBDir, err)
+			return nil, fmt.Errorf("failed to check existing snapshots in state database directory %q: %w", args.StateDBDir, err)
 		}
 		if len(matches) > 0 {
 			slog.Warn("Existing snapshots found for state database directory", "directory", args.StateDBDir, "snapshots_found", len(matches))
@@ -156,11 +275,11 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 				fmt.Printf("Do you want to delete the existing snapshots and continue (y/n)? ")
 				var response string
 				if _, err := fmt.Scanln(&response); err != nil {
-					return fmt.Errorf("failed to read user input: %w", err)
+					return nil, fmt.Errorf("failed to read user input: %w", err)
 				}
 				if strings.ToLower(strings.TrimSpace(response)) != "y" {
 					slog.Error("Execution aborted by the user")
-					return nil
+					return nil, nil
 				}
 			}
 		}
@@ -174,120 +293,43 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 			slog.Warn("Snapshots are currently not supported with flat database variants; consider disabling snapshots or using a different variant")
 		}
 	}
+	return snapshotHandler, nil
+}
 
-	if args.LogDBSize {
-		slog.Warn("DB size log enabled. This will trigger a flush with every progress report and reduce performance")
+func cleanupStateDbDir(args *ReplayArgs, snapshotHandler *SnapshotHandler, outerError error) error {
+	slog.Info("Removing state database directory", "directory", args.StateDBDir)
+	err := os.RemoveAll(args.StateDBDir)
+	snapshotDirs := snapshotHandler.GetSnapshotDirs(args.StateDBDir)
+	if len(snapshotDirs) > 0 {
+		if outerError == nil || errors.Is(outerError, context.Canceled) {
+			for _, dir := range snapshotDirs {
+				slog.Info("Removing state database snapshot directory", "directory", dir)
+				err = errors.Join(err, os.RemoveAll(dir))
+			}
+		} else {
+			slog.Info("Replay terminated with error")
+			for _, dir := range snapshotDirs {
+				slog.Info("Available snapshot", "directory", dir)
+			}
+		}
 	}
+	return err
+}
 
-	// Load genesis data from the specified file.
-	genesis, err := ReadGenesisFromFile(args.JSONGenesisFile)
-	if err != nil {
-		return fmt.Errorf("failed to read genesis file %q: %w", args.JSONGenesisFile, err)
-	}
-	chainID := genesis.ChainID
-
-	// Open the block database.
-	slog.Info("Opening block database", "directory", args.BlockDBDir)
-	if args.WriteUpgradeHeights {
-		slog.Info("Upgrade heights writing enabled")
-	}
-	if args.OverwriteStateRoot {
-		slog.Info("State root overwriting enabled")
-	}
-	var database blockdb.BlockDB
-	if args.OverwriteStateRoot || args.WriteUpgradeHeights {
-		database, err = blockdb.OpenRocksDBForWriting(args.BlockDBDir)
-	} else {
-		database, err = blockdb.OpenRocksDBForReading(args.BlockDBDir)
-	}
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
-	}
-	defer func() {
-		err = errors.Join(err, database.Close())
-	}()
-
-	metadataStore, err := NewBlockDBMetadataStore(database, chainID, slog.Default(), args.WriteUpgradeHeights)
-	if err != nil {
-		return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
-	}
-
-	interpreter, err := tosca.NewInterpreter(args.Interpreter)
-	if err != nil {
-		return fmt.Errorf("failed to create interpreter %q: %w", args.Interpreter, err)
-	}
-
-	// Open State Database in new directory.
-	params := StateParameters{
-		Directory:   args.StateDBDir,
-		WithArchive: args.WithArchive,
-		Schema:      args.DBSchema,
-		Variant:     args.DBVariant,
-	}
-
-	state, err := NewState(params)
-	if err != nil {
-		return fmt.Errorf("failed to create state: %w", err)
-	}
-	chain := &stateChainAdapter{
-		chainID:          chainID,
-		metadataStore:    metadataStore,
-		blockHashHistory: &blockHashHistory{},
-		interpreter:      interpreter,
-		state:            state,
-		schema:           args.DBSchema,
-		snapshotHandler:  snapshotHandler,
-	}
-	// Because snapshots invalidate the state, we need to close it here.
-	defer func() {
-		slog.Info("Closing state database", "directory", args.StateDBDir)
-		err = errors.Join(err, chain.state.Close())
-	}()
-
+func prepareState(args *ReplayArgs, chain *stateChainAdapter, genesis *Genesis) error {
 	if args.StartBlock == 0 {
-		slog.Info("Starting replay from genesis")
+		slog.Info("Applying genesis")
 		// Apply genesis data to the state database.
-		if err := state.ApplyGenesis(genesis); err != nil {
+		if err := chain.state.ApplyGenesis(genesis); err != nil {
 			return fmt.Errorf("failed to apply genesis data: %w", err)
 		}
-	} else {
-		slog.Info("Starting replay from block", "block_number", args.StartBlock)
 	}
-	stateRoot, err := state.GetStateRoot().Await().Get()
+	stateRoot, err := chain.state.GetStateRoot().Await().Get()
 	if err != nil {
 		return fmt.Errorf("failed to get state root: %w", err)
 	}
 	slog.Info("Loaded state", "root_hash", stateRoot)
-
-	// Prepare the progress logger.
-	progress := startProgressLogger(slog.Default(), state, args.StateDBDir, args.LogDBSize)
-	defer func() {
-		progress.LogSummary()
-	}()
-
-	// Pick the replay method.
-	run := runReplayLoop
-	if args.UsePipeline {
-		slog.Info("Using replay pipeline")
-		run = runReplayPipeline
-	} else {
-		slog.Info("Using simple replay loop")
-	}
-
-	// ---- Start Replay ----
-	blocks := database.GetRange(chainID, args.StartBlock, args.EndBlock)
-
-	replayLoopContext := ReplayLoopContext{
-		overwriteStateRoot: New(args.OverwriteStateRoot, args.ConfirmAllPrompts),
-		skipStateRootCheck: args.NoStateRootCheck,
-		stateRootNotSet:    false,
-		skipReceiptsCheck:  args.NoReceiptsCheck,
-	}
-
-	return run(
-		ctx, blocks, chain, database, replayLoopContext,
-		func(block *types.Block) error { return progress.LogProgress(block) },
-	)
+	return nil
 }
 
 // runReplayLoop processes the blocks from the given iterator, applying them
