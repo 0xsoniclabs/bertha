@@ -390,7 +390,12 @@ func runReplayPipeline(
 	replayLoopContext ReplayLoopContext,
 	onBlockDone func(block *types.Block) error,
 ) error {
-	const bufferSize = 1024
+	// This value must be smaller than 256. Otherwise, accessing the block hash
+	// from the blockHashHistory for the parent hash verification, might return
+	// incorrect hashes as the processing of blocks might be too much ahead and
+	// overwrite the hashes in the blockHashHistory before they are accessed for
+	// the parent hash verification.
+	const channelSize = 128
 
 	// Pipeline stages:
 	//  - decoding of blocks
@@ -411,8 +416,8 @@ func runReplayPipeline(
 	}
 
 	// Channels between stages
-	decodedBlocks := make(chan *decodedBlock, bufferSize)
-	results := make(chan *processResult, bufferSize)
+	decodedBlocks := make(chan *decodedBlock, channelSize)
+	results := make(chan *processResult, channelSize)
 	abort := make(chan struct{})
 
 	// Utility to collect errors.
