@@ -33,6 +33,7 @@ import (
 	"github.com/0xsoniclabs/sonic/evmcore/core_types"
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"
 	"github.com/0xsoniclabs/sonic/inter"
+	"github.com/0xsoniclabs/sonic/inter/state"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/tosca/go/geth_adapter"
 	"github.com/0xsoniclabs/tosca/go/tosca"
@@ -47,6 +48,8 @@ import (
 	// Uncomment to enable experimental Carmen features.
 	//_ "github.com/0xsoniclabs/carmen/go/experimental"
 )
+
+//go:generate mockgen -source=state.go -destination=state_mock.go -package=replay
 
 // State is an abstraction of the Chain State Database. It tracks the balances,
 // nonces, codes, and storage states of accounts in the blockchain and provides
@@ -66,6 +69,20 @@ type StateParameters struct {
 	WithArchive bool
 	Schema      carmen.Schema
 	Variant     carmen.Variant
+}
+
+type Processor interface {
+	ProcessWithDifficulty(
+		block *evmcore.EvmBlock,
+		statedb state.StateDB,
+		cfg vm.Config,
+		gasLimit uint64,
+		usedGas *uint64,
+		trueTxOffset int,
+		onNewLog func(*core_types.Log),
+		difficulty *big.Int,
+		remainingSize uint64,
+	) evmcore.ProcessSummary
 }
 
 // NewState creates a new State instance with the given parameters. The
@@ -160,7 +177,7 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 func (s *State) ApplyBlock(
 	block *types.Block,
 	interpreter tosca.Interpreter,
-	processor *evmcore.StateProcessor,
+	processor Processor,
 	upgrades opera.Upgrades,
 	corrections map[common.Address]Correction,
 	chainConfig *params.ChainConfig,
@@ -170,13 +187,20 @@ func (s *State) ApplyBlock(
 	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsCancun(block.Number(), block.Time()) && block.ExcessBlobGas() != nil {
 		blobBaseFee = eip4844.CalcBlobFee(chainConfig, block.Header())
 	}
+	prevRandao := block.Header().MixDigest
+	if block.Difficulty().Sign() != 0 {
+		// Before the Merge, PrevRandao is not used; set to zero. This indicates
+		// to the EVM that the difficulty should be used instead.
+		prevRandao = common.Hash{}
+	}
+
 	evmBlock := &evmcore.EvmBlock{
 		EvmHeader: evmcore.EvmHeader{
 			Number:      block.Number(),
 			ParentHash:  block.ParentHash(),
 			Time:        inter.Timestamp(block.Time() * 1e9),
 			GasLimit:    block.GasLimit(),
-			PrevRandao:  block.Header().MixDigest,
+			PrevRandao:  prevRandao,
 			BaseFee:     block.BaseFee(),
 			BlobBaseFee: blobBaseFee,
 			Coinbase:    block.Coinbase(),
@@ -207,7 +231,7 @@ func (s *State) ApplyBlock(
 	}
 
 	var usedGas uint64
-	processed := processor.Process(
+	processed := processor.ProcessWithDifficulty(
 		evmBlock,
 		stateDB,
 		vmConfig,
@@ -215,6 +239,7 @@ func (s *State) ApplyBlock(
 		&usedGas,
 		0, // Tx index offset
 		onLog,
+		block.Difficulty(),
 		math.MaxUint64,
 	)
 

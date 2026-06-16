@@ -11,7 +11,7 @@ index 693eabf..881c5c8 100644
 +	_ "github.com/0xsoniclabs/carmen/go/experimental"
  )
 
- // State is an abstraction of the Chain State Database. It tracks the balances,
+ //go:generate mockgen -source=state.go -destination=state_mock.go -package=replay
 diff --git a/go/go.mod b/go/go.mod
 index 043657d..0baa98b 100644
 --- a/go/go.mod

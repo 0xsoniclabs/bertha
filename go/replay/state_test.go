@@ -37,6 +37,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
@@ -187,6 +188,65 @@ func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
 	key = cc.Key(common.HexToHash("0x3"))
 	value = cc.Value(common.HexToHash("0x4"))
 	require.Equal(t, value, db.GetState(addr, key))
+}
+
+func TestState_ApplyBlock_PrevRandaoIsMixDigestPostMerge(t *testing.T) {
+	tests := map[string]struct {
+		difficulty     *big.Int
+		mixDigest      common.Hash
+		wantPrevRandao common.Hash
+	}{
+		"pre-merge": {
+			difficulty:     big.NewInt(1000),
+			mixDigest:      common.Hash{0xab},
+			wantPrevRandao: common.Hash{},
+		},
+		"post-merge": {
+			difficulty:     big.NewInt(0),
+			mixDigest:      common.Hash{0xab},
+			wantPrevRandao: common.Hash{0xab},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			processor := NewMockProcessor(ctrl)
+
+			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+			require.NoError(t, err)
+			defer func() { require.NoError(t, state.Close()) }()
+
+			block := types.NewBlockWithHeader(&types.Header{
+				Difficulty: tt.difficulty,
+				MixDigest:  tt.mixDigest,
+				GasLimit:   8_000_000,
+			})
+
+			chainConfig := opera.CreateTransientEvmChainConfig(
+				1,
+				[]opera.UpgradeHeight{},
+				idx.Block(block.NumberU64()),
+			)
+
+			processor.EXPECT().ProcessWithDifficulty(
+				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
+				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
+				gomock.Any(),
+			).DoAndReturn(func(
+				evmBlock *evmcore.EvmBlock, _ interface{}, _ vm.Config,
+				_ uint64, _ *uint64, _ int, _ interface{},
+				difficulty *big.Int, _ uint64,
+			) evmcore.ProcessSummary {
+				require.Equal(t, tt.wantPrevRandao, evmBlock.PrevRandao)
+				require.Equal(t, tt.difficulty, difficulty)
+				return evmcore.ProcessSummary{}
+			})
+
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil)
+			require.NoError(t, err)
+		})
+	}
 }
 
 func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
