@@ -188,10 +188,11 @@ var (
 		Usage:   "JSON encoded genesis data to use for replaying the blockchain",
 	}
 	stateDBDirectoryFlag = &cli.StringFlag{
-		Name:    "state-db-dir",
-		Aliases: []string{"sdb"},
-		Usage:   "Path to the state database directory (default: OS-defined temporary directory)",
-		Value:   "",
+		Name:        "state-db-dir",
+		Aliases:     []string{"sdb"},
+		Usage:       "Path to the state database directory",
+		Value:       "",
+		DefaultText: "OS-defined temporary directory",
 	}
 	initDBFlag = &cli.StringFlag{
 		Name:  "init-db-dir",
@@ -201,6 +202,7 @@ var (
 	keepDBFlag = &cli.BoolFlag{
 		Name:  "keep-db",
 		Usage: "Keep the state database after running the replay",
+		Value: false,
 	}
 
 	withArchiveFlag = &cli.BoolFlag{
@@ -223,7 +225,7 @@ var (
 	}
 	usePipelineFlag = &cli.BoolFlag{
 		Name:  "use-pipeline",
-		Usage: "Enable the replay pipeline (default: true)",
+		Usage: "Enable the replay pipeline",
 		Value: true,
 	}
 
@@ -241,17 +243,18 @@ var (
 	}
 	snapshotStartBlock = &cli.Uint64Flag{
 		Name:  "snapshot-start-block",
-		Usage: "Block number from which to start taking snapshots (default: 0)",
+		Usage: "Block number from which to start taking snapshots",
 		Value: 0,
 	}
 	snapshotEndBlock = &cli.Uint64Flag{
-		Name:  "snapshot-end-block",
-		Usage: "Block number at which to stop taking snapshots (default: max block)",
-		Value: math.MaxUint64,
+		Name:        "snapshot-end-block",
+		Usage:       "Block number at which to stop taking snapshots",
+		Value:       math.MaxUint64,
+		DefaultText: "max",
 	}
 	snapshotNumToKeep = &cli.Uint64Flag{
 		Name:  "snapshot-num-to-keep",
-		Usage: "Number of snapshots to keep (default: 1)",
+		Usage: "Number of snapshots to keep",
 		Value: 1,
 	}
 
@@ -283,7 +286,7 @@ var (
 	logDBSize = &cli.BoolFlag{
 		Name:    "log-db-size",
 		Aliases: []string{"lds"},
-		Usage:   "Include the disk size of the database in progress log messages (default = disabled)",
+		Usage:   "Include the disk size of the database in progress log messages",
 		Value:   false,
 	}
 
