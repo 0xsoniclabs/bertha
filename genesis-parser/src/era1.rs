@@ -55,23 +55,15 @@ fn convert_authorization_list(
         .collect()
 }
 
-/// Converts an [`EthereumTxEnvelope<TxEip4844Variant>`] to a [`Transaction`]. The block height is
-/// used to determine how the `y_parity` is computed for legacy transactions (EIP-155).
-fn convert_transaction(
-    block_number: u64,
-    transaction: EthereumTxEnvelope<TxEip4844Variant>,
-) -> Transaction {
+/// Converts an [`EthereumTxEnvelope<TxEip4844Variant>`] to a [`Transaction`].
+fn convert_transaction(transaction: EthereumTxEnvelope<TxEip4844Variant>) -> Transaction {
     match transaction {
         EthereumTxEnvelope::Legacy(signed) => {
-            const FORK_BLKNUM: u64 = 2_675_000;
-
             let sig = signed.signature();
             let tx = signed.tx();
 
             // EIP-155
-            let y_parity = if let Some(chain_id) = tx.chain_id
-                && block_number >= FORK_BLKNUM
-            {
+            let y_parity = if let Some(chain_id) = tx.chain_id {
                 sig.v() as u64 + chain_id * 2 + 35
             } else {
                 sig.v() as u64 + 27
@@ -231,7 +223,7 @@ pub fn convert_block(block: &BlockTuple) -> Result<Block, Error> {
         .decode::<BlockBody<EthereumTxEnvelope<TxEip4844Variant>>>()?
         .transactions
         .into_iter()
-        .map(|tx| convert_transaction(header.number, tx))
+        .map(convert_transaction)
         .collect();
     let receipts = block
         .receipts
