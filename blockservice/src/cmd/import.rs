@@ -128,10 +128,13 @@ fn import(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut blocks = blocks.peekable();
 
-    let total_blocks = blocks
-        .peek()
-        .and_then(|b| b.as_ref().map(|b| b.number + 1).ok())
-        .unwrap_or_default();
+    let total_blocks = match blocks.peek() {
+        None => 0,
+        Some(Ok(block)) => block.number + 1,
+        // through peek only a reference to the error is available, so next is used which returns
+        // the exact same value but as an owned value
+        Some(Err(_)) => return Err(blocks.next().unwrap().unwrap_err().into()),
+    };
 
     writeln!(
         writer,
@@ -572,19 +575,9 @@ mod tests {
                 &mut writer,
             );
             assert!(result.is_err());
-            assert!(
-                result
-                    .unwrap_err()
-                    .to_string()
-                    .contains("corrupt gzip stream")
-            );
-
-            let output = String::from_utf8(writer).unwrap();
-            assert!(output.contains(indoc::indoc! {"
-                Genesis file contains 0 blocks for chain ID 0
-                Creating new entry for chain ID 0 in the configuration
-                Importing 0 blocks for chain ID 0"
-            }));
+            let result_str = result.unwrap_err().to_string();
+            assert!(result_str.contains("corrupt gzip stream"));
+            assert!(writer.is_empty());
         }
     }
 
