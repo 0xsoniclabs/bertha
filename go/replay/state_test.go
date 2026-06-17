@@ -35,6 +35,7 @@ import (
 	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
@@ -653,7 +654,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7251(t *testing.T) {
 		"EIP-7251: request count should be reset to 0")
 }
 
-func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChains(t *testing.T) {
+func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChainsPostMerge(t *testing.T) {
 	const sonicChainID = uint64(146)
 	sonicUpgrades := opera.GetSonicUpgrades()
 	sonicChainConfig := opera.CreateTransientEvmChainConfig(
@@ -668,16 +669,25 @@ func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChains(t *testing.T) {
 	tests := map[string]struct {
 		chainConfig    *params.ChainConfig
 		upgrades       opera.Upgrades
+		difficulty     uint64
 		wantBalanceWei uint64
 	}{
-		"ethereum": {
+		"ethereum post-merge": {
 			chainConfig:    params.MainnetChainConfig,
 			upgrades:       opera.Upgrades{},
+			difficulty:     0,
 			wantBalanceWei: amountGwei * params.GWei,
+		},
+		"ethereum pre-merge": {
+			chainConfig:    params.MainnetChainConfig,
+			upgrades:       opera.Upgrades{},
+			difficulty:     1,
+			wantBalanceWei: 0,
 		},
 		"non-ethereum": {
 			chainConfig:    sonicChainConfig,
 			upgrades:       sonicUpgrades,
+			difficulty:     0,
 			wantBalanceWei: 0,
 		},
 	}
@@ -689,7 +699,8 @@ func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChains(t *testing.T) {
 			defer func() { require.NoError(t, state.Close()) }()
 
 			block, err := convert.ConvertToGethBlock(&blockdb.Block{
-				GasLimit: 8_000_000,
+				GasLimit:   8_000_000,
+				Difficulty: tt.difficulty,
 				Withdrawals: []*blockdb.Withdrawal{
 					{Address: withdrawalAddr.Bytes(), Amount: amountGwei},
 				},
@@ -706,6 +717,93 @@ func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChains(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Equal(t, tt.wantBalanceWei, state.db.GetBalance(cc.Address(withdrawalAddr)).Uint64())
+		})
+	}
+}
+
+func TestState_ApplyBlock_RewardsAreAccumulatedInEthereumChainsPreMerge(t *testing.T) {
+	const sonicChainID = uint64(146)
+	sonicUpgrades := opera.GetSonicUpgrades()
+	sonicChainConfig := opera.CreateTransientEvmChainConfig(
+		sonicChainID,
+		[]opera.UpgradeHeight{},
+		idx.Block(1),
+	)
+
+	coinbase := common.Address{0x01}
+	uncleCoinbase := common.Address{0x02}
+	blockNumber := uint64(10_000_000) // post-Constantinople
+	uncleNumber := blockNumber - 1
+
+	// Constantinople block reward is 2 ETH.
+	// Uncle reward = (uncleNumber + 8 - blockNumber) / 8 * blockReward
+	// Miner reward = blockReward + blockReward/32 per uncle
+	blockReward := ethash.ConstantinopleBlockReward
+	uncleReward := new(uint256.Int).Set(blockReward)
+	uncleReward.Mul(uncleReward, uint256.NewInt(7))
+	uncleReward.Div(uncleReward, uint256.NewInt(8))
+
+	minerReward := new(uint256.Int).Set(blockReward)
+	minerReward.Add(minerReward, new(uint256.Int).Div(blockReward, uint256.NewInt(32)))
+
+	tests := map[string]struct {
+		chainConfig      *params.ChainConfig
+		upgrades         opera.Upgrades
+		difficulty       uint64
+		wantMinerBalance *uint256.Int
+		wantUncleBalance *uint256.Int
+	}{
+		"ethereum pre-merge": {
+			chainConfig:      params.MainnetChainConfig,
+			upgrades:         opera.Upgrades{},
+			difficulty:       1,
+			wantMinerBalance: minerReward,
+			wantUncleBalance: uncleReward,
+		},
+		"ethereum post-merge": {
+			chainConfig:      params.MainnetChainConfig,
+			upgrades:         opera.Upgrades{},
+			difficulty:       0,
+			wantMinerBalance: uint256.NewInt(0),
+			wantUncleBalance: uint256.NewInt(0),
+		},
+		"non-ethereum": {
+			chainConfig:      sonicChainConfig,
+			upgrades:         sonicUpgrades,
+			difficulty:       1,
+			wantMinerBalance: uint256.NewInt(0),
+			wantUncleBalance: uint256.NewInt(0),
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+			require.NoError(t, err)
+			defer func() { require.NoError(t, state.Close()) }()
+
+			block, err := convert.ConvertToGethBlock(&blockdb.Block{
+				Number:      blockNumber,
+				GasLimit:    8_000_000,
+				Difficulty:  tt.difficulty,
+				Beneficiary: coinbase.Bytes(),
+				OmmerHeaders: []*blockdb.OmmerHeader{
+					{Beneficiary: uncleCoinbase.Bytes(), Number: uncleNumber},
+				},
+			})
+			require.NoError(t, err)
+
+			processor := evmcore.NewStateProcessorForReplay(
+				tt.chainConfig,
+				&blockHashHistory{},
+				tt.upgrades,
+			)
+
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, tt.upgrades, nil, tt.chainConfig, nil)
+			require.NoError(t, err)
+
+			require.Equal(t, tt.wantMinerBalance.ToBig(), state.db.GetBalance(cc.Address(coinbase)).ToBig())
+			require.Equal(t, tt.wantUncleBalance.ToBig(), state.db.GetBalance(cc.Address(uncleCoinbase)).ToBig())
 		})
 	}
 }

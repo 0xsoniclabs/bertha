@@ -39,6 +39,7 @@ import (
 	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/0xsoniclabs/tracy"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -183,12 +184,13 @@ func (s *State) ApplyBlock(
 	chainConfig *params.ChainConfig,
 	onLog func(*core_types.Log),
 ) (types.Receipts, error) {
+	isPostMerge := block.Difficulty().Sign() == 0
 	blobBaseFee := big.NewInt(1)
 	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsCancun(block.Number(), block.Time()) && block.ExcessBlobGas() != nil {
 		blobBaseFee = eip4844.CalcBlobFee(chainConfig, block.Header())
 	}
 	prevRandao := block.Header().MixDigest
-	if block.Difficulty().Sign() != 0 {
+	if !isPostMerge {
 		// Before the Merge, PrevRandao is not used; set to zero. This indicates
 		// to the EVM that the difficulty should be used instead.
 		prevRandao = common.Hash{}
@@ -286,7 +288,11 @@ func (s *State) ApplyBlock(
 	}
 
 	if isEthereum(chainConfig.ChainID.Uint64()) {
-		creditWithdrawals(block, s.db, chainConfig)
+		if isPostMerge {
+			creditWithdrawals(block, s.db, chainConfig)
+		} else {
+			accumulateRewards(chainConfig, s.db, block.Header(), block.Uncles())
+		}
 	}
 
 	zone.End()
@@ -355,4 +361,36 @@ func creditWithdrawals(block *types.Block, stateDB carmen.StateDB, chainConfig *
 		amnt = amnt.Mul(amnt, uint256.NewInt(params.GWei))
 		stateDB.AddBalance(cc.Address(w.Address), amount.NewFromUint256(amnt))
 	}
+}
+
+// accumulateRewards credits the coinbase of the given block with the mining
+// reward. The total reward consists of the static block reward and rewards for
+// included uncles. The coinbase of each uncle block is also rewarded.
+// Copied from
+// https://github.com/0xsoniclabs/go-ethereum/blob/949ae6d396a5798262c0d228a8de0e3fa504e00c/consensus/ethash/consensus.go#L570
+func accumulateRewards(config *params.ChainConfig, stateDB carmen.StateDB, header *types.Header, uncles []*types.Header) {
+	// Select the correct block reward based on chain progression
+	blockReward := ethash.FrontierBlockReward
+	if config.IsByzantium(header.Number) {
+		blockReward = ethash.ByzantiumBlockReward
+	}
+	if config.IsConstantinople(header.Number) {
+		blockReward = ethash.ConstantinopleBlockReward
+	}
+	// Accumulate the rewards for the miner and any included uncles
+	reward := new(uint256.Int).Set(blockReward)
+	r := new(uint256.Int)
+	hNum, _ := uint256.FromBig(header.Number)
+	for _, uncle := range uncles {
+		uNum, _ := uint256.FromBig(uncle.Number)
+		r.AddUint64(uNum, 8)
+		r.Sub(r, hNum)
+		r.Mul(r, blockReward)
+		r.Rsh(r, 3)
+		stateDB.AddBalance(cc.Address(uncle.Coinbase), amount.NewFromUint256(r))
+
+		r.Rsh(blockReward, 5)
+		reward.Add(reward, r)
+	}
+	stateDB.AddBalance(cc.Address(header.Coinbase), amount.NewFromUint256(reward))
 }
