@@ -19,7 +19,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
 use bertha_types::{
-    AccessListEntry, Block, Log, PostStateOrStatus, SetCodeAuthorization, Transaction,
+    AccessListEntry, Block, Log, OmmerHeader, PostStateOrStatus, SetCodeAuthorization, Transaction,
     TransactionReceipt, TransactionType, U256,
 };
 use reth_era::{common::decode::DecodeCompressedRlp, era1::types::execution::BlockTuple};
@@ -218,12 +218,21 @@ fn convert_receipts(receipt: ReceiptEnvelope) -> TransactionReceipt {
 /// Converts a [`BlockTuple`] to a [`Block`].
 pub fn convert_block(block: &BlockTuple) -> Result<Block, Error> {
     let header: Header = block.header.decode()?;
-    let transactions = block
+    let body = block
         .body
-        .decode::<BlockBody<EthereumTxEnvelope<TxEip4844Variant>>>()?
+        .decode::<BlockBody<EthereumTxEnvelope<TxEip4844Variant>>>()?;
+    let transactions = body
         .transactions
         .into_iter()
         .map(convert_transaction)
+        .collect();
+    let ommer_headers = body
+        .ommers
+        .iter()
+        .map(|h| OmmerHeader {
+            beneficiary: h.beneficiary.0.0,
+            number: h.number,
+        })
         .collect();
     let receipts = block
         .receipts
@@ -253,6 +262,7 @@ pub fn convert_block(block: &BlockTuple) -> Result<Block, Error> {
         excess_blob_gas: header.excess_blob_gas,
         parent_beacon_block_root: header.parent_beacon_block_root.map(|r| r.0),
         requests_hash: header.requests_hash.map(|h| h.0),
+        ommer_headers,
         verkle_state_root: None,
         binary_state_root: None,
     })

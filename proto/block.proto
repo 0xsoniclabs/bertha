@@ -48,6 +48,15 @@ message Block {
   optional bytes binary_state_root = 21;
 
   repeated Withdrawal withdrawals = 22;
+
+  repeated OmmerHeader ommer_headers = 23;
+}
+
+// A minimal ommer (uncle) block header, containing only the fields needed
+// for computing miner rewards in pre-merge Ethereum PoW blocks.
+message OmmerHeader {
+  bytes beneficiary = 1;
+  uint64 number = 2;
 }
 
 // Corresponds to bertha_types::Withdrawal

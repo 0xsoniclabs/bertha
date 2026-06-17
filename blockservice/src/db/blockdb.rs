@@ -500,9 +500,9 @@ where
 /// Key for storing the version of the block database format.
 const VERSION_KEY: [u8; 2] = [0x00, 0x00];
 
-/// The current version of the block database format. This should be incremented whenever a change
-/// is made to the format.
-const CURRENT_VERSION: u64 = 2;
+/// The current version of the block database format. The version should be incremented whenever a
+/// change is made to the key/value layout or the protobuf format.
+const CURRENT_VERSION: u64 = 3;
 
 /// Converts the version into the byte format for storage.
 fn serialize_version(version: u64) -> [u8; 8] {

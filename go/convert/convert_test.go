@@ -43,7 +43,6 @@ func TestConvertToGethBlock_InvalidTransactionType_ReturnsAnError(t *testing.T) 
 }
 
 func TestConvertToGethBlock_ConvertsBlockToGethBlock(t *testing.T) {
-
 	input := &blockdb.Block{
 		ParentHash:      []byte{0x01, 0x02, 0x03, 0x04},
 		OmmersHash:      []byte{0x05, 0x06, 0x07, 0x08},
@@ -60,9 +59,22 @@ func TestConvertToGethBlock_ConvertsBlockToGethBlock(t *testing.T) {
 		WithdrawalsRoot: []byte{0x2b, 0x2c, 0x2d, 0x2e},
 		BlobGasUsed:     func() *uint64 { x := uint64(100); return &x }(),
 		ExcessBlobGas:   func() *uint64 { x := uint64(10); return &x }(),
-		Transactions:    []*blockdb.Transaction{{}, {}},
-		Receipts:        []*blockdb.TransactionReceipt{{}, {}},
-		Withdrawals:     []*blockdb.Withdrawal{{}, {}},
+		// The conversion of the transactions themselves is tested in
+		// TestToGethTransaction_ConvertsTransactionToGethTransaction
+		// This just checks the number of transactions.
+		Transactions: []*blockdb.Transaction{{}, {}},
+		// The conversion of the receipts themselves is tested in
+		// TestToGethReceipt_ConvertsReceiptToGethReceipt
+		// This just checks the number of receipts.
+		Receipts: []*blockdb.TransactionReceipt{{}, {}},
+		// The conversion of the ommers themselves is tested in
+		// TestToGethOmmerHeader_ConvertsOmmerHeaderToGethHeader
+		// This just checks the number of ommers.
+		OmmerHeaders: []*blockdb.OmmerHeader{{}, {}},
+		// The conversion of the withdrawals themselves is tested in
+		// TestToGethWithdrawal_ConvertsWithdrawalToGethWithdrawal
+		// This just checks the number of withdrawals.
+		Withdrawals: []*blockdb.Withdrawal{{}, {}},
 	}
 
 	transactions := types.Transactions{}
@@ -75,6 +87,11 @@ func TestConvertToGethBlock_ConvertsBlockToGethBlock(t *testing.T) {
 	receipts := types.Receipts{}
 	for _, receipt := range input.Receipts {
 		receipts = append(receipts, ToGethReceipt(receipt))
+	}
+
+	uncleHeaders := []*types.Header{}
+	for _, ommer := range input.OmmerHeaders {
+		uncleHeaders = append(uncleHeaders, toGethOmmerHeader(ommer))
 	}
 
 	withdrawals := types.Withdrawals{}
@@ -106,6 +123,7 @@ func TestConvertToGethBlock_ConvertsBlockToGethBlock(t *testing.T) {
 		}).
 		WithBody(types.Body{
 			Transactions: transactions,
+			Uncles:       uncleHeaders,
 			Withdrawals:  withdrawals,
 		})
 
@@ -129,6 +147,12 @@ func TestConvertToGethBlock_ConvertsBlockToGethBlock(t *testing.T) {
 	require.Equal(t, want.BaseFee(), got.BaseFee())
 	require.Equal(t, want.Header(), got.Header())
 	require.Equal(t, want.Hash(), got.Hash())
+	require.Equal(t, len(want.Transactions()), len(got.Transactions()))
+	for i := range want.Transactions() {
+		require.Equal(t, want.Transactions()[i].Hash(), got.Transactions()[i].Hash())
+	}
+	require.Equal(t, want.Uncles(), got.Uncles())
+	require.Equal(t, want.Withdrawals(), got.Withdrawals())
 }
 
 func TestToBerthaTransaction_ConvertsGethTransactionToBerthaTransaction(t *testing.T) {
@@ -677,6 +701,27 @@ func TestToOptionalHash_ConvertsBytesToHashesIfNotEmpty(t *testing.T) {
 			require.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestToGethOmmerHeader_ConvertsOmmerHeaderToGethHeader(t *testing.T) {
+	input := &blockdb.OmmerHeader{
+		Beneficiary: []byte{0x01, 0x02, 0x03},
+		Number:      42,
+	}
+
+	want := &types.Header{
+		Coinbase: common.BytesToAddress([]byte{0x01, 0x02, 0x03}),
+		Number:   new(big.Int).SetUint64(42),
+	}
+
+	got := toGethOmmerHeader(input)
+	require.Equal(t, want.Coinbase, got.Coinbase)
+	require.Equal(t, want.Number, got.Number)
+}
+
+func TestToGethOmmerHeader_NilOmmerHeader_ReturnsNil(t *testing.T) {
+	got := toGethOmmerHeader(nil)
+	require.Nil(t, got)
 }
 
 func TestToGethWithdrawal_ConvertsWithdrawal(t *testing.T) {

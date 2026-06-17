@@ -32,7 +32,7 @@ mod u256;
 mod withdrawal;
 
 pub use as_hex::AsHex;
-pub use block::Block;
+pub use block::{Block, OmmerHeader};
 pub use block_header::BlockHeader;
 pub use eip_2718_utils::{EIP2718Unmarshallable, Eip2718Marshallable, compute_root_hash, verify};
 pub use error::VerificationError;

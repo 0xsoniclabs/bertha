@@ -130,6 +130,7 @@ impl TryFrom<IdxFullBlock> for Block {
             excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
             requests_hash: None,
+            ommer_headers: Vec::new(),
             verkle_state_root: None,
             binary_state_root: None,
         })
@@ -246,6 +247,7 @@ mod tests {
             excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
             requests_hash: None,
+            ommer_headers: Vec::new(),
             verkle_state_root: None,
             binary_state_root: None,
         };
@@ -302,6 +304,7 @@ mod tests {
             excess_blob_gas: Some(0),
             parent_beacon_block_root: None,
             requests_hash: None,
+            ommer_headers: Vec::new(),
             verkle_state_root: None,
             binary_state_root: None,
         };

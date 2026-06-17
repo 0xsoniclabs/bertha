@@ -52,16 +52,21 @@ func ConvertToGethBlock(block *blockdb.Block) (*types.Block, error) {
 	txHash := types.DeriveSha(transactions, trie.NewStackTrie(nil))
 
 	// Convert the receipts.
-	receipts := types.Receipts{}
+	receipts := make(types.Receipts, 0, len(block.Receipts))
 	for _, receipt := range block.Receipts {
 		receipts = append(receipts, ToGethReceipt(receipt))
 	}
 	receiptsHash := types.DeriveSha(receipts, trie.NewStackTrie(nil))
 	bloom := types.MergeBloom(receipts)
 
-	withdrawals := types.Withdrawals{}
+	withdrawals := make(types.Withdrawals, 0, len(block.Withdrawals))
 	for _, w := range block.Withdrawals {
 		withdrawals = append(withdrawals, toGethWithdrawal(w))
+	}
+
+	uncles := make([]*types.Header, 0, len(block.OmmerHeaders))
+	for _, oh := range block.OmmerHeaders {
+		uncles = append(uncles, toGethOmmerHeader(oh))
 	}
 
 	// Obtain the total gas used in this block.
@@ -100,6 +105,7 @@ func ConvertToGethBlock(block *blockdb.Block) (*types.Block, error) {
 		}).
 		WithBody(types.Body{
 			Transactions: transactions,
+			Uncles:       uncles,
 			Withdrawals:  withdrawals,
 		}), nil
 }
@@ -308,6 +314,16 @@ func toOptionalHash(data []byte) *common.Hash {
 	var hash common.Hash
 	copy(hash[:], data)
 	return &hash
+}
+
+func toGethOmmerHeader(oh *blockdb.OmmerHeader) *types.Header {
+	if oh == nil {
+		return nil
+	}
+	return &types.Header{
+		Coinbase: common.BytesToAddress(oh.Beneficiary),
+		Number:   new(big.Int).SetUint64(oh.Number),
+	}
 }
 
 func toGethWithdrawal(w *blockdb.Withdrawal) *types.Withdrawal {
