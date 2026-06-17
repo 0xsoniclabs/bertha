@@ -164,7 +164,15 @@ fn import(
         smallest_import_block_number = *range.end() + 1;
     }
 
-    let import_blocks = total_blocks - smallest_import_block_number;
+    let import_blocks = total_blocks.saturating_sub(smallest_import_block_number);
+
+    if import_blocks == 0 {
+        writeln!(
+            writer,
+            "All blocks are already in the database, nothing to import"
+        )?;
+        return Ok(());
+    }
 
     if import_blocks != total_blocks {
         writeln!(
@@ -174,14 +182,14 @@ fn import(
         )?;
     }
 
-    let mut uncompressed_bytes_written = 0;
-    let mut block_count = 0;
-    let progress_bar = make_progress_bar(total_blocks)?;
-
     writeln!(
         writer,
         "Importing {import_blocks} blocks for chain ID {chain_id}"
     )?;
+
+    let mut uncompressed_bytes_written = 0;
+    let mut block_count = 0;
+    let progress_bar = make_progress_bar(import_blocks)?;
 
     let mut batch = db.batch();
     let mut prev_parent_hash: Option<Hash> = None;
@@ -263,18 +271,24 @@ fn import(
 
 #[cfg(test)]
 mod tests {
+    use core::slice;
+
     use bertha_types::Block;
     use mockall::Sequence;
     use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::{
+        BlockRange,
         app_dir::init_app_dir,
         cmd::MockCancelIndicator,
         db::{
             CHAIN_IDS_KEY, KvDb, make_block_ranges_key, serialize_block_ranges, serialize_chain_ids,
         },
-        utils::test_dir::{Permissions, TestDir},
+        utils::{
+            ranges::subtract_ranges,
+            test_dir::{Permissions, TestDir},
+        },
     };
 
     #[test]
@@ -311,50 +325,48 @@ mod tests {
         }
     }
 
-    #[test]
-    fn inserts_missing_blocks_from_snapshot_file_into_db() {
-        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
-
-        let num_blocks = 5;
+    #[rstest::rstest]
+    #[case::skips_stored_blocks(0..=2, 0..=4, Some(3..=4))]
+    #[case::skips_import_when_all_blocks_stored(0..=5, 0..=5, None)]
+    #[case::does_not_skip_stored_blocks_if_not_starting_at_zero(1..=2, 0..=4, Some(0..=4))]
+    fn import_skips_blocks_already_in_db(
+        #[case] db_blocks_range: BlockRange,
+        #[case] available_blocks_range: BlockRange,
+        #[case] import_blocks_range: Option<BlockRange>,
+    ) {
         let chain_id = 146;
 
-        let mut prev_hash = Hash::default();
-        let mut all_blocks = Vec::new();
-        for block_number in 0..num_blocks {
-            let block = Block {
-                number: block_number,
-                parent_hash: prev_hash,
-                ..Block::default_sonic()
-            };
-            prev_hash = block.to_header().compute_hash();
-            all_blocks.push(block);
-        }
+        let db_blocks: Vec<_> = db_blocks_range
+            .clone()
+            .map(|i| Block {
+                number: i,
+                ..Block::default()
+            })
+            .collect();
+        let available_blocks: Vec<_> = available_blocks_range
+            .clone()
+            .map(|i| {
+                Block {
+                    number: i,
+                    difficulty: 1, // non-default difficulty to distinguish from blocks stored in DB
+                    ..Block::default()
+                }
+            })
+            .collect();
 
-        let db_blocks_num = 2;
-        let db_blocks = &all_blocks[..db_blocks_num];
-        let mut genesis_blocks = all_blocks.clone();
-
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
-        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
-        for block in db_blocks {
+        let (cfg, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
+        for block in &db_blocks {
             db.put(chain_id, block.clone()).unwrap();
         }
-        drop(db);
-
-        // modify the blocks which are part of the genesis file but are not inserted into the db
-        // because they are already stored
-        for block in genesis_blocks.iter_mut().take(db_blocks_num) {
-            block.gas_limit = 1; // modify block so we can check that the existing blocks are not being overwritten
-        }
-        let genesis_file = tmpdir.path().join("genesis.g");
-        let genesis_data =
-            genesis_parser::test_utils::generate_test_genesis(chain_id, 0, &genesis_blocks);
-        std::fs::write(&genesis_file, genesis_data).unwrap();
 
         let mut writer = Vec::new();
-        import_gfile(
-            tmpdir.path(),
-            genesis_file.to_str().unwrap(),
+        import(
+            cfg,
+            &mut db,
+            available_blocks.clone().into_iter().map(Ok).rev(),
+            chain_id,
             false,
             &CancellationToken::new(),
             &mut writer,
@@ -362,20 +374,68 @@ mod tests {
         .unwrap();
 
         let output = String::from_utf8(writer).unwrap();
-        assert!(output.contains(indoc::indoc! {"
-            Genesis file contains 5 blocks for chain ID 146
+        let mut expected_output = String::new();
+        expected_output += &indoc::formatdoc! {"
+            Genesis file contains {} blocks for chain ID 146
             Creating new entry for chain ID 146 in the configuration
-            Skipping 2 blocks that are already in the database
-            Importing 3 blocks for chain ID 146
-            Wrote 3 blocks, total uncompressed size: 0 MiB, elapsed: 0s, throughput: "
-        }));
+            ",
+            available_blocks_range.clone().count()
+        };
 
-        let (_, db) = open_app_dir(tmpdir.path(), true).unwrap();
-        for block in all_blocks {
-            let db_block = db.get(chain_id, block.number).unwrap();
-            // check that the missing blocks were inserted and the existing blocks were not
-            // modified
-            assert_eq!(db_block, Some(block.clone()),);
+        if let Some(import_blocks_range) = &import_blocks_range {
+            let skip = subtract_ranges(
+                available_blocks_range.clone(),
+                slice::from_ref(import_blocks_range),
+            )
+            .into_iter()
+            .map(Iterator::count)
+            .sum::<usize>();
+            if skip > 0 {
+                expected_output += &indoc::formatdoc! {"
+                    Skipping {skip} blocks that are already in the database
+                "};
+            }
+            let import_blocks_count = import_blocks_range.clone().count();
+            expected_output += &indoc::formatdoc! {"
+                Importing {import_blocks_count} blocks for chain ID 146
+                Wrote {import_blocks_count} blocks, total uncompressed size: 0 MiB, elapsed: 0s, throughput: ",
+            };
+        } else {
+            expected_output += &indoc::indoc! {"
+                All blocks are already in the database, nothing to import"
+            };
+        }
+        assert!(
+            output.starts_with(&expected_output),
+            "got output:\n{output}\nexpected output:\n{expected_output}"
+        );
+
+        // Verify existing blocks that are not reimported are not overwritten and imported blocks
+        // are stored in the database
+        if let Some(import_blocks_range) = import_blocks_range {
+            // Existing non-imported blocks should remain unchanged
+            for block in db_blocks {
+                if !import_blocks_range.contains(&block.number) {
+                    assert_eq!(db.get(chain_id, block.number).unwrap(), Some(block));
+                }
+            }
+            // Imported blocks should be stored in the database and might overwrite existing blocks
+            for block_number in import_blocks_range {
+                assert_eq!(
+                    db.get(chain_id, block_number).unwrap(),
+                    Some(Block {
+                        number: block_number,
+                        difficulty: 1, /* non-default difficulty to distinguish from blocks
+                                        * stored in DB */
+                        ..Default::default()
+                    })
+                );
+            }
+        } else {
+            // Existing non-imported blocks should remain unchanged
+            for block in db_blocks {
+                assert_eq!(db.get(chain_id, block.number).unwrap(), Some(block));
+            }
         }
     }
 
