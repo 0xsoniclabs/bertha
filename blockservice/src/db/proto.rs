@@ -110,6 +110,15 @@ impl From<bertha_types::TransactionReceipt> for TransactionReceipt {
     }
 }
 
+impl From<bertha_types::OmmerHeader> for OmmerHeader {
+    fn from(value: bertha_types::OmmerHeader) -> Self {
+        Self {
+            beneficiary: value.beneficiary.into(),
+            number: value.number,
+        }
+    }
+}
+
 impl From<bertha_types::Block> for Block {
     fn from(value: bertha_types::Block) -> Self {
         let transactions = value
@@ -119,6 +128,7 @@ impl From<bertha_types::Block> for Block {
             .collect::<Vec<_>>();
         let receipts = value.receipts.into_iter().map(From::from).collect();
         let withdrawals = value.withdrawals.into_iter().map(From::from).collect();
+        let ommer_headers = value.ommer_headers.into_iter().map(From::from).collect();
 
         Block {
             parent_hash: value.parent_hash.into(),
@@ -146,6 +156,8 @@ impl From<bertha_types::Block> for Block {
 
             verkle_state_root: value.verkle_state_root.map(Into::into),
             binary_state_root: value.binary_state_root.map(Into::into),
+
+            ommer_headers,
         }
     }
 }
@@ -310,6 +322,17 @@ impl TryFrom<Withdrawal> for bertha_types::Withdrawal {
     }
 }
 
+impl TryFrom<OmmerHeader> for bertha_types::OmmerHeader {
+    type Error = Error;
+
+    fn try_from(value: OmmerHeader) -> Result<Self, Self::Error> {
+        Ok(Self {
+            beneficiary: convert_to_fixed_size(value.beneficiary)?,
+            number: value.number,
+        })
+    }
+}
+
 impl TryFrom<Block> for bertha_types::Block {
     type Error = Error;
 
@@ -326,6 +349,11 @@ impl TryFrom<Block> for bertha_types::Block {
             .collect::<Result<Vec<_>, _>>()?;
         let withdrawals = value
             .withdrawals
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<Vec<_>, _>>()?;
+        let ommer_headers = value
+            .ommer_headers
             .into_iter()
             .map(TryInto::try_into)
             .collect::<Result<Vec<_>, _>>()?;
@@ -368,6 +396,7 @@ impl TryFrom<Block> for bertha_types::Block {
                 .binary_state_root
                 .map(convert_to_fixed_size)
                 .transpose()?,
+            ommer_headers,
         })
     }
 }
@@ -528,6 +557,7 @@ mod tests {
             verkle_state_root: rng.option(verkle_state_root),
             binary_state_root: rng.option(binary_state_root),
             withdrawals: vec![make_withdrawal(rng), make_withdrawal(rng)],
+            ommer_headers: vec![make_ommer_header(rng), make_ommer_header(rng)],
         }
     }
 
@@ -537,6 +567,13 @@ mod tests {
             validator_index: rng.u64(),
             address: rng.bytes(),
             amount: rng.u64(),
+        }
+    }
+
+    fn make_ommer_header(rng: &mut TestRng) -> bertha_types::OmmerHeader {
+        bertha_types::OmmerHeader {
+            beneficiary: rng.bytes(),
+            number: rng.u64(),
         }
     }
 
@@ -690,6 +727,29 @@ mod tests {
     #[case::invalid_requests_hash(Block { requests_hash: Some(vec![0; 31]), ..valid_proto_block() })]
     fn block_conversion_fails_for_invalid_byte_strings(#[case] invalid_block: Block) {
         let err = bertha_types::Block::try_from(invalid_block).unwrap_err();
+        assert_eq!(err, Error::TypeConversion);
+    }
+
+    #[test]
+    fn ommer_header_can_be_converted_from_and_to_protobuf_types() {
+        let ommer_header = make_ommer_header(&mut TestRng::new(42));
+        let proto_ommer_header: OmmerHeader = ommer_header.clone().into();
+        let converted_ommer_header: bertha_types::OmmerHeader =
+            proto_ommer_header.try_into().unwrap();
+        assert_eq!(converted_ommer_header, ommer_header);
+    }
+
+    fn valid_proto_ommer_header() -> OmmerHeader {
+        make_ommer_header(&mut TestRng::new(42)).into()
+    }
+
+    #[test]
+    fn ommer_header_conversion_fails_for_invalid_beneficiary() {
+        let invalid_ommer_header = OmmerHeader {
+            beneficiary: vec![0; 19],
+            ..valid_proto_ommer_header()
+        };
+        let err = bertha_types::OmmerHeader::try_from(invalid_ommer_header).unwrap_err();
         assert_eq!(err, Error::TypeConversion);
     }
 

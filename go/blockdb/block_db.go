@@ -242,9 +242,10 @@ func (db RocksDB) GetCorrections(chainID uint64) ([]byte, error) {
 	return db.db.GetBytes(readOptions, MakeCorrectionsKey(chainID))
 }
 
-// CurrentVersion is the current version of the block database format. It is
-// used to check compatibility when opening the database.
-const CurrentVersion uint64 = 2
+// CurrentVersion is the version of the block database format. The version
+// should be incremented whenever a change is made to the key/value layout or
+// the protobuf format.
+const CurrentVersion uint64 = 3
 
 // MakeVersionKey returns the key used to store the version of the block database format.
 func MakeVersionKey() []byte {

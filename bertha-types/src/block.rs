@@ -80,9 +80,22 @@ pub struct Block {
     /// Added by EIP-7685
     pub requests_hash: Option<Hash>,
 
+    /// Ommer/uncle block headers included in this block.
+    /// Only relevant for pre-merge Ethereum PoW blocks.
+    pub ommer_headers: Vec<OmmerHeader>,
+
     // State roots for experimental data structures
     pub verkle_state_root: Option<Hash>,
     pub binary_state_root: Option<Hash>,
+}
+
+/// A minimal ommer (uncle) block header, containing only the fields needed
+/// for computing miner rewards in pre-merge Ethereum PoW blocks.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OmmerHeader {
+    /// geth: Coinbase
+    pub beneficiary: Address,
+    pub number: u64,
 }
 
 impl Block {
@@ -173,6 +186,7 @@ impl Block {
             excess_blob_gas: header.excess_blob_gas,
             parent_beacon_block_root: None,
             requests_hash: None,
+            ommer_headers: Vec::new(),
             verkle_state_root: None,
             binary_state_root: None,
         }
@@ -260,6 +274,7 @@ impl From<JsonBlock> for Block {
             excess_blob_gas: json_block.excess_blob_gas.map(|v| v.0),
             parent_beacon_block_root: json_block.parent_beacon_block_root.map(|v| v.0),
             requests_hash: json_block.requests_hash.map(|v| v.0),
+            ommer_headers: Vec::new(),
             verkle_state_root: None,
             binary_state_root: None,
         }
