@@ -440,60 +440,56 @@ func TestState_ApplyBlock_BlobBaseFeeIsCalculatedFromHeaderForEthereum(t *testin
 }
 
 func TestState_ApplyBlock_ApplySonicVmConfigIfNotEthereumChain(t *testing.T) {
-	// Note: the vm config setting "InsufficientBalanceIsNotAnError" is used as
-	// a proxy for whether the Sonic VM config is applied.
 	tests := map[string]struct {
-		chainConfig *params.ChainConfig
-		blockNumber uint64
-		wantSkipped bool
+		chainConfig                     *params.ChainConfig
+		wantChargeExcessGas             bool
+		wantIgnoreGasFeeCap             bool
+		wantInsufficientBalanceIsNotErr bool
+		wantSkipTipPaymentToCoinbase    bool
 	}{
 		"Ethereum": {
 			chainConfig: params.MainnetChainConfig,
-			blockNumber: 3_000_000, // past EIP-155 activation (block 2,675,000)
-			wantSkipped: true,
 		},
 		"Sonic": {
-			chainConfig: opera.CreateTransientEvmChainConfig(146, []opera.UpgradeHeight{}, idx.Block(1)),
-			blockNumber: 1,
-			wantSkipped: false,
+			chainConfig:                     opera.CreateTransientEvmChainConfig(146, []opera.UpgradeHeight{}, idx.Block(1)),
+			wantChargeExcessGas:             true,
+			wantIgnoreGasFeeCap:             true,
+			wantInsufficientBalanceIsNotErr: true,
+			wantSkipTipPaymentToCoinbase:    true,
 		},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			processor := NewMockProcessor(ctrl)
+
 			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
 			require.NoError(t, err)
 			defer func() { require.NoError(t, state.Close()) }()
 
-			key, err := crypto.GenerateKey()
-			require.NoError(t, err)
-			signer := types.LatestSignerForChainID(tt.chainConfig.ChainID)
-
-			// Sender has no balance, but the tx transfers 1 wei.
-			tx := types.MustSignNewTx(key, signer, &types.LegacyTx{
-				Nonce:    0,
-				To:       &common.Address{1},
-				Gas:      21_000,
-				GasPrice: big.NewInt(0),
-				Value:    big.NewInt(1),
+			block := types.NewBlockWithHeader(&types.Header{
+				GasLimit: 8_000_000,
 			})
 
-			block, err := convert.ConvertToGethBlock(&blockdb.Block{
-				Number:       tt.blockNumber,
-				GasLimit:     8_000_000,
-				Transactions: []*blockdb.Transaction{convert.ToBerthaTransaction(tx)},
+			processor.EXPECT().ProcessWithDifficulty(
+				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
+				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
+				gomock.Any(),
+			).DoAndReturn(func(
+				_ *evmcore.EvmBlock, _ interface{}, cfg vm.Config,
+				_ uint64, _ *uint64, _ int, _ interface{},
+				_ *big.Int, _ uint64,
+			) evmcore.ProcessSummary {
+				require.Equal(t, tt.wantChargeExcessGas, cfg.ChargeExcessGas)
+				require.Equal(t, tt.wantIgnoreGasFeeCap, cfg.IgnoreGasFeeCap)
+				require.Equal(t, tt.wantInsufficientBalanceIsNotErr, cfg.InsufficientBalanceIsNotAnError)
+				require.Equal(t, tt.wantSkipTipPaymentToCoinbase, cfg.SkipTipPaymentToCoinbase)
+				return evmcore.ProcessSummary{}
 			})
+
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, tt.chainConfig, nil)
 			require.NoError(t, err)
-
-			processor := evmcore.NewStateProcessorForReplay(tt.chainConfig, &blockHashHistory{}, opera.Upgrades{})
-
-			receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, tt.chainConfig, nil)
-			if tt.wantSkipped {
-				require.ErrorContains(t, err, "skipped txs")
-			} else {
-				require.NoError(t, err)
-				require.Len(t, receipts, 1)
-			}
 		})
 	}
 }
