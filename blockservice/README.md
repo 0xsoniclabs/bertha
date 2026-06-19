@@ -29,6 +29,7 @@ Commands:
   import-gfile                 Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
   import-era1                  Import all blocks from the specified directory (which is expected to contain `.era1` files) into the block database, and optionally also verify the parent hashes. The blocks are stored under the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
   import-era                   Import all blocks from the specified directory (which is expected to contain `.era` files) into the block database. The blocks are stored under the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
+  import-erae                  Import all blocks from the specified directory (which is expected to contain `.erae` files) into the block database, and optionally also verify the parent hashes. The blocks are stored under the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
   import-rules-update-heights  Import rules update heights from a JSON file into the block database for the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
   import-corrections           Import corrections from a JSON file into the block database for the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
   fetch                        Fetch blocks from a remote block service and store them in the local database
@@ -75,25 +76,33 @@ Import the genesis file.
 cargo run --release -- import-gfile </path/to/snapshot.g>
 ```
 
-### Import Ethereum `.era1` and `.era` files
+### Import Ethereum `.era1`, `.era` and `.erae` files
 
-`.era1` files store pre-merge Ethereum history, while `.era` files store post-merge Ethereum beacon chain history.
-Thus, `.era1` files contain all data that is stored in bertha, while `.era` files are missing transaction receipts.
-Therefore, `.era` file import does not support parent hash verification, because the computed parent hash will be always incorrect because of the missing receipts.
+- `.era1` files store pre-merge Ethereum history
+- `.era` files store post-merge Ethereum beacon chain history. They don't store transaction receipts and therefore don't support parent hash verification, because the computed parent hash will always be incorrect.
+- `.erae` files store both pre- and post-merge Ethereum history. They are intended as a uniform storage for the full history, but are currently not as widely adopted.
 
-*Note: First import the `.era1` files and then the `.era` files.*
+*Note: For chains with both pre- and post-merge history, either import the `.erae` files, or first import the `.era1` files and then the `.era` files.*
 
-Download all era1/era files.
+Download all era1/era/erae files.
 ```sh
+# era1 files for sepolia
 wget --recursive --no-parent https://sepolia.era1.nimbus.team
+# era files for sepolia
 wget --recursive --no-parent https://sepolia.era.nimbus.team
+# erae files for sepolia
+curl -s "https://data.ethpandaops.io/erae/sepolia/" \
+  | grep -oP '"name":\s*"\Ksepolia-[^"]+\.erae' \
+  | wget -i - -B "https://data.ethpandaops.io/erae/sepolia/" -P sepolia-erae/
+# era files for hoodi
 wget --recursive --no-parent https://hoodi.era.nimbus.team
 ```
 
-Import era1/era files.
+Import era1/era/erae files.
 ```sh
 cargo run --release -- import-era1 </path/to/era1-directory> <chain-id-or-name> [--verify]
 cargo run --release -- import-era </path/to/era-directory> <chain-id-or-name>
+cargo run --release -- import-erae </path/to/erae-directory> <chain-id-or-name> [--verify]
 ```
 
 ### Import rules update heights

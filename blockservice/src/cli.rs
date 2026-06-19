@@ -55,6 +55,15 @@ pub enum Command {
     /// into the block database. The blocks are stored under the specified chain, which can be a
     /// name (e.g. `sonic`, `sepolia`) or a numeric ID.
     ImportEra { era_dir: PathBuf, chain: Chain },
+    /// Import all blocks from the specified directory (which is expected to contain `.erae` files)
+    /// into the block database, and optionally also verify the parent hashes. The blocks are stored
+    /// under the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID.
+    ImportErae {
+        erae_dir: PathBuf,
+        chain: Chain,
+        #[arg(long, default_value_t = false)]
+        verify: bool,
+    },
     /// Import rules update heights from a JSON file into the block database for the specified
     /// chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID.
     ImportRulesUpdateHeights { chain: Chain, file: PathBuf },
@@ -176,6 +185,7 @@ Commands:
   import-gfile                 Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
   import-era1                  Import all blocks from the specified directory (which is expected to contain `.era1` files) into the block database, and optionally also verify the parent hashes. The blocks are stored under the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
   import-era                   Import all blocks from the specified directory (which is expected to contain `.era` files) into the block database. The blocks are stored under the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
+  import-erae                  Import all blocks from the specified directory (which is expected to contain `.erae` files) into the block database, and optionally also verify the parent hashes. The blocks are stored under the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
   import-rules-update-heights  Import rules update heights from a JSON file into the block database for the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
   import-corrections           Import corrections from a JSON file into the block database for the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
   fetch                        Fetch blocks from a remote block service and store them in the local database

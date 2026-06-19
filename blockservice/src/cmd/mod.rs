@@ -21,7 +21,7 @@ use std::{
 
 pub use fetch::fetch;
 pub use fetch_metadata::fetch_metadata;
-pub use import::{import_era, import_era1, import_gfile};
+pub use import::{import_era, import_era1, import_erae, import_gfile};
 pub use import_metadata::{import_corrections, import_rules_update_heights};
 use indicatif::{ProgressBar, style::TemplateError};
 pub use init::init;
@@ -164,6 +164,18 @@ pub async fn execute(
             args.dir,
             era_dir,
             chain.to_chain_id(),
+            &cancellation_token,
+            &mut output,
+        ),
+        Command::ImportErae {
+            erae_dir,
+            chain,
+            verify,
+        } => cmd::import_erae(
+            args.dir,
+            erae_dir,
+            chain.to_chain_id(),
+            verify,
             &cancellation_token,
             &mut output,
         ),

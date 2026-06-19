@@ -17,7 +17,7 @@
 use std::{fs::File, io::BufReader, path::Path};
 
 use bertha_types::{Block, Hash, HexConvert};
-use genesis_parser::{Era1FileReader, EraDir, EraFileReader, GFile};
+use genesis_parser::{Era1FileReader, EraDir, EraEFileReader, EraFileReader, GFile};
 use prost::Message;
 
 use crate::{
@@ -76,6 +76,32 @@ pub fn import_era(
         blocks,
         chain_id,
         false,
+        cancel_indicator,
+        &mut writer,
+    )
+}
+
+/// Imports blocks from a directory containing `.erae` files into the database located in `app_dir`,
+/// and optionally verifies the parent hashes.
+pub fn import_erae(
+    app_dir: impl AsRef<Path>,
+    erae_dir_path: impl AsRef<Path>,
+    chain_id: u64,
+    verify: bool,
+    cancel_indicator: &impl CancelIndicator,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (cfg, mut db) = open_app_dir(app_dir, false)?;
+
+    let era_dir = EraDir::<EraEFileReader>::open(erae_dir_path, chain_id)?;
+    let blocks = era_dir.blocks();
+
+    import(
+        cfg,
+        &mut db,
+        blocks,
+        chain_id,
+        verify,
         cancel_indicator,
         &mut writer,
     )
@@ -294,6 +320,7 @@ mod tests {
     #[rstest::rstest]
     #[case::import_era1(|path: &Path, w: &mut Vec<u8>| import_era1(path, "somepath", 123, true, &CancellationToken::new(), w))]
     #[case::import_era(|path: &Path, w: &mut Vec<u8>| import_era(path, "somepath", 123, &CancellationToken::new(), w))]
+    #[case::import_erae(|path: &Path, w: &mut Vec<u8>| import_erae(path, "somepath", 123, true, &CancellationToken::new(), w))]
     #[case::import_gfile(|path: &Path, w: &mut Vec<u8>| import_gfile(path, "somepath", true, &CancellationToken::new(), w))]
     fn import_function_fails_if_app_dir_is_not_initialized(
         #[case] run: fn(&Path, &mut Vec<u8>) -> EmptyResult,
