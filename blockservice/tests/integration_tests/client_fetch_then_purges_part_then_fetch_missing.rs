@@ -63,7 +63,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
         String::from_utf8_lossy(&log),
         indoc::indoc! {"
         [146] SONIC: SONIC test chain
-        ├── upgrade heights: no
+        ├── rules update heights: no
         ├── corrections: no
         └── 0 - 9
         "}
@@ -106,7 +106,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
         String::from_utf8_lossy(&log),
         indoc::indoc! {"
         [146] SONIC: SONIC test chain
-        ├── upgrade heights: no
+        ├── rules update heights: no
         ├── corrections: no
         └── 0 - 9
         "}
@@ -148,7 +148,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
         String::from_utf8_lossy(&log),
         indoc::indoc! {"
             [146] SONIC: SONIC test chain
-            ├── upgrade heights: no
+            ├── rules update heights: no
             ├── corrections: no
             ├── 0 - 4
             └── 9 - 9
@@ -192,7 +192,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
         String::from_utf8_lossy(&log),
         indoc::indoc! {"
         [146] SONIC: SONIC test chain
-        ├── upgrade heights: no
+        ├── rules update heights: no
         ├── corrections: no
         └── 0 - 9
         "}

@@ -277,29 +277,29 @@ func TestReplay_BlockDBAccessMode(t *testing.T) {
 	chainID := uint64(123)
 
 	cases := map[string]struct {
-		overwriteStateRoot  bool
-		writeUpgradeHeights bool
-		requiresWriteAccess bool
+		overwriteStateRoot      bool
+		writeRulesUpdateHeights bool
+		requiresWriteAccess     bool
 	}{
-		"NoOverwriteStateRootAndNoWriteUpgradeHeightsRequiresOnlyReadAccess": {
-			overwriteStateRoot:  false,
-			writeUpgradeHeights: false,
-			requiresWriteAccess: false,
+		"NoOverwriteStateRootAndNoWriteRulesUpdateHeightsRequiresOnlyReadAccess": {
+			overwriteStateRoot:      false,
+			writeRulesUpdateHeights: false,
+			requiresWriteAccess:     false,
 		},
 		"OverwriteStateRootRequiresWriteAccess": {
-			overwriteStateRoot:  true,
-			writeUpgradeHeights: false,
-			requiresWriteAccess: true,
+			overwriteStateRoot:      true,
+			writeRulesUpdateHeights: false,
+			requiresWriteAccess:     true,
 		},
-		"WriteUpgradeHeightsRequiresWriteAccess": {
-			overwriteStateRoot:  false,
-			writeUpgradeHeights: true,
-			requiresWriteAccess: true,
+		"WriteRulesUpdateHeightsRequiresWriteAccess": {
+			overwriteStateRoot:      false,
+			writeRulesUpdateHeights: true,
+			requiresWriteAccess:     true,
 		},
-		"OverwriteStateRootAndWriteUpgradeHeightsRequiresWriteAccess": {
-			overwriteStateRoot:  true,
-			writeUpgradeHeights: true,
-			requiresWriteAccess: true,
+		"OverwriteStateRootAndWriteRulesUpdateHeightsRequiresWriteAccess": {
+			overwriteStateRoot:      true,
+			writeRulesUpdateHeights: true,
+			requiresWriteAccess:     true,
 		},
 	}
 
@@ -342,14 +342,14 @@ func TestReplay_BlockDBAccessMode(t *testing.T) {
 				}
 
 				err := Replay(t.Context(), ReplayArgs{
-					BlockDBDir:          blockDBPath,
-					JSONGenesisFile:     genesis,
-					Interpreter:         "sfvm",
-					DBSchema:            5,
-					DBVariant:           "go-file",
-					OverwriteStateRoot:  tc.overwriteStateRoot,
-					WriteUpgradeHeights: tc.writeUpgradeHeights,
-					EndBlock:            uint64(numBlocks),
+					BlockDBDir:              blockDBPath,
+					JSONGenesisFile:         genesis,
+					Interpreter:             "sfvm",
+					DBSchema:                5,
+					DBVariant:               "go-file",
+					OverwriteStateRoot:      tc.overwriteStateRoot,
+					WriteRulesUpdateHeights: tc.writeRulesUpdateHeights,
+					EndBlock:                uint64(numBlocks),
 				})
 
 				if tc.requiresWriteAccess && readOnly {
@@ -950,10 +950,10 @@ func TestStateChainAdapter_ApplyBlock_AppliesUpgrades(t *testing.T) {
 
 	metadataStore := &BlockDBMetadataStore{
 		metadata: Metadata{
-			UpgradeHeights: []opera.UpgradeHeight{
-				{Height: 5, Upgrades: noExcessGasCharges},
-				{Height: 10, Upgrades: withExcessGasCharges},
-				{Height: 15, Upgrades: noExcessGasCharges},
+			RulesUpdateHeights: []RulesUpdateHeight{
+				{Block: 5, Rules: opera.Rules{Upgrades: noExcessGasCharges}},
+				{Block: 10, Rules: opera.Rules{Upgrades: withExcessGasCharges}},
+				{Block: 15, Rules: opera.Rules{Upgrades: noExcessGasCharges}},
 			},
 		},
 	}
@@ -1009,7 +1009,7 @@ func TestStateChainAdapter_ApplyBlock_AppliesUpgrades(t *testing.T) {
 	}
 }
 
-func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnEpochSealingTx(t *testing.T) {
+func TestStateChainAdapter_ApplyBlock_CommitsRulesUpdateWhenEncounteringAnEpochSealingTx(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	address := crypto.PubkeyToAddress(key.PublicKey)
@@ -1017,8 +1017,8 @@ func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnEpochSeal
 	signer := types.LatestSignerForChainID(big.NewInt(int64(chainID)))
 
 	cases := map[string]struct {
-		tx                   *blockdb.Transaction
-		expectCommitUpgrades bool
+		tx                *blockdb.Transaction
+		expectCommitRules bool
 	}{
 		"EpochSealingTx": {
 			// An epoch sealing transaction must be an internal transaction to
@@ -1035,7 +1035,7 @@ func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnEpochSeal
 					R:        big.NewInt(0),
 				},
 			)),
-			expectCommitUpgrades: true,
+			expectCommitRules: true,
 		},
 		"NonEpochSealingTx": {
 			tx: convert.ToBerthaTransaction(types.MustSignNewTx(key, signer,
@@ -1045,7 +1045,7 @@ func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnEpochSeal
 					GasPrice: big.NewInt(100000),
 				},
 			)),
-			expectCommitUpgrades: false,
+			expectCommitRules: false,
 		},
 	}
 
@@ -1081,8 +1081,8 @@ func TestStateChainAdapter_ApplyBlock_CommitsUpgradesWhenEncounteringAnEpochSeal
 			mockMetadataStore.EXPECT().GetUpgradesAtBlock(uint64(5))
 			mockMetadataStore.EXPECT().GetCorrectionsAtBlock(uint64(5))
 
-			if tc.expectCommitUpgrades {
-				mockMetadataStore.EXPECT().CommitUpgrades(uint64(5)).Return(nil)
+			if tc.expectCommitRules {
+				mockMetadataStore.EXPECT().CommitRules(uint64(5)).Return(nil)
 			}
 
 			_, _, err = chain.ApplyBlock(block)
@@ -1601,14 +1601,14 @@ func TestBlockHashHistory_ProducesHeaderWithCorrectHashes(t *testing.T) {
 	require.Equal(t, grandParent, header.ParentHash)
 }
 
-func TestOnNewLog_CallsPatchUpgradesWithDecodedDiff(t *testing.T) {
+func TestOnNewLog_CallsPatchRulesWithDecodedDiff(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockStore := NewMockMetadataStore(ctrl)
 
 	diff := []byte(`{"Upgrades":{"Allegro":true}}`)
 	log := makeUpdateNetworkRulesLog(diff)
 
-	mockStore.EXPECT().PatchUpgrades(uint64(42), diff).Return(nil)
+	mockStore.EXPECT().PatchRules(uint64(42), diff).Return(nil)
 	onNewLog(mockStore, 42, log)
 }
 
@@ -1620,7 +1620,7 @@ func TestOnNewLog_IgnoresLogsWithWrongAddress(t *testing.T) {
 	log := makeUpdateNetworkRulesLog(diff)
 	log.Address = common.Address{0x42} // wrong address
 
-	mockStore.EXPECT().PatchUpgrades(gomock.Any(), gomock.Any()).Return(nil).Times(0)
+	mockStore.EXPECT().PatchRules(gomock.Any(), gomock.Any()).Return(nil).Times(0)
 	onNewLog(mockStore, 1, log)
 }
 
@@ -1632,7 +1632,7 @@ func TestOnNewLog_IgnoresLogsWithWrongTopic(t *testing.T) {
 	log := makeUpdateNetworkRulesLog(diff)
 	log.Topics = []common.Hash{{0xFF}} // wrong topic
 
-	mockStore.EXPECT().PatchUpgrades(gomock.Any(), gomock.Any()).Return(nil).Times(0)
+	mockStore.EXPECT().PatchRules(gomock.Any(), gomock.Any()).Return(nil).Times(0)
 	onNewLog(mockStore, 1, log)
 }
 
@@ -1644,7 +1644,7 @@ func TestOnNewLog_IgnoresLogsWithNoTopic(t *testing.T) {
 	log := makeUpdateNetworkRulesLog(diff)
 	log.Topics = []common.Hash{} // no topic
 
-	mockStore.EXPECT().PatchUpgrades(gomock.Any(), gomock.Any()).Return(nil).Times(0)
+	mockStore.EXPECT().PatchRules(gomock.Any(), gomock.Any()).Return(nil).Times(0)
 	onNewLog(mockStore, 1, log)
 }
 
@@ -1652,7 +1652,7 @@ func TestOnNewLog_IgnoresLogsWithTooShortData(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockStore := NewMockMetadataStore(ctrl)
 
-	mockStore.EXPECT().PatchUpgrades(gomock.Any(), gomock.Any()).Return(nil).Times(0)
+	mockStore.EXPECT().PatchRules(gomock.Any(), gomock.Any()).Return(nil).Times(0)
 	onNewLog(mockStore, 1, &core_types.Log{
 		Address: driver.ContractAddress,
 		Topics:  []common.Hash{driverpos.Topics.UpdateNetworkRules},

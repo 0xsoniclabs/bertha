@@ -63,7 +63,7 @@ async fn client_fetch_then_verify_then_fetch_more_then_verify() {
         String::from_utf8_lossy(&log),
         indoc::indoc! {"
         [146] SONIC: SONIC test chain
-        ├── upgrade heights: no
+        ├── rules update heights: no
         ├── corrections: no
         └── 0 - 29
         "}

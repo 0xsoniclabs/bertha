@@ -154,12 +154,13 @@ where
                     .into_iter()
                     .map(|chain_id| {
                         let ranges = self.db.get_ranges_of_chain_id(chain_id)?;
-                        let has_upgrade_heights = self.db.get_upgrade_heights(chain_id)?.is_some();
+                        let has_rules_update_heights =
+                            self.db.get_rules_update_heights(chain_id)?.is_some();
                         let has_corrections = self.db.get_corrections(chain_id)?.is_some();
                         Ok(ChainListing {
                             chain_id,
                             block_ranges: ranges.into_iter().map(From::from).collect(),
-                            has_upgrade_heights,
+                            has_rules_update_heights,
                             has_corrections,
                         })
                     })
@@ -172,7 +173,7 @@ where
         }
     }
 
-    /// Returns the upgrade heights and corrections metadata for a given chain ID,
+    /// Returns the rules update heights and corrections metadata for a given chain ID,
     /// if any are stored in the database.
     async fn get_metadata(
         &self,
@@ -188,9 +189,9 @@ where
             None => println!("Received metadata request for chain ID {chain_id}"),
         }
 
-        let upgrade_heights = self
+        let rules_update_heights = self
             .db
-            .get_upgrade_heights(chain_id)
+            .get_rules_update_heights(chain_id)
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
         let corrections = self
@@ -199,7 +200,7 @@ where
             .map_err(|e| tonic::Status::internal(e.to_string()))?;
 
         Ok(tonic::Response::new(Metadata {
-            upgrade_heights,
+            rules_update_heights,
             corrections,
         }))
     }
@@ -436,7 +437,7 @@ mod tests {
             db.expect_get_ranges_of_chain_id()
                 .with(eq(1))
                 .returning(|_| Ok(vec![1..=2, 3..=4]));
-            db.expect_get_upgrade_heights()
+            db.expect_get_rules_update_heights()
                 .with(eq(1))
                 .returning(|_| Ok(Some(b"data".to_vec())));
             db.expect_get_corrections()
@@ -455,7 +456,7 @@ mod tests {
                         proto_rpc::BlockRange { from: 1, to: 2 },
                         proto_rpc::BlockRange { from: 3, to: 4 }
                     ],
-                    has_upgrade_heights: true,
+                    has_rules_update_heights: true,
                     has_corrections: true,
                 }]
             );
@@ -466,7 +467,7 @@ mod tests {
             db.expect_get_ranges_of_chain_id()
                 .with(eq(1))
                 .returning(|_| Ok(vec![]));
-            db.expect_get_upgrade_heights()
+            db.expect_get_rules_update_heights()
                 .with(eq(1))
                 .returning(|_| Ok(None));
             db.expect_get_corrections()
@@ -482,7 +483,7 @@ mod tests {
                 vec![ChainListing {
                     chain_id: 1,
                     block_ranges: Vec::new(),
-                    has_upgrade_heights: false,
+                    has_rules_update_heights: false,
                     has_corrections: false,
                 }]
             );
@@ -497,13 +498,13 @@ mod tests {
             db.expect_get_ranges_of_chain_id()
                 .with(eq(2))
                 .returning(|_| Ok(vec![5..=6]));
-            db.expect_get_upgrade_heights()
+            db.expect_get_rules_update_heights()
                 .with(eq(1))
                 .returning(|_| Ok(Some(b"data".to_vec())));
             db.expect_get_corrections()
                 .with(eq(1))
                 .returning(|_| Ok(None));
-            db.expect_get_upgrade_heights()
+            db.expect_get_rules_update_heights()
                 .with(eq(2))
                 .returning(|_| Ok(None));
             db.expect_get_corrections()
@@ -523,13 +524,13 @@ mod tests {
                             proto_rpc::BlockRange { from: 1, to: 2 },
                             proto_rpc::BlockRange { from: 3, to: 4 }
                         ],
-                        has_upgrade_heights: true,
+                        has_rules_update_heights: true,
                         has_corrections: false,
                     },
                     ChainListing {
                         chain_id: 2,
                         block_ranges: vec![proto_rpc::BlockRange { from: 5, to: 6 }],
-                        has_upgrade_heights: false,
+                        has_rules_update_heights: false,
                         has_corrections: true,
                     }
                 ]
@@ -554,21 +555,21 @@ mod tests {
 
     #[rstest::rstest]
     #[case::no_metadata(None, None)]
-    #[case::only_upgrade_heights(Some(b"upgrade-heights".to_vec()), None)]
+    #[case::only_rules_update_heights(Some(b"rules-update-heights".to_vec()), None)]
     #[case::only_corrections(None, Some(b"corrections".to_vec()))]
-    #[case::both_metadata(Some(b"upgrade-heights".to_vec()), Some(b"corrections".to_vec()))]
+    #[case::both_metadata(Some(b"rules-update-heights".to_vec()), Some(b"corrections".to_vec()))]
     #[tokio::test]
     async fn get_metadata_returns_expected_data(
-        #[case] upgrade_heights: Option<Vec<u8>>,
+        #[case] rules_update_heights: Option<Vec<u8>>,
         #[case] corrections: Option<Vec<u8>>,
     ) {
         let chain_id = 1;
         let mut db = MockBlockDb::new();
-        let expected_upgrade_heights = upgrade_heights.clone();
+        let expected_rules_update_heights = rules_update_heights.clone();
         let expected_corrections = corrections.clone();
-        db.expect_get_upgrade_heights()
+        db.expect_get_rules_update_heights()
             .with(eq(chain_id))
-            .returning(move |_| Ok(upgrade_heights.clone()));
+            .returning(move |_| Ok(rules_update_heights.clone()));
         db.expect_get_corrections()
             .with(eq(chain_id))
             .returning(move |_| Ok(corrections.clone()));
@@ -578,7 +579,7 @@ mod tests {
         let req = Request::new(MetadataRequest { chain_id });
         let res = server.get_metadata(req).await.unwrap();
         let metadata = res.into_inner();
-        assert_eq!(metadata.upgrade_heights, expected_upgrade_heights);
+        assert_eq!(metadata.rules_update_heights, expected_rules_update_heights);
         assert_eq!(metadata.corrections, expected_corrections);
     }
 
@@ -586,7 +587,7 @@ mod tests {
     async fn get_metadata_forwards_db_errors() {
         let chain_id = 1;
         let mut db = MockBlockDb::new();
-        db.expect_get_upgrade_heights()
+        db.expect_get_rules_update_heights()
             .with(eq(chain_id))
             .returning(|_| Err(Error::StorageLayer("DB error".to_owned())));
 

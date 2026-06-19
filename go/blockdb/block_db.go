@@ -38,8 +38,8 @@ type BlockDB interface {
 	Update(chainID uint64, block *Block) error
 	GetRange(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error]
 	GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error]
-	GetUpgradeHeights(chainID uint64) ([]byte, error)
-	PutUpgradeHeights(chainID uint64, data []byte) error
+	GetRulesUpdateHeights(chainID uint64) ([]byte, error)
+	PutRulesUpdateHeights(chainID uint64, data []byte) error
 	GetCorrections(chainID uint64) ([]byte, error)
 	Close() error
 }
@@ -219,19 +219,19 @@ func (db RocksDB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) 
 	}
 }
 
-// GetUpgradeHeights returns the raw (JSON-encoded) upgrade heights for the given chain ID.
+// GetRulesUpdateHeights returns the raw (JSON-encoded) rules update heights for the given chain ID.
 // Returns nil if no data is stored for the chain ID.
-func (db RocksDB) GetUpgradeHeights(chainID uint64) ([]byte, error) {
+func (db RocksDB) GetRulesUpdateHeights(chainID uint64) ([]byte, error) {
 	readOptions := grocksdb.NewDefaultReadOptions()
 	defer readOptions.Destroy()
-	return db.db.GetBytes(readOptions, MakeUpgradeHeightsKey(chainID))
+	return db.db.GetBytes(readOptions, MakeRulesUpdateHeightsKey(chainID))
 }
 
-// PutUpgradeHeights stores the raw (JSON-encoded) upgrade heights for the given chain ID.
-func (db RocksDB) PutUpgradeHeights(chainID uint64, data []byte) error {
+// PutRulesUpdateHeights stores the raw (JSON-encoded) rules update heights for the given chain ID.
+func (db RocksDB) PutRulesUpdateHeights(chainID uint64, data []byte) error {
 	writeOptions := grocksdb.NewDefaultWriteOptions()
 	defer writeOptions.Destroy()
-	return db.db.Put(writeOptions, MakeUpgradeHeightsKey(chainID), data)
+	return db.db.Put(writeOptions, MakeRulesUpdateHeightsKey(chainID), data)
 }
 
 // GetCorrections returns the raw (JSON-encoded) corrections for the given chain ID.
@@ -252,9 +252,9 @@ func MakeVersionKey() []byte {
 	return []byte{0x00, 0x00}
 }
 
-// MakeUpgradeHeightsKey creates a 10-byte key for the upgrade heights of the given chain ID.
+// MakeRulesUpdateHeightsKey creates a 10-byte key for the rules update heights of the given chain ID.
 // The key layout matches the Rust blockservice: [0x01, chain_id (8 bytes BE), 0x01].
-func MakeUpgradeHeightsKey(chainID uint64) []byte {
+func MakeRulesUpdateHeightsKey(chainID uint64) []byte {
 	key := make([]byte, 10)
 	key[0] = 0x01
 	binary.BigEndian.PutUint64(key[1:9], chainID)

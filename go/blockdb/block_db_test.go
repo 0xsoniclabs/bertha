@@ -45,8 +45,8 @@ func TestOpenRocksDB(t *testing.T) {
 			"get range rev returns error if block is invalid":           testRocksDB_GetRangeRev_ReturnsErrorIfBlockIsInvalid,
 			"get range rev stops at non-17-byte key":                    testRocksDB_GetRangeRev_StopsAtNon17ByteKey,
 			"get range rev stops at wrong prefix key":                   testRocksDB_GetRangeRev_StopsAtWrongPrefixKey,
-			"get upgrade heights returns stored data":                   testRocksDB_GetUpgradeHeights_ReturnsStoredData,
-			"get upgrade heights returns nil when not stored":           testRocksDB_GetUpgradeHeights_ReturnsNilWhenNotStored,
+			"get rules update heights returns stored data":              testRocksDB_GetRulesUpdateHeights_ReturnsStoredData,
+			"get rules update heights returns nil when not stored":      testRocksDB_GetRulesUpdateHeights_ReturnsNilWhenNotStored,
 			"get corrections returns stored data":                       testRocksDB_GetCorrections_ReturnsStoredData,
 			"get corrections returns nil when not stored":               testRocksDB_GetCorrections_ReturnsNilWhenNotStored,
 		}
@@ -548,14 +548,14 @@ func TestRocksDB_Update_OverwritesExistingBlock(t *testing.T) {
 	require.Equal(t, updatedBlock.StateRoot, retrievedBlock.StateRoot, "retrieved block state root does not match after update")
 }
 
-func testRocksDB_GetUpgradeHeights_ReturnsStoredData(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRulesUpdateHeights_ReturnsStoredData(t *testing.T, dbOpener OpenRocksDBFunc) {
 	chainID := uint64(3)
-	data := []byte(`upgrade heights data`)
+	data := []byte(`rules update heights data`)
 
 	path := t.TempDir()
 	db, err := createDB(path)
 	require.NoError(t, err)
-	require.NoError(t, db.putRaw(MakeUpgradeHeightsKey(chainID), data))
+	require.NoError(t, db.putRaw(MakeRulesUpdateHeightsKey(chainID), data))
 	db.close()
 
 	rocksDB, err := dbOpener(path)
@@ -564,12 +564,12 @@ func testRocksDB_GetUpgradeHeights_ReturnsStoredData(t *testing.T, dbOpener Open
 		require.NoError(t, rocksDB.Close())
 	}()
 
-	got, err := rocksDB.GetUpgradeHeights(chainID)
+	got, err := rocksDB.GetRulesUpdateHeights(chainID)
 	require.NoError(t, err)
 	require.Equal(t, data, got)
 }
 
-func testRocksDB_GetUpgradeHeights_ReturnsNilWhenNotStored(t *testing.T, dbOpener OpenRocksDBFunc) {
+func testRocksDB_GetRulesUpdateHeights_ReturnsNilWhenNotStored(t *testing.T, dbOpener OpenRocksDBFunc) {
 	path := t.TempDir()
 	db, err := createDB(path)
 	require.NoError(t, err)
@@ -581,14 +581,14 @@ func testRocksDB_GetUpgradeHeights_ReturnsNilWhenNotStored(t *testing.T, dbOpene
 		require.NoError(t, rocksDB.Close())
 	}()
 
-	got, err := rocksDB.GetUpgradeHeights(3)
+	got, err := rocksDB.GetRulesUpdateHeights(3)
 	require.NoError(t, err)
 	require.Nil(t, got)
 }
 
-func TestRocksDB_PutUpgradeHeights_StoresData(t *testing.T) {
+func TestRocksDB_PutRulesUpdateHeights_StoresData(t *testing.T) {
 	chainID := uint64(3)
-	data := []byte(`upgrade heights data`)
+	data := []byte(`rules update heights data`)
 
 	path := t.TempDir()
 	db, err := createDB(path)
@@ -601,16 +601,16 @@ func TestRocksDB_PutUpgradeHeights_StoresData(t *testing.T) {
 		require.NoError(t, rocksDB.Close())
 	}()
 
-	require.NoError(t, rocksDB.PutUpgradeHeights(chainID, data))
+	require.NoError(t, rocksDB.PutRulesUpdateHeights(chainID, data))
 
-	got, err := rocksDB.GetUpgradeHeights(chainID)
+	got, err := rocksDB.GetRulesUpdateHeights(chainID)
 	require.NoError(t, err)
 	require.Equal(t, data, got)
 }
 
-func TestRocksDB_PutUpgradeHeights_ReturnsErrorIfDBIsReadOnly(t *testing.T) {
+func TestRocksDB_PutRulesUpdateHeights_ReturnsErrorIfDBIsReadOnly(t *testing.T) {
 	chainID := uint64(3)
-	data := []byte(`upgrade heights data`)
+	data := []byte(`rules update heights data`)
 
 	path := t.TempDir()
 	db, err := createDB(path)
@@ -623,7 +623,7 @@ func TestRocksDB_PutUpgradeHeights_ReturnsErrorIfDBIsReadOnly(t *testing.T) {
 		require.NoError(t, rocksDB.Close())
 	}()
 
-	err = rocksDB.PutUpgradeHeights(chainID, data)
+	err = rocksDB.PutRulesUpdateHeights(chainID, data)
 	require.ErrorContains(t, err, "Not supported operation in secondary mode")
 }
 

@@ -67,7 +67,7 @@ async fn client_list_remote_then_fetch_then_list_then_view() {
         String::from_utf8_lossy(&log),
         indoc::indoc! {"
         [146] SONIC: SONIC test chain
-        ├── upgrade heights: no
+        ├── rules update heights: no
         ├── corrections: no
         └── 0 - 5
         "}
@@ -110,7 +110,7 @@ async fn client_list_remote_then_fetch_then_list_then_view() {
         String::from_utf8_lossy(&log),
         indoc::indoc! {"
         [146] SONIC: SONIC test chain
-        ├── upgrade heights: no
+        ├── rules update heights: no
         ├── corrections: no
         └── 5 - 5
         "}

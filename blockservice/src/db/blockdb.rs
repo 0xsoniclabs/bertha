@@ -120,11 +120,11 @@ pub trait BlockDb {
     /// The start and end of each range are inclusive.
     fn get_ranges_of_chain_id(&self, chain_id: u64) -> Result<Vec<BlockRange>, Error>;
 
-    /// Retrieves the JSON-encoded upgrade heights for the specified chain-ID.
-    fn get_upgrade_heights(&self, chain_id: u64) -> Result<Option<Vec<u8>>, Error>;
+    /// Retrieves the JSON-encoded rules update heights for the specified chain-ID.
+    fn get_rules_update_heights(&self, chain_id: u64) -> Result<Option<Vec<u8>>, Error>;
 
-    /// Stores the JSON-encoded upgrade heights for the specified chain-ID.
-    fn put_upgrade_heights(&mut self, chain_id: u64, data: &[u8]) -> Result<(), Error>;
+    /// Stores the JSON-encoded rules update heights for the specified chain-ID.
+    fn put_rules_update_heights(&mut self, chain_id: u64, data: &[u8]) -> Result<(), Error>;
 
     /// Retrieves the JSON-encoded corrections for the specified chain-ID.
     fn get_corrections(&self, chain_id: u64) -> Result<Option<Vec<u8>>, Error>;
@@ -296,17 +296,17 @@ where
             .unwrap_or_default())
     }
 
-    fn get_upgrade_heights(&self, chain_id: u64) -> Result<Option<Vec<u8>>, Error> {
-        self.db.get_raw(&make_upgrade_heights_key(chain_id))
+    fn get_rules_update_heights(&self, chain_id: u64) -> Result<Option<Vec<u8>>, Error> {
+        self.db.get_raw(&make_rules_update_heights_key(chain_id))
     }
 
-    fn put_upgrade_heights(&mut self, chain_id: u64, data: &[u8]) -> Result<(), Error> {
+    fn put_rules_update_heights(&mut self, chain_id: u64, data: &[u8]) -> Result<(), Error> {
         let mut chain_ids = self.get_chain_ids()?;
         if let Err(idx) = chain_ids.binary_search(&chain_id) {
             chain_ids.insert(idx, chain_id);
         }
         self.execute_in_batch(|batch| {
-            batch.put_raw(&make_upgrade_heights_key(chain_id), data);
+            batch.put_raw(&make_rules_update_heights_key(chain_id), data);
             batch.put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids(chain_ids));
         })?;
         Ok(())
@@ -493,7 +493,7 @@ where
 //   - 0x01 => chain IDs (u64 array, big-endian)
 // - Chain metadata (10-byte keys): [0x01 prefix, chain_id (8 bytes big endian), suffix]
 //   - suffix 0x00 => block ranges as (start, end) u64 pairs (big-endian)
-//   - suffix 0x01 => upgrade heights (JSON)
+//   - suffix 0x01 => rules update heights (JSON)
 //   - suffix 0x02 => corrections (JSON)
 // - Blocks (17-byte keys): [0x02 prefix, chain_id (8 bytes big endian), block_number (8 bytes big
 //   endian)] => protobuf block.
@@ -586,8 +586,8 @@ fn deserialize_block_ranges(data: impl AsRef<[u8]>) -> Result<Vec<BlockRange>, E
         .collect())
 }
 
-/// Returns the key for storing the upgrade heights for the given chain ID.
-pub fn make_upgrade_heights_key(chain_id: u64) -> [u8; 10] {
+/// Returns the key for storing the rules update heights for the given chain ID.
+pub fn make_rules_update_heights_key(chain_id: u64) -> [u8; 10] {
     let mut key = [0u8; 10];
     key[0] = 0x01;
     key[1..9].copy_from_slice(&chain_id.to_be_bytes());
@@ -881,47 +881,47 @@ mod tests {
     }
 
     #[rstest::rstest]
-    #[case::no_upgrade_heights(None)]
-    #[case::upgrade_heights(Some(vec![1, 2, 3]))]
-    fn kv_db_backed_block_db_get_upgrade_heights_returns_data_stored_at_key(
+    #[case::no_rules_update_heights(None)]
+    #[case::rules_update_heights(Some(vec![1, 2, 3]))]
+    fn kv_db_backed_block_db_get_rules_update_heights_returns_data_stored_at_key(
         #[case] stored_payload: Option<Vec<u8>>,
     ) {
         let chain_id = 1;
         let mut kv_db = MockKvDb::new();
         kv_db
             .expect_get_raw()
-            .with(eq(make_upgrade_heights_key(chain_id)))
+            .with(eq(make_rules_update_heights_key(chain_id)))
             .return_once({
                 let values = stored_payload.clone();
                 move |_| Ok(values)
             })
             .times(1);
         let db = KvDbBackedBlockDb { db: kv_db };
-        let result = db.get_upgrade_heights(chain_id);
+        let result = db.get_rules_update_heights(chain_id);
         assert_eq!(result, Ok(stored_payload));
     }
 
     #[rstest::rstest]
-    #[case::no_upgrade_heights(None)]
-    #[case::upgrade_heights(Some(vec![1, 2, 3]))]
-    fn rocks_block_db_get_upgrade_heights_returns_data_stored_at_key(
+    #[case::no_rules_update_heights(None)]
+    #[case::rules_update_heights(Some(vec![1, 2, 3]))]
+    fn rocks_block_db_get_rules_update_heights_returns_data_stored_at_key(
         #[case] stored_payload: Option<Vec<u8>>,
     ) {
         let chain_id = 1;
         let (_tmpdir, db) = create_rocks_block_db();
         if let Some(payload) = &stored_payload {
             db.kv_db()
-                .put_raw(&make_upgrade_heights_key(chain_id), payload)
+                .put_raw(&make_rules_update_heights_key(chain_id), payload)
                 .unwrap();
         }
-        let result = db.get_upgrade_heights(chain_id);
+        let result = db.get_rules_update_heights(chain_id);
         assert_eq!(result, Ok(stored_payload));
     }
 
     #[rstest::rstest]
     #[case::chain_id_exists(vec![1, 2, 3])]
     #[case::chain_id_not_exists(vec![1, 3])]
-    fn kv_db_backed_block_db_put_upgrade_heights_stores_data_at_key_and_adds_chain_id(
+    fn kv_db_backed_block_db_put_rules_update_heights_stores_data_at_key_and_adds_chain_id(
         #[case] existing_chain_ids: Vec<u64>,
     ) {
         let chain_id = 2;
@@ -935,7 +935,10 @@ mod tests {
             .times(1);
         kv_db_batch
             .expect_put_raw()
-            .with(eq(make_upgrade_heights_key(chain_id)), eq(data.clone()))
+            .with(
+                eq(make_rules_update_heights_key(chain_id)),
+                eq(data.clone()),
+            )
             .return_once(|_, _| ())
             .times(1);
         kv_db_batch
@@ -957,13 +960,13 @@ mod tests {
             .return_once(|_| Ok(()))
             .times(1);
         let mut db = KvDbBackedBlockDb { db: kv_db };
-        assert!(db.put_upgrade_heights(chain_id, &data).is_ok());
+        assert!(db.put_rules_update_heights(chain_id, &data).is_ok());
     }
 
     #[rstest::rstest]
     #[case::chain_id_exists(vec![1, 2, 3])]
     #[case::chain_id_not_exists(vec![1, 3])]
-    fn rocks_block_db_put_upgrade_heights_stores_data_at_key_and_adds_chain_id(
+    fn rocks_block_db_put_rules_update_heights_stores_data_at_key_and_adds_chain_id(
         #[case] existing_chain_ids: Vec<u64>,
     ) {
         let chain_id = 2;
@@ -972,11 +975,11 @@ mod tests {
         db.kv_db()
             .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids(existing_chain_ids))
             .unwrap();
-        db.put_upgrade_heights(chain_id, &data).unwrap();
+        db.put_rules_update_heights(chain_id, &data).unwrap();
 
         assert_eq!(
             db.kv_db()
-                .get_raw(&make_upgrade_heights_key(chain_id))
+                .get_raw(&make_rules_update_heights_key(chain_id))
                 .unwrap(),
             Some(data)
         );
@@ -2281,10 +2284,10 @@ mod tests {
     }
 
     #[test]
-    fn make_upgrade_heights_key_returns_10_byte_key_consisting_of_prefix_0x01_and_be_chain_id_and_suffix_0x01()
+    fn make_rules_update_heights_key_returns_10_byte_key_consisting_of_prefix_0x01_and_be_chain_id_and_suffix_0x01()
      {
         let chain_id = 258;
-        let key = make_upgrade_heights_key(chain_id);
+        let key = make_rules_update_heights_key(chain_id);
         assert_eq!(
             key,
             [
@@ -2330,7 +2333,7 @@ mod tests {
         let global_metadata_keys = [VERSION_KEY, CHAIN_IDS_KEY];
         let chain_metadata_keys = [
             make_block_ranges_key(0),
-            make_upgrade_heights_key(0),
+            make_rules_update_heights_key(0),
             make_corrections_key(0),
         ];
         for global_metadata_key in global_metadata_keys {
@@ -2344,7 +2347,7 @@ mod tests {
     fn chain_metadata_is_stored_before_blocks() {
         let chain_metadata_keys = [
             make_block_ranges_key(u64::MAX),
-            make_upgrade_heights_key(u64::MAX),
+            make_rules_update_heights_key(u64::MAX),
             make_corrections_key(u64::MAX),
         ];
         let block_data_key = make_block_key(u64::MIN, 0);

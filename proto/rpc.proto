@@ -55,7 +55,7 @@ message ChainListings {
 message ChainListing {
   uint64 chainId = 1;
   repeated BlockRange blockRanges = 2;
-  bool hasUpgradeHeights = 3;
+  bool hasRulesUpdateHeights = 3;
   bool hasCorrections = 4;
 }
 
@@ -72,6 +72,6 @@ message MetadataRequest {
 
 // The metadata of a chain.
 message Metadata {
-  optional bytes upgradeHeights = 1;
+  optional bytes rulesUpdateHeights = 1;
   optional bytes corrections = 2;
 }

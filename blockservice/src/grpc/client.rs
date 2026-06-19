@@ -90,7 +90,7 @@ impl RpcClient {
         Ok(response.into_inner())
     }
 
-    /// Fetches the upgrade heights and corrections for a specific chain ID.
+    /// Fetches the rules update heights and corrections for a specific chain ID.
     pub async fn get_metadata(&mut self, chain_id: u64) -> Result<Metadata, tonic::Status> {
         let mut request = Request::new(MetadataRequest { chain_id });
 
@@ -338,7 +338,7 @@ pub mod tests {
     #[tokio::test]
     async fn get_metadata_returns_metadata_successfully() {
         let expected_metadata = Metadata {
-            upgrade_heights: Some(b"upgrade-heights".to_vec()),
+            rules_update_heights: Some(b"rules-update-heights".to_vec()),
             corrections: Some(b"corrections".to_vec()),
         };
 
@@ -385,7 +385,7 @@ pub mod tests {
             .returning({
                 move |_| {
                     Ok(tonic::Response::new(Metadata {
-                        upgrade_heights: None,
+                        rules_update_heights: None,
                         corrections: None,
                     }))
                 }

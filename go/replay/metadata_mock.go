@@ -41,18 +41,18 @@ func (m *MockMetadataStore) EXPECT() *MockMetadataStoreMockRecorder {
 	return m.recorder
 }
 
-// CommitUpgrades mocks base method.
-func (m *MockMetadataStore) CommitUpgrades(blockNumber uint64) error {
+// CommitRules mocks base method.
+func (m *MockMetadataStore) CommitRules(blockNumber uint64) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CommitUpgrades", blockNumber)
+	ret := m.ctrl.Call(m, "CommitRules", blockNumber)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// CommitUpgrades indicates an expected call of CommitUpgrades.
-func (mr *MockMetadataStoreMockRecorder) CommitUpgrades(blockNumber any) *gomock.Call {
+// CommitRules indicates an expected call of CommitRules.
+func (mr *MockMetadataStoreMockRecorder) CommitRules(blockNumber any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitUpgrades", reflect.TypeOf((*MockMetadataStore)(nil).CommitUpgrades), blockNumber)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitRules", reflect.TypeOf((*MockMetadataStore)(nil).CommitRules), blockNumber)
 }
 
 // GetCorrectionsAtBlock mocks base method.
@@ -97,16 +97,16 @@ func (mr *MockMetadataStoreMockRecorder) GetUpgradesAtBlock(blockNumber any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUpgradesAtBlock", reflect.TypeOf((*MockMetadataStore)(nil).GetUpgradesAtBlock), blockNumber)
 }
 
-// PatchUpgrades mocks base method.
-func (m *MockMetadataStore) PatchUpgrades(blockNumber uint64, diff []byte) error {
+// PatchRules mocks base method.
+func (m *MockMetadataStore) PatchRules(blockNumber uint64, diff []byte) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PatchUpgrades", blockNumber, diff)
+	ret := m.ctrl.Call(m, "PatchRules", blockNumber, diff)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// PatchUpgrades indicates an expected call of PatchUpgrades.
-func (mr *MockMetadataStoreMockRecorder) PatchUpgrades(blockNumber, diff any) *gomock.Call {
+// PatchRules indicates an expected call of PatchRules.
+func (mr *MockMetadataStoreMockRecorder) PatchRules(blockNumber, diff any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PatchUpgrades", reflect.TypeOf((*MockMetadataStore)(nil).PatchUpgrades), blockNumber, diff)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PatchRules", reflect.TypeOf((*MockMetadataStore)(nil).PatchRules), blockNumber, diff)
 }
