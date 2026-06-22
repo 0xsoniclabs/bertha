@@ -20,7 +20,7 @@ use alloy_rlp::Encodable;
 use bertha_types::{Block, Hash};
 use flate2::{Compression, bufread::GzEncoder};
 
-use crate::{
+use crate::g_file::{
     block::IdxFullBlock,
     units::{GenesisHeader, HEADER, Unit, VERSION},
 };

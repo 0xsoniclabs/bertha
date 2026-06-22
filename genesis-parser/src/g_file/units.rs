@@ -25,7 +25,7 @@ use bertha_types::Hash;
 
 use crate::{
     error::{Error, GFileError},
-    read_bytes,
+    g_file::read_bytes,
 };
 
 /// Metadata for part of the genesis file that contains data of a specific type (e.g. blocks).
@@ -186,10 +186,8 @@ mod tests {
     use alloy_rlp::Encodable;
     use bertha_types::Hash;
 
-    use crate::{
-        Error, GFileError,
-        units::{GenesisHeader, HEADER, Unit, VERSION, parse_metadata, read_file_header},
-    };
+    use super::*;
+    use crate::{Error, GFileError};
 
     #[test]
     fn check_file_header_succeeds_with_valid_header() {

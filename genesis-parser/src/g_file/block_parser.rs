@@ -21,12 +21,12 @@ use std::{
 };
 
 use alloy_rlp::Decodable;
-use bertha_types::Hash;
+use bertha_types::{Block, Hash};
 use flate2::bufread::GzDecoder;
 
 use crate::{
-    Block, Error, GFileError, block::IdxFullBlock, read_bytes, slice_reader::SliceReader,
-    units::UnitDescriptor,
+    Error, GFileError,
+    g_file::{block::IdxFullBlock, read_bytes, slice_reader::SliceReader, units::UnitDescriptor},
 };
 
 /// An iterator that parses blocks from a compressed genesis file lazily while they are consumed.

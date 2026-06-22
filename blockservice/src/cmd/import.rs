@@ -311,8 +311,7 @@ mod tests {
         let num_blocks = 5;
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
-        let genesis_data =
-            genesis_parser::test_utils::generate_test_genesis(chain_id, num_blocks, &[]);
+        let genesis_data = genesis_parser::generate_test_genesis(chain_id, num_blocks, &[]);
         std::fs::write(&genesis_file, genesis_data).unwrap();
 
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
@@ -352,7 +351,7 @@ mod tests {
     ) {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         let genesis_file = tmpdir.path().join("genesis.g");
-        let mut genesis_data = genesis_parser::test_utils::generate_test_genesis(0, 5, &[]);
+        let mut genesis_data = genesis_parser::generate_test_genesis(0, 5, &[]);
         let corruption = [0xde, 0xad, 0xbe, 0xef];
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
