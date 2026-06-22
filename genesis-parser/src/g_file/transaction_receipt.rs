@@ -21,13 +21,13 @@ use bertha_types::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct StoredReceiptRlpWithTxType {
+pub struct StoredReceiptRlpWithTxType {
     pub receipt: StoredReceiptRlp,
     pub transaction_type: TransactionType,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-pub(crate) struct StoredReceiptRlp {
+pub struct StoredReceiptRlp {
     pub post_state_or_status: RlpString,
     pub cumulative_gas_used: u64,
     pub logs: Vec<Log>,
@@ -79,7 +79,7 @@ mod tests {
     use alloy_rlp::{Decodable, Encodable};
     use bertha_types::{PostStateOrStatus, RlpString, TransactionReceipt, TransactionType};
 
-    use crate::transaction_receipt::{StoredReceiptRlp, StoredReceiptRlpWithTxType};
+    use super::*;
 
     #[test]
     fn from_into_is_identity() {

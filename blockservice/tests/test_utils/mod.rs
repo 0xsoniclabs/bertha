@@ -164,8 +164,7 @@ pub fn make_snapshot_file(
     num_blocks: usize,
     extra_blocks: &[Block],
 ) -> PathBuf {
-    let genesis =
-        genesis_parser::test_utils::generate_test_genesis(chain_id, num_blocks, extra_blocks);
+    let genesis = genesis_parser::generate_test_genesis(chain_id, num_blocks, extra_blocks);
     let filepath = path.join(format!(
         "{}_{}_snapshot",
         chain_id,

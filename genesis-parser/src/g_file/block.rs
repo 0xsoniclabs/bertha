@@ -20,11 +20,11 @@ use bertha_types::{
     Hash, RlpString, Transaction, TransactionType, U256,
 };
 
-use crate::transaction_receipt::{StoredReceiptRlp, StoredReceiptRlpWithTxType};
+use crate::g_file::transaction_receipt::{StoredReceiptRlp, StoredReceiptRlpWithTxType};
 
 /// A wrapper around a [Transaction] to implement RLP encoding/decoding.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RlpTransaction(Transaction);
+pub struct RlpTransaction(Transaction);
 
 impl Encodable for RlpTransaction {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
@@ -53,7 +53,7 @@ impl Decodable for RlpTransaction {
 /// This type and its fields correspond directly to the ones used in Sonic.
 // Source: sonic/inter/ibr/inter_block_records.go
 #[derive(Debug, Clone, Default, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-pub(crate) struct IdxFullBlock {
+pub struct IdxFullBlock {
     pub block: FullBlock,
     pub block_number: u64, // idx
 }
@@ -62,7 +62,7 @@ pub(crate) struct IdxFullBlock {
 /// This type and its fields correspond directly to the ones used in Sonic.
 // Source: sonic/inter/ibr/inter_block_records.go
 #[derive(Debug, Clone, Default, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-pub(crate) struct FullBlock {
+pub struct FullBlock {
     pub block_hash: Hash,
     pub parent_hash: Hash,
     pub state_root: Hash,
