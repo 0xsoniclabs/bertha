@@ -56,19 +56,26 @@ $ cargo run --release -- init --help
 
 ## Running
 
-Create a new block database
+### Create a new block database
 
 ```sh
 cargo run --release -- init
 ```
 
-Import a Sonic `.g` file
+### Import a Sonic `.g` file
 
+Download the latest genesis file.
+```sh
+wget --trust-server-names https://genesis.soniclabs.com/latest-sonic-archive.g
+wget --trust-server-names https://genesis.soniclabs.com/latest-testnet-archive.g
+```
+
+Import the genesis file.
 ```sh
 cargo run --release -- import-gfile </path/to/snapshot.g>
 ```
 
-Import Ethereum `.era1` and `.era` files
+### Import Ethereum `.era1` and `.era` files
 
 `.era1` files store pre-merge Ethereum history, while `.era` files store post-merge Ethereum beacon chain history.
 Thus, `.era1` files contain all data that is stored in bertha, while `.era` files are missing transaction receipts.
@@ -76,12 +83,20 @@ Therefore, `.era` file import does not support parent hash verification, because
 
 *Note: First import the `.era1` files and then the `.era` files.*
 
+Download all era1/era files.
 ```sh
-cargo run --release -- import-era1 </path/to/era1_directory> [--verify]
-cargo run --release -- import-era </path/to/era_directory>
+wget --recursive --no-parent https://sepolia.era1.nimbus.team
+wget --recursive --no-parent https://sepolia.era.nimbus.team
+wget --recursive --no-parent https://hoodi.era.nimbus.team
 ```
 
-Import upgrade heights
+Import era1/era files.
+```sh
+cargo run --release -- import-era1 </path/to/era1_directory> <chain ID> [--verify]
+cargo run --release -- import-era </path/to/era_directory> <chain ID>
+```
+
+### Import upgrade heights
 
 *Note: New upgrade heights can be detected and applied automatically for Sonic chains. The import is not mandatory but can be used to verify that the detected upgrade heights match the stored ones.*
 
@@ -89,7 +104,7 @@ Import upgrade heights
 cargo run --release -- import-upgrade-heights <chain-id> </path/to/upgrade-heights.json>
 ```
 
-Import corrections
+### Import corrections
 
 *Note: Corrections are not needed for all chains.*
 
@@ -97,13 +112,13 @@ Import corrections
 cargo run --release -- import-corrections <chain-id> </path/to/corrections.json>
 ```
 
-Start the gRPC server (by default the port is 8080, configured in `blockservice.toml`)
+### Start the gRPC server (by default the port is 8080, configured in `blockservice.toml`)
 
 ```sh
 cargo run --release -- start
 ```
 
-Fetch blocks from a gRPC server
+### Fetch blocks from a gRPC server
 
 ```sh
 cargo run --release -- fetch <url> <chain_id>
