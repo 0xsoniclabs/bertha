@@ -15,6 +15,7 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
+# Script to run go with local carmen modifications and tracy profiling enabled.
 # Usage: ./go-run-with-carmen-and-tracy.sh <go-run-args>
 # e.g. ./go-run-with-carmen-and-tracy.sh . replay -g sonic.json -db .blockdb --db-schema 6 --db-variant rust-memory
 # It is assumed that the tracy and carmen repositories are located next to bertha.
