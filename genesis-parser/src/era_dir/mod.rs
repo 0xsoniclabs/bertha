@@ -23,6 +23,7 @@ use std::{
 
 use bertha_types::Block;
 use lighthouse_types::{ForkName, ForkVersionDecode, MainnetEthSpec, SignedBeaconBlock};
+use pariter::IteratorExt;
 use reth_era::{
     common::file_ops::StreamReader, era::file::EraReader, era1::file::Era1Reader,
     ere::file::EreReader,
@@ -83,19 +84,23 @@ impl<R: FileReader> EraDir<R> {
         // the file name in reverse order, sorts the files according to their era number.
         self.files.sort_by(|a, b| b.cmp(a)); // sort in reverse
 
-        self.files.into_iter().flat_map(move |path| {
-            let _file_span = tracy_client::span!("process_file");
-            match R::read_file(path, self.chain_id) {
-                Ok(blocks) => {
-                    let mut blocks: Vec<_> = blocks.collect();
-                    // The blocks in `.era1` and `.era` files are in ascending order, so reverse
-                    // them to get descending order.
-                    blocks.reverse();
-                    blocks
+        self.files
+            .into_iter()
+            .parallel_map(move |path| {
+                let _file_span = tracy_client::span!("process_file");
+                match R::read_file(path, self.chain_id) {
+                    Ok(blocks) => {
+                        let mut blocks: Vec<_> = blocks.collect();
+                        // The blocks in `.era1` and `.era` files are in ascending
+                        // order, so reverse them to
+                        // get descending order.
+                        blocks.reverse();
+                        blocks
+                    }
+                    Err(err) => vec![Err(err)],
                 }
-                Err(err) => vec![Err(err)],
-            }
-        })
+            })
+            .flatten()
     }
 }
 

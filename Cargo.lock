@@ -1154,6 +1154,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-channel"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-deque"
 version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1914,6 +1923,7 @@ dependencies = [
  "bertha-types",
  "const-hex",
  "flate2",
+ "pariter",
  "reth-era",
  "rstest",
  "thiserror 2.0.18",
@@ -2998,6 +3008,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "81fec4625e73cf41ef4bb6846cafa6d44736525f442ba45e407c4a000a13996f"
 dependencies = [
  "group",
+]
+
+[[package]]
+name = "pariter"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a4548b881022fd7440d48482a4e0a9f2fcdcb43a11be596a297256a1fa8199f"
+dependencies = [
+ "crossbeam-channel",
 ]
 
 [[package]]
