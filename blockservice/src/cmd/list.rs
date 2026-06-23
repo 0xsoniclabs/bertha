@@ -43,7 +43,7 @@ pub async fn list(
                         .into_iter()
                         .map(From::from)
                         .collect(),
-                    chain_range.has_upgrade_heights,
+                    chain_range.has_rules_update_heights,
                     chain_range.has_corrections,
                 )
             })
@@ -64,23 +64,30 @@ pub async fn list(
             .into_iter()
             .map(|chain_id| {
                 let ranges = db.get_ranges_of_chain_id(chain_id)?;
-                let has_upgrade_heights = db.get_upgrade_heights(chain_id)?.is_some();
+                let has_rules_update_heights = db.get_rules_update_heights(chain_id)?.is_some();
                 let has_corrections = db.get_corrections(chain_id)?.is_some();
-                Ok((chain_id, ranges, has_upgrade_heights, has_corrections))
+                Ok((chain_id, ranges, has_rules_update_heights, has_corrections))
             })
             .collect::<Result<_, crate::error::Error>>()?
     };
 
-    for (chain_id, ranges, has_upgrade_heights, has_corrections) in chain_listings {
+    for (chain_id, ranges, has_rules_update_heights, has_corrections) in chain_listings {
         let chain_cfg = cfg
             .get_chain_config(chain_id)
             .unwrap_or(ChainConfig::new(chain_id));
 
         writeln!(writer, "{}", chain_cfg.pretty_name())?;
 
-        let has_upgrade_heights_str = if has_upgrade_heights { "yes" } else { "no" };
+        let has_rules_update_heights_str = if has_rules_update_heights {
+            "yes"
+        } else {
+            "no"
+        };
         let has_corrections_str = if has_corrections { "yes" } else { "no" };
-        writeln!(writer, "├── upgrade heights: {has_upgrade_heights_str}")?;
+        writeln!(
+            writer,
+            "├── rules update heights: {has_rules_update_heights_str}"
+        )?;
         writeln!(writer, "├── corrections: {has_corrections_str}")?;
 
         if ranges.is_empty() {
@@ -198,7 +205,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn print_availability_of_upgrade_heights_and_corrections() {
+    async fn print_availability_of_rules_update_heights_and_corrections() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
@@ -209,7 +216,7 @@ mod tests {
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
                 [1] (no name): (no description)
-                ├── upgrade heights: no
+                ├── rules update heights: no
                 ├── corrections: no
                 └── no blocks
                 ",
@@ -217,7 +224,8 @@ mod tests {
         );
 
         let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
-        db.put_upgrade_heights(1, b"upgrade-heights").unwrap();
+        db.put_rules_update_heights(1, b"rules-update-heights")
+            .unwrap();
         db.put_corrections(1, b"corrections").unwrap();
         drop(db);
 
@@ -228,7 +236,7 @@ mod tests {
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
                 [1] (no name): (no description)
-                ├── upgrade heights: yes
+                ├── rules update heights: yes
                 ├── corrections: yes
                 └── no blocks
                 ",
@@ -249,7 +257,7 @@ mod tests {
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
                 [1] (no name): (no description)
-                ├── upgrade heights: no
+                ├── rules update heights: no
                 ├── corrections: no
                 └── no blocks
                ",
@@ -277,7 +285,7 @@ mod tests {
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
                 [1] (no name): (no description)
-                ├── upgrade heights: no
+                ├── rules update heights: no
                 ├── corrections: no
                 ├── 2 - 4
                 └── 6 - 8
@@ -302,12 +310,12 @@ mod tests {
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
                 [1] (no name): (no description)
-                ├── upgrade heights: no
+                ├── rules update heights: no
                 ├── corrections: no
                 ├── 2 - 4
                 └── 6 - 8
                 [3] (no name): (no description)
-                ├── upgrade heights: no
+                ├── rules update heights: no
                 ├── corrections: no
                 └── 3 - 5
                 ",
@@ -327,7 +335,7 @@ mod tests {
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
                 [1] (no name): (no description)
-                ├── upgrade heights: no
+                ├── rules update heights: no
                 ├── corrections: no
                 └── no blocks
                 ",
@@ -349,7 +357,7 @@ mod tests {
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
                 [1] Test Chain: A test chain
-                ├── upgrade heights: no
+                ├── rules update heights: no
                 ├── corrections: no
                 └── no blocks
                 ",
@@ -384,12 +392,12 @@ mod tests {
             String::from_utf8(buf).unwrap(),
             indoc::indoc! {"
                 [7] (no name): (no description)
-                ├── upgrade heights: no
+                ├── rules update heights: no
                 ├── corrections: no
                 ├── 2 - 4
                 └── 6 - 8
                 [32] Test Chain: A test chain
-                ├── upgrade heights: no
+                ├── rules update heights: no
                 ├── corrections: no
                 └── no blocks
                 ",
@@ -408,7 +416,7 @@ mod tests {
                 chain_listings: vec![ChainListing {
                     chain_id: 1,
                     block_ranges: vec![],
-                    has_upgrade_heights: false,
+                    has_rules_update_heights: false,
                     has_corrections: false,
                 }],
             };
@@ -431,7 +439,7 @@ mod tests {
                 String::from_utf8(buf).unwrap(),
                 indoc::indoc! {"
                     [1] (no name): (no description)
-                    ├── upgrade heights: no
+                    ├── rules update heights: no
                     ├── corrections: no
                     └── no blocks
                     "
@@ -447,7 +455,7 @@ mod tests {
                         BlockRange { from: 2, to: 4 },
                         BlockRange { from: 6, to: 8 },
                     ],
-                    has_upgrade_heights: true,
+                    has_rules_update_heights: true,
                     has_corrections: true,
                 }],
             };
@@ -464,7 +472,7 @@ mod tests {
                 String::from_utf8(buf).unwrap(),
                 indoc::indoc! {"
                     [1] (no name): (no description)
-                    ├── upgrade heights: yes
+                    ├── rules update heights: yes
                     ├── corrections: yes
                     ├── 2 - 4
                     └── 6 - 8
@@ -482,13 +490,13 @@ mod tests {
                             BlockRange { from: 2, to: 4 },
                             BlockRange { from: 6, to: 8 },
                         ],
-                        has_upgrade_heights: true,
+                        has_rules_update_heights: true,
                         has_corrections: false,
                     },
                     ChainListing {
                         chain_id: 3,
                         block_ranges: vec![BlockRange { from: 3, to: 5 }],
-                        has_upgrade_heights: false,
+                        has_rules_update_heights: false,
                         has_corrections: true,
                     },
                 ],
@@ -506,12 +514,12 @@ mod tests {
                 String::from_utf8(buf).unwrap(),
                 indoc::indoc! {"
                     [1] (no name): (no description)
-                    ├── upgrade heights: yes
+                    ├── rules update heights: yes
                     ├── corrections: no
                     ├── 2 - 4
                     └── 6 - 8
                     [3] (no name): (no description)
-                    ├── upgrade heights: no
+                    ├── rules update heights: no
                     ├── corrections: yes
                     └── 3 - 5
                     "
@@ -548,7 +556,7 @@ mod tests {
                     chain_listings: vec![ChainListing {
                         chain_id: 1,
                         block_ranges: vec![proto_rpc::BlockRange { from: 0, to: 0 }],
-                        has_upgrade_heights: false,
+                        has_rules_update_heights: false,
                         has_corrections: false,
                     }],
                 }))

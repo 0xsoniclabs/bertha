@@ -18,9 +18,9 @@ use std::path::Path;
 
 use crate::{app_dir::open_app_dir, db::BlockDb};
 
-/// Reads the contents of `file` and stores them as the upgrade heights for `chain_id` in the
+/// Reads the contents of `file` and stores them as the rules update heights for `chain_id` in the
 /// block database located at `app_dir`.
-pub fn import_upgrade_heights(
+pub fn import_rules_update_heights(
     app_dir: impl AsRef<Path>,
     chain_id: u64,
     file: impl AsRef<Path>,
@@ -29,10 +29,10 @@ pub fn import_upgrade_heights(
     let (_cfg, mut db) = open_app_dir(app_dir, false)?;
 
     let data = std::fs::read(file)?;
-    db.put_upgrade_heights(chain_id, &data)?;
+    db.put_rules_update_heights(chain_id, &data)?;
     writeln!(
         writer,
-        "Upgrade heights for chain ID {chain_id} imported successfully."
+        "Rules update heights for chain ID {chain_id} imported successfully."
     )?;
     Ok(())
 }
@@ -65,10 +65,10 @@ mod tests {
     };
 
     #[test]
-    fn import_upgrade_heights_fails_if_app_dir_is_not_initialized() {
+    fn import_rules_update_heights_fails_if_app_dir_is_not_initialized() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
-        let result = import_upgrade_heights(tmpdir.path(), 1, "/dev/null", std::io::sink());
+        let result = import_rules_update_heights(tmpdir.path(), 1, "/dev/null", std::io::sink());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no blockservice.toml found at {} - did you forget to run init?",
@@ -77,25 +77,25 @@ mod tests {
     }
 
     #[test]
-    fn import_upgrade_heights_stores_file_contents() {
+    fn import_rules_update_heights_stores_file_contents() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
-        let data = b"upgrade-heights";
-        let file = tmpdir.path().join("upgrade_heights.json");
+        let data = b"rules-update-heights";
+        let file = tmpdir.path().join("rules_update_heights.json");
         std::fs::write(&file, data).unwrap();
 
         let mut buf = Vec::new();
-        import_upgrade_heights(tmpdir.path(), 1, &file, &mut buf).unwrap();
+        import_rules_update_heights(tmpdir.path(), 1, &file, &mut buf).unwrap();
 
         let (_, db) = crate::app_dir::open_app_dir(tmpdir.path(), true).unwrap();
         assert_eq!(
-            db.get_upgrade_heights(1).unwrap().as_deref(),
+            db.get_rules_update_heights(1).unwrap().as_deref(),
             Some(data.as_ref())
         );
         assert_eq!(
             buf,
-            b"Upgrade heights for chain ID 1 imported successfully.\n"
+            b"Rules update heights for chain ID 1 imported successfully.\n"
         );
     }
 

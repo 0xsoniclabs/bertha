@@ -364,7 +364,7 @@ mod tests {
             String::from_utf8(log).unwrap(),
             indoc::indoc! {"
             [146] SONIC: SONIC test chain
-            ├── upgrade heights: no
+            ├── rules update heights: no
             ├── corrections: no
             └── 0 - 9
             "},

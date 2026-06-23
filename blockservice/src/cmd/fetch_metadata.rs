@@ -32,13 +32,16 @@ pub async fn fetch_metadata(
     let mut client = RpcClient::try_new(url, auth_token).await?;
     let metadata = client.get_metadata(chain_id).await?;
 
-    if let Some(upgrade_heights) = metadata.upgrade_heights {
-        db.put_upgrade_heights(chain_id, &upgrade_heights)?;
-        writeln!(writer, "Stored upgrade heights for chain ID {chain_id}")?;
+    if let Some(rules_update_heights) = metadata.rules_update_heights {
+        db.put_rules_update_heights(chain_id, &rules_update_heights)?;
+        writeln!(
+            writer,
+            "Stored rules update heights for chain ID {chain_id}"
+        )?;
     } else {
         writeln!(
             writer,
-            "No upgrade heights available for chain ID {chain_id}"
+            "No rules update heights available for chain ID {chain_id}"
         )?;
     }
 
@@ -70,12 +73,12 @@ mod tests {
 
     #[rstest::rstest]
     #[case::no_metadata(None, None)]
-    #[case::only_upgrade_heights(Some(b"upgrade-heights".to_vec()), None)]
+    #[case::only_rules_update_heights(Some(b"rules-update-heights".to_vec()), None)]
     #[case::only_corrections(None, Some(b"corrections".to_vec()))]
-    #[case::both_metadata(Some(b"upgrade-heights".to_vec()), Some(b"corrections".to_vec()))]
+    #[case::both_metadata(Some(b"rules-update-heights".to_vec()), Some(b"corrections".to_vec()))]
     #[tokio::test]
     async fn fetches_metadata_and_stores_in_database(
-        #[case] upgrade_heights: Option<Vec<u8>>,
+        #[case] rules_update_heights: Option<Vec<u8>>,
         #[case] corrections: Option<Vec<u8>>,
     ) {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
@@ -83,11 +86,11 @@ mod tests {
 
         let mut server = MockRpcServer::new();
         server.expect_get_metadata().returning({
-            let upgrade_heights = upgrade_heights.clone();
+            let rules_update_heights = rules_update_heights.clone();
             let corrections = corrections.clone();
             move |_| {
                 Ok(tonic::Response::new(proto_rpc::Metadata {
-                    upgrade_heights: upgrade_heights.clone(),
+                    rules_update_heights: rules_update_heights.clone(),
                     corrections: corrections.clone(),
                 }))
             }
@@ -105,15 +108,17 @@ mod tests {
 
         let (_cfg, db) = open_app_dir(tmpdir.path(), true).unwrap();
 
-        if upgrade_heights.is_some() {
-            assert!(log_str.contains(&format!("Stored upgrade heights for chain ID {chain_id}")));
-            let stored = db.get_upgrade_heights(chain_id).unwrap().unwrap();
-            assert_eq!(stored, upgrade_heights.unwrap());
+        if rules_update_heights.is_some() {
+            assert!(log_str.contains(&format!(
+                "Stored rules update heights for chain ID {chain_id}"
+            )));
+            let stored = db.get_rules_update_heights(chain_id).unwrap().unwrap();
+            assert_eq!(stored, rules_update_heights.unwrap());
         } else {
             assert!(log_str.contains(&format!(
-                "No upgrade heights available for chain ID {chain_id}"
+                "No rules update heights available for chain ID {chain_id}"
             )));
-            assert!(db.get_upgrade_heights(chain_id).unwrap().is_none());
+            assert!(db.get_rules_update_heights(chain_id).unwrap().is_none());
         }
 
         if corrections.is_some() {
@@ -195,7 +200,7 @@ mod tests {
             .returning({
                 move |_| {
                     Ok(tonic::Response::new(proto_rpc::Metadata {
-                        upgrade_heights: None,
+                        rules_update_heights: None,
                         corrections: None,
                     }))
                 }

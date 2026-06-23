@@ -18,17 +18,20 @@ use std::path::Path;
 
 use crate::{app_dir::open_app_dir, db::BlockDb};
 
-/// Writes the upgrade heights stored in the block database for `chain_id` to `writer`.
-pub fn view_upgrade_heights(
+/// Writes the rules update heights stored in the block database for `chain_id` to `writer`.
+pub fn view_rules_update_heights(
     app_dir: impl AsRef<Path>,
     chain_id: u64,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (_cfg, db) = open_app_dir(app_dir, true)?;
 
-    match db.get_upgrade_heights(chain_id)? {
+    match db.get_rules_update_heights(chain_id)? {
         Some(data) => writeln!(writer, "{}", String::from_utf8_lossy(&data))?,
-        None => writeln!(writer, "[chain ID {chain_id}] no upgrade heights found")?,
+        None => writeln!(
+            writer,
+            "[chain ID {chain_id}] no rules update heights found"
+        )?,
     }
 
     Ok(())
@@ -59,10 +62,10 @@ mod tests {
     };
 
     #[test]
-    fn view_upgrade_heights_fails_if_app_dir_is_not_initialized() {
+    fn view_rules_update_heights_fails_if_app_dir_is_not_initialized() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
 
-        let result = view_upgrade_heights(tmpdir.path(), 1, std::io::sink());
+        let result = view_rules_update_heights(tmpdir.path(), 1, std::io::sink());
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(&format!(
             "no blockservice.toml found at {} - did you forget to run init?",
@@ -71,29 +74,29 @@ mod tests {
     }
 
     #[test]
-    fn view_upgrade_heights_writes_not_found_if_absent() {
+    fn view_rules_update_heights_writes_not_found_if_absent() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
         let mut buf = Vec::new();
-        view_upgrade_heights(tmpdir.path(), 1, &mut buf).unwrap();
+        view_rules_update_heights(tmpdir.path(), 1, &mut buf).unwrap();
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "[chain ID 1] no upgrade heights found\n"
+            "[chain ID 1] no rules update heights found\n"
         );
     }
 
     #[test]
-    fn view_upgrade_heights_writes_stored_data() {
+    fn view_rules_update_heights_writes_stored_data() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
-        let data = b"upgrade-heights";
+        let data = b"rules-update-heights";
         let (_, mut db) = crate::app_dir::open_app_dir(tmpdir.path(), false).unwrap();
-        db.put_upgrade_heights(1, data).unwrap();
+        db.put_rules_update_heights(1, data).unwrap();
 
         let mut buf = Vec::new();
-        view_upgrade_heights(tmpdir.path(), 1, &mut buf).unwrap();
+        view_rules_update_heights(tmpdir.path(), 1, &mut buf).unwrap();
         let data_with_newline = [data.as_slice(), b"\n"].concat();
         assert_eq!(buf, data_with_newline);
     }

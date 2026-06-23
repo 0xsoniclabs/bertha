@@ -112,33 +112,33 @@ func (mr *MockBlockDBMockRecorder) GetRangeRev(chainID, startBlockNumber, endBlo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRangeRev", reflect.TypeOf((*MockBlockDB)(nil).GetRangeRev), chainID, startBlockNumber, endBlockNumber)
 }
 
-// GetUpgradeHeights mocks base method.
-func (m *MockBlockDB) GetUpgradeHeights(chainID uint64) ([]byte, error) {
+// GetRulesUpdateHeights mocks base method.
+func (m *MockBlockDB) GetRulesUpdateHeights(chainID uint64) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetUpgradeHeights", chainID)
+	ret := m.ctrl.Call(m, "GetRulesUpdateHeights", chainID)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// GetUpgradeHeights indicates an expected call of GetUpgradeHeights.
-func (mr *MockBlockDBMockRecorder) GetUpgradeHeights(chainID any) *gomock.Call {
+// GetRulesUpdateHeights indicates an expected call of GetRulesUpdateHeights.
+func (mr *MockBlockDBMockRecorder) GetRulesUpdateHeights(chainID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUpgradeHeights", reflect.TypeOf((*MockBlockDB)(nil).GetUpgradeHeights), chainID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetRulesUpdateHeights", reflect.TypeOf((*MockBlockDB)(nil).GetRulesUpdateHeights), chainID)
 }
 
-// PutUpgradeHeights mocks base method.
-func (m *MockBlockDB) PutUpgradeHeights(chainID uint64, data []byte) error {
+// PutRulesUpdateHeights mocks base method.
+func (m *MockBlockDB) PutRulesUpdateHeights(chainID uint64, data []byte) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PutUpgradeHeights", chainID, data)
+	ret := m.ctrl.Call(m, "PutRulesUpdateHeights", chainID, data)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// PutUpgradeHeights indicates an expected call of PutUpgradeHeights.
-func (mr *MockBlockDBMockRecorder) PutUpgradeHeights(chainID, data any) *gomock.Call {
+// PutRulesUpdateHeights indicates an expected call of PutRulesUpdateHeights.
+func (mr *MockBlockDBMockRecorder) PutRulesUpdateHeights(chainID, data any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PutUpgradeHeights", reflect.TypeOf((*MockBlockDB)(nil).PutUpgradeHeights), chainID, data)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PutRulesUpdateHeights", reflect.TypeOf((*MockBlockDB)(nil).PutRulesUpdateHeights), chainID, data)
 }
 
 // Update mocks base method.

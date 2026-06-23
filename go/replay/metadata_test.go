@@ -30,67 +30,97 @@ import (
 )
 
 func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
-	upgrades := []opera.UpgradeHeight{{Upgrades: opera.Upgrades{Sonic: true}, Height: 5}}
+	genesisRules := opera.Rules{NetworkID: 146}
+	storedHeightsWithGenesis := []RulesUpdateHeight{
+		{Block: 0, Rules: genesisRules},
+		{Block: 5, Rules: opera.Rules{NetworkID: 146, Upgrades: opera.Upgrades{Sonic: true}}},
+	}
+	storedHeightsWithoutGenesis := []RulesUpdateHeight{
+		{Block: 5, Rules: opera.Rules{NetworkID: 146, Upgrades: opera.Upgrades{Sonic: true}}},
+	}
 	corrections := Corrections{
 		10: {common.HexToAddress("0x123"): {Balance: *uint256.NewInt(100)}},
 	}
 
-	upgradesData, err := json.Marshal(upgrades)
+	rulesUpdateHeightsWithGenesisData, err := json.Marshal(storedHeightsWithGenesis)
+	require.NoError(t, err)
+	rulesUpdateHeightsWithoutGenesisData, err := json.Marshal(storedHeightsWithoutGenesis)
 	require.NoError(t, err)
 	correctionsData, err := json.Marshal(corrections)
 	require.NoError(t, err)
 
 	testCases := map[string]struct {
-		upgradesData      []byte
-		correctionsData   []byte
-		expectErr         string
-		expectLog         func(logger *utils.MockLogger)
-		expectUpgrades    []opera.UpgradeHeight
-		expectCorrections Corrections
+		rulesUpdateHeightsData   []byte
+		correctionsData          []byte
+		expectErr                string
+		expectLog                func(logger *utils.MockLogger)
+		expectRulesUpdateHeights []RulesUpdateHeight
+		expectCorrections        Corrections
 	}{
-		"no upgrade heights, no corrections": {
+		"no rules update heights, no corrections": {
 			expectLog: func(logger *utils.MockLogger) {
-				logger.EXPECT().Warn("No upgrade heights available").Times(1)
+				logger.EXPECT().Warn("No rules update heights available").Times(1)
 				logger.EXPECT().Warn("No corrections available").Times(1)
 			},
+			expectRulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: genesisRules}},
 		},
-		"only upgrade heights": {
-			upgradesData: upgradesData,
+		"stored heights with genesis": {
+			rulesUpdateHeightsData: rulesUpdateHeightsWithGenesisData,
 			expectLog: func(logger *utils.MockLogger) {
-				logger.EXPECT().Info("Loaded upgrade heights from block db", "num_upgrade_heights", len(upgrades)).Times(1)
+				logger.EXPECT().Info("Loaded rules update heights from block db", "num_rules_update_heights", len(storedHeightsWithGenesis)).Times(1)
 				logger.EXPECT().Warn("No corrections available").Times(1)
 			},
-			expectUpgrades: upgrades,
+			expectRulesUpdateHeights: storedHeightsWithGenesis,
+		},
+		"stored heights without genesis prepends it": {
+			rulesUpdateHeightsData: rulesUpdateHeightsWithoutGenesisData,
+			expectLog: func(logger *utils.MockLogger) {
+				logger.EXPECT().Info("Loaded rules update heights from block db", "num_rules_update_heights", 1).Times(1)
+				logger.EXPECT().Warn("No corrections available").Times(1)
+			},
+			expectRulesUpdateHeights: storedHeightsWithGenesis,
 		},
 		"only corrections": {
 			correctionsData: correctionsData,
 			expectLog: func(logger *utils.MockLogger) {
-				logger.EXPECT().Warn("No upgrade heights available").Times(1)
+				logger.EXPECT().Warn("No rules update heights available").Times(1)
 				logger.EXPECT().Info("Loaded corrections from block db", "num_corrections", len(corrections)).Times(1)
 			},
-			expectCorrections: corrections,
+			expectRulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: genesisRules}},
+			expectCorrections:        corrections,
 		},
 		"both": {
-			upgradesData:    upgradesData,
-			correctionsData: correctionsData,
+			rulesUpdateHeightsData: rulesUpdateHeightsWithGenesisData,
+			correctionsData:        correctionsData,
 			expectLog: func(logger *utils.MockLogger) {
-				logger.EXPECT().Info("Loaded upgrade heights from block db", "num_upgrade_heights", len(upgrades)).Times(1)
+				logger.EXPECT().Info("Loaded rules update heights from block db", "num_rules_update_heights", len(storedHeightsWithGenesis)).Times(1)
 				logger.EXPECT().Info("Loaded corrections from block db", "num_corrections", len(corrections)).Times(1)
 			},
-			expectUpgrades:    upgrades,
-			expectCorrections: corrections,
+			expectRulesUpdateHeights: storedHeightsWithGenesis,
+			expectCorrections:        corrections,
 		},
-		"invalid upgrade heights": {
-			upgradesData:    []byte("not-json"),
-			correctionsData: correctionsData,
-			expectErr:       "failed to parse stored upgrade heights",
+		"genesis rules mismatch": {
+			rulesUpdateHeightsData: func() []byte {
+				data, _ := json.Marshal([]RulesUpdateHeight{
+					{Block: 0, Rules: opera.Rules{NetworkID: 146, Upgrades: opera.Upgrades{Sonic: true}}},
+				})
+				return data
+			}(),
+			expectErr: "stored genesis rules at block 0 do not match provided genesis rules",
+			expectLog: func(logger *utils.MockLogger) {
+				logger.EXPECT().Info("Loaded rules update heights from block db", "num_rules_update_heights", 1).Times(1)
+			},
+		},
+		"invalid rules update heights": {
+			rulesUpdateHeightsData: []byte("not-json"),
+			correctionsData:        correctionsData,
+			expectErr:              "failed to parse stored rules update heights",
 		},
 		"invalid corrections": {
-			upgradesData:    upgradesData,
 			correctionsData: []byte("not-json"),
 			expectErr:       "failed to parse stored corrections",
 			expectLog: func(logger *utils.MockLogger) {
-				logger.EXPECT().Info("Loaded upgrade heights from block db", "num_upgrade_heights", len(upgrades)).Times(1)
+				logger.EXPECT().Warn("No rules update heights available").Times(1)
 			},
 		},
 	}
@@ -100,129 +130,137 @@ func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			db := blockdb.NewMockBlockDB(ctrl)
 			logger := utils.NewMockLogger(ctrl)
-			chainID := uint64(146)
 
-			db.EXPECT().GetUpgradeHeights(chainID).Return(tc.upgradesData, nil).Times(1)
-			db.EXPECT().GetCorrections(chainID).Return(tc.correctionsData, nil).Times(1)
+			db.EXPECT().GetRulesUpdateHeights(genesisRules.NetworkID).Return(tc.rulesUpdateHeightsData, nil).Times(1)
+			db.EXPECT().GetCorrections(genesisRules.NetworkID).Return(tc.correctionsData, nil).Times(1)
 
 			if tc.expectLog != nil {
 				tc.expectLog(logger)
 			}
 
-			store, err := NewBlockDBMetadataStore(db, chainID, logger, false)
+			store, err := NewBlockDBMetadataStore(db, genesisRules, logger, false)
 			if tc.expectErr != "" {
 				require.ErrorContains(t, err, tc.expectErr)
 				return
 			}
 
 			require.NoError(t, err)
-			require.Equal(t, tc.expectUpgrades, store.metadata.UpgradeHeights)
+			require.Equal(t, tc.expectRulesUpdateHeights, store.metadata.RulesUpdateHeights)
 			require.Equal(t, tc.expectCorrections, store.metadata.Corrections)
 		})
 	}
 }
 
-func TestBlockDBMetadataStore_PatchUpgrades_ReturnsErrorForInvalidDiff(t *testing.T) {
-	store := &BlockDBMetadataStore{}
-	err := store.PatchUpgrades(0, []byte("not valid json {{{"))
+func TestBlockDBMetadataStore_PatchRules_ReturnsErrorForInvalidDiff(t *testing.T) {
+	rules := opera.FakeNetRules(opera.Upgrades{Berlin: true, London: true, Sonic: true})
+	store := &BlockDBMetadataStore{
+		metadata: Metadata{RulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: rules}}},
+	}
+	err := store.PatchRules(0, []byte("not valid json {{{"))
 	require.Error(t, err)
 }
 
-func TestBlockDBMetadataStore_PatchUpgrades_IgnoresUpdatesWithoutChanges(t *testing.T) {
+func TestBlockDBMetadataStore_PatchRules_AppliesDiffToNextRules(t *testing.T) {
+	rules := opera.FakeNetRules(opera.Upgrades{Berlin: true, London: true, Sonic: true})
 	store := &BlockDBMetadataStore{
 		metadata: Metadata{
-			UpgradeHeights: []opera.UpgradeHeight{
-				{Upgrades: opera.Upgrades{Sonic: true}, Height: 2},
+			RulesUpdateHeights: []RulesUpdateHeight{
+				{Block: 0, Rules: rules},
 			},
 		},
 	}
-
-	diff := []byte(`{"Upgrades":{"Sonic":true}}`)
-	err := store.PatchUpgrades(5, diff)
-	require.NoError(t, err)
-	require.Nil(t, store.nextUpgrades)
-}
-
-func TestBlockDBMetadataStore_PatchUpgrades_AppliesDiffToNextUpgrades(t *testing.T) {
-	store := &BlockDBMetadataStore{}
-	require.Nil(t, store.nextUpgrades)
+	require.Nil(t, store.nextRules)
 
 	diff := []byte(`{"Upgrades":{"Allegro":true}}`)
-	err := store.PatchUpgrades(0, diff)
+	err := store.PatchRules(0, diff)
 	require.NoError(t, err)
-	require.NotNil(t, store.nextUpgrades)
-	// Berlin, London and Sonic are enabled by default.
-	require.True(t, store.nextUpgrades.Berlin)
-	require.True(t, store.nextUpgrades.London)
-	require.True(t, store.nextUpgrades.Sonic)
-	require.True(t, store.nextUpgrades.Allegro)
-	require.False(t, store.nextUpgrades.Brio)
+	require.NotNil(t, store.nextRules)
+	require.True(t, store.nextRules.Upgrades.Allegro)
+	require.False(t, store.nextRules.Upgrades.Brio)
 
 	diff = []byte(`{"Upgrades":{"Brio":true}}`)
-	err = store.PatchUpgrades(0, diff)
+	err = store.PatchRules(0, diff)
 	require.NoError(t, err)
-	require.NotNil(t, store.nextUpgrades)
-	require.True(t, store.nextUpgrades.Berlin)
-	require.True(t, store.nextUpgrades.London)
-	require.True(t, store.nextUpgrades.Sonic)
-	require.True(t, store.nextUpgrades.Allegro)
-	require.True(t, store.nextUpgrades.Brio)
+	require.NotNil(t, store.nextRules)
+	require.True(t, store.nextRules.Upgrades.Allegro)
+	require.True(t, store.nextRules.Upgrades.Brio)
 }
 
-func TestBlockDBMetadataStore_CommitUpgrades_NoNextUpgrades_IsNoOp(t *testing.T) {
+func TestBlockDBMetadataStore_PatchRules_UsesLatestRulesAtOrBeforeBlock(t *testing.T) {
+	rulesAt0 := opera.FakeNetRules(opera.Upgrades{Berlin: true, London: true, Sonic: true})
+	rulesAt10 := rulesAt0
+	rulesAt10.Upgrades = opera.Upgrades{Berlin: true, London: true, Sonic: true, Allegro: true}
+	rulesAt20 := rulesAt0
+	rulesAt20.Upgrades = opera.Upgrades{Berlin: true, London: true, Sonic: true, Allegro: true, Brio: true}
+
+	store := &BlockDBMetadataStore{
+		metadata: Metadata{
+			RulesUpdateHeights: []RulesUpdateHeight{
+				{Block: 0, Rules: rulesAt0},
+				{Block: 10, Rules: rulesAt10},
+				{Block: 20, Rules: rulesAt20},
+			},
+		},
+	}
+
+	err := store.PatchRules(12, []byte(`{"Upgrades":{"GasSubsidies":true}}`))
+	require.NoError(t, err)
+	require.NotNil(t, store.nextRules)
+	require.True(t, store.nextRules.Upgrades.Allegro)
+	require.False(t, store.nextRules.Upgrades.Brio)
+	require.True(t, store.nextRules.Upgrades.GasSubsidies)
+}
+
+func TestBlockDBMetadataStore_CommitRules_NoNextRules_IsNoOp(t *testing.T) {
 	store := &BlockDBMetadataStore{}
-	require.NoError(t, store.CommitUpgrades(5))
+	require.NoError(t, store.CommitRules(5))
 }
 
-func TestBlockDBMetadataStore_CommitUpgrades_KnownUpgradeIsNotStoredAgain(t *testing.T) {
+func TestBlockDBMetadataStore_CommitRules_KnownRulesUpdateIsNotStoredAgain(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	logger := utils.NewMockLogger(ctrl)
 
-	knownUpgrade := opera.UpgradeHeight{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}, Height: 4}
+	knownRules := opera.Rules{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}}
 	store := &BlockDBMetadataStore{
 		metadata: Metadata{
-			UpgradeHeights: []opera.UpgradeHeight{
-				knownUpgrade,
+			RulesUpdateHeights: []RulesUpdateHeight{
+				{Block: 4, Rules: knownRules},
 			},
 		},
 		logger: logger,
 	}
 
-	logger.EXPECT().Info("Detected known upgrade", "block", knownUpgrade.Height).Times(1)
+	logger.EXPECT().Info("Detected known rules update", "block", uint64(4)).Times(1)
 
-	store.nextUpgrades = &knownUpgrade.Upgrades
-	require.NoError(t, store.CommitUpgrades(uint64(knownUpgrade.Height-1)))
-	require.Nil(t, store.nextUpgrades)
-	require.Len(t, store.metadata.UpgradeHeights, 1)
+	store.nextRules = &knownRules
+	require.NoError(t, store.CommitRules(3)) // blockNumber+1 = 4
+	require.Nil(t, store.nextRules)
+	require.Len(t, store.metadata.RulesUpdateHeights, 1)
 }
 
-func TestBlockDBMetadataStore_CommitUpgrades_KnownHeightWithDifferentUpgrade_ReturnsError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	logger := utils.NewMockLogger(ctrl)
-
-	knownUpgrade := opera.UpgradeHeight{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}, Height: 4}
+func TestBlockDBMetadataStore_CommitRules_KnownHeightWithDifferentRulesUpdate_ReturnsError(t *testing.T) {
+	knownRules := opera.Rules{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}}
 	store := &BlockDBMetadataStore{
 		metadata: Metadata{
-			UpgradeHeights: []opera.UpgradeHeight{
-				knownUpgrade,
+			RulesUpdateHeights: []RulesUpdateHeight{
+				{Block: 4, Rules: knownRules},
 			},
 		},
-		logger: logger,
 	}
 
-	mismatch := opera.Upgrades{Sonic: true, Brio: true}
-	store.nextUpgrades = &mismatch
-	err := store.CommitUpgrades(uint64(knownUpgrade.Height - 1))
-	require.ErrorContains(t, err, "unexpected upgrade at block 4")
-	require.Nil(t, store.nextUpgrades)
+	mismatch := opera.Rules{Upgrades: opera.Upgrades{Sonic: true, Brio: true}}
+	store.nextRules = &mismatch
+	err := store.CommitRules(3) // blockNumber+1 = 4
+	require.ErrorContains(t, err, "unexpected rules update at block 4")
+	require.Nil(t, store.nextRules)
 }
 
-func TestBlockDBMetadataStore_CommitUpgrades_NewUpgradeIsStoredWhenWriteEnabled(t *testing.T) {
+func TestBlockDBMetadataStore_CommitRules_NewRulesUpdateIsStoredWhenWriteEnabled(t *testing.T) {
 	cases := map[string]struct {
-		writeUpgradeHeights bool
+		writeRulesUpdateHeights bool
 	}{
-		"write enabled":  {writeUpgradeHeights: true},
-		"write disabled": {writeUpgradeHeights: false},
+		"write enabled":  {writeRulesUpdateHeights: true},
+		"write disabled": {writeRulesUpdateHeights: false},
 	}
 
 	for name, tc := range cases {
@@ -231,39 +269,39 @@ func TestBlockDBMetadataStore_CommitUpgrades_NewUpgradeIsStoredWhenWriteEnabled(
 			db := blockdb.NewMockBlockDB(ctrl)
 			logger := utils.NewMockLogger(ctrl)
 
-			newUpgrades := opera.Upgrades{Sonic: true, Allegro: true, Brio: true}
+			chainID := uint64(146)
+			newRules := opera.Rules{Upgrades: opera.Upgrades{Sonic: true, Allegro: true, Brio: true}}
 			store := &BlockDBMetadataStore{
-				db:                  db,
-				chainID:             146,
-				logger:              logger,
-				writeUpgradeHeights: tc.writeUpgradeHeights,
-				metadata: Metadata{UpgradeHeights: []opera.UpgradeHeight{
-					{Upgrades: opera.Upgrades{Sonic: true}, Height: 5},
-					{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}, Height: 10},
+				db:                      db,
+				logger:                  logger,
+				writeRulesUpdateHeights: tc.writeRulesUpdateHeights,
+				metadata: Metadata{RulesUpdateHeights: []RulesUpdateHeight{
+					{Block: 5, Rules: opera.Rules{NetworkID: chainID, Upgrades: opera.Upgrades{Sonic: true}}},
+					{Block: 10, Rules: opera.Rules{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}}},
 				}},
 			}
 
-			if tc.writeUpgradeHeights {
-				db.EXPECT().PutUpgradeHeights(store.chainID, gomock.Any()).DoAndReturn(func(chainID uint64, data []byte) error {
-					var got []opera.UpgradeHeight
+			if tc.writeRulesUpdateHeights {
+				db.EXPECT().PutRulesUpdateHeights(chainID, gomock.Any()).DoAndReturn(func(chainID uint64, data []byte) error {
+					var got []RulesUpdateHeight
 					require.NoError(t, json.Unmarshal(data, &got))
 					require.Len(t, got, 3)
-					require.Equal(t, uint64(5), uint64(got[0].Height))
-					require.Equal(t, uint64(10), uint64(got[1].Height))
-					require.Equal(t, uint64(15+1), uint64(got[2].Height))
-					require.Equal(t, newUpgrades, got[2].Upgrades)
+					require.Equal(t, uint64(5), got[0].Block)
+					require.Equal(t, uint64(10), got[1].Block)
+					require.Equal(t, uint64(16), got[2].Block)
+					require.Equal(t, newRules, got[2].Rules)
 					return nil
 				}).Times(1)
-				logger.EXPECT().Info("New upgrade detected and stored in the block db", "block", gomock.Any()).Times(1)
+				logger.EXPECT().Info("New rules update detected and stored in the block db", "block", uint64(16)).Times(1)
 			} else {
-				logger.EXPECT().Warn("New upgrade detected but not stored in the block db (use --write-upgrade-heights to persist)", "block", gomock.Any()).Times(1)
+				logger.EXPECT().Warn("New rules update detected but not stored in the block db (use --write-rules-update-heights to persist)", "block", uint64(16)).Times(1)
 			}
 
-			store.nextUpgrades = &newUpgrades
-			require.NoError(t, store.CommitUpgrades(15))
-			require.Nil(t, store.nextUpgrades)
-			// Upgrade is always tracked in-memory.
-			require.Len(t, store.metadata.UpgradeHeights, 3)
+			store.nextRules = &newRules
+			require.NoError(t, store.CommitRules(15))
+			require.Nil(t, store.nextRules)
+			// Rules update is always tracked in-memory.
+			require.Len(t, store.metadata.RulesUpdateHeights, 3)
 		})
 	}
 }
@@ -277,10 +315,10 @@ func TestBlockDBMetadataStore_GetUpgradesAtBlock_ObtainsUpgradesFromCachedValues
 
 	store := &BlockDBMetadataStore{
 		metadata: Metadata{
-			UpgradeHeights: []opera.UpgradeHeight{
-				{Upgrades: upgrades[0], Height: 5},
-				{Upgrades: upgrades[1], Height: 7},
-				{Upgrades: upgrades[2], Height: 11},
+			RulesUpdateHeights: []RulesUpdateHeight{
+				{Block: 5, Rules: opera.Rules{Upgrades: upgrades[0]}},
+				{Block: 7, Rules: opera.Rules{Upgrades: upgrades[1]}},
+				{Block: 11, Rules: opera.Rules{Upgrades: upgrades[2]}},
 			},
 		},
 	}
@@ -296,7 +334,7 @@ func TestBlockDBMetadataStore_GetUpgradesAtBlock_ObtainsUpgradesFromCachedValues
 		}
 
 		got := store.GetUpgradesAtBlock(uint64(blockNr))
-		require.Equal(t, expect, got, "block number %d", blockNr)
+		require.Equal(t, expect, got)
 	}
 }
 
@@ -317,4 +355,37 @@ func TestBlockDBMetadataStore_GetCorrectionsAtBlock_ReturnsCorrections(t *testin
 	require.Equal(t, corrections[10], store.GetCorrectionsAtBlock(10))
 	require.Equal(t, corrections[20], store.GetCorrectionsAtBlock(20))
 	require.Nil(t, store.GetCorrectionsAtBlock(30))
+}
+
+func TestRulesUpdateHeights_MarshalUnmarshal_IsIdentity(t *testing.T) {
+	testCases := map[string]struct {
+		rulesUpdateHeights []RulesUpdateHeight
+	}{
+		"all fields set": {
+			rulesUpdateHeights: []RulesUpdateHeight{{
+				Block: 123,
+				Rules: opera.MainNetRules(),
+			}},
+		},
+		"zero value fields": {
+			rulesUpdateHeights: []RulesUpdateHeight{{}},
+		},
+		"empty slice": {
+			rulesUpdateHeights: []RulesUpdateHeight{},
+		},
+		"nil slice": {
+			rulesUpdateHeights: nil,
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			data, err := json.Marshal(tc.rulesUpdateHeights)
+			require.NoError(t, err)
+
+			var got []RulesUpdateHeight
+			require.NoError(t, json.Unmarshal(data, &got))
+			require.Equal(t, tc.rulesUpdateHeights, got)
+		})
+	}
 }

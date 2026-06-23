@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"reflect"
 	"slices"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
@@ -32,16 +33,16 @@ import (
 
 //go:generate mockgen -source=metadata.go -destination=metadata_mock.go -package=replay
 
-// MetadataStore is an interface for storing and retrieving chain upgrade rules
-// and corrections.
+// MetadataStore is an interface for storing and retrieving chain rules and
+// corrections.
 type MetadataStore interface {
-	// PatchUpgrades patches the upgrades that will be committed by
-	// CommitUpgrades with the provided json opera.Rules patch.
-	PatchUpgrades(blockNumber uint64, diff []byte) error
+	// PatchRules patches the rules that will be committed by CommitRules with
+	// the provided json opera.Rules patch.
+	PatchRules(blockNumber uint64, diff []byte) error
 
-	// CommitUpgrades commits the upgrades that have been updated by
-	// PatchUpgrades and will become effective at the next block.
-	CommitUpgrades(blockNumber uint64) error
+	// CommitRules commits the rules that have been updated by PatchRules and
+	// will become effective at the next block.
+	CommitRules(blockNumber uint64) error
 
 	// GetUpgradeHeights returns all stored upgrade heights.
 	GetUpgradeHeights() []opera.UpgradeHeight
@@ -57,36 +58,49 @@ type MetadataStore interface {
 
 // BlockDBMetadataStore is a MetadataStore implementation backed by the block database.
 type BlockDBMetadataStore struct {
-	db                  blockdb.BlockDB
-	metadata            Metadata
-	nextUpgrades        *opera.Upgrades
-	chainID             uint64
-	logger              utils.Logger
-	writeUpgradeHeights bool
+	db                      blockdb.BlockDB
+	metadata                Metadata
+	nextRules               *opera.Rules
+	logger                  utils.Logger
+	writeRulesUpdateHeights bool
 }
 
 // NewBlockDBMetadataStore creates a BlockDBMetadataStore backed by data stored in the
-// given block database. If writeUpgradeHeights is true, newly detected upgrade heights
+// given block database. If writeRulesHeights is true, newly detected rule heights
 // are persisted to the block database.
-func NewBlockDBMetadataStore(db blockdb.BlockDB, chainID uint64, logger utils.Logger, writeUpgradeHeights bool) (*BlockDBMetadataStore, error) {
-	upgradesData, err := db.GetUpgradeHeights(chainID)
+func NewBlockDBMetadataStore(db blockdb.BlockDB, rules opera.Rules, logger utils.Logger, writeRulesHeights bool) (*BlockDBMetadataStore, error) {
+	rulesUpdateHeightsData, err := db.GetRulesUpdateHeights(rules.NetworkID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get upgrade heights from block db: %w", err)
+		return nil, fmt.Errorf("failed to get rules update heights from block db: %w", err)
 	}
-	correctionsData, err := db.GetCorrections(chainID)
+	correctionsData, err := db.GetCorrections(rules.NetworkID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get corrections from block db: %w", err)
 	}
 
-	var upgrades []opera.UpgradeHeight
-	if upgradesData != nil {
-		if err := json.Unmarshal(upgradesData, &upgrades); err != nil {
-			return nil, fmt.Errorf("failed to parse stored upgrade heights: %w", err)
+	var rulesUpdateHeights []RulesUpdateHeight
+	if rulesUpdateHeightsData != nil {
+		if err := json.Unmarshal(rulesUpdateHeightsData, &rulesUpdateHeights); err != nil {
+			return nil, fmt.Errorf("failed to parse stored rules update heights: %w", err)
 		}
-		logger.Info("Loaded upgrade heights from block db", "num_upgrade_heights", len(upgrades))
+		logger.Info("Loaded rules update heights from block db", "num_rules_update_heights", len(rulesUpdateHeights))
 	} else {
-		logger.Warn("No upgrade heights available")
+		logger.Warn("No rules update heights available")
 	}
+
+	slices.SortFunc(rulesUpdateHeights, func(a, b RulesUpdateHeight) int {
+		return cmp.Compare(a.Block, b.Block)
+	})
+
+	// Ensure the genesis rules entry is present at block 0.
+	if len(rulesUpdateHeights) > 0 && rulesUpdateHeights[0].Block == 0 {
+		if !reflect.DeepEqual(rulesUpdateHeights[0].Rules, rules) {
+			return nil, fmt.Errorf("stored genesis rules at block 0 do not match provided genesis rules")
+		}
+	} else {
+		rulesUpdateHeights = append([]RulesUpdateHeight{{Block: 0, Rules: rules}}, rulesUpdateHeights...)
+	}
+
 	var corrections Corrections
 	if correctionsData != nil {
 		if err := json.Unmarshal(correctionsData, &corrections); err != nil {
@@ -100,105 +114,97 @@ func NewBlockDBMetadataStore(db blockdb.BlockDB, chainID uint64, logger utils.Lo
 	return &BlockDBMetadataStore{
 		db: db,
 		metadata: Metadata{
-			UpgradeHeights: upgrades,
-			Corrections:    corrections,
+			RulesUpdateHeights: rulesUpdateHeights,
+			Corrections:        corrections,
 		},
-		chainID:             chainID,
-		logger:              logger,
-		writeUpgradeHeights: writeUpgradeHeights,
+		logger:                  logger,
+		writeRulesUpdateHeights: writeRulesHeights,
 	}, nil
 }
 
-func (s *BlockDBMetadataStore) PatchUpgrades(blockNumber uint64, diff []byte) error {
-	var upgrades opera.Upgrades
-	if s.nextUpgrades != nil {
-		upgrades = *s.nextUpgrades
-	} else {
-		upgrades = s.GetUpgradesAtBlock(blockNumber)
-		// Only Sonic modifies its updates by log messages, and Sonic has the
-		// updates Berlin, London and Sonic enabled from the beginning, and
-		// therefore there are no upgrade heights for them.
-		upgrades.Berlin = true
-		upgrades.London = true
-		upgrades.Sonic = true
+func (s *BlockDBMetadataStore) PatchRules(blockNumber uint64, diff []byte) error {
+	last := s.metadata.RulesUpdateHeights[0].Rules
+	for _, rulesHeight := range s.metadata.RulesUpdateHeights {
+		if rulesHeight.Block <= blockNumber {
+			last = rulesHeight.Rules
+		}
 	}
-	originalRules := opera.Rules{
-		Economy:  opera.EconomyRules{MinGasPrice: &big.Int{}, MinBaseFee: &big.Int{}},
-		Upgrades: upgrades,
+	if s.nextRules != nil {
+		last = *s.nextRules
 	}
-	updatedRules, err := updateRules(originalRules, diff)
+	if last.Economy.MinGasPrice == nil {
+		last.Economy.MinGasPrice = new(big.Int)
+	}
+	if last.Economy.MinBaseFee == nil {
+		last.Economy.MinBaseFee = new(big.Int)
+	}
+	updatedRules, err := opera.UpdateRules(last, diff)
 	if err != nil {
-		return fmt.Errorf("failed to update rules: %v", err)
+		return fmt.Errorf("failed to update rules: %w", err)
 	}
-	if updatedRules.Upgrades != originalRules.Upgrades {
-		s.nextUpgrades = &updatedRules.Upgrades
+	if !reflect.DeepEqual(updatedRules, last) {
+		s.nextRules = &updatedRules
 	}
 	return nil
 }
 
-func updateRules(src opera.Rules, diff []byte) (opera.Rules, error) {
-	changed := src.Copy()
-	if err := json.Unmarshal(diff, &changed); err != nil {
-		return opera.Rules{}, err
-	}
-
-	// protect readonly fields
-	changed.NetworkID = src.NetworkID
-	changed.Name = src.Name
-
-	return changed, nil
-}
-
-func (s *BlockDBMetadataStore) CommitUpgrades(blockNumber uint64) error {
-	if s.nextUpgrades == nil {
+func (s *BlockDBMetadataStore) CommitRules(blockNumber uint64) error {
+	if s.nextRules == nil {
 		return nil
 	}
-	upgrade := opera.UpgradeHeight{
-		Upgrades: *s.nextUpgrades,
-		Height:   idx.Block(blockNumber + 1), // effective from next block on
+	rulesUpdateHeight := RulesUpdateHeight{
+		Block: blockNumber + 1, // effective from next block on
+		Rules: *s.nextRules,
 	}
-	s.nextUpgrades = nil
-	// Check if the upgrade matches one of the known values
-	for _, existingUpgrade := range s.metadata.UpgradeHeights {
-		if existingUpgrade.Height == upgrade.Height {
-			if existingUpgrade.Upgrades == upgrade.Upgrades {
-				s.logger.Info("Detected known upgrade", "block", upgrade.Height)
+	s.nextRules = nil
+	// Check if the rules update matches one of the known values
+	for _, existingUpdate := range s.metadata.RulesUpdateHeights {
+		if existingUpdate.Block == rulesUpdateHeight.Block {
+			if reflect.DeepEqual(existingUpdate.Rules, rulesUpdateHeight.Rules) {
+				s.logger.Info("Detected known rules update", "block", rulesUpdateHeight.Block)
 				return nil
 			} else {
-				return fmt.Errorf("unexpected upgrade at block %d: upgrade does not match known upgrade", upgrade.Height)
+				return fmt.Errorf("unexpected rules update at block %d: update does not match known update", rulesUpdateHeight.Block)
 			}
 		}
 	}
-	s.metadata.UpgradeHeights = append(s.metadata.UpgradeHeights, upgrade)
-	slices.SortFunc(s.metadata.UpgradeHeights, func(a, b opera.UpgradeHeight) int {
-		return cmp.Compare(a.Height, b.Height)
+	s.metadata.RulesUpdateHeights = append(s.metadata.RulesUpdateHeights, rulesUpdateHeight)
+	slices.SortFunc(s.metadata.RulesUpdateHeights, func(a, b RulesUpdateHeight) int {
+		return cmp.Compare(a.Block, b.Block)
 	})
-	if !s.writeUpgradeHeights {
-		s.logger.Warn("New upgrade detected but not stored in the block db (use --write-upgrade-heights to persist)", "block", upgrade.Height)
+	if !s.writeRulesUpdateHeights {
+		s.logger.Warn("New rules update detected but not stored in the block db (use --write-rules-update-heights to persist)", "block", rulesUpdateHeight.Block)
 		return nil
 	}
-	data, err := json.Marshal(s.metadata.UpgradeHeights)
+	data, err := json.Marshal(s.metadata.RulesUpdateHeights)
 	if err != nil {
-		return fmt.Errorf("failed to marshal upgrade heights: %w", err)
+		return fmt.Errorf("failed to marshal rules update heights: %w", err)
 	}
-	if err := s.db.PutUpgradeHeights(s.chainID, data); err != nil {
-		return fmt.Errorf("failed to store upgrade heights in block db: %w", err)
+	if err := s.db.PutRulesUpdateHeights(s.metadata.RulesUpdateHeights[0].Rules.NetworkID, data); err != nil {
+		return fmt.Errorf("failed to store rules update heights in block db: %w", err)
 	}
-	s.logger.Info("New upgrade detected and stored in the block db", "block", upgrade.Height)
+	s.logger.Info("New rules update detected and stored in the block db", "block", rulesUpdateHeight.Block)
 	return nil
 }
 
 // GetUpgradeHeights returns all stored upgrade heights.
 func (s *BlockDBMetadataStore) GetUpgradeHeights() []opera.UpgradeHeight {
-	return s.metadata.UpgradeHeights
+	upgradeHeights := make([]opera.UpgradeHeight, len(s.metadata.RulesUpdateHeights))
+	for i, rulesHeight := range s.metadata.RulesUpdateHeights {
+		upgradeHeights[i] = opera.UpgradeHeight{
+			Height:   idx.Block(rulesHeight.Block),
+			Upgrades: rulesHeight.Rules.Upgrades,
+		}
+	}
+	return upgradeHeights
 }
 
 // GetUpgradesAtBlock returns the effective upgrades at the given block number.
 func (s *BlockDBMetadataStore) GetUpgradesAtBlock(blockNumber uint64) opera.Upgrades {
 	upgrades := opera.Upgrades{}
-	for _, upgrade := range s.metadata.UpgradeHeights {
-		if upgrade.Height <= idx.Block(blockNumber) {
-			upgrades = upgrade.Upgrades
+	for _, rulesHeight := range s.metadata.RulesUpdateHeights {
+		if idx.Block(rulesHeight.Block) <= idx.Block(blockNumber) {
+			upgrades = rulesHeight.Rules.Upgrades
 		}
 	}
 	return upgrades
@@ -209,9 +215,15 @@ func (s *BlockDBMetadataStore) GetCorrectionsAtBlock(blockNumber uint64) map[com
 	return s.metadata.Corrections[blockNumber]
 }
 
-// Metadata holds chain-specific metadata such as upgrades to the EVM rules and
-// corrections to be applied to account states.
+// Metadata holds chain-specific metadata consisting of the heights of rules
+// updates and corrections for the account state.
 type Metadata struct {
-	UpgradeHeights []opera.UpgradeHeight
-	Corrections    Corrections
+	RulesUpdateHeights []RulesUpdateHeight
+	Corrections        Corrections
+}
+
+// RulesUpdateHeight represents a rules update that becomes effective at a specific block.
+type RulesUpdateHeight struct {
+	Block uint64
+	Rules opera.Rules
 }

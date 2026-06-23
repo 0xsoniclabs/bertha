@@ -36,11 +36,11 @@ async fn client_list_remote_then_fetch_metadata_then_list_then_view_metadata() {
     .await
     .expect("blockservice should initialize");
 
-    // Import upgrade heights
-    let file = server_dir.path().join("upgrade-heights");
-    std::fs::write(&file, b"upgrade-heights").unwrap();
+    // Import rules update heights
+    let file = server_dir.path().join("rules-update-heights");
+    std::fs::write(&file, b"rules-update-heights").unwrap();
     let CommandExecutionOutput { result, .. } = execute_command(
-        Command::ImportUpgradeHeights {
+        Command::ImportRulesUpdateHeights {
             chain_id: CHAIN_ID,
             file,
         },
@@ -93,7 +93,7 @@ async fn client_list_remote_then_fetch_metadata_then_list_then_view_metadata() {
         String::from_utf8_lossy(&log),
         indoc::indoc! {"
         [146] SONIC: SONIC test chain
-        ├── upgrade heights: yes
+        ├── rules update heights: yes
         ├── corrections: yes
         └── no blocks
         "}
@@ -130,15 +130,15 @@ async fn client_list_remote_then_fetch_metadata_then_list_then_view_metadata() {
         String::from_utf8_lossy(&log),
         indoc::indoc! {"
         [146] SONIC: SONIC test chain
-        ├── upgrade heights: yes
+        ├── rules update heights: yes
         ├── corrections: yes
         └── no blocks
         "}
     );
 
-    // Print the upgrade-heights
+    // Print the rules update heights
     let CommandExecutionOutput { result, log } = execute_command(
-        Command::ViewUpgradeHeights { chain_id: CHAIN_ID },
+        Command::ViewRulesUpdateHeights { chain_id: CHAIN_ID },
         &client_dir,
         None,
         None,
@@ -146,7 +146,7 @@ async fn client_list_remote_then_fetch_metadata_then_list_then_view_metadata() {
     )
     .await;
     assert!(result.is_ok());
-    assert_eq!(log, b"upgrade-heights\n");
+    assert_eq!(log, b"rules-update-heights\n");
 
     // Print the corrections
     let CommandExecutionOutput { result, log } = execute_command(

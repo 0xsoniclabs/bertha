@@ -85,7 +85,7 @@ async fn multiple_clients_fetch_blocks_from_the_same_server_concurrently() {
             String::from_utf8_lossy(&log),
             indoc::formatdoc! {"
             [146] SONIC: SONIC test chain
-            ├── upgrade heights: no
+            ├── rules update heights: no
             ├── corrections: no
             └── {} - {}
             ", from, to}

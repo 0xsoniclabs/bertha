@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 )
@@ -78,6 +79,19 @@ func TestParseGenesis_CanParseValidGenesisData(t *testing.T) {
 		account.Storage[common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002")],
 		common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002"),
 	)
+}
+
+func TestParseGenesis_SetsDefaultsForMissingFields(t *testing.T) {
+	genesisData := []byte(`{"Rules": {"NetworkID": 146}}`)
+
+	genesis, err := ParseGenesis(genesisData)
+	require.NoError(t, err)
+
+	require.Equal(t, opera.DefaultEmitterRules(), genesis.Rules.Emitter)
+	require.Equal(t, opera.DefaultDagRules(), genesis.Rules.Dag)
+	require.Equal(t, opera.DefaultEpochsRules(), genesis.Rules.Epochs)
+	require.Equal(t, opera.DefaultGasPowerRules(), genesis.Rules.Economy.ShortGasPower)
+	require.Equal(t, opera.DefaultGasPowerRules(), genesis.Rules.Economy.LongGasPower)
 }
 
 func TestParseGenesis_FailsOnInvalidJSON(t *testing.T) {

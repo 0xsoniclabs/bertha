@@ -23,6 +23,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/holiman/uint256"
 )
@@ -30,6 +31,7 @@ import (
 // Genesis is a data structure capturing the genesis state information.
 type Genesis struct {
 	ChainID  uint64
+	Rules    opera.Rules
 	Accounts []Account
 }
 
@@ -45,9 +47,7 @@ type Account struct {
 // ParseGenesis takes a JSON byte slice and unmarshals it into a Genesis struct.
 func ParseGenesis(jsonData []byte) (*Genesis, error) {
 	var genesis struct {
-		Rules struct {
-			NetworkID uint64 `json:"NetworkID"`
-		}
+		Rules    opera.Rules `json:"rules"`
 		Accounts []struct {
 			Address common.Address              `json:"address"`
 			Nonce   uint64                      `json:"nonce"`
@@ -56,12 +56,23 @@ func ParseGenesis(jsonData []byte) (*Genesis, error) {
 			Storage map[common.Hash]common.Hash `json:"storage"`
 		}
 	}
+	// Initialize rules with defaults so that fields not present in the
+	// genesis JSON have valid values. The JSON genesis files only contain a
+	// subset of the rules fields; those omitted need sensible defaults for
+	// opera.UpdateRules validation to pass once Allegro is activated.
+	genesis.Rules = opera.Rules{
+		Dag:     opera.DefaultDagRules(),
+		Emitter: opera.DefaultEmitterRules(),
+		Epochs:  opera.DefaultEpochsRules(),
+		Economy: opera.DefaultEconomyRules(),
+	}
 	if err := json.Unmarshal(jsonData, &genesis); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal genesis data: %w", err)
 	}
 
 	res := &Genesis{
 		ChainID:  genesis.Rules.NetworkID,
+		Rules:    genesis.Rules,
 		Accounts: nil,
 	}
 	for _, account := range genesis.Accounts {

@@ -62,28 +62,28 @@ import (
 //go:generate mockgen -source=replay.go -destination=replay_mock.go -package=replay
 
 type ReplayArgs struct {
-	JSONGenesisFile     string
-	BlockDBDir          string
-	StateDBDir          string
-	InitDBDir           string
-	KeepDB              bool
-	WithArchive         bool
-	DBSchema            carmen.Schema
-	DBVariant           carmen.Variant
-	UsePipeline         bool
-	Interpreter         string
-	StartBlock          uint64
-	EndBlock            uint64
-	SnapshotInterval    uint64
-	SnapshotStartBlock  uint64
-	SnapshotEndBlock    uint64
-	SnapshotNumToKeep   uint64
-	WriteUpgradeHeights bool
-	OverwriteStateRoot  bool
-	NoStateRootCheck    bool
-	NoReceiptsCheck     bool
-	LogDBSize           bool
-	ConfirmAllPrompts   bool
+	JSONGenesisFile         string
+	BlockDBDir              string
+	StateDBDir              string
+	InitDBDir               string
+	KeepDB                  bool
+	WithArchive             bool
+	DBSchema                carmen.Schema
+	DBVariant               carmen.Variant
+	UsePipeline             bool
+	Interpreter             string
+	StartBlock              uint64
+	EndBlock                uint64
+	SnapshotInterval        uint64
+	SnapshotStartBlock      uint64
+	SnapshotEndBlock        uint64
+	SnapshotNumToKeep       uint64
+	WriteRulesUpdateHeights bool
+	OverwriteStateRoot      bool
+	NoStateRootCheck        bool
+	NoReceiptsCheck         bool
+	LogDBSize               bool
+	ConfirmAllPrompts       bool
 }
 
 func Replay(ctx context.Context, args ReplayArgs) (err error) {
@@ -117,7 +117,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 
 	// Create the metadata store
 	slog.Info("Initializing metadata store")
-	metadataStore, err := NewBlockDBMetadataStore(blockDb, chainID, slog.Default(), args.WriteUpgradeHeights)
+	metadataStore, err := NewBlockDBMetadataStore(blockDb, genesis.Rules, slog.Default(), args.WriteRulesUpdateHeights)
 	if err != nil {
 		return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
 	}
@@ -209,14 +209,14 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 
 func openBlockDb(args *ReplayArgs) (blockdb.BlockDB, func() error, error) {
 	slog.Info("Opening block database", "directory", args.BlockDBDir)
-	if args.WriteUpgradeHeights {
-		slog.Info("Upgrade heights writing enabled")
+	if args.WriteRulesUpdateHeights {
+		slog.Info("Rules update heights writing enabled")
 	}
 	if args.OverwriteStateRoot {
 		slog.Info("State root overwriting enabled")
 	}
 	var dbOpener func(string) (blockdb.RocksDB, error)
-	if args.OverwriteStateRoot || args.WriteUpgradeHeights {
+	if args.OverwriteStateRoot || args.WriteRulesUpdateHeights {
 		dbOpener = blockdb.OpenRocksDBForWriting
 	} else {
 		dbOpener = blockdb.OpenRocksDBForReading
@@ -709,13 +709,13 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 		return nil, a.state.GetStateRoot(), nil
 	}
 
-	// Commit all pending upgrades if the block is an epoch sealing block.
+	// Commit all pending rules updates if the block is an epoch sealing block.
 	if block.Transactions().Len() > 0 {
 		_, err := drivercall.ParseSealEpochArgs(block.Transactions()[0])
 		isEpochSealingTx := err == nil
 		if isEpochSealingTx {
-			if err := a.metadataStore.CommitUpgrades(block.NumberU64()); err != nil {
-				return nil, future.Future[result.Result[common.Hash]]{}, fmt.Errorf("failed to commit upgrades at block %d: %v", block.NumberU64(), err)
+			if err := a.metadataStore.CommitRules(block.NumberU64()); err != nil {
+				return nil, future.Future[result.Result[common.Hash]]{}, fmt.Errorf("failed to commit rules at block %d: %v", block.NumberU64(), err)
 			}
 		}
 	}
@@ -877,7 +877,7 @@ func (h *blockHashHistory) Header(_ common.Hash, number uint64) *evmcore.EvmHead
 	}
 }
 
-// --- upgrade handling ---
+// --- rules update handling ---
 
 func onNewLog(metadataStore MetadataStore, blockNumber uint64, l *core_types.Log) {
 	// https://github.com/0xsoniclabs/sonic/blob/c3816115c9ae51682aa475c715aabbe10e0dcef4/gossip/blockproc/drivermodule/driver_txs.go#L351
@@ -890,9 +890,9 @@ func onNewLog(metadataStore MetadataStore, blockNumber uint64, l *core_types.Log
 			slog.Warn("Failed to decode UpdateNetworkRules event data", "block", blockNumber, "error", err)
 			return
 		}
-		err = metadataStore.PatchUpgrades(blockNumber, diff)
+		err = metadataStore.PatchRules(blockNumber, diff)
 		if err != nil {
-			slog.Error("Failed to update rules", "block", blockNumber, "error", err)
+			slog.Warn("Failed to patch rules", "block", blockNumber, "error", err)
 		}
 	}
 }
