@@ -198,13 +198,20 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		skipReceiptsCheck:  args.NoReceiptsCheck,
 	}
 
+	// Create the archive verifier if archive mode is enabled.
+	var verifier *archiveVerifier
+	if args.WithArchive {
+		verifier = newArchiveVerifier(ctx, runWithState, blockDb, metadataStore, interpreter, args.DBSchema, chainID)
+		defer func() { err = errors.Join(err, verifier.close()) }()
+	}
+
 	// Pick the replay method.
 	run := runReplayLoop
 	if args.UsePipeline {
 		run = runReplayPipeline
 	}
 
-	return run(ctx, blocks, chain, blockDb, replayLoopContext, onBlockDone)
+	return run(ctx, blocks, chain, blockDb, replayLoopContext, onBlockDone, verifier)
 }
 
 func openBlockDb(args *ReplayArgs) (blockdb.BlockDB, func() error, error) {
@@ -342,6 +349,7 @@ func runReplayLoop(
 	blockDB blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
 	onBlockDone func(block *types.Block) error,
+	verifier *archiveVerifier,
 ) error {
 	for block, err := range blocks {
 		tracy.FrameMark()
@@ -374,6 +382,11 @@ func runReplayLoop(
 				return err
 			}
 		}
+
+		// Submit block for archive verification if enabled.
+		if verifier != nil && block.Number > archiveVerificationOffset {
+			verifier.submit(block.Number - archiveVerificationOffset)
+		}
 	}
 	return nil
 }
@@ -389,6 +402,7 @@ func runReplayPipeline(
 	blockDB blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
 	onBlockDone func(block *types.Block) error,
+	verifier *archiveVerifier,
 ) error {
 	// This value must be smaller than 256. Otherwise, accessing the block hash
 	// from the blockHashHistory for the parent hash verification, might return
@@ -514,6 +528,11 @@ func runReplayPipeline(
 					return
 				}
 			}
+
+			// Submit block for archive verification if enabled.
+			if verifier != nil && block.Number > archiveVerificationOffset {
+				verifier.submit(block.Number - archiveVerificationOffset)
+			}
 		}
 	})
 
@@ -524,6 +543,58 @@ func runReplayPipeline(
 		return nil
 	}
 	return *err
+}
+
+// checkReceipts compares the given receipts against the expected values in the
+// block. It verifies all fields that contribute to the block hash via the
+// receipts root.
+func checkReceipts(block *blockdb.Block, receipts types.Receipts) error {
+	if len(receipts) != len(block.Receipts) {
+		return fmt.Errorf("number of receipts mismatch for block %d: expected %d, got %d",
+			block.Number, len(block.Receipts), len(receipts))
+	}
+	for i, receipt := range receipts {
+		want := block.Receipts[i]
+		if receipt.Status != want.GetStatus() {
+			return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
+				block.Number, i, want.GetStatus(), receipt.Status)
+		}
+		if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
+			return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
+				block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
+		}
+		if len(receipt.Logs) != len(want.Logs) {
+			return fmt.Errorf("receipt logs length mismatch for block %d, tx %d: expected %d, got %d",
+				block.Number, i, len(want.Logs), len(receipt.Logs))
+		}
+		for j, log := range receipt.Logs {
+			wantLog := want.Logs[j]
+			if !slices.Equal(log.Address.Bytes(), wantLog.Address) {
+				return fmt.Errorf("receipt log address mismatch for block %d, tx %d, log %d: expected %s, got %s",
+					block.Number, i, j, hexutil.Encode(wantLog.Address), hexutil.Encode(log.Address.Bytes()))
+			}
+			if len(log.Topics) != len(wantLog.Topics) {
+				return fmt.Errorf("receipt log topics length mismatch for block %d, tx %d, log %d: expected %d, got %d",
+					block.Number, i, j, len(wantLog.Topics), len(log.Topics))
+			}
+			for k, topic := range log.Topics {
+				if !slices.Equal(topic.Bytes(), wantLog.Topics[k]) {
+					return fmt.Errorf("receipt log topic mismatch for block %d, tx %d, log %d, topic %d: expected %s, got %s",
+						block.Number, i, j, k, hexutil.Encode(wantLog.Topics[k]), hexutil.Encode(topic.Bytes()))
+				}
+			}
+			if !bytes.Equal(log.Data, wantLog.Data) {
+				return fmt.Errorf("receipt log data mismatch for block %d, tx %d, log %d: expected %s, got %s",
+					block.Number, i, j, hexutil.Encode(wantLog.Data), hexutil.Encode(log.Data))
+			}
+		}
+		expectedBloom := convert.ToGethReceipt(want).Bloom
+		if receipt.Bloom != expectedBloom {
+			return fmt.Errorf("receipt bloom mismatch for block %d, tx %d: expected %s, got %s",
+				block.Number, i, hexutil.Encode(expectedBloom[:]), hexutil.Encode(receipt.Bloom[:]))
+		}
+	}
+	return nil
 }
 
 // checkBlockResults checks the results of applying a block against the
@@ -543,52 +614,8 @@ func checkBlockResults(
 	noStateRootCheck := replayLoopContext.skipStateRootCheck
 
 	if !replayLoopContext.skipReceiptsCheck {
-		if len(receipts) != len(block.Receipts) {
-			return fmt.Errorf("number of receipts mismatch for block %d: expected %d, got %d",
-				block.Number, len(block.Receipts), len(receipts))
-		}
-		for i, receipt := range receipts {
-			want := block.Receipts[i]
-			// check all fields which contribute to the block hash via the receipts root (are part of receiptRLP)
-			if receipt.Status != want.GetStatus() {
-				return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, want.GetStatus(), receipt.Status)
-			}
-			if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
-				return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
-			}
-			if len(receipt.Logs) != len(want.Logs) {
-				return fmt.Errorf("receipt logs length mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, len(want.Logs), len(receipt.Logs))
-			}
-			for j, log := range receipt.Logs {
-				wantLog := want.Logs[j]
-				// check all fields which contribute to the receipts root
-				if !slices.Equal(log.Address.Bytes(), wantLog.Address) {
-					return fmt.Errorf("receipt log address mismatch for block %d, tx %d, log %d: expected %s, got %s",
-						block.Number, i, j, hexutil.Encode(wantLog.Address), hexutil.Encode(log.Address.Bytes()))
-				}
-				if len(log.Topics) != len(wantLog.Topics) {
-					return fmt.Errorf("receipt log topics length mismatch for block %d, tx %d, log %d: expected %d, got %d",
-						block.Number, i, j, len(wantLog.Topics), len(log.Topics))
-				}
-				for k, topic := range log.Topics {
-					if !slices.Equal(topic.Bytes(), wantLog.Topics[k]) {
-						return fmt.Errorf("receipt log topic mismatch for block %d, tx %d, log %d, topic %d: expected %s, got %s",
-							block.Number, i, j, k, hexutil.Encode(wantLog.Topics[k]), hexutil.Encode(topic.Bytes()))
-					}
-				}
-				if !bytes.Equal(log.Data, wantLog.Data) {
-					return fmt.Errorf("receipt log data mismatch for block %d, tx %d, log %d: expected %s, got %s",
-						block.Number, i, j, hexutil.Encode(wantLog.Data), hexutil.Encode(log.Data))
-				}
-			}
-			expectedBloom := convert.ToGethReceipt(want).Bloom
-			if receipt.Bloom != expectedBloom {
-				return fmt.Errorf("receipt bloom mismatch for block %d, tx %d: expected %s, got %s",
-					block.Number, i, hexutil.Encode(expectedBloom[:]), hexutil.Encode(receipt.Bloom[:]))
-			}
+		if err := checkReceipts(block, receipts); err != nil {
+			return err
 		}
 	}
 

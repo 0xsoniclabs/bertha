@@ -149,6 +149,13 @@ func (s *State) GetStateRoot() future.Future[result.Result[common.Hash]] {
 	})
 }
 
+// GetArchiveStateDB returns a non-committable state view for the given block
+// number from the archive. The caller must call Release() on the returned
+// state when done.
+func (s *State) GetArchiveStateDB(block uint64) (carmen.NonCommittableStateDB, error) {
+	return s.db.GetArchiveStateDB(block)
+}
+
 // ApplyGenesis applies the genesis data from the specified file on this state.
 func (s *State) ApplyGenesis(genesis *Genesis) error {
 	// apply the genesis accounts to the state

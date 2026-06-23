@@ -402,6 +402,7 @@ type replayer func(
 	database blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
 	onBlockProcessed func(*types.Block) error,
+	verifier *archiveVerifier,
 ) error
 
 func canProcessEmptyBlocks(t *testing.T, run replayer) {
@@ -440,7 +441,7 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	require.NoError(t, run(t.Context(), iter, chain, nil, ReplayLoopContext{}, func(block *types.Block) error {
 		counter++
 		return nil
-	}))
+	}, nil))
 	require.Equal(t, len(blocks), counter)
 }
 
@@ -509,7 +510,7 @@ func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 	}
 
 	iter := utils.NewIter(blocks)
-	require.NoError(t, run(t.Context(), iter, chain, nil, ReplayLoopContext{}, nil))
+	require.NoError(t, run(t.Context(), iter, chain, nil, ReplayLoopContext{}, nil, nil))
 }
 
 func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
@@ -521,7 +522,7 @@ func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
 	blocks := func(yield func(*blockdb.Block, error) bool) {
 		yield(nil, injectedError)
 	}
-	require.ErrorIs(t, run(t.Context(), blocks, chain, nil, ReplayLoopContext{}, nil), injectedError)
+	require.ErrorIs(t, run(t.Context(), blocks, chain, nil, ReplayLoopContext{}, nil, nil), injectedError)
 }
 
 func failsOnCancelledContext(t *testing.T, run replayer) {
@@ -536,7 +537,7 @@ func failsOnCancelledContext(t *testing.T, run replayer) {
 		{Number: 0, StateRoot: types.EmptyRootHash[:]},
 	})
 
-	require.ErrorIs(t, run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil), context.Canceled)
+	require.ErrorIs(t, run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil), context.Canceled)
 }
 
 func failsOnBlockConversionError(t *testing.T, run replayer) {
@@ -551,7 +552,7 @@ func failsOnBlockConversionError(t *testing.T, run replayer) {
 		}},
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil),
 		"failed to convert block 0",
 	)
 }
@@ -569,7 +570,7 @@ func failsOnBlockApplicationError(t *testing.T, run replayer) {
 	ctxt := t.Context()
 	blocks := utils.NewIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
-		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil),
 		injectedError,
 	)
 }
@@ -587,7 +588,7 @@ func failsOnCommitmentComputationError(t *testing.T, run replayer) {
 	ctxt := t.Context()
 	blocks := utils.NewIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
-		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil),
 		injectedError,
 	)
 }
@@ -638,7 +639,7 @@ func failsOnDifferentReceipts(t *testing.T, run replayer) {
 			ctxt := t.Context()
 			blocks := utils.NewIter([]*blockdb.Block{{Receipts: tc.blockReceipts}})
 			require.ErrorContains(t,
-				run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
+				run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil),
 				tc.expectedError,
 			)
 		})
@@ -668,7 +669,7 @@ func failsOnParentHashMismatch(t *testing.T, run replayer) {
 		ParentHash: common.Hash{0xCD}.Bytes(), // does not match hashOfParentBlock
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil),
 		"parent hash mismatch",
 	)
 }
@@ -692,7 +693,7 @@ func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 		StateRoot: common.Hash{0x2}.Bytes(),
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil),
 		"state root mismatch",
 	)
 }
@@ -719,7 +720,7 @@ func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 	require.NoError(t,
 		run(ctxt, blocks, chain, nil, ReplayLoopContext{
 			skipStateRootCheck: true,
-		}, nil),
+		}, nil, nil),
 		"state root mismatch",
 	)
 }
@@ -745,7 +746,7 @@ func skipReceiptsCheckIfNoReceiptsCheckFlagIsSet(t *testing.T, run replayer) {
 			PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful}, // different receipt
 		}},
 	}})
-	err := run(ctxt, blocks, chain, nil, ReplayLoopContext{skipReceiptsCheck: true}, nil)
+	err := run(ctxt, blocks, chain, nil, ReplayLoopContext{skipReceiptsCheck: true}, nil, nil)
 	require.NoError(t, err)
 }
 
@@ -779,7 +780,7 @@ func overwriteStateRootHash(t *testing.T, run replayer) {
 	require.NoError(t,
 		run(ctxt, blocks, chain, blockDB, ReplayLoopContext{
 			overwriteStateRoot: New(true, true),
-		}, nil),
+		}, nil, nil),
 		"state root mismatch",
 	)
 }
@@ -822,7 +823,7 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 
 		// Start running the replay pipeline.
 		go func() {
-			err := runReplayPipeline(t.Context(), utils.NewIter(blocks), chain, nil, ReplayLoopContext{}, nil)
+			err := runReplayPipeline(t.Context(), utils.NewIter(blocks), chain, nil, ReplayLoopContext{}, nil, nil)
 			require.ErrorIs(t, err, issue)
 		}()
 
