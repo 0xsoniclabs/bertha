@@ -40,6 +40,7 @@ pub struct EraDir<R: FileReader> {
 impl<R: FileReader> EraDir<R> {
     /// Opens the directory at the given path and scans for `.era1` and `.era` files.
     pub fn open(path: impl AsRef<Path>, chain_id: u64) -> Result<Self, Error> {
+        let _span = tracy_client::span!("EraDir::open");
         let mut files = Vec::new();
 
         for entry in fs::read_dir(&path)? {
@@ -64,6 +65,7 @@ impl<R: FileReader> EraDir<R> {
     /// are of type `Result<Block, Error>` to be able to propagate errors during parsing. Once
     /// an error was returned, the iterator will not yield any more blocks.
     pub fn blocks(mut self) -> impl Iterator<Item = Result<Block, Error>> {
+        let _span = tracy_client::span!("EraDir::blocks");
         // `.era` file naming convention: <config-name>-<era-number>-<short-historical-root>.era
         //     - config-name is the CONFIG_NAME field of the runtime configuration (mainnet, prater,
         //       ropsten, sepolia, etc)
@@ -77,6 +79,7 @@ impl<R: FileReader> EraDir<R> {
         self.files.sort_by(|a, b| b.cmp(a)); // sort in reverse
 
         self.files.into_iter().flat_map(move |path| {
+            let _file_span = tracy_client::span!("process_file");
             match R::read_file(path, self.chain_id) {
                 Ok(blocks) => {
                     let mut blocks: Vec<_> = blocks.collect();

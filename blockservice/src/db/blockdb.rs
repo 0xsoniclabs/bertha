@@ -454,6 +454,7 @@ where
     }
 
     fn write_batch(&mut self, mut batch: Self::Batch) -> Result<(), Error> {
+        let _span = tracy_client::span!("write_batch");
         if batch.block_ranges.is_empty() {
             return Ok(());
         }

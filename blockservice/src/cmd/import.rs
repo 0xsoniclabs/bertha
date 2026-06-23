@@ -39,6 +39,7 @@ pub fn import_era1(
     cancel_indicator: &impl CancelIndicator,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let _span = tracy_client::span!("import_era1");
     let (cfg, mut db) = open_app_dir(app_dir, false)?;
 
     let era_dir = EraDir::<Era1FileReader>::open(era_dir_path, chain_id)?;
@@ -63,6 +64,7 @@ pub fn import_era(
     cancel_indicator: &impl CancelIndicator,
     mut writer: impl std::io::Write,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let _span = tracy_client::span!("import_era");
     let (cfg, mut db) = open_app_dir(app_dir, false)?;
 
     let era_dir = EraDir::<EraFileReader>::open(era_dir_path, chain_id)?;
@@ -229,7 +231,9 @@ fn import(
 
         // We use put_bytes so we can count bytes.
         let number = block.number;
+        let _proto_span = tracy_client::span!("proto::Block::encode_to_vec");
         let protoblock = proto::Block::from(block).encode_to_vec();
+        drop(_proto_span);
         uncompressed_bytes_written += protoblock.len();
 
         if batch.size() >= BATCH_SIZE {

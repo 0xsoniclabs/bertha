@@ -21,6 +21,9 @@ edition = "2024"
 publish = false
 rust-version.workspace = true
 
+[features]
+tracy = ["tracy-client/default"]
+
 [dependencies]
 # bertha
 bertha-types = { path = "../bertha-types" }
@@ -39,6 +42,9 @@ reth-era = { git = "https://github.com/paradigmxyz/reth", tag = "v2.2.0" }
 lighthouse-types = { git = "https://github.com/sigp/lighthouse", tag = "v8.1.2", package = "types" }
 alloy-consensus = "2.0.5"
 alloy-eips = "2.0.5"
+
+# profiling
+tracy-client = { version = "=0.18.2", default-features = false } # "enabled" feature is disabled by default
 
 [dev-dependencies]
 # parameterized tests
