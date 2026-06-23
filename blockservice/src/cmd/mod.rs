@@ -150,63 +150,65 @@ pub async fn execute(
         }
         Command::ImportEra1 {
             era1_dir,
-            chain_id,
+            chain,
             verify,
         } => cmd::import_era1(
             args.dir,
             era1_dir,
-            chain_id,
+            chain.to_chain_id(),
             verify,
             &cancellation_token,
             &mut output,
         ),
-        Command::ImportEra { era_dir, chain_id } => cmd::import_era(
+        Command::ImportEra { era_dir, chain } => cmd::import_era(
             args.dir,
             era_dir,
-            chain_id,
+            chain.to_chain_id(),
             &cancellation_token,
             &mut output,
         ),
-        Command::ImportRulesUpdateHeights { chain_id, file } => {
-            cmd::import_rules_update_heights(args.dir, chain_id, file, &mut output)
+        Command::ImportRulesUpdateHeights { chain, file } => {
+            cmd::import_rules_update_heights(args.dir, chain.to_chain_id(), file, &mut output)
         }
-        Command::ImportCorrections { chain_id, file } => {
-            cmd::import_corrections(args.dir, chain_id, file, &mut output)
+        Command::ImportCorrections { chain, file } => {
+            cmd::import_corrections(args.dir, chain.to_chain_id(), file, &mut output)
         }
         Command::Fetch {
             url,
-            chain_id,
+            chain,
             from,
             to,
-        } => cmd::fetch(args.dir, url, chain_id, from, to, &mut output).await,
-        Command::FetchMetadata { url, chain_id } => {
-            cmd::fetch_metadata(args.dir, url, chain_id, &mut output).await
+        } => cmd::fetch(args.dir, url, chain.to_chain_id(), from, to, &mut output).await,
+        Command::FetchMetadata { url, chain } => {
+            cmd::fetch_metadata(args.dir, url, chain.to_chain_id(), &mut output).await
         }
-        Command::List { chain_id, url } => cmd::list(args.dir, chain_id, url, &mut output).await,
+        Command::List { chain, url } => {
+            cmd::list(args.dir, chain.map(|c| c.to_chain_id()), url, &mut output).await
+        }
         Command::Verify {
-            chain_id,
+            chain,
             block_number,
             block_hash,
         } => cmd::verify(
             args.dir,
-            chain_id,
+            chain.to_chain_id(),
             block_number,
             block_hash,
             &cancellation_token,
             &mut output,
         ),
-        Command::Purge { chain_id, from, to } => {
-            cmd::purge(args.dir, chain_id, from, to, &mut output, &input)
+        Command::Purge { chain, from, to } => {
+            cmd::purge(args.dir, chain.to_chain_id(), from, to, &mut output, &input)
         }
         Command::View {
-            chain_id,
+            chain,
             block_number,
-        } => cmd::view(args.dir, chain_id, block_number, &mut output),
-        Command::ViewRulesUpdateHeights { chain_id } => {
-            cmd::view_rules_update_heights(args.dir, chain_id, &mut output)
+        } => cmd::view(args.dir, chain.to_chain_id(), block_number, &mut output),
+        Command::ViewRulesUpdateHeights { chain } => {
+            cmd::view_rules_update_heights(args.dir, chain.to_chain_id(), &mut output)
         }
-        Command::ViewCorrections { chain_id } => {
-            cmd::view_corrections(args.dir, chain_id, &mut output)
+        Command::ViewCorrections { chain } => {
+            cmd::view_corrections(args.dir, chain.to_chain_id(), &mut output)
         }
         Command::Start => {
             cmd::start(

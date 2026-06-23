@@ -16,7 +16,7 @@
 
 use std::vec;
 
-use blockservice::cli::Command;
+use blockservice::cli::{Chain, Command};
 
 use crate::test_utils::{
     CommandExecutionOutput, IntegrationTestServer, execute_command, init_blockservice,
@@ -49,7 +49,7 @@ async fn client_fetch_then_verify_then_fetch_more_then_verify() {
     // List remote chains
     let CommandExecutionOutput { result, log } = execute_command(
         Command::List {
-            chain_id: None,
+            chain: None,
             url: Some(server.uri()),
         },
         &client_dir,
@@ -73,7 +73,7 @@ async fn client_fetch_then_verify_then_fetch_more_then_verify() {
     let CommandExecutionOutput { result, log } = execute_command(
         Command::Fetch {
             url: server.uri(),
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
             from: None,
             to: Some(9),
         },
@@ -92,7 +92,7 @@ async fn client_fetch_then_verify_then_fetch_more_then_verify() {
     // Verify the fetched blocks
     let CommandExecutionOutput { result, log } = execute_command(
         Command::Verify {
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
             block_number: Some(0),
             block_hash: None,
         },
@@ -109,7 +109,7 @@ async fn client_fetch_then_verify_then_fetch_more_then_verify() {
     let CommandExecutionOutput { result, log } = execute_command(
         Command::Fetch {
             url: server.uri(),
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
             from: Some(10),
             to: Some(29),
         },
@@ -128,7 +128,7 @@ async fn client_fetch_then_verify_then_fetch_more_then_verify() {
     // Verify the fetched SONIC blocks
     let CommandExecutionOutput { result, log } = execute_command(
         Command::Verify {
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
             block_number: Some(10),
             block_hash: None,
         },

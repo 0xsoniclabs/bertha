@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-use blockservice::cli::Command;
+use blockservice::cli::{Chain, Command};
 
 use crate::test_utils::{
     CommandExecutionOutput, IntegrationTestServer, execute_command, init_blockservice,
@@ -48,7 +48,7 @@ async fn client_fetch_then_fetch_again_is_noop() {
     let CommandExecutionOutput { result, log } = execute_command(
         Command::Fetch {
             url: server.uri(),
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
             from: None,
             to: None,
         },
@@ -68,7 +68,7 @@ async fn client_fetch_then_fetch_again_is_noop() {
     let CommandExecutionOutput { result, log } = execute_command(
         Command::Fetch {
             url: server.uri(),
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
             from: None,
             to: None,
         },

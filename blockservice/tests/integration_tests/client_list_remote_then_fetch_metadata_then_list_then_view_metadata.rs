@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-use blockservice::cli::Command;
+use blockservice::cli::{Chain, Command};
 
 use crate::test_utils::{
     CommandExecutionOutput, IntegrationTestServer, execute_command, init_blockservice,
@@ -41,7 +41,7 @@ async fn client_list_remote_then_fetch_metadata_then_list_then_view_metadata() {
     std::fs::write(&file, b"rules-update-heights").unwrap();
     let CommandExecutionOutput { result, .. } = execute_command(
         Command::ImportRulesUpdateHeights {
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
             file,
         },
         server_dir.path(),
@@ -57,7 +57,7 @@ async fn client_list_remote_then_fetch_metadata_then_list_then_view_metadata() {
     std::fs::write(&file, b"corrections").unwrap();
     let CommandExecutionOutput { result, .. } = execute_command(
         Command::ImportCorrections {
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
             file,
         },
         server_dir.path(),
@@ -79,7 +79,7 @@ async fn client_list_remote_then_fetch_metadata_then_list_then_view_metadata() {
     // List remote chains
     let CommandExecutionOutput { result, log } = execute_command(
         Command::List {
-            chain_id: None,
+            chain: None,
             url: Some(server.uri()),
         },
         &client_dir,
@@ -103,7 +103,7 @@ async fn client_list_remote_then_fetch_metadata_then_list_then_view_metadata() {
     let CommandExecutionOutput { result, .. } = execute_command(
         Command::FetchMetadata {
             url: server.uri(),
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
         },
         &client_dir,
         None,
@@ -116,7 +116,7 @@ async fn client_list_remote_then_fetch_metadata_then_list_then_view_metadata() {
     // List local chains
     let CommandExecutionOutput { result, log } = execute_command(
         Command::List {
-            chain_id: None,
+            chain: None,
             url: None,
         },
         &client_dir,
@@ -138,7 +138,9 @@ async fn client_list_remote_then_fetch_metadata_then_list_then_view_metadata() {
 
     // Print the rules update heights
     let CommandExecutionOutput { result, log } = execute_command(
-        Command::ViewRulesUpdateHeights { chain_id: CHAIN_ID },
+        Command::ViewRulesUpdateHeights {
+            chain: Chain::Id(CHAIN_ID),
+        },
         &client_dir,
         None,
         None,
@@ -150,7 +152,9 @@ async fn client_list_remote_then_fetch_metadata_then_list_then_view_metadata() {
 
     // Print the corrections
     let CommandExecutionOutput { result, log } = execute_command(
-        Command::ViewCorrections { chain_id: CHAIN_ID },
+        Command::ViewCorrections {
+            chain: Chain::Id(CHAIN_ID),
+        },
         &client_dir,
         None,
         None,
