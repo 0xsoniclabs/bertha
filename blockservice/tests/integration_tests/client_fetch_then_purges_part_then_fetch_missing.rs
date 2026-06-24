@@ -16,7 +16,7 @@
 
 use std::io::Cursor;
 
-use blockservice::cli::Command;
+use blockservice::cli::{Chain, Command};
 
 use crate::test_utils::{
     CommandExecutionOutput, IntegrationTestServer, execute_command, init_blockservice,
@@ -49,7 +49,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
     // List remote chains
     let CommandExecutionOutput { result, log } = execute_command(
         Command::List {
-            chain_id: None,
+            chain: None,
             url: Some(server.uri()),
         },
         &client_dir,
@@ -73,7 +73,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
     let CommandExecutionOutput { result, log } = execute_command(
         Command::Fetch {
             url: server.uri(),
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
             from: None,
             to: None,
         },
@@ -92,7 +92,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
     // List blocks in the client
     let CommandExecutionOutput { result, log } = execute_command(
         Command::List {
-            chain_id: Some(CHAIN_ID),
+            chain: Some(Chain::Id(CHAIN_ID)),
             url: None,
         },
         &client_dir,
@@ -115,7 +115,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
     // Purge blocks from the local database
     let CommandExecutionOutput { result, log } = execute_command(
         Command::Purge {
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
             from: Some(5),
             to: Some(8),
         },
@@ -134,7 +134,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
     // List blocks in the client after purge
     let CommandExecutionOutput { result, log } = execute_command(
         Command::List {
-            chain_id: Some(CHAIN_ID),
+            chain: Some(Chain::Id(CHAIN_ID)),
             url: None,
         },
         &client_dir,
@@ -159,7 +159,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
     let CommandExecutionOutput { result, log } = execute_command(
         Command::Fetch {
             url: server.uri(),
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
             from: None,
             to: None,
         },
@@ -178,7 +178,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
     // List blocks in the client
     let CommandExecutionOutput { result, log } = execute_command(
         Command::List {
-            chain_id: Some(CHAIN_ID),
+            chain: Some(Chain::Id(CHAIN_ID)),
             url: None,
         },
         &client_dir,

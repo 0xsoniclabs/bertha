@@ -17,7 +17,7 @@
 use std::vec;
 
 use bertha_types::Block;
-use blockservice::cli::Command;
+use blockservice::cli::{Chain, Command};
 
 use crate::test_utils::{
     CommandExecutionOutput, IntegrationTestServer, execute_command, init_blockservice,
@@ -53,7 +53,7 @@ async fn client_list_remote_then_fetch_then_list_then_view() {
     // List remote chains
     let CommandExecutionOutput { result, log } = execute_command(
         Command::List {
-            chain_id: Some(CHAIN_ID),
+            chain: Some(Chain::Id(CHAIN_ID)),
             url: Some(server.uri()),
         },
         &client_dir,
@@ -77,7 +77,7 @@ async fn client_list_remote_then_fetch_then_list_then_view() {
     let CommandExecutionOutput { result, log } = execute_command(
         Command::Fetch {
             url: server.uri(),
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
             from: Some(5),
             to: Some(5),
         },
@@ -96,7 +96,7 @@ async fn client_list_remote_then_fetch_then_list_then_view() {
     // List local chains
     let CommandExecutionOutput { result, log } = execute_command(
         Command::List {
-            chain_id: Some(CHAIN_ID),
+            chain: Some(Chain::Id(CHAIN_ID)),
             url: None,
         },
         &client_dir,
@@ -119,7 +119,7 @@ async fn client_list_remote_then_fetch_then_list_then_view() {
     // Print the block
     let CommandExecutionOutput { result, log } = execute_command(
         Command::View {
-            chain_id: CHAIN_ID,
+            chain: Chain::Id(CHAIN_ID),
             block_number: 5,
         },
         &client_dir,

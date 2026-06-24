@@ -23,7 +23,7 @@ use std::{
 use bertha_types::Block;
 use blockservice::{
     app_dir::CONFIG_FILE_NAME,
-    cli::{Args, Command},
+    cli::{Args, Chain, Command},
     cmd::{self, AddressBinder},
     config::{ChainConfig, Config},
 };
@@ -350,7 +350,7 @@ mod tests {
         result.expect("Initialization should succeed");
         let CommandExecutionOutput { result, log } = execute_command(
             Command::List {
-                chain_id: Some(CHAIN_ID),
+                chain: Some(Chain::Id(CHAIN_ID)),
                 url: Some(server.uri()),
             },
             server_dir.path(),
@@ -387,7 +387,7 @@ mod tests {
 
         let CommandExecutionOutput { result, log: _ } = execute_command(
             Command::List {
-                chain_id: None,
+                chain: None,
                 url: Some(server_url),
             },
             server_dir.path(),
@@ -508,7 +508,7 @@ mod tests {
         // Check if the server is running by executing a command
         let CommandExecutionOutput { result, log: _ } = execute_command(
             Command::List {
-                chain_id: Some(CHAIN_ID),
+                chain: Some(Chain::Id(CHAIN_ID)),
                 url: Some(uri(address)),
             },
             temp_dir.path(),

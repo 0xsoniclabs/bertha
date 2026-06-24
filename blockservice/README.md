@@ -27,18 +27,18 @@ Usage: blockservice [OPTIONS] <COMMAND>
 Commands:
   init                         Initialize a new block database
   import-gfile                 Import all blocks from the specified snapshot (`.g`) file into the block database, and optionally also verify the parent hashes
-  import-era1                  Import all blocks from the specified directory (which is expected to contain `.era1` files) into the block database, and optionally also verify the parent hashes. The blocks are stored under the specified chain ID
-  import-era                   Import all blocks from the specified directory (which is expected to contain `.era` files) into the block database. The blocks are stored under the specified chain ID
-  import-rules-update-heights  Import rules update heights from a JSON file into the block database for the specified chain ID
-  import-corrections           Import corrections from a JSON file into the block database for the specified chain ID
+  import-era1                  Import all blocks from the specified directory (which is expected to contain `.era1` files) into the block database, and optionally also verify the parent hashes. The blocks are stored under the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
+  import-era                   Import all blocks from the specified directory (which is expected to contain `.era` files) into the block database. The blocks are stored under the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
+  import-rules-update-heights  Import rules update heights from a JSON file into the block database for the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
+  import-corrections           Import corrections from a JSON file into the block database for the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
   fetch                        Fetch blocks from a remote block service and store them in the local database
   fetch-metadata               Fetch metadata (rules update heights and corrections) from a remote block service and store them in the local database
   list                         List all block ranges for all chains or only for the specific chain if specified. If url is not set this lists the locally stored block ranges, otherwise the block ranges of the remote block service
-  verify                       Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash
-  purge                        Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`
-  view                         Print the block as JSON
-  view-rules-update-heights    Print the rules update heights stored in the block database for the specified chain ID
-  view-corrections             Print the corrections stored in the block database for the specified chain ID
+  verify                       Check that all parent hashes match the hash of the parent block starting from the specified block number with the specified block hash. The chain can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
+  purge                        Delete all blocks of the specified chain, optionally restricted to the range from `from` to `to`. The chain can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
+  view                         Print the block as JSON. The chain can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
+  view-rules-update-heights    Print the rules update heights stored in the block database for the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
+  view-corrections             Print the corrections stored in the block database for the specified chain, which can be a name (e.g. `sonic`, `sepolia`) or a numeric ID
   start                        Start the block server
   help                         Print this message or the help of the given subcommand(s)
 
@@ -49,7 +49,7 @@ Options:
 
 Subcommand usage (e.g. for `init`)
 ```sh
-$ cargo run --release -- init --help
+cargo run --release -- init --help
 ```
 
 **Note: by default, all commands assume that the db directory (called `.blockdb`) is in the current directory, however you can specify a different path using `--dir <DIR>`.**
@@ -92,8 +92,8 @@ wget --recursive --no-parent https://hoodi.era.nimbus.team
 
 Import era1/era files.
 ```sh
-cargo run --release -- import-era1 </path/to/era1_directory> <chain ID> [--verify]
-cargo run --release -- import-era </path/to/era_directory> <chain ID>
+cargo run --release -- import-era1 </path/to/era1-directory> <chain-id-or-name> [--verify]
+cargo run --release -- import-era </path/to/era-directory> <chain-id-or-name>
 ```
 
 ### Import rules update heights
@@ -101,7 +101,7 @@ cargo run --release -- import-era </path/to/era_directory> <chain ID>
 *Note: New rules update heights can be detected and applied automatically for Sonic chains. The import is not mandatory but can be used to verify that the detected rules update heights match the stored ones.*
 
 ```sh
-cargo run --release -- import-rules-update-heights <chain-id> </path/to/rules-update-heights.json>
+cargo run --release -- import-rules-update-heights <chain-id-or-name> </path/to/rules-update-heights.json>
 ```
 
 ### Import corrections
@@ -109,7 +109,7 @@ cargo run --release -- import-rules-update-heights <chain-id> </path/to/rules-up
 *Note: Corrections are not needed for all chains.*
 
 ```sh
-cargo run --release -- import-corrections <chain-id> </path/to/corrections.json>
+cargo run --release -- import-corrections <chain-id-or-name> </path/to/corrections.json>
 ```
 
 ### Start the gRPC server (by default the port is 8080, configured in `blockservice.toml`)
@@ -121,5 +121,5 @@ cargo run --release -- start
 ### Fetch blocks from a gRPC server
 
 ```sh
-cargo run --release -- fetch <url> <chain_id>
+cargo run --release -- fetch <url> <chain-id-or-name>
 ```

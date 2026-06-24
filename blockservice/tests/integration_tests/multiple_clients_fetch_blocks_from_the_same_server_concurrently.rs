@@ -16,7 +16,10 @@
 
 use std::vec;
 
-use blockservice::{BlockRange, cli::Command};
+use blockservice::{
+    BlockRange,
+    cli::{Chain, Command},
+};
 
 use crate::test_utils::{
     CommandExecutionOutput, IntegrationTestServer, execute_command, init_blockservice,
@@ -52,7 +55,7 @@ async fn multiple_clients_fetch_blocks_from_the_same_server_concurrently() {
         let CommandExecutionOutput { result, log } = execute_command(
             Command::Fetch {
                 url,
-                chain_id: CHAIN_ID,
+                chain: Chain::Id(CHAIN_ID),
                 from: Some(from),
                 to: Some(to),
             },
@@ -71,7 +74,7 @@ async fn multiple_clients_fetch_blocks_from_the_same_server_concurrently() {
         // List blocks in the client
         let CommandExecutionOutput { result, log } = execute_command(
             Command::List {
-                chain_id: Some(CHAIN_ID),
+                chain: Some(Chain::Id(CHAIN_ID)),
                 url: None,
             },
             &client_dir,

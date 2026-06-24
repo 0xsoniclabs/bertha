@@ -29,7 +29,7 @@ async fn client_connect_to_unavailable_server_fails() {
     // Try to connect to an unavailable server
     let CommandExecutionOutput { result, log } = execute_command(
         Command::List {
-            chain_id: None,
+            chain: None,
             url: Some("http://[::1]:0".to_string()), // Always refused connection
         },
         &client_dir,
