@@ -14,18 +14,20 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-use alloy_consensus::{
-    BlockBody, Eip658Value, EthereumTxEnvelope, Header, ReceiptEnvelope, TxEip4844Variant,
+use alloy_consensus::{BlockBody, Eip658Value, EthereumTxEnvelope, Header, TxEip4844Variant};
+use bertha_types::{
+    Block, Log, OmmerHeader, PostStateOrStatus, TransactionReceipt, U256, Withdrawal,
 };
-use bertha_types::{Block, Log, OmmerHeader, PostStateOrStatus, TransactionReceipt, U256};
-use reth_era::{common::decode::DecodeCompressedRlp, era1::types::execution::BlockTuple};
+use reth_era::{
+    common::decode::DecodeCompressedRlp,
+    ere::types::execution::{BlockTuple, SlimReceipt},
+};
 
 use crate::{Error, era_dir::common};
 
-/// Converts a [`ReceiptEnvelope`] to a [`TransactionReceipt`].
-fn convert_receipts(receipt: ReceiptEnvelope) -> TransactionReceipt {
-    let transaction_type = common::convert_tx_type(receipt.tx_type());
-    let receipt = receipt.into_receipt();
+/// Converts a [`SlimReceipt`] to a [`TransactionReceipt`].
+fn convert_slim_receipt(receipt: SlimReceipt) -> TransactionReceipt {
+    let transaction_type = common::convert_tx_type(receipt.tx_type);
     TransactionReceipt {
         transaction_type,
         post_state_or_status: match receipt.status {
@@ -45,7 +47,7 @@ fn convert_receipts(receipt: ReceiptEnvelope) -> TransactionReceipt {
     }
 }
 
-/// Converts a [`BlockTuple`] to a [`Block`].
+/// Converts an ere [`BlockTuple`] to a [`Block`].
 pub fn convert_block(block: &BlockTuple) -> Result<Block, Error> {
     let header: Header = block.header.decode()?;
     let body = block
@@ -64,12 +66,29 @@ pub fn convert_block(block: &BlockTuple) -> Result<Block, Error> {
             number: h.number,
         })
         .collect();
+    let withdrawals = body
+        .withdrawals
+        .map(|ws| {
+            ws.into_iter()
+                .map(|w| Withdrawal {
+                    index: w.index,
+                    validator_index: w.validator_index,
+                    address: w.address.0.0,
+                    amount: w.amount,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let receipts = block
         .receipts
-        .decode::<Vec<ReceiptEnvelope>>()?
-        .into_iter()
-        .map(convert_receipts)
-        .collect();
+        .as_ref()
+        .map(|compressed| {
+            compressed
+                .decode_receipts()
+                .map(|receipts| receipts.into_iter().map(convert_slim_receipt).collect())
+        })
+        .transpose()?
+        .unwrap_or_default();
 
     Ok(Block {
         parent_hash: header.parent_hash.0,
@@ -87,7 +106,7 @@ pub fn convert_block(block: &BlockTuple) -> Result<Block, Error> {
         receipts,
         base_fee_per_gas: header.base_fee_per_gas.map(U256::from),
         withdrawals_root: header.withdrawals_root.map(|w| w.0),
-        withdrawals: Vec::new(), // withdrawals don't exist pre-merge
+        withdrawals,
         blob_gas_used: header.blob_gas_used,
         excess_blob_gas: header.excess_blob_gas,
         parent_beacon_block_root: header.parent_beacon_block_root.map(|r| r.0),

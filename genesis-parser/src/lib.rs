@@ -15,7 +15,7 @@
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
 pub use crate::{
-    era_dir::{Era1FileReader, EraDir, EraFileReader},
+    era_dir::{Era1FileReader, EraDir, EraEFileReader, EraFileReader},
     error::{Error, GFileError},
     g_file::{GFile, test_utils::generate_test_genesis},
 };

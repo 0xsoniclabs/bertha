@@ -23,14 +23,19 @@ use std::{
 
 use bertha_types::Block;
 use lighthouse_types::{ForkName, ForkVersionDecode, MainnetEthSpec, SignedBeaconBlock};
-use reth_era::{common::file_ops::StreamReader, era::file::EraReader, era1::file::Era1Reader};
+use reth_era::{
+    common::file_ops::StreamReader, era::file::EraReader, era1::file::Era1Reader,
+    ere::file::EreReader,
+};
 
 use crate::Error;
 
+mod common;
 mod era;
 mod era1;
+mod erae;
 
-/// An accessor to parsed blocks from a directory containing `.era1` and `.era` files.
+/// An accessor to parsed blocks from a directory containing files with extension `R::EXTENSION`.
 pub struct EraDir<R: FileReader> {
     files: Vec<PathBuf>,
     chain_id: u64,
@@ -38,7 +43,7 @@ pub struct EraDir<R: FileReader> {
 }
 
 impl<R: FileReader> EraDir<R> {
-    /// Opens the directory at the given path and scans for `.era1` and `.era` files.
+    /// Opens the directory at the given path and scans for files with extension `R::EXTENSION`.
     pub fn open(path: impl AsRef<Path>, chain_id: u64) -> Result<Self, Error> {
         let _span = tracy_client::span!("EraDir::open");
         let mut files = Vec::new();
@@ -150,6 +155,27 @@ impl FileReader for EraFileReader {
                 SignedBeaconBlock::<MainnetEthSpec>::from_ssz_bytes_by_fork(&ssz_bytes, fork)
                     .map_err(|e| Error::Era(format!("SSZ decode error: {e:?}")))?;
             era::convert_block(beacon_block)
+        }))
+    }
+}
+
+pub struct EraEFileReader;
+
+impl FileReader for EraEFileReader {
+    const EXTENSION: &'static str = "erae";
+
+    /// Reads and parses a single `.erae` file at the given path, returning an iterator over its
+    /// blocks.
+    fn read_file(
+        path: impl AsRef<Path>,
+        _chain_id: u64,
+    ) -> Result<impl Iterator<Item = Result<Block, Error>>, Error> {
+        let file = File::open(path.as_ref())?;
+        let reader = EreReader::new(file);
+        Ok(reader.iter().map(|result| {
+            result
+                .map_err(Error::E2S)
+                .and_then(|block| erae::convert_block(&block))
         }))
     }
 }
