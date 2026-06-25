@@ -18,7 +18,6 @@
 package replay
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -29,7 +28,6 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -53,7 +51,6 @@ import (
 	"github.com/0xsoniclabs/tracy"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
@@ -364,7 +361,7 @@ func runReplayLoop(
 		}
 
 		// Check the receipts against the expected values in the block.
-		if err := checkBlockResults(chain, block, receipts, stateRoot, blockDB, &replayLoopContext); err != nil {
+		if err := checkBlockResults(chain, block, receipts, stateRoot, blockDB, &replayLoopContext, slog.Default()); err != nil {
 			return err
 		}
 
@@ -501,7 +498,7 @@ func runReplayPipeline(
 		for result := range results {
 			block := result.decoded.proto
 
-			err := checkBlockResults(chain, block, result.receipts, result.stateRoot, blockDB, &replayLoopContext)
+			err := checkBlockResults(chain, block, result.receipts, result.stateRoot, blockDB, &replayLoopContext, slog.Default())
 			if err != nil {
 				reportIssue(err)
 				return
@@ -524,131 +521,6 @@ func runReplayPipeline(
 		return nil
 	}
 	return *err
-}
-
-// checkBlockResults checks the results of applying a block against the
-// expected values in the block, including receipt fields and the resulting
-// state root. It is factored out to allow its use in both the simple replay
-// loop and the pipeline version.
-func checkBlockResults(
-	chain Chain,
-	block *blockdb.Block,
-	receipts types.Receipts,
-	stateRootFuture future.Future[result.Result[common.Hash]],
-	blockDB blockdb.BlockDB,
-	replayLoopContext *ReplayLoopContext,
-) error {
-	zone := tracy.ZoneBegin("CheckResults")
-	overwriteStateRoot := &replayLoopContext.overwriteStateRoot
-	noStateRootCheck := replayLoopContext.skipStateRootCheck
-
-	if !replayLoopContext.skipReceiptsCheck {
-		if len(receipts) != len(block.Receipts) {
-			return fmt.Errorf("number of receipts mismatch for block %d: expected %d, got %d",
-				block.Number, len(block.Receipts), len(receipts))
-		}
-		for i, receipt := range receipts {
-			want := block.Receipts[i]
-			// check all fields which contribute to the block hash via the receipts root (are part of receiptRLP)
-			if receipt.Status != want.GetStatus() {
-				return fmt.Errorf("receipt status mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, want.GetStatus(), receipt.Status)
-			}
-			if receipt.CumulativeGasUsed != want.CumulativeGasUsed {
-				return fmt.Errorf("receipt cumulative gas used mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, want.CumulativeGasUsed, receipt.CumulativeGasUsed)
-			}
-			if len(receipt.Logs) != len(want.Logs) {
-				return fmt.Errorf("receipt logs length mismatch for block %d, tx %d: expected %d, got %d",
-					block.Number, i, len(want.Logs), len(receipt.Logs))
-			}
-			for j, log := range receipt.Logs {
-				wantLog := want.Logs[j]
-				// check all fields which contribute to the receipts root
-				if !slices.Equal(log.Address.Bytes(), wantLog.Address) {
-					return fmt.Errorf("receipt log address mismatch for block %d, tx %d, log %d: expected %s, got %s",
-						block.Number, i, j, hexutil.Encode(wantLog.Address), hexutil.Encode(log.Address.Bytes()))
-				}
-				if len(log.Topics) != len(wantLog.Topics) {
-					return fmt.Errorf("receipt log topics length mismatch for block %d, tx %d, log %d: expected %d, got %d",
-						block.Number, i, j, len(wantLog.Topics), len(log.Topics))
-				}
-				for k, topic := range log.Topics {
-					if !slices.Equal(topic.Bytes(), wantLog.Topics[k]) {
-						return fmt.Errorf("receipt log topic mismatch for block %d, tx %d, log %d, topic %d: expected %s, got %s",
-							block.Number, i, j, k, hexutil.Encode(wantLog.Topics[k]), hexutil.Encode(topic.Bytes()))
-					}
-				}
-				if !bytes.Equal(log.Data, wantLog.Data) {
-					return fmt.Errorf("receipt log data mismatch for block %d, tx %d, log %d: expected %s, got %s",
-						block.Number, i, j, hexutil.Encode(wantLog.Data), hexutil.Encode(log.Data))
-				}
-			}
-			expectedBloom := convert.ToGethReceipt(want).Bloom
-			if receipt.Bloom != expectedBloom {
-				return fmt.Errorf("receipt bloom mismatch for block %d, tx %d: expected %s, got %s",
-					block.Number, i, hexutil.Encode(expectedBloom[:]), hexutil.Encode(receipt.Bloom[:]))
-			}
-		}
-	}
-
-	// Check resulting state root.
-	computedStateRoot, err := stateRootFuture.Await().Get()
-	if err != nil {
-		return fmt.Errorf("failed to get state root after applying block %d: %w", block.Number, err)
-	}
-	expectedStateRoot := getExpectedStateRoot(chain, block)
-
-	if overwriteStateRoot.IsEnabled() {
-		if !overwriteStateRoot.IsConfirmed() && expectedStateRoot != (common.Hash{}) && expectedStateRoot != computedStateRoot {
-			slog.Warn("Block has existing state root", "block_number", block.Number, "existing", expectedStateRoot, "new", computedStateRoot)
-			fmt.Printf("Are you sure you want to overwrite the existing state root (y/n)? ")
-			var response string
-			if _, err := fmt.Scanln(&response); err != nil {
-				return fmt.Errorf("failed to read user input: %w", err)
-			}
-			if strings.ToLower(strings.TrimSpace(response)) != "y" {
-				slog.Info("State roots overriding disabled from this point onward")
-				overwriteStateRoot.Disable() //disabled by the user
-			} else {
-				slog.Info("Overriding state roots from this point onward")
-				overwriteStateRoot.Confirm() //confirmed by the user
-			}
-		}
-
-		// Double check in case user disabled the overwrite
-		if overwriteStateRoot.IsEnabled() {
-			updateStateRoot(chain, block, computedStateRoot)
-			err = blockDB.Update(chain.ChainID(), block)
-			if err != nil {
-				return fmt.Errorf("failed to update block %d in database: %w", block.Number, err)
-			}
-		}
-	}
-
-	if !noStateRootCheck && !overwriteStateRoot.IsEnabled() {
-		if expectedStateRoot == (common.Hash{}) {
-			if !replayLoopContext.stateRootNotSet {
-				slog.Warn("No state root set in the block DB. State root verification skipped", "block_number", block.Number)
-				replayLoopContext.stateRootNotSet = true
-			}
-		} else if computedStateRoot != expectedStateRoot {
-			return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
-				block.Number, expectedStateRoot, computedStateRoot)
-		}
-	}
-
-	hashOfParentBlock := chain.GetBlockHash(block.Number - 1)
-	parentHash := common.BytesToHash(block.ParentHash)
-	if hashOfParentBlock == (common.Hash{}) {
-		slog.Warn("No block hash set. Parent hash verification skipped", "block_number", block.Number)
-	} else if parentHash != hashOfParentBlock {
-		return fmt.Errorf("parent hash mismatch: hash of block %d is %x, parent hash of block %d is %x",
-			block.Number-1, hashOfParentBlock, block.Number, parentHash)
-	}
-
-	zone.End()
-	return nil
 }
 
 // Chain is an interface for an evolving block chain.
