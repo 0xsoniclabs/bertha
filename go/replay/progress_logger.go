@@ -19,6 +19,7 @@ package replay
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/0xsoniclabs/bertha/utils"
@@ -85,12 +86,12 @@ func (p *progressLogger) LogProgress(block *types.Block) error {
 	deltaTime := now.Sub(p.lastUpdate)
 	p.lastUpdate = now
 
-	runtime := time.Since(p.start)
+	elapsed := time.Since(p.start)
 
 	args := []any{
 		"block", number,
 		"block_time", currentBlockTime.Format(time.RFC3339),
-		"elapsed", fmt.Sprintf("%02d:%02d:%02d", int(runtime.Hours()), int(runtime.Minutes())%60, int(runtime.Seconds())%60),
+		"elapsed", fmt.Sprintf("%02d:%02d:%02d", int(elapsed.Hours()), int(elapsed.Minutes())%60, int(elapsed.Seconds())%60),
 		"txs/s", int(float64(deltaTx) / deltaTime.Seconds()),
 		"MGas/s", int(float64(deltaGas) / deltaTime.Seconds() / 1000 / 1000),
 		"realtime", int(deltaBlockTime.Seconds() / deltaTime.Seconds()),
@@ -128,6 +129,15 @@ func (p *progressLogger) LogProgress(block *types.Block) error {
 			return err
 		}
 	}
+
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+	args = append(args,
+		"Alloc", fmt.Sprintf("%.1fMiB", float64(memStats.Alloc)/1024/1024),
+		"Sys", fmt.Sprintf("%.1fMiB", float64(memStats.Sys)/1024/1024),
+		"NumGC", memStats.NumGC,
+		"HeapObjects", memStats.HeapObjects,
+	)
 
 	p.logger.Info("Processing block", args...)
 	return nil

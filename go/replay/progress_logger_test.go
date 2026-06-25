@@ -69,6 +69,10 @@ func TestProgressLogger_ProducesLogMessagesEvery10kSteps(t *testing.T) {
 		"txs/s", 0,
 		"MGas/s", 0,
 		"realtime", gomock.Any(),
+		"Alloc", gomock.Any(),
+		"Sys", gomock.Any(),
+		"NumGC", gomock.Any(),
+		"HeapObjects", gomock.Any(),
 	)
 	require.NoError(logger.LogProgress(block10k))
 
@@ -82,6 +86,10 @@ func TestProgressLogger_ProducesLogMessagesEvery10kSteps(t *testing.T) {
 		"txs/s", 0,
 		"MGas/s", 0,
 		"realtime", gomock.Any(),
+		"Alloc", gomock.Any(),
+		"Sys", gomock.Any(),
+		"NumGC", gomock.Any(),
+		"HeapObjects", gomock.Any(),
 	)
 	require.NoError(logger.LogProgress(block20k))
 }
@@ -123,6 +131,10 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 		"MGas/s", 0,
 		"realtime", gomock.Any(),
 		"LiveDB size", "0.121GiB",
+		"Alloc", gomock.Any(),
+		"Sys", gomock.Any(),
+		"NumGC", gomock.Any(),
+		"HeapObjects", gomock.Any(),
 	)
 	err = logger.LogProgress(block)
 	require.NoError(err)
@@ -146,6 +158,10 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 		"realtime", gomock.Any(),
 		"LiveDB size", "0.121GiB",
 		"ArchiveDB size", "0.152GiB",
+		"Alloc", gomock.Any(),
+		"Sys", gomock.Any(),
+		"NumGC", gomock.Any(),
+		"HeapObjects", gomock.Any(),
 	)
 	err = logger.LogProgress(block)
 	require.NoError(err)
