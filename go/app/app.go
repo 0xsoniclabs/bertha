@@ -19,6 +19,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"maps"
 	"math"
@@ -96,16 +97,23 @@ func getApp() *cli.Command {
 			diagnosticsPortFlag,
 		},
 		Before: func(ctx context.Context, cmd *cli.Command) (context.Context, error) {
-			tracy.StartupProfiler()
-			tracyEnabled = true
 			if cmd.Bool(diagnosticsFlag.Name) {
-				diagnostic = StartDiagnostics(slog.Default(), cmd.Uint16(diagnosticsPortFlag.Name))
+				var err error
+				diagnostic, err = StartDiagnostics(slog.Default(), cmd.Uint16(diagnosticsPortFlag.Name))
+				if err != nil {
+					return ctx, err
+				}
 			}
 			var err error
 			profiler, err = StartCPUProfile(cmd.String(cpuProfileFlag.Name))
 			if err != nil {
+				if diagnostic != nil {
+					err = errors.Join(err, diagnostic.Stop())
+				}
 				return ctx, err
 			}
+			tracy.StartupProfiler()
+			tracyEnabled = true
 			ctx, cancel := context.WithCancel(ctx)
 			go func() {
 				sigs := make(chan os.Signal, 1)
@@ -147,12 +155,13 @@ var (
 	diagnosticsFlag = &cli.BoolFlag{
 		Name:  "diagnostics",
 		Usage: "enable diagnostics server (pprof)",
-		Value: false,
+		Value: true,
 	}
 	diagnosticsPortFlag = &cli.Uint16Flag{
-		Name:  "diagnostics-port",
-		Usage: "port for diagnostics server (pprof)",
-		Value: 6060,
+		Name:        "diagnostics-port",
+		Usage:       "port for diagnostics server (pprof)",
+		Value:       0,
+		DefaultText: "chosen by OS",
 	}
 
 	blockDatabaseDirectoryFlag = &cli.StringFlag{
