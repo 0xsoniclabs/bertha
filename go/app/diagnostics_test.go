@@ -17,36 +17,44 @@
 package app
 
 import (
-	"fmt"
 	"net"
+	"strings"
 	"testing"
-	"testing/synctest"
 
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
 
-func TestStartDiagnostics_LogsServerPortAndUserInfo(t *testing.T) {
+func TestStartDiagnostics_PortZero_PicksFreePortAndLogsAddressAndUserInfo(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	logger := utils.NewMockLogger(ctrl)
 
+	var address string
 	logger.EXPECT().Info(
 		"Starting diagnostics server",
-		"address", "http://localhost:12345/debug/pprof",
+		"address", gomock.Any(),
 		"see", "https://pkg.go.dev/net/http/pprof",
-	).Times(1)
+	).Do(func(msg string, keysAndValues ...interface{}) {
+		address = keysAndValues[1].(string)
+		require.True(t, strings.HasPrefix(address, "http://"))
+		require.True(t, strings.HasSuffix(address, "/debug/pprof"))
+		address = strings.TrimPrefix(address, "http://")
+		address = strings.TrimSuffix(address, "/debug/pprof")
+	}).Times(1)
 
-	server := StartDiagnostics(logger, 12345)
+	server, err := StartDiagnostics(logger, 0)
+	require.NoError(t, err)
+	require.Equal(t, address, server.address)
 	require.NoError(t, server.Stop())
 }
 
-func TestStartDiagnostics_InvalidPort_LogsErrorRunningServer(t *testing.T) {
+func TestStartDiagnostics_InvalidPort_ReturnsError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	logger := utils.NewMockLogger(ctrl)
 
 	// Occupy a port to make the diagnostics server fail to start.
-	listener, err := net.Listen("tcp", "localhost:0") // occupy a random port
+	listener, err := net.Listen("tcp", "127.0.0.1:0") // occupy a random port
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, listener.Close())
@@ -54,20 +62,6 @@ func TestStartDiagnostics_InvalidPort_LogsErrorRunningServer(t *testing.T) {
 
 	port := uint16(listener.Addr().(*net.TCPAddr).Port)
 
-	logger.EXPECT().Info(
-		"Starting diagnostics server",
-		"address", fmt.Sprintf("http://localhost:%d/debug/pprof", port),
-		"see", "https://pkg.go.dev/net/http/pprof",
-	).Times(1)
-
-	logger.EXPECT().Error(
-		"Diagnostics server failed",
-		"err", gomock.Any(),
-	).Times(1)
-
-	synctest.Test(t, func(t *testing.T) {
-		server := StartDiagnostics(logger, port)
-		synctest.Wait()
-		require.NoError(t, server.Stop())
-	})
+	_, err = StartDiagnostics(logger, port)
+	require.ErrorContains(t, err, "starting diagnostics server failed")
 }

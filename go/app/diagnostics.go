@@ -19,8 +19,8 @@ package app
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
-	"runtime"
 	"time"
 
 	_ "net/http/pprof"
@@ -30,41 +30,52 @@ import (
 
 // diagnostic represents a running diagnostics server.
 type diagnostic struct {
-	server *http.Server
-	done   <-chan struct{}
+	server  *http.Server
+	address string
+	done    <-chan struct{}
 }
 
 // StartDiagnostics starts a diagnostics server on the given port. The
 // diagnostics server provides pprof endpoints for profiling and debugging.
 // Among others, it provides access to CPU, heap, and synchronization profiles.
-// Also, trace information can be accessed via a HTTP endpoint. For details
-// see https://pkg.go.dev/net/http/pprof.
+// Also, trace information can be accessed via a HTTP endpoint. The server
+// listens on localhost on the provided port (or a port chosen by the OS if 0 is
+// specified). For details see https://pkg.go.dev/net/http/pprof.
 func StartDiagnostics(
 	logger utils.Logger,
 	port uint16,
-) *diagnostic {
-	address := fmt.Sprintf("localhost:%d", port)
-	runtime.SetBlockProfileRate(1)
-	runtime.SetMutexProfileFraction(1)
+) (*diagnostic, error) {
+	address := fmt.Sprintf("127.0.0.1:%d", port)
 
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return nil, fmt.Errorf("starting diagnostics server failed: %w", err)
+	}
+
+	// Optionally, set the block and mutex profile rates to enable profiling of blocking operations and mutex contention.
+	// runtime.SetBlockProfileRate(1)
+	// runtime.SetMutexProfileFraction(1)
+
+	address = listener.Addr().String()
 	logger.Info("Starting diagnostics server",
 		"address", fmt.Sprintf("http://%s/debug/pprof", address),
 		"see", "https://pkg.go.dev/net/http/pprof",
 	)
-	server := &http.Server{Addr: address}
+	server := &http.Server{}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if err := server.ListenAndServe(); err != nil {
+		if err := server.Serve(listener); err != nil {
 			if err != http.ErrServerClosed {
 				logger.Error("Diagnostics server failed", "err", err)
 			}
 		}
 	}()
 	return &diagnostic{
-		server: server,
-		done:   done,
-	}
+		server:  server,
+		address: address,
+		done:    done,
+	}, nil
 }
 
 // Stop stops the diagnostics server.

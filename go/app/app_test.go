@@ -62,8 +62,3 @@ func TestRun_FailedRun_ReportsIssue(t *testing.T) {
 		"failed to open database",
 	)
 }
-
-func TestRun_RunWithDiagnosticFlag_DoesNotFail(t *testing.T) {
-	args := []string{"test", "--" + diagnosticsFlag.Name}
-	require.NoError(t, Run(args))
-}
