@@ -23,7 +23,7 @@ require github.com/linxGnu/grocksdb v1.8.12
 require (
 	github.com/0xsoniclabs/carmen/go v0.0.0-20260512102324-2d892af38ce4
 	github.com/0xsoniclabs/sonic v0.0.0-20260624112538-aadddf0f4449 // v2.2.0-rc.7
-	github.com/0xsoniclabs/tosca v0.0.0-20260629103146-8440da321c89
+	github.com/0xsoniclabs/tosca v0.0.0-20260629114125-9dcb10e4b3ed
 	github.com/0xsoniclabs/tracy v0.0.0-20251027125423-00a5ab7968fb
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
 	github.com/ethereum/go-ethereum v1.17.2
@@ -118,6 +118,8 @@ require (
 replace github.com/ethereum/go-ethereum => github.com/0xsoniclabs/go-ethereum v0.0.0-20260507120815-e9dfccd41dbe
 
 replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundation/lachesis-base-sonic v0.0.0-20260429065829-930ae462cd09
+
+replace github.com/0xsoniclabs/tosca => github.com/0xsoniclabs/tosca v0.0.0-20260629114125-9dcb10e4b3ed
 
 // This line is automatically uncommented by the `go-run-with-carmen.sh` and `go-run-with-carmen-and-tracy.sh` scripts.
 //
