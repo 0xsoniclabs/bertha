@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"reflect"
 	"slices"
+	"sync"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/utils"
@@ -56,11 +57,13 @@ type MetadataStore interface {
 	GetCorrectionsAtBlock(blockNumber uint64) map[common.Address]Correction
 }
 
-// BlockDBMetadataStore is a MetadataStore implementation backed by the block database.
+// BlockDBMetadataStore is a MetadataStore implementation backed by the block
+// database that is safe for concurrent use.
 type BlockDBMetadataStore struct {
 	db                      blockdb.BlockDB
 	metadata                Metadata
 	nextRules               *opera.Rules
+	mutex                   sync.RWMutex
 	logger                  utils.Logger
 	writeRulesUpdateHeights bool
 }
@@ -123,6 +126,9 @@ func NewBlockDBMetadataStore(db blockdb.BlockDB, rules opera.Rules, logger utils
 }
 
 func (s *BlockDBMetadataStore) PatchRules(blockNumber uint64, diff []byte) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	last := s.metadata.RulesUpdateHeights[0].Rules
 	for _, rulesHeight := range s.metadata.RulesUpdateHeights {
 		if rulesHeight.Block <= blockNumber {
@@ -149,6 +155,9 @@ func (s *BlockDBMetadataStore) PatchRules(blockNumber uint64, diff []byte) error
 }
 
 func (s *BlockDBMetadataStore) CommitRules(blockNumber uint64) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	if s.nextRules == nil {
 		return nil
 	}
@@ -189,6 +198,9 @@ func (s *BlockDBMetadataStore) CommitRules(blockNumber uint64) error {
 
 // GetUpgradeHeights returns all stored upgrade heights.
 func (s *BlockDBMetadataStore) GetUpgradeHeights() []opera.UpgradeHeight {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
 	upgradeHeights := make([]opera.UpgradeHeight, len(s.metadata.RulesUpdateHeights))
 	for i, rulesHeight := range s.metadata.RulesUpdateHeights {
 		upgradeHeights[i] = opera.UpgradeHeight{
@@ -201,6 +213,9 @@ func (s *BlockDBMetadataStore) GetUpgradeHeights() []opera.UpgradeHeight {
 
 // GetUpgradesAtBlock returns the effective upgrades at the given block number.
 func (s *BlockDBMetadataStore) GetUpgradesAtBlock(blockNumber uint64) opera.Upgrades {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
 	upgrades := opera.Upgrades{}
 	for _, rulesHeight := range s.metadata.RulesUpdateHeights {
 		if idx.Block(rulesHeight.Block) <= idx.Block(blockNumber) {
@@ -212,6 +227,9 @@ func (s *BlockDBMetadataStore) GetUpgradesAtBlock(blockNumber uint64) opera.Upgr
 
 // GetCorrectionsAtBlock returns the account corrections for the given block number.
 func (s *BlockDBMetadataStore) GetCorrectionsAtBlock(blockNumber uint64) map[common.Address]Correction {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
 	return s.metadata.Corrections[blockNumber]
 }
 
