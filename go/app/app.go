@@ -61,6 +61,7 @@ func getApp() *cli.Command {
 					initDBFlag,
 					keepDBFlag,
 					withArchiveFlag,
+					archiveRateFlag,
 					interpreterFlag,
 					dbSchema,
 					dbVariant,
@@ -220,6 +221,11 @@ var (
 		Usage:   "Use the archive mode for the state database",
 		Value:   false,
 	}
+	archiveRateFlag = &cli.Float64Flag{
+		Name:  "archive-rate",
+		Usage: "Rate in blocks/s at which blocks from the already processed history are rerun for archive verification [0 = disabled]",
+		Value: 0,
+	}
 	dbSchema = &cli.IntFlag{
 		Name:    "db-schema",
 		Aliases: []string{"schema"},
@@ -229,7 +235,7 @@ var (
 	dbVariant = &cli.StringFlag{
 		Name:    "db-variant",
 		Aliases: []string{"variant"},
-		Usage:   "Block database variant to use (" + strings.Join(getListOfCarmenVariants(), ", ") + ")",
+		Usage:   "Block database variant to use [" + strings.Join(getListOfCarmenVariants(), ", ") + "]",
 		Value:   "go-file",
 	}
 	usePipelineFlag = &cli.BoolFlag{
@@ -240,14 +246,14 @@ var (
 
 	interpreterFlag = &cli.StringFlag{
 		Name:  "interpreter",
-		Usage: "Interpreter to use (" + strings.Join(getListOfInterpreters(), ", ") + ")",
+		Usage: "Interpreter to use [" + strings.Join(getListOfInterpreters(), ", ") + "]",
 		Value: "sfvm",
 	}
 
 	snapshotInterval = &cli.Uint64Flag{
 		Name:    "snapshot-interval",
 		Aliases: []string{"si"},
-		Usage:   "Interval of blocks at which to perform database snapshots (0 = disabled)",
+		Usage:   "Interval of blocks at which to perform database snapshots [0 = disabled]",
 		Value:   0,
 	}
 	snapshotStartBlock = &cli.Uint64Flag{
@@ -332,6 +338,7 @@ func parseReplayArgsAndRunReplay(ctx context.Context, c *cli.Command) error {
 		InitDBDir:               c.String(initDBFlag.Name),
 		KeepDB:                  c.Bool(keepDBFlag.Name),
 		WithArchive:             c.Bool(withArchiveFlag.Name),
+		ArchiveRate:             c.Float64(archiveRateFlag.Name),
 		DBSchema:                carmen.Schema(c.Int(dbSchema.Name)),
 		DBVariant:               carmen.Variant(c.String(dbVariant.Name)),
 		UsePipeline:             c.Bool(usePipelineFlag.Name),

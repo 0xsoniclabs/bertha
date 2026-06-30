@@ -27,8 +27,10 @@ import (
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/0xsoniclabs/bertha/utils"
+	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 )
 
 func TestArchiveVerifier_NewArchiveVerifier_ChecksArchiveRate(t *testing.T) {
@@ -74,7 +76,7 @@ func TestArchiveVerifier_Submit_SkipsBlockZero(t *testing.T) {
 	require.NoError(t, err)
 
 	v := &archiveVerifier{pool: pool}
-	v.submit(&blockdb.Block{Number: 0}, blockHashHistory{})
+	v.submit(&blockdb.Block{Number: 0}, &blockHashHistory{})
 
 	_, ok := pool.GetRandom()
 	require.False(t, ok)
@@ -85,7 +87,7 @@ func TestArchiveVerifier_Submit_AddsNonZeroBlocks(t *testing.T) {
 	require.NoError(t, err)
 
 	v := &archiveVerifier{pool: pool}
-	v.submit(&blockdb.Block{Number: 1}, blockHashHistory{})
+	v.submit(&blockdb.Block{Number: 1}, &blockHashHistory{})
 
 	item, ok := pool.GetRandom()
 	require.True(t, ok)
@@ -153,7 +155,7 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 			numBlocks: 100,
 			setupPool: func(blocks []*blockdb.Block, pool *utils.RandomRetentionPool[blockWithHashHistory]) {
 				for _, block := range blocks[1:] {
-					pool.Add(blockWithHashHistory{block: block, hashHistory: blockHashHistory{}})
+					pool.Add(blockWithHashHistory{block: block, hashHistory: &blockHashHistory{}})
 				}
 			},
 			verifyCalls: 100,
@@ -169,7 +171,7 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 							CumulativeGasUsed: 999,
 						}},
 					},
-					hashHistory: blockHashHistory{},
+					hashHistory: &blockHashHistory{},
 				})
 			},
 			verifyCalls: 1,
@@ -282,7 +284,7 @@ func TestArchiveVerifier_verifyBlock_CancelsContextOnFailure(t *testing.T) {
 	// Submit blocks so the pool is non-empty.
 	protoBlocks := utils.CreateValidBlocks(t, 10)
 	for _, block := range protoBlocks[1:] {
-		verifier.submit(block, blockHashHistory{})
+		verifier.submit(block, &blockHashHistory{})
 	}
 
 	// Call verifyBlock directly to deterministically trigger cancellation.
@@ -293,4 +295,115 @@ func TestArchiveVerifier_verifyBlock_CancelsContextOnFailure(t *testing.T) {
 
 	verifierErr := verifier.close()
 	require.ErrorIs(t, verifierErr, injectedErr)
+}
+
+func TestArchiveVerifier_close_WaitsForInFlightVerifications(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	stateDb := carmen.NewMockStateDB(ctrl)
+	// Report the archive as empty so verifyBlock returns immediately after
+	// the archive-height check, without touching the pool or block payloads.
+	stateDb.EXPECT().GetArchiveBlockHeight().Return(uint64(0), true, nil).AnyTimes()
+	state := &State{db: stateDb}
+
+	var startedTasks atomic.Int64
+	finish := make(chan struct{})
+	runWithState := func(fn func(*State) error) error {
+		startedTasks.Add(1)
+		<-finish
+		return fn(state)
+	}
+
+	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
+	require.NoError(t, err)
+	// verifyBlock will return early after getting the archive height because
+	// the archive is reported as empty.
+	for i := range maxConcurrentVerifications {
+		pool.Add(blockWithHashHistory{block: &blockdb.Block{Number: uint64(i)}})
+	}
+
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+
+	v := &archiveVerifier{
+		pool:         pool,
+		runWithState: runWithState,
+		metadata:     &BlockDBMetadataStore{},
+		chainID:      123,
+		ctx:          ctx,
+		cancelParent: cancel,
+		done:         make(chan struct{}),
+		interval:     time.Millisecond,
+	}
+	v.wg.Go(v.dispatcher)
+
+	// Wait until all concurrent verifyBlock slots are occupied.
+	require.Eventually(t, func() bool {
+		return startedTasks.Load() == int64(maxConcurrentVerifications)
+	}, time.Second, time.Millisecond)
+
+	// close() must wait for the in-flight verifyBlock goroutines to finish.
+	closed := make(chan error, 1)
+	go func() { closed <- v.close() }()
+
+	select {
+	case err := <-closed:
+		t.Fatalf("close() returned before in-flight verifications finished: %v", err)
+	case <-time.After(50 * time.Millisecond):
+		// close() is correctly blocked on the running verifyBlock goroutines.
+	}
+
+	// Unblock the verifyBlock goroutines and expect close() to complete with no error.
+	close(finish)
+
+	select {
+	case err := <-closed:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("close() did not complete after unblocking verifications")
+	}
+}
+
+func TestArchiveVerifier_close_StopsDispatcher(t *testing.T) {
+	var startedTasks atomic.Int64
+	runWithState := func(func(*State) error) error {
+		startedTasks.Add(1)
+		return nil
+	}
+
+	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
+	require.NoError(t, err)
+	// Add blocks with Number > archiveHeight (which defaults to 0) so
+	// verifyBlock exits cleanly after the pool-scan loop without touching
+	// the block payload or invoking additional runWithState calls.
+	for i := 2; i <= 10; i++ {
+		pool.Add(blockWithHashHistory{block: &blockdb.Block{Number: uint64(i)}})
+	}
+
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+
+	v := &archiveVerifier{
+		pool:         pool,
+		runWithState: runWithState,
+		metadata:     &BlockDBMetadataStore{},
+		chainID:      123,
+		ctx:          ctx,
+		cancelParent: cancel,
+		done:         make(chan struct{}),
+		interval:     time.Millisecond,
+	}
+	v.wg.Go(v.dispatcher)
+
+	// Wait until several verifyBlock tasks have been spawned by the dispatcher.
+	require.Eventually(t, func() bool {
+		return startedTasks.Load() >= 3
+	}, time.Second, time.Millisecond)
+
+	// Close the verifier; the dispatcher must stop spawning new verifyBlock
+	// goroutines.
+	require.NoError(t, v.close())
+
+	countAfterClose := startedTasks.Load()
+	time.Sleep(50 * time.Millisecond)
+	require.Equal(t, countAfterClose, startedTasks.Load())
 }

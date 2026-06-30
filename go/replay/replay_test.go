@@ -25,6 +25,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 
@@ -83,26 +84,29 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 
 	db.Close()
 
-	require.NoError(
-		Replay(t.Context(), ReplayArgs{
-			BlockDBDir:      path,
-			JSONGenesisFile: genesis,
-			Interpreter:     "sfvm",
-			DBSchema:        5,
-			DBVariant:       "go-file",
-		}),
-	)
-
-	require.NoError(
-		Replay(t.Context(), ReplayArgs{
-			BlockDBDir:      path,
-			JSONGenesisFile: genesis,
-			WithArchive:     true,
-			Interpreter:     "sfvm",
-			DBSchema:        5,
-			DBVariant:       "go-file",
-		}),
-	)
+	tests := map[string]struct {
+		withArchive bool
+		archiveRate float64
+	}{
+		"NoArchive":           {},
+		"ArchiveRateEnabled":  {withArchive: true, archiveRate: 100},
+		"ArchiveRateDisabled": {withArchive: true, archiveRate: 0},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			require.NoError(
+				Replay(t.Context(), ReplayArgs{
+					BlockDBDir:      path,
+					JSONGenesisFile: genesis,
+					WithArchive:     tc.withArchive,
+					ArchiveRate:     tc.archiveRate,
+					Interpreter:     "sfvm",
+					DBSchema:        5,
+					DBVariant:       "go-file",
+				}),
+			)
+		})
+	}
 }
 
 func TestReplay_FailsIfStartBlockIsProvidedWithoutStateDbDir(t *testing.T) {
@@ -137,6 +141,39 @@ func TestReplay_FailsIfStartBlockIsProvidedWithoutStateDbDir(t *testing.T) {
 		err,
 		"existing state or initial database directory must be specified when starting from a non-genesis block",
 	)
+}
+
+func TestReplay_InvalidArchiveRateIsReportedAsCreationFailure(t *testing.T) {
+	require := require.New(t)
+
+	dir := t.TempDir()
+	genesis := filepath.Join(dir, "genesis.json")
+	require.NoError(os.WriteFile(genesis, []byte(`{"Rules": {"NetworkID": 123}}`), 0644))
+
+	dbPath := filepath.Join(dir, "block-db")
+	options := grocksdb.NewDefaultOptions()
+	options.SetCreateIfMissing(true)
+	defer options.Destroy()
+	db, err := grocksdb.OpenDb(options, dbPath)
+	require.NoError(err)
+
+	writeOptions := grocksdb.NewDefaultWriteOptions()
+	defer writeOptions.Destroy()
+	version := make([]byte, 8)
+	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
+	require.NoError(db.Put(writeOptions, blockdb.MakeVersionKey(), version))
+	db.Close()
+
+	err = Replay(t.Context(), ReplayArgs{
+		BlockDBDir:      dbPath,
+		JSONGenesisFile: genesis,
+		WithArchive:     true,
+		ArchiveRate:     -1,
+		Interpreter:     "sfvm",
+		DBSchema:        5,
+		DBVariant:       "go-file",
+	})
+	require.ErrorContains(err, "failed to create archive verifier")
 }
 
 func TestReplay_StateDbAndSnapshotCleanupBehavior(t *testing.T) {
@@ -376,6 +413,7 @@ func TestReplayLoop(t *testing.T) {
 			"OverwriteStateRootHash":                        overwriteStateRootHash,
 			"SkipStateRootCheckIfNoStateRootCheckFlagIsSet": skipStateRootCheckIfNoStateRootCheckFlagIsSet,
 			"SkipReceiptsCheckIfNoReceiptsCheckFlagIsSet":   skipReceiptsCheckIfNoReceiptsCheckFlagIsSet,
+			"StopsOnArchiveVerifierFailure":                 stopsOnArchiveVerifierFailure,
 		}
 		for name, test := range tests {
 			t.Run(name, func(t *testing.T) {
@@ -400,6 +438,7 @@ type replayer func(
 	database blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
 	onBlockProcessed func(*types.Block) error,
+	verifier *archiveVerifier,
 ) error
 
 func canProcessEmptyBlocks(t *testing.T, run replayer) {
@@ -438,7 +477,7 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	require.NoError(t, run(t.Context(), iter, chain, nil, ReplayLoopContext{}, func(block *types.Block) error {
 		counter++
 		return nil
-	}))
+	}, nil))
 	require.Equal(t, len(blocks), counter)
 }
 
@@ -507,7 +546,7 @@ func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 	}
 
 	iter := utils.NewIter(blocks)
-	require.NoError(t, run(t.Context(), iter, chain, nil, ReplayLoopContext{}, nil))
+	require.NoError(t, run(t.Context(), iter, chain, nil, ReplayLoopContext{}, nil, nil))
 }
 
 func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
@@ -519,7 +558,7 @@ func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
 	blocks := func(yield func(*blockdb.Block, error) bool) {
 		yield(nil, injectedError)
 	}
-	require.ErrorIs(t, run(t.Context(), blocks, chain, nil, ReplayLoopContext{}, nil), injectedError)
+	require.ErrorIs(t, run(t.Context(), blocks, chain, nil, ReplayLoopContext{}, nil, nil), injectedError)
 }
 
 func failsOnCancelledContext(t *testing.T, run replayer) {
@@ -534,7 +573,7 @@ func failsOnCancelledContext(t *testing.T, run replayer) {
 		{Number: 0, StateRoot: types.EmptyRootHash[:]},
 	})
 
-	require.ErrorIs(t, run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil), context.Canceled)
+	require.ErrorIs(t, run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil), context.Canceled)
 }
 
 func failsOnBlockConversionError(t *testing.T, run replayer) {
@@ -549,7 +588,7 @@ func failsOnBlockConversionError(t *testing.T, run replayer) {
 		}},
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil),
 		"failed to convert block 0",
 	)
 }
@@ -567,7 +606,7 @@ func failsOnBlockApplicationError(t *testing.T, run replayer) {
 	ctxt := t.Context()
 	blocks := utils.NewIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
-		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil),
 		injectedError,
 	)
 }
@@ -585,7 +624,7 @@ func failsOnCommitmentComputationError(t *testing.T, run replayer) {
 	ctxt := t.Context()
 	blocks := utils.NewIter([]*blockdb.Block{{}})
 	require.ErrorIs(t,
-		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil),
 		injectedError,
 	)
 }
@@ -636,7 +675,7 @@ func failsOnDifferentReceipts(t *testing.T, run replayer) {
 			ctxt := t.Context()
 			blocks := utils.NewIter([]*blockdb.Block{{Receipts: tc.blockReceipts}})
 			require.ErrorContains(t,
-				run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
+				run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil),
 				tc.expectedError,
 			)
 		})
@@ -668,7 +707,7 @@ func failsOnParentHashMismatch(t *testing.T, run replayer) {
 		ParentHash: common.Hash{0xCD}.Bytes(), // does not match hashOfParentBlock
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil),
 		"parent hash mismatch",
 	)
 }
@@ -692,7 +731,7 @@ func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 		StateRoot: common.Hash{0x2}.Bytes(),
 	}})
 	require.ErrorContains(t,
-		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil),
+		run(ctxt, blocks, chain, nil, ReplayLoopContext{}, nil, nil),
 		"state root mismatch",
 	)
 }
@@ -720,7 +759,7 @@ func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 	require.NoError(t,
 		run(ctxt, blocks, chain, nil, ReplayLoopContext{
 			skipStateRootCheck: true,
-		}, nil),
+		}, nil, nil),
 		"state root mismatch",
 	)
 }
@@ -747,8 +786,64 @@ func skipReceiptsCheckIfNoReceiptsCheckFlagIsSet(t *testing.T, run replayer) {
 			PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful}, // different receipt
 		}},
 	}})
-	err := run(ctxt, blocks, chain, nil, ReplayLoopContext{skipReceiptsCheck: true}, nil)
+	err := run(ctxt, blocks, chain, nil, ReplayLoopContext{skipReceiptsCheck: true}, nil, nil)
 	require.NoError(t, err)
+}
+
+func stopsOnArchiveVerifierFailure(t *testing.T, run replayer) {
+	ctrl := gomock.NewController(t)
+	chain := NewMockChain(ctrl)
+	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+	chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{}).AnyTimes()
+
+	// Create a cancellable context, as the Replay function does.
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+
+	injectedErr := fmt.Errorf("injected archive error")
+	const cancelAfter = int64(5)
+
+	// Simulate a verifier failure deterministically: after applying a few
+	// blocks, cancel the shared context with the injected error, mimicking
+	// what the archive verifier does on a real failure.
+	var blocksApplied atomic.Int64
+	chain.EXPECT().
+		ApplyBlock(gomock.Any()).
+		DoAndReturn(func(*types.Block) (types.Receipts, future.Future[result.Result[common.Hash]], error) {
+			if blocksApplied.Add(1) == cancelAfter {
+				cancel(injectedErr)
+			}
+			return nil, future.Immediate(result.Ok(common.Hash{})), nil
+		}).AnyTimes()
+
+	// Bare verifier without a dispatcher: the cancellation is driven by the
+	// mock above, so we only need submit and close to be no-ops.
+	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
+	require.NoError(t, err)
+	verifier := &archiveVerifier{
+		pool:         pool,
+		cancelParent: cancel,
+		ctx:          ctx,
+		done:         make(chan struct{}),
+	}
+	defer func() { require.NoError(t, verifier.close()) }()
+
+	// Provide many more blocks than we expect to process before cancellation.
+	const totalBlocks = 10_000
+	blocks := make([]*blockdb.Block, totalBlocks)
+	for i := range blocks {
+		blocks[i] = &blockdb.Block{Number: uint64(i), StateRoot: common.Hash{}.Bytes()}
+	}
+
+	err = run(ctx, utils.NewIter(blocks), chain, nil, ReplayLoopContext{}, nil, verifier)
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, context.Cause(ctx), injectedErr)
+	// Only a small number of blocks should have been applied before the
+	// cancellation propagates. The pipeline may buffer up to a few hundred
+	// additional blocks in its stages; allow a generous upper bound below
+	// totalBlocks to keep the test robust.
+	require.Less(t, blocksApplied.Load(), int64(1000))
 }
 
 func overwriteStateRootHash(t *testing.T, run replayer) {
@@ -782,7 +877,7 @@ func overwriteStateRootHash(t *testing.T, run replayer) {
 	require.NoError(t,
 		run(ctxt, blocks, chain, blockDB, ReplayLoopContext{
 			overwriteStateRoot: New(true, true),
-		}, nil),
+		}, nil, nil),
 		"state root mismatch",
 	)
 }
@@ -825,7 +920,7 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 
 		// Start running the replay pipeline.
 		go func() {
-			err := runReplayPipeline(t.Context(), utils.NewIter(blocks), chain, nil, ReplayLoopContext{}, nil)
+			err := runReplayPipeline(t.Context(), utils.NewIter(blocks), chain, nil, ReplayLoopContext{}, nil, nil)
 			require.ErrorIs(t, err, issue)
 		}()
 
@@ -1169,6 +1264,29 @@ func Test_FlagWithConfirmation(t *testing.T) {
 	flag.Disable()
 	require.False(flag.IsEnabled())
 	require.True(flag.IsConfirmed())
+}
+
+func TestBlockHashHistory_Clone_ReturnsNilForNilReceiver(t *testing.T) {
+	var h *blockHashHistory
+	require.Nil(t, h.Clone())
+}
+
+func TestBlockHashHistory_Clone_ProducesIndependentCopy(t *testing.T) {
+	original := &blockHashHistory{}
+	for i := uint64(0); i < 256; i++ {
+		original.SetBlockHash(i, common.BytesToHash([]byte{byte(i)}))
+	}
+
+	clone := original.Clone()
+	require.Equal(t, *original, *clone)
+
+	// Mutating the clone must not affect the original.
+	clone.SetBlockHash(0, common.Hash{0xAA})
+	require.Equal(t, common.BytesToHash([]byte{0}), original.GetBlockHash(0))
+
+	// Mutating the original must not affect the clone.
+	original.SetBlockHash(1, common.Hash{0xBB})
+	require.Equal(t, common.BytesToHash([]byte{1}), clone.GetBlockHash(1))
 }
 
 func TestBlockHashHistory_CanSetAndRetrieveHistoricHashes(t *testing.T) {
