@@ -592,32 +592,7 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 		}
 	}
 
-	var chainConfig *params.ChainConfig
-	var upgrades opera.Upgrades
-	if cfg := ethereumChainConfigMap[a.chainID]; cfg != nil {
-		chainConfig = cfg
-		rules := chainConfig.Rules(block.Number(), false, block.Time())
-		upgrades = opera.Upgrades{
-			Berlin: rules.IsBerlin,
-			London: rules.IsLondon,
-			Llr:    false,
-
-			Sonic:   rules.IsCancun,
-			Allegro: rules.IsPrague,
-			Brio:    rules.IsOsaka,
-
-			SingleProposerBlockFormation: false,
-			GasSubsidies:                 false,
-			TransactionBundles:           false,
-		}
-	} else {
-		chainConfig = opera.CreateTransientEvmChainConfig(
-			a.chainID,
-			a.metadataStore.GetUpgradeHeights(),
-			idx.Block(block.NumberU64()),
-		)
-		upgrades = a.metadataStore.GetUpgradesAtBlock(block.NumberU64())
-	}
+	chainConfig, upgrades := getChainConfigAndUpgrades(block, a.chainID, a.metadataStore)
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
@@ -661,6 +636,31 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	}
 	// Return the receipts and the resulting state root.
 	return receipts, stateRoot, nil
+}
+
+func getChainConfigAndUpgrades(block *types.Block, chainID uint64, metadata MetadataStore) (*params.ChainConfig, opera.Upgrades) {
+	if cfg := ethereumChainConfigMap[chainID]; cfg != nil {
+		rules := cfg.Rules(block.Number(), false, block.Time())
+		return cfg, opera.Upgrades{
+			Berlin: rules.IsBerlin,
+			London: rules.IsLondon,
+			Llr:    false,
+
+			Sonic:   rules.IsCancun,
+			Allegro: rules.IsPrague,
+			Brio:    rules.IsOsaka,
+
+			SingleProposerBlockFormation: false,
+			GasSubsidies:                 false,
+			TransactionBundles:           false,
+		}
+	}
+	chainConfig := opera.CreateTransientEvmChainConfig(
+		chainID,
+		metadata.GetUpgradeHeights(),
+		idx.Block(block.NumberU64()),
+	)
+	return chainConfig, metadata.GetUpgradesAtBlock(block.NumberU64())
 }
 
 // getExpectedStateRoot returns the expected state root for the given block, based on the chain type.
