@@ -874,71 +874,6 @@ func TestStateChainAdapter_ApplyBlock_ForwardsExecutionError(t *testing.T) {
 	require.ErrorContains(t, err, "failed to apply block")
 }
 
-func TestStateChainAdapter_ApplyBlock_CreatesChainConfigAndUpgradesFromMetadataStoreForNonEthereumChains(t *testing.T) {
-	cases := map[string]struct {
-		chainID    uint64
-		isEthereum bool
-	}{
-		"Ethereum Mainnet": {
-			chainID:    1,
-			isEthereum: true,
-		},
-		"Sepolia": {
-			chainID:    11155111,
-			isEthereum: true,
-		},
-		"Holesky": {
-			chainID:    17000,
-			isEthereum: true,
-		},
-		"Hoodi": {
-			chainID:    560048,
-			isEthereum: true,
-		},
-		"Sonic": {
-			chainID:    146,
-			isEthereum: false,
-		},
-		"Unknown Chain": {
-			chainID:    9999,
-			isEthereum: false,
-		},
-	}
-
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			mockMetadataStore := NewMockMetadataStore(ctrl)
-
-			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
-			require.NoError(t, err)
-			defer func() { require.NoError(t, state.Close()) }()
-
-			chain := &stateChainAdapter{
-				chainID:          tc.chainID,
-				metadataStore:    mockMetadataStore,
-				blockHashHistory: &blockHashHistory{},
-				state:            state,
-				snapshotHandler:  &SnapshotHandler{},
-			}
-
-			block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: 1})
-			require.NoError(t, err)
-
-			if tc.isEthereum {
-				mockMetadataStore.EXPECT().GetCorrectionsAtBlock(uint64(1))
-			} else {
-				mockMetadataStore.EXPECT().GetUpgradeHeights()
-				mockMetadataStore.EXPECT().GetUpgradesAtBlock(uint64(1))
-				mockMetadataStore.EXPECT().GetCorrectionsAtBlock(uint64(1))
-			}
-
-			_, _, err = chain.ApplyBlock(block)
-			require.NoError(t, err)
-		})
-	}
-}
-
 func TestStateChainAdapter_ApplyBlock_AppliesUpgrades(t *testing.T) {
 	// To see an effect of upgrades, this test uses two different rule sets
 	// such that gas costs for a simple transaction with excess gas differ.
@@ -1090,6 +1025,55 @@ func TestStateChainAdapter_ApplyBlock_CommitsRulesUpdateWhenEncounteringAnEpochS
 
 			_, _, err = chain.ApplyBlock(block)
 			require.NoError(t, err)
+		})
+	}
+}
+
+func TestStateChainAdapter_GetChainConfigAndUpgrades_ReadsFromMetadataStoreForNonEthereumChains(t *testing.T) {
+	cases := map[string]struct {
+		chainID    uint64
+		isEthereum bool
+	}{
+		"Ethereum Mainnet": {
+			chainID:    1,
+			isEthereum: true,
+		},
+		"Sepolia": {
+			chainID:    11155111,
+			isEthereum: true,
+		},
+		"Holesky": {
+			chainID:    17000,
+			isEthereum: true,
+		},
+		"Hoodi": {
+			chainID:    560048,
+			isEthereum: true,
+		},
+		"Sonic": {
+			chainID:    146,
+			isEthereum: false,
+		},
+		"Unknown Chain": {
+			chainID:    9999,
+			isEthereum: false,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			mockMetadataStore := NewMockMetadataStore(ctrl)
+
+			block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: 1})
+			require.NoError(t, err)
+
+			if !tc.isEthereum {
+				mockMetadataStore.EXPECT().GetUpgradeHeights()
+				mockMetadataStore.EXPECT().GetUpgradesAtBlock(uint64(1))
+			}
+
+			getChainConfigAndUpgrades(block, tc.chainID, mockMetadataStore)
 		})
 	}
 }
