@@ -605,7 +605,7 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	onLog := func(l *core_types.Log) { onNewLog(a.metadataStore, block.NumberU64(), l) }
 
 	// Apply the block to the state database.
-	receipts, err := a.state.ApplyBlock(block, a.interpreter, processor, upgrades, corrections, chainConfig, onLog)
+	receipts, err := a.state.ApplyBlock(block, a.interpreter, processor, upgrades, corrections, chainConfig, onLog, false)
 	if err != nil {
 		stateRoot := future.Future[result.Result[common.Hash]]{}
 		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)

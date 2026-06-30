@@ -175,6 +175,10 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 // ApplyBlock applies the given block to this state, processing all transactions
 // and updating the state accordingly. It returns the receipts of the transactions
 // in the block, or an error if the block could not be processed.
+//
+// When isArchive is true, the block is re-executed against the archive state
+// for the parent block. In this mode, BeginBlock/EndBlock are not called and
+// the state is not committed.
 func (s *State) ApplyBlock(
 	block *types.Block,
 	interpreter tosca.Interpreter,
@@ -183,7 +187,32 @@ func (s *State) ApplyBlock(
 	corrections map[common.Address]Correction,
 	chainConfig *params.ChainConfig,
 	onLog func(*core_types.Log),
+	isArchive bool,
 ) (types.Receipts, error) {
+	var stateDB *evmstore.CarmenStateDB
+	var vmStateDB carmen.VmStateDB
+
+	if isArchive {
+		if block.NumberU64() == 0 {
+			return nil, fmt.Errorf("cannot apply genesis block in archive mode")
+		}
+		archiveBlock := block.NumberU64() - 1
+		archiveDB, err := s.db.GetArchiveStateDB(archiveBlock)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get archive state for block %d: %w", archiveBlock, err)
+		}
+		defer archiveDB.Release()
+		stateDB = evmstore.CreateNonCommittableCarmenStateDb(archiveDB, nil)
+		vmStateDB = archiveDB
+	} else {
+		stateDB = evmstore.CreateCarmenStateDb(s.db, nil)
+		vmStateDB = s.db
+		s.db.BeginBlock()
+	}
+
+	zone := tracy.ZoneBegin("TransactionProcessing")
+	defer zone.End()
+
 	isPostMerge := block.Difficulty().Sign() == 0
 	blobBaseFee := big.NewInt(1)
 	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsCancun(block.Number(), block.Time()) && block.ExcessBlobGas() != nil {
@@ -210,17 +239,12 @@ func (s *State) ApplyBlock(
 		Transactions: block.Transactions(),
 	}
 
-	stateDB := evmstore.CreateCarmenStateDb(s.db, nil)
-
 	var vmConfig vm.Config
 	if !isEthereum(chainConfig.ChainID.Uint64()) {
 		// Apply Sonic-specific VM settings that are not applicable to Ethereum chains.
 		vmConfig = opera.GetVmConfig(opera.Rules{Upgrades: upgrades})
 	}
 	vmConfig.Interpreter = geth_adapter.NewGethInterpreterFactory(interpreter)
-
-	zone := tracy.ZoneBegin("TransactionProcessing")
-	s.db.BeginBlock()
 
 	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsCancun(block.Number(), block.Time()) {
 		// EIP-4788: store the parent beacon block root in the beacon roots contract.
@@ -274,45 +298,46 @@ func (s *State) ApplyBlock(
 
 	// Apply corrections if any are provided.
 	if len(corrections) > 0 {
-		s.db.BeginTransaction()
+		vmStateDB.BeginTransaction()
 		slog.Info("Applying corrections", "block", block.NumberU64())
 		for addr, acc := range corrections {
 			slog.Info("Correcting account",
 				"address", addr.Hex(),
-				"old_balance", s.db.GetBalance(cc.Address(addr)).ToBig().String(),
+				"old_balance", vmStateDB.GetBalance(cc.Address(addr)).ToBig().String(),
 				"new_balance", acc.Balance.ToBig().String(),
 			)
-			s.setBalance(addr, acc.Balance.ToBig())
+			setBalance(vmStateDB, addr, acc.Balance.ToBig())
 		}
-		s.db.EndTransaction()
+		vmStateDB.EndTransaction()
 	}
 
 	if isEthereum(chainConfig.ChainID.Uint64()) {
 		if isPostMerge {
-			creditWithdrawals(block, s.db, chainConfig)
+			creditWithdrawals(block, vmStateDB, chainConfig)
 		} else {
-			accumulateRewards(chainConfig, s.db, block.Header(), block.Uncles())
+			accumulateRewards(chainConfig, vmStateDB, block.Header(), block.Uncles())
 		}
 	}
 
-	zone.End()
+	if !isArchive {
+		endBlockZone := tracy.ZoneBegin("EndBlock")
+		s.db.EndBlock(block.NumberU64())
+		endBlockZone.End()
+	}
 
-	zone = tracy.ZoneBegin("EndBlock")
-	s.db.EndBlock(block.NumberU64())
-	zone.End()
-	return receipts, s.db.Check()
+	return receipts, vmStateDB.Check()
 }
 
-func (s *State) setBalance(address common.Address, balance *big.Int) {
+func setBalance(stateDB carmen.VmStateDB, address common.Address, balance *big.Int) {
 	addr := cc.Address(address)
-	cur := s.db.GetBalance(addr).ToBig()
+	cur := stateDB.GetBalance(addr).ToBig()
 	switch cur.Cmp(balance) {
 	case -1:
 		diff, _ := amount.NewFromBigInt(new(big.Int).Sub(balance, cur))
-		s.db.AddBalance(addr, diff)
+		stateDB.AddBalance(addr, diff)
 	case 1:
 		diff, _ := amount.NewFromBigInt(new(big.Int).Sub(cur, balance))
-		s.db.SubBalance(addr, diff)
+		stateDB.SubBalance(addr, diff)
 	}
 }
 
@@ -353,7 +378,7 @@ func processSystemCall(
 	return nil
 }
 
-func creditWithdrawals(block *types.Block, stateDB carmen.StateDB, chainConfig *params.ChainConfig) {
+func creditWithdrawals(block *types.Block, stateDB carmen.VmStateDB, chainConfig *params.ChainConfig) {
 	// Derived from https://github.com/0xsoniclabs/go-ethereum/blob/949ae6d396a5798262c0d228a8de0e3fa504e00c/consensus/beacon/consensus.go#L329-L342
 	for _, w := range block.Withdrawals() {
 		// Convert amount from gwei to wei.
@@ -368,7 +393,7 @@ func creditWithdrawals(block *types.Block, stateDB carmen.StateDB, chainConfig *
 // included uncles. The coinbase of each uncle block is also rewarded.
 // Copied from
 // https://github.com/0xsoniclabs/go-ethereum/blob/949ae6d396a5798262c0d228a8de0e3fa504e00c/consensus/ethash/consensus.go#L570
-func accumulateRewards(config *params.ChainConfig, stateDB carmen.StateDB, header *types.Header, uncles []*types.Header) {
+func accumulateRewards(config *params.ChainConfig, stateDB carmen.VmStateDB, header *types.Header, uncles []*types.Header) {
 	// Select the correct block reward based on chain progression
 	blockReward := ethash.FrontierBlockReward
 	if config.IsByzantium(header.Number) {

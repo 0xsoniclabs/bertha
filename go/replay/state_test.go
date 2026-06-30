@@ -244,7 +244,7 @@ func TestState_ApplyBlock_PrevRandaoIsMixDigestPostMerge(t *testing.T) {
 				return evmcore.ProcessSummary{}
 			})
 
-			_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil)
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
 			require.NoError(t, err)
 		})
 	}
@@ -272,7 +272,7 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil)
+	receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 }
@@ -306,7 +306,7 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil)
+	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
 	require.ErrorContains(t, err, "skipped txs")
 }
 
@@ -340,7 +340,7 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, corrections[17], chainConfig, nil)
+	receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, corrections[17], chainConfig, nil, false)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 
@@ -430,7 +430,7 @@ func TestState_ApplyBlock_BlobBaseFeeIsCalculatedFromHeaderForEthereum(t *testin
 				tt.upgrades,
 			)
 
-			_, err = state.ApplyBlock(block, testInterpreter(t), processor, tt.upgrades, nil, tt.chainConfig, nil)
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, tt.upgrades, nil, tt.chainConfig, nil, false)
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)
 			} else {
@@ -489,7 +489,7 @@ func TestState_ApplyBlock_ApplySonicVmConfigIfNotEthereumChain(t *testing.T) {
 				return evmcore.ProcessSummary{}
 			})
 
-			_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, tt.chainConfig, nil)
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, tt.chainConfig, nil, false)
 			require.NoError(t, err)
 		})
 	}
@@ -533,7 +533,7 @@ func TestState_ApplyBlock_EthereumCancunBlock_AppliesEIP4788(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil)
+	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
 	require.NoError(t, err)
 
 	// EIP-4788 stores the beacon root at storage slot (timestamp % 8191) + 8191.
@@ -586,7 +586,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7002(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil)
+	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
 	require.NoError(t, err)
 
 	// Verify the main side effects of the system calls:
@@ -640,7 +640,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7251(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil)
+	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
 	require.NoError(t, err)
 
 	// Verify the main side effects of the system calls:
@@ -713,7 +713,7 @@ func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChainsPostMerge(t *tes
 				tt.upgrades,
 			)
 
-			_, err = state.ApplyBlock(block, testInterpreter(t), processor, tt.upgrades, nil, tt.chainConfig, nil)
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, tt.upgrades, nil, tt.chainConfig, nil, false)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.wantBalanceWei, state.db.GetBalance(cc.Address(withdrawalAddr)).Uint64())
@@ -799,13 +799,52 @@ func TestState_ApplyBlock_RewardsAreAccumulatedInEthereumChainsPreMerge(t *testi
 				tt.upgrades,
 			)
 
-			_, err = state.ApplyBlock(block, testInterpreter(t), processor, tt.upgrades, nil, tt.chainConfig, nil)
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, tt.upgrades, nil, tt.chainConfig, nil, false)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.wantMinerBalance.ToBig(), state.db.GetBalance(cc.Address(coinbase)).ToBig())
 			require.Equal(t, tt.wantUncleBalance.ToBig(), state.db.GetBalance(cc.Address(uncleCoinbase)).ToBig())
 		})
 	}
+}
+
+func TestState_ApplyBlock_CanApplyBlockToArchiveState(t *testing.T) {
+	state, err := NewState(StateParameters{
+		Directory:   t.TempDir(),
+		WithArchive: true,
+		Schema:      5,
+	})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, state.Close()) }()
+
+	chainConfig := opera.CreateTransientEvmChainConfig(
+		1,
+		[]opera.UpgradeHeight{},
+		idx.Block(2),
+	)
+
+	processor := evmcore.NewStateProcessorForReplay(
+		chainConfig,
+		&blockHashHistory{},
+		opera.Upgrades{},
+	)
+
+	// Apply blocks 0, 1 and 2 normally to populate the archive.
+	for i := range 3 {
+		block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: uint64(i)})
+		require.NoError(t, err)
+		_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
+		require.NoError(t, err)
+	}
+	require.NoError(t, state.db.Flush())
+
+	// Apply block 1 using archive mode.
+	block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: 1})
+	require.NoError(t, err)
+
+	receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, true)
+	require.NoError(t, err)
+	require.Empty(t, receipts)
 }
 
 func TestState_setBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
@@ -817,7 +856,7 @@ func TestState_setBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
 
 	addr := common.Address{1}
 	balance := big.NewInt(1000)
-	state.setBalance(addr, balance)
+	setBalance(state.db, addr, balance)
 
 	// Check initial balance
 	have := state.db.GetBalance(cc.Address(addr))
@@ -825,13 +864,13 @@ func TestState_setBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
 
 	// Increase balance
 	balance = big.NewInt(1500)
-	state.setBalance(addr, balance)
+	setBalance(state.db, addr, balance)
 	have = state.db.GetBalance(cc.Address(addr))
 	require.Equal(t, uint64(1500), have.Uint64())
 
 	// Decrease balance
 	balance = big.NewInt(750)
-	state.setBalance(addr, balance)
+	setBalance(state.db, addr, balance)
 	have = state.db.GetBalance(cc.Address(addr))
 	require.Equal(t, uint64(750), have.Uint64())
 }
