@@ -998,7 +998,7 @@ func TestStateChainAdapter_ApplyBlock_CommitsRulesUpdateWhenEncounteringAnEpochS
 				require.NoError(t, state.Close())
 			}()
 
-			state.setBalance(address, big.NewInt(1e18))
+			setBalance(state.db, address, big.NewInt(1e18))
 
 			chain := &stateChainAdapter{
 				chainID:          chainID,
