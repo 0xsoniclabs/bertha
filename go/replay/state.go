@@ -138,6 +138,12 @@ func (s *State) Close() error {
 	return err
 }
 
+// GetArchiveBlockHeight returns the highest block currently available in the
+// archive. If the archive is empty, empty is true.
+func (s *State) GetArchiveBlockHeight() (height uint64, empty bool, err error) {
+	return s.db.GetArchiveBlockHeight()
+}
+
 // GetStateRoot returns the current state root hash of the state database.
 func (s *State) GetStateRoot() future.Future[result.Result[common.Hash]] {
 	return future.Then(s.db.GetCommitment(), func(res result.Result[cc.Hash]) result.Result[common.Hash] {
