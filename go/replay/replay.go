@@ -533,7 +533,7 @@ type Chain interface {
 		future.Future[result.Result[common.Hash]],
 		error,
 	)
-	GetBlockHash(number uint64) common.Hash
+	GetBlockHashHistory() *blockHashHistory
 }
 
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
@@ -560,8 +560,8 @@ func (a *stateChainAdapter) IsVerkleConformant() bool {
 	return a.schema == 6
 }
 
-func (a *stateChainAdapter) GetBlockHash(number uint64) common.Hash {
-	return a.blockHashHistory.GetBlockHash(number)
+func (a *stateChainAdapter) GetBlockHashHistory() *blockHashHistory {
+	return a.blockHashHistory
 }
 
 func (a *stateChainAdapter) ApplyBlock(block *types.Block) (

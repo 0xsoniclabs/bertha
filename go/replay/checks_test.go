@@ -290,7 +290,11 @@ func Test_checkBlockResults_FailsIfComputedValuesMismatchStoredOnes(t *testing.T
 
 			chain := NewMockChain(ctrl)
 			chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
-			chain.EXPECT().GetBlockHash(tc.block.Number - 1).Return(tc.hashOfParent).AnyTimes()
+			history := blockHashHistory{}
+			if tc.block.Number != 0 {
+				history.SetBlockHash(tc.block.Number-1, tc.hashOfParent)
+			}
+			chain.EXPECT().GetBlockHashHistory().Return(&history).AnyTimes()
 
 			logger := utils.NewMockLogger(ctrl)
 			logger.EXPECT().Warn(gomock.Any(), gomock.Any()).AnyTimes()
@@ -414,7 +418,7 @@ func Test_checkParentHash_LogsMessageIfPreviousBlockHashNotSet(t *testing.T) {
 	}
 
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().GetBlockHash(uint64(block.Number - 1)).Return(common.Hash{})
+	chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{})
 
 	logger := utils.NewMockLogger(ctrl)
 	logger.EXPECT().Warn("No block hash set. Parent hash verification skipped", "block_number", block.Number)

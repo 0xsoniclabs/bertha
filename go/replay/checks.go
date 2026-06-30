@@ -184,7 +184,7 @@ func checkStateRoot(
 func checkParentHash(chain Chain, block *blockdb.Block, logger utils.Logger) error {
 	hashOfParentBlock := common.Hash{}
 	if block.Number != 0 {
-		hashOfParentBlock = chain.GetBlockHash(block.Number - 1)
+		hashOfParentBlock = chain.GetBlockHashHistory().GetBlockHash(block.Number - 1)
 	}
 	parentHash := common.BytesToHash(block.ParentHash)
 	if hashOfParentBlock == (common.Hash{}) {

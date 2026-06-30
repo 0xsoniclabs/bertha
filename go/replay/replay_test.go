@@ -447,7 +447,7 @@ func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 	chain := NewMockChain(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
-	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).AnyTimes()
+	chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{}).AnyTimes()
 
 	// A block history with a few transactions.
 	blocks := []*blockdb.Block{
@@ -650,7 +650,9 @@ func failsOnParentHashMismatch(t *testing.T, run replayer) {
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 	hashOfParentBlock := common.Hash{0xAB}
-	chain.EXPECT().GetBlockHash(uint64(0)).Return(hashOfParentBlock)
+	history := blockHashHistory{}
+	history.SetBlockHash(0, hashOfParentBlock)
+	chain.EXPECT().GetBlockHashHistory().Return(&history)
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any()).
@@ -700,7 +702,7 @@ func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 	chain := NewMockChain(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
-	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
+	chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{})
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any()).
@@ -728,7 +730,7 @@ func skipReceiptsCheckIfNoReceiptsCheckFlagIsSet(t *testing.T, run replayer) {
 	chain := NewMockChain(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
-	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
+	chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{})
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any()).
@@ -754,7 +756,7 @@ func overwriteStateRootHash(t *testing.T, run replayer) {
 	chain := NewMockChain(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
-	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
+	chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{})
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any()).
@@ -795,7 +797,7 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 		chain := NewMockChain(ctrl)
 		chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 		chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
-		chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).AnyTimes()
+		chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{}).AnyTimes()
 
 		promise, firstHash := future.Create[result.Result[common.Hash]]()
 
