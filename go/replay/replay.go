@@ -65,6 +65,7 @@ type ReplayArgs struct {
 	InitDBDir               string
 	KeepDB                  bool
 	WithArchive             bool
+	ArchiveRate             float64
 	DBSchema                carmen.Schema
 	DBVariant               carmen.Variant
 	UsePipeline             bool
@@ -195,13 +196,28 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		skipReceiptsCheck:  args.NoReceiptsCheck,
 	}
 
+	// Create the archive verifier if archive mode is enabled.
+	var verifier *archiveVerifier
+	if args.WithArchive {
+		var cancel context.CancelCauseFunc
+		ctx, cancel = context.WithCancelCause(ctx)
+		defer cancel(nil)
+		verifier, err = newArchiveVerifier(ctx, cancel, runWithState, metadataStore, interpreter, chainID, args.ArchiveRate)
+		if err != nil {
+			return fmt.Errorf("failed to create archive verifier: %w", err)
+		}
+		if verifier != nil {
+			defer func() { err = errors.Join(err, verifier.close()) }()
+		}
+	}
+
 	// Pick the replay method.
 	run := runReplayLoop
 	if args.UsePipeline {
 		run = runReplayPipeline
 	}
 
-	return run(ctx, blocks, chain, blockDb, replayLoopContext, onBlockDone)
+	return run(ctx, blocks, chain, blockDb, replayLoopContext, onBlockDone, verifier)
 }
 
 func openBlockDb(args *ReplayArgs) (blockdb.BlockDB, func() error, error) {
@@ -339,6 +355,7 @@ func runReplayLoop(
 	blockDB blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
 	onBlockDone func(block *types.Block) error,
+	verifier *archiveVerifier,
 ) error {
 	for block, err := range blocks {
 		tracy.FrameMark()
@@ -352,6 +369,12 @@ func runReplayLoop(
 		gethBlock, err := convert.ConvertToGethBlock(block)
 		if err != nil {
 			return fmt.Errorf("failed to convert block %d: %w", block.Number, err)
+		}
+
+		// If the archive verifier is enabled, capture the current state of the block hash history.
+		var hashHistory *blockHashHistory
+		if verifier != nil {
+			hashHistory = chain.GetBlockHashHistory().Clone()
 		}
 
 		// Run the transactions in the block against the state database.
@@ -371,6 +394,11 @@ func runReplayLoop(
 				return err
 			}
 		}
+
+		// Submit block for archive verification if enabled.
+		if verifier != nil {
+			verifier.submit(block, hashHistory)
+		}
 	}
 	return nil
 }
@@ -386,6 +414,7 @@ func runReplayPipeline(
 	blockDB blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
 	onBlockDone func(block *types.Block) error,
+	verifier *archiveVerifier,
 ) error {
 	// This value must be smaller than 256. Otherwise, accessing the block hash
 	// from the blockHashHistory for the parent hash verification, might return
@@ -410,6 +439,9 @@ func runReplayPipeline(
 		decoded   *decodedBlock
 		receipts  types.Receipts
 		stateRoot future.Future[result.Result[common.Hash]]
+		// This needs to be deep-copied, it is just a pointer to avoid copying
+		// the whole struct every time it is passed through the channels.
+		hashHistory *blockHashHistory
 	}
 
 	// Channels between stages
@@ -474,15 +506,21 @@ func runReplayPipeline(
 		defer close(results)
 		for decoded := range decodedBlocks {
 			gethBlock := decoded.geth
+			// If the archive verifier is enabled, capture the current state of the block hash history.
+			var hashHistory *blockHashHistory
+			if verifier != nil {
+				hashHistory = chain.GetBlockHashHistory().Clone()
+			}
 			receipts, stateRootFuture, err := chain.ApplyBlock(gethBlock)
 			if err != nil {
 				reportIssue(fmt.Errorf("failed to apply block %d: %w", gethBlock.NumberU64(), err))
 				return
 			}
 			result := &processResult{
-				decoded:   decoded,
-				receipts:  receipts,
-				stateRoot: stateRootFuture,
+				decoded:     decoded,
+				receipts:    receipts,
+				stateRoot:   stateRootFuture,
+				hashHistory: hashHistory,
 			}
 			select {
 			case results <- result:
@@ -510,6 +548,11 @@ func runReplayPipeline(
 					reportIssue(err)
 					return
 				}
+			}
+
+			// Submit block for archive verification if enabled.
+			if verifier != nil {
+				verifier.submit(block, result.hashHistory)
 			}
 		}
 	})
@@ -729,6 +772,14 @@ func (f *FlagWithConfirmation) Confirm() {
 // be used with the EVM state processor to serve historic block hashes.
 type blockHashHistory struct {
 	historicHashes [256]common.Hash
+}
+
+func (h *blockHashHistory) Clone() *blockHashHistory {
+	if h == nil {
+		return nil
+	}
+	clone := *h
+	return &clone
 }
 
 func (h *blockHashHistory) GetBlockHash(number uint64) common.Hash {

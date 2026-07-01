@@ -44,7 +44,7 @@ const (
 // blockWithHashHistory holds a block and the block hash history for that block.
 type blockWithHashHistory struct {
 	block       *blockdb.Block
-	hashHistory blockHashHistory
+	hashHistory *blockHashHistory
 }
 
 // archiveVerifier re-executes old blocks against archive states to verify that
@@ -81,8 +81,8 @@ func newArchiveVerifier(
 	if archiveRate == 0 {
 		return nil, nil // Archive verification is disabled.
 	}
-	if math.IsNaN(archiveRate) || math.IsInf(archiveRate, 0) || archiveRate <= 0 {
-		return nil, fmt.Errorf("archive rate must be a finite number greater than zero, got %g", archiveRate)
+	if math.IsNaN(archiveRate) || math.IsInf(archiveRate, 0) || archiveRate < 0 {
+		return nil, fmt.Errorf("archive rate must be a finite number greater than or equal to zero, got %g", archiveRate)
 	}
 	interval := time.Duration(float64(time.Second) / archiveRate)
 	if interval <= 0 {
@@ -108,7 +108,7 @@ func newArchiveVerifier(
 }
 
 // submit adds a block to the archive verifier's pool for later verification.
-func (v *archiveVerifier) submit(block *blockdb.Block, blockHashHistory blockHashHistory) {
+func (v *archiveVerifier) submit(block *blockdb.Block, blockHashHistory *blockHashHistory) {
 	// Block 0 is skipped since it is equivalent with the genesis data import.
 	if block.Number > 0 {
 		v.pool.Add(blockWithHashHistory{block, blockHashHistory})
@@ -201,7 +201,7 @@ func (v *archiveVerifier) verifyBlock() {
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
-		&item.hashHistory,
+		item.hashHistory,
 		upgrades,
 	)
 
