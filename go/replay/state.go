@@ -61,6 +61,7 @@ import (
 type State struct {
 	// TODO: replace with Carmen facade
 	db             carmen.StateDB
+	state          carmen.State
 	stateParameter StateParameters
 }
 
@@ -122,8 +123,14 @@ func NewState(params StateParameters) (*State, error) {
 	db := carmen.CreateCustomStateDBUsing(state, 0)
 	return &State{
 		db:             db,
+		state:          state,
 		stateParameter: params,
 	}, nil
+}
+
+// GetMemoryFootprint returns the memory footprint of the underlying carmen state.
+func (s *State) GetMemoryFootprint() string {
+	return s.state.GetMemoryFootprint().ToString("carmen")
 }
 
 // Close closes the state database and releases any resources associated with it.
