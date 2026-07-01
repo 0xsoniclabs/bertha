@@ -483,7 +483,7 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 
 func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
+	chain := newMockChainWithMaybeSnapshot(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 	chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{}).AnyTimes()
@@ -551,7 +551,7 @@ func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 
 func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
+	chain := newMockChainWithMaybeSnapshot(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	injectedError := fmt.Errorf("injected error")
@@ -563,7 +563,7 @@ func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
 
 func failsOnCancelledContext(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
+	chain := newMockChainWithMaybeSnapshot(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	ctxt, cancel := context.WithCancel(t.Context())
@@ -578,7 +578,7 @@ func failsOnCancelledContext(t *testing.T, run replayer) {
 
 func failsOnBlockConversionError(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
+	chain := newMockChainWithMaybeSnapshot(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	ctxt := t.Context()
@@ -595,7 +595,7 @@ func failsOnBlockConversionError(t *testing.T, run replayer) {
 
 func failsOnBlockApplicationError(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
+	chain := newMockChainWithMaybeSnapshot(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	injectedError := fmt.Errorf("injected error")
@@ -613,7 +613,7 @@ func failsOnBlockApplicationError(t *testing.T, run replayer) {
 
 func failsOnCommitmentComputationError(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
+	chain := newMockChainWithMaybeSnapshot(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	injectedError := fmt.Errorf("injected error")
@@ -661,7 +661,7 @@ func failsOnDifferentReceipts(t *testing.T, run replayer) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
-			chain := NewMockChain(ctrl)
+			chain := newMockChainWithMaybeSnapshot(ctrl)
 			chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 			chain.EXPECT().
@@ -684,7 +684,7 @@ func failsOnDifferentReceipts(t *testing.T, run replayer) {
 
 func failsOnParentHashMismatch(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
+	chain := newMockChainWithMaybeSnapshot(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
@@ -714,7 +714,7 @@ func failsOnParentHashMismatch(t *testing.T, run replayer) {
 
 func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
+	chain := newMockChainWithMaybeSnapshot(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
@@ -738,7 +738,7 @@ func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 
 func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
+	chain := newMockChainWithMaybeSnapshot(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 	chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{})
@@ -766,7 +766,7 @@ func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 
 func skipReceiptsCheckIfNoReceiptsCheckFlagIsSet(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
+	chain := newMockChainWithMaybeSnapshot(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 	chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{})
@@ -792,7 +792,7 @@ func skipReceiptsCheckIfNoReceiptsCheckFlagIsSet(t *testing.T, run replayer) {
 
 func stopsOnArchiveVerifierFailure(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
+	chain := newMockChainWithMaybeSnapshot(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 	chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{}).AnyTimes()
@@ -848,7 +848,7 @@ func stopsOnArchiveVerifierFailure(t *testing.T, run replayer) {
 
 func overwriteStateRootHash(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
-	chain := NewMockChain(ctrl)
+	chain := newMockChainWithMaybeSnapshot(ctrl)
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 	chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{})
@@ -889,7 +889,7 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 		// stuck trying to send to full channels. We then inject an error in stage
 		// 3 and verify that the other stages are aborted correctly.
 		ctrl := gomock.NewController(t)
-		chain := NewMockChain(ctrl)
+		chain := newMockChainWithMaybeSnapshot(ctrl)
 		chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 		chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 		chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{}).AnyTimes()
@@ -1402,4 +1402,17 @@ func makeUpdateNetworkRulesLog(diff []byte) *core_types.Log {
 		Topics:  []common.Hash{driverpos.Topics.UpdateNetworkRules},
 		Data:    data,
 	}
+}
+
+func newMockChainWithMaybeSnapshot(ctrl *gomock.Controller) *MockChain {
+	chain := NewMockChain(ctrl)
+	chain.EXPECT().
+		MaybeSnapshot(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(
+			_ uint64,
+			sr future.Future[result.Result[common.Hash]],
+		) (future.Future[result.Result[common.Hash]], error) {
+			return sr, nil
+		}).AnyTimes()
+	return chain
 }
