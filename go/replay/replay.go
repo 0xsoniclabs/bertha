@@ -383,15 +383,21 @@ func runReplayLoop(
 			return fmt.Errorf("failed to apply block %d: %w", block.Number, err)
 		}
 
+		// Create a snapshot if one is due at this block.
+		stateRoot, err = chain.MaybeSnapshot(gethBlock.NumberU64(), stateRoot)
+		if err != nil {
+			return fmt.Errorf("failed to create snapshot at block %d: %w", block.Number, err)
+		}
+
 		// Check the receipts against the expected values in the block.
 		if err := checkBlockResults(chain, block, receipts, stateRoot, blockDB, &replayLoopContext, slog.Default()); err != nil {
-			return err
+			return fmt.Errorf("failed to check block results for block %d: %w", block.Number, err)
 		}
 
 		// Report the progress of the replay.
 		if onBlockDone != nil {
 			if err := onBlockDone(gethBlock); err != nil {
-				return err
+				return fmt.Errorf("failed to execute onBlockDone callback for block %d: %w", block.Number, err)
 			}
 		}
 
@@ -516,6 +522,12 @@ func runReplayPipeline(
 				reportIssue(fmt.Errorf("failed to apply block %d: %w", gethBlock.NumberU64(), err))
 				return
 			}
+			// Create a snapshot if one is due at this block.
+			stateRootFuture, err = chain.MaybeSnapshot(gethBlock.NumberU64(), stateRootFuture)
+			if err != nil {
+				reportIssue(fmt.Errorf("failed to create snapshot at block %d: %w", gethBlock.NumberU64(), err))
+				return
+			}
 			result := &processResult{
 				decoded:     decoded,
 				receipts:    receipts,
@@ -538,14 +550,14 @@ func runReplayPipeline(
 
 			err := checkBlockResults(chain, block, result.receipts, result.stateRoot, blockDB, &replayLoopContext, slog.Default())
 			if err != nil {
-				reportIssue(err)
+				reportIssue(fmt.Errorf("failed to check block results for block %d: %w", block.Number, err))
 				return
 			}
 
 			// Report the progress of the replay.
 			if onBlockDone != nil {
 				if err := onBlockDone(result.decoded.geth); err != nil {
-					reportIssue(err)
+					reportIssue(fmt.Errorf("failed to execute onBlockDone callback for block %d: %w", block.Number, err))
 					return
 				}
 			}
@@ -576,6 +588,14 @@ type Chain interface {
 		future.Future[result.Result[common.Hash]],
 		error,
 	)
+	// MaybeSnapshot creates a state database snapshot if one is due at the
+	// given block number. It must be called after ApplyBlock and receives the
+	// state-root future returned by ApplyBlock so it can be resolved before
+	// the state pointer is swapped.
+	MaybeSnapshot(
+		blockNumber uint64,
+		stateRoot future.Future[result.Result[common.Hash]],
+	) (future.Future[result.Result[common.Hash]], error)
 	GetBlockHashHistory() *blockHashHistory
 }
 
@@ -669,16 +689,33 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 
 	a.blockHashHistory.SetBlockHash(block.NumberU64(), completeHeader.Hash())
 
-	stateRoot := a.state.GetStateRoot()
-	if a.snapshotHandler.ShouldCreateSnapshot(block.NumberU64()) {
-		stateRoot = future.Immediate(stateRoot.Await())
-		a.state, err = a.snapshotHandler.Snapshot(block.NumberU64(), a.state)
-		if err != nil {
-			return nil, stateRoot, fmt.Errorf("failed to create snapshot at block %d: %w", block.NumberU64(), err)
-		}
+	return receipts, a.state.GetStateRoot(), nil
+}
+
+// MaybeSnapshot creates a state database snapshot if one is due at the given
+// block number. When a snapshot is triggered, the stateRoot future is awaited
+// and returned as an immediate future so it remains valid after the underlying
+// state database has been closed and reopened. When no snapshot is due, the
+// stateRoot future is returned unchanged.
+func (a *stateChainAdapter) MaybeSnapshot(
+	blockNumber uint64,
+	stateRoot future.Future[result.Result[common.Hash]],
+) (future.Future[result.Result[common.Hash]], error) {
+	if !a.snapshotHandler.ShouldCreateSnapshot(blockNumber) {
+		return stateRoot, nil
 	}
-	// Return the receipts and the resulting state root.
-	return receipts, stateRoot, nil
+	// Resolve the state-root future before swapping the state pointer so it
+	// remains valid after the underlying state has been closed and reopened.
+	stateRoot = future.Immediate(stateRoot.Await())
+
+	a.stateRwMutex.Lock()
+	defer a.stateRwMutex.Unlock()
+	newState, err := a.snapshotHandler.Snapshot(blockNumber, a.state)
+	if err != nil {
+		return stateRoot, fmt.Errorf("failed to create snapshot at block %d: %w", blockNumber, err)
+	}
+	a.state = newState
+	return stateRoot, nil
 }
 
 func getChainConfigAndUpgrades(block *types.Block, chainID uint64, metadata MetadataStore) (*params.ChainConfig, opera.Upgrades) {
