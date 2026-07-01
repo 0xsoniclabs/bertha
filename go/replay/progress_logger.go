@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/0xsoniclabs/bertha/utils"
@@ -138,6 +139,20 @@ func (p *progressLogger) LogProgress(block *types.Block) error {
 		"NumGC", memStats.NumGC,
 		"HeapObjects", memStats.HeapObjects,
 	)
+
+	// Log the memory footprint of the carmen state.
+	if p.runWithState != nil {
+		err := p.runWithState(func(state *State) error {
+			p.logger.Info("Carmen memory footprint")
+			for _, line := range strings.Split(strings.TrimRight(state.GetMemoryFootprint(), "\n"), "\n") {
+				p.logger.Info(line)
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
 
 	p.logger.Info("Processing block", args...)
 	return nil
