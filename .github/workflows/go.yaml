@@ -87,7 +87,7 @@ jobs:
         packages: librocksdb-dev
     - name: go test
       working-directory: go
-      run: go test --count 1 ./...
+      run: go test -race --count 1 ./...
 
   protobuf:
     name: protobuf

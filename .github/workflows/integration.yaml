@@ -62,9 +62,24 @@ jobs:
     - name: verify blockdb (Go)
       working-directory: go
       run: go run . verify --database-dir ../.blockdb --chain-id 4003
-    - name: replay blocks
+    - name: replay blocks [baseline]
       working-directory: go
       run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json
+    - name: replay blocks [snapshot]
+      working-directory: go
+      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json --snapshot-interval 10
+    - name: replay blocks [archive]
+      working-directory: go
+      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json --with-archive
+    - name: replay blocks [archive+snapshot]
+      working-directory: go
+      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json --with-archive --snapshot-interval 10
+    - name: replay blocks [archive+load]
+      working-directory: go
+      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json --with-archive --archive-rate 10000
+    - name: replay blocks [archive+load+snapshot]
+      working-directory: go
+      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json --with-archive --archive-rate 10000 --snapshot-interval 10
 
   generate-test-data:
     name: generate-test-data
