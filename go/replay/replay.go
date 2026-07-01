@@ -178,12 +178,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	if args.LogDBSize {
 		slog.Warn("DB size log enabled. This will trigger a flush with every progress report and reduce performance")
 	}
-	runWithState := func(f func(*State) error) error {
-		chain.stateRwMutex.Lock()
-		defer chain.stateRwMutex.Unlock()
-		return f(chain.state)
-	}
-	progressLogger := startProgressLogger(slog.Default(), runWithState, args.StateDBDir, args.LogDBSize)
+	progressLogger := startProgressLogger(slog.Default(), chain, args.StateDBDir, args.LogDBSize)
 	onBlockDone := func(block *types.Block) error { return progressLogger.LogProgress(block) }
 	defer func() { progressLogger.LogSummary() }()
 
@@ -202,7 +197,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		var cancel context.CancelCauseFunc
 		ctx, cancel = context.WithCancelCause(ctx)
 		defer cancel(nil)
-		verifier, err = newArchiveVerifier(ctx, cancel, runWithState, metadataStore, interpreter, chainID, args.ArchiveRate)
+		verifier, err = newArchiveVerifier(ctx, cancel, chain, metadataStore, interpreter, chainID, args.ArchiveRate)
 		if err != nil {
 			return fmt.Errorf("failed to create archive verifier: %w", err)
 		}
@@ -371,10 +366,15 @@ func runReplayLoop(
 			return fmt.Errorf("failed to convert block %d: %w", block.Number, err)
 		}
 
+		var hashOfParentBlock common.Hash
+		if gethBlock.NumberU64() > 0 {
+			hashOfParentBlock = chain.GetBlockHash(gethBlock.NumberU64() - 1)
+		}
+
 		// If the archive verifier is enabled, capture the current state of the block hash history.
-		var hashHistory *blockHashHistory
+		var hashHistoryClone *blockHashHistory
 		if verifier != nil {
-			hashHistory = chain.GetBlockHashHistory().Clone()
+			hashHistoryClone = chain.CloneBlockHashHistory()
 		}
 
 		// Run the transactions in the block against the state database.
@@ -390,7 +390,7 @@ func runReplayLoop(
 		}
 
 		// Check the receipts against the expected values in the block.
-		if err := checkBlockResults(chain, block, receipts, stateRoot, blockDB, &replayLoopContext, slog.Default()); err != nil {
+		if err := checkBlockResults(chain, block, receipts, stateRoot, hashOfParentBlock, blockDB, &replayLoopContext, slog.Default()); err != nil {
 			return fmt.Errorf("failed to check block results for block %d: %w", block.Number, err)
 		}
 
@@ -403,7 +403,7 @@ func runReplayLoop(
 
 		// Submit block for archive verification if enabled.
 		if verifier != nil {
-			verifier.submit(block, hashHistory)
+			verifier.submit(block, hashHistoryClone)
 		}
 	}
 	return nil
@@ -422,11 +422,6 @@ func runReplayPipeline(
 	onBlockDone func(block *types.Block) error,
 	verifier *archiveVerifier,
 ) error {
-	// This value must be smaller than 256. Otherwise, accessing the block hash
-	// from the blockHashHistory for the parent hash verification, might return
-	// incorrect hashes as the processing of blocks might be too much ahead and
-	// overwrite the hashes in the blockHashHistory before they are accessed for
-	// the parent hash verification.
 	const channelSize = 128
 
 	// Pipeline stages:
@@ -442,9 +437,10 @@ func runReplayPipeline(
 
 	// Result of second stage: applied block results
 	type processResult struct {
-		decoded   *decodedBlock
-		receipts  types.Receipts
-		stateRoot future.Future[result.Result[common.Hash]]
+		decoded           *decodedBlock
+		receipts          types.Receipts
+		stateRoot         future.Future[result.Result[common.Hash]]
+		hashOfParentBlock common.Hash
 		// This needs to be deep-copied, it is just a pointer to avoid copying
 		// the whole struct every time it is passed through the channels.
 		hashHistory *blockHashHistory
@@ -512,10 +508,14 @@ func runReplayPipeline(
 		defer close(results)
 		for decoded := range decodedBlocks {
 			gethBlock := decoded.geth
+			var hashOfParentBlock common.Hash
+			if gethBlock.NumberU64() > 0 {
+				hashOfParentBlock = chain.GetBlockHash(gethBlock.NumberU64() - 1)
+			}
 			// If the archive verifier is enabled, capture the current state of the block hash history.
-			var hashHistory *blockHashHistory
+			var hashHistoryClone *blockHashHistory
 			if verifier != nil {
-				hashHistory = chain.GetBlockHashHistory().Clone()
+				hashHistoryClone = chain.CloneBlockHashHistory()
 			}
 			receipts, stateRootFuture, err := chain.ApplyBlock(gethBlock)
 			if err != nil {
@@ -529,10 +529,11 @@ func runReplayPipeline(
 				return
 			}
 			result := &processResult{
-				decoded:     decoded,
-				receipts:    receipts,
-				stateRoot:   stateRootFuture,
-				hashHistory: hashHistory,
+				decoded:           decoded,
+				receipts:          receipts,
+				stateRoot:         stateRootFuture,
+				hashOfParentBlock: hashOfParentBlock,
+				hashHistory:       hashHistoryClone,
 			}
 			select {
 			case results <- result:
@@ -548,7 +549,7 @@ func runReplayPipeline(
 		for result := range results {
 			block := result.decoded.proto
 
-			err := checkBlockResults(chain, block, result.receipts, result.stateRoot, blockDB, &replayLoopContext, slog.Default())
+			err := checkBlockResults(chain, block, result.receipts, result.stateRoot, result.hashOfParentBlock, blockDB, &replayLoopContext, slog.Default())
 			if err != nil {
 				reportIssue(fmt.Errorf("failed to check block results for block %d: %w", block.Number, err))
 				return
@@ -596,17 +597,61 @@ type Chain interface {
 		blockNumber uint64,
 		stateRoot future.Future[result.Result[common.Hash]],
 	) (future.Future[result.Result[common.Hash]], error)
-	GetBlockHashHistory() *blockHashHistory
+	GetBlockHash(blockNumber uint64) common.Hash
+	CloneBlockHashHistory() *blockHashHistory
+}
+
+// ArchiveState exposes the subset of state operations required by the archive
+// verifier. Implementations must be safe to call concurrently with block
+// application on the same underlying state.
+type ArchiveState interface {
+	GetArchiveBlockHeight() (height uint64, empty bool, err error)
+	ApplyArchiveBlock(
+		block *types.Block,
+		interpreter tosca.Interpreter,
+		processor Processor,
+		upgrades opera.Upgrades,
+		corrections map[common.Address]Correction,
+		chainConfig *params.ChainConfig,
+	) (types.Receipts, error)
+}
+
+// StateFlusher exposes the state-flush operation required by the progress
+// logger. Implementations must be safe to call concurrently with block
+// application on the same underlying state.
+type StateFlusher interface {
+	FlushState() error
 }
 
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
+//
+// Concurrency: two mutexes coordinate access to the adapter.
+//
+//   - stateSwitchMutex guards accesses to the underlying *State pointer.
+//     RLock is held during operations that use the current state (block
+//     application via ApplyBlock, archive queries via GetArchiveBlockHeight
+//     and ApplyArchiveBlock, flushes via FlushState). Lock is held only for
+//     the snapshot pointer swap in MaybeSnapshot, which closes and reopens
+//     the state database.
+//
+//   - stateModifyMutex serializes live block application. It ensures that at
+//     most one goroutine executes ApplyBlock at a time and protects
+//     mutations to adapter fields performed during block application
+//     (notably blockHashHistory writes).
+//
+// Together they allow live block application and concurrent archive
+// verification / flushes to proceed in parallel while ensuring the state
+// pointer is not swapped while any operation is using it. Lock ordering:
+// callers acquiring both locks must take stateSwitchMutex before
+// stateModifyMutex.
 type stateChainAdapter struct {
 	chainID          uint64
 	metadataStore    MetadataStore
 	blockHashHistory *blockHashHistory
 	interpreter      tosca.Interpreter
 	state            *State
-	stateRwMutex     sync.Mutex
+	stateSwitchMutex sync.RWMutex
+	stateModifyMutex sync.Mutex
 	schema           carmen.Schema
 	snapshotHandler  *SnapshotHandler
 }
@@ -623,17 +668,33 @@ func (a *stateChainAdapter) IsVerkleConformant() bool {
 	return a.schema == 6
 }
 
-func (a *stateChainAdapter) GetBlockHashHistory() *blockHashHistory {
-	return a.blockHashHistory
+func (a *stateChainAdapter) GetBlockHash(blockNumber uint64) common.Hash {
+	a.stateSwitchMutex.RLock()
+	defer a.stateSwitchMutex.RUnlock()
+	a.stateModifyMutex.Lock()
+	defer a.stateModifyMutex.Unlock()
+	return a.blockHashHistory.GetBlockHash(blockNumber)
 }
 
+func (a *stateChainAdapter) CloneBlockHashHistory() *blockHashHistory {
+	a.stateSwitchMutex.RLock()
+	defer a.stateSwitchMutex.RUnlock()
+	a.stateModifyMutex.Lock()
+	defer a.stateModifyMutex.Unlock()
+	return a.blockHashHistory.Clone()
+}
+
+// ApplyBlock applies the given block to the state database and returns the
+// resulting receipts and state-root future.
 func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	types.Receipts,
 	future.Future[result.Result[common.Hash]],
 	error,
 ) {
-	a.stateRwMutex.Lock()
-	defer a.stateRwMutex.Unlock()
+	a.stateSwitchMutex.RLock()
+	defer a.stateSwitchMutex.RUnlock()
+	a.stateModifyMutex.Lock()
+	defer a.stateModifyMutex.Unlock()
 
 	zoneBlock := tracy.ZoneBegin("ProcessBlock")
 	defer zoneBlock.End()
@@ -697,6 +758,11 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 // and returned as an immediate future so it remains valid after the underlying
 // state database has been closed and reopened. When no snapshot is due, the
 // stateRoot future is returned unchanged.
+//
+// The snapshot swap runs under an exclusive lock on stateSwitchMutex, so it
+// will block until all in-flight operations holding stateSwitchMutex.RLock()
+// complete. The stateRoot future must be resolved before the state pointer is
+// swapped so it remains valid after the old state DB is closed and reopened.
 func (a *stateChainAdapter) MaybeSnapshot(
 	blockNumber uint64,
 	stateRoot future.Future[result.Result[common.Hash]],
@@ -708,14 +774,47 @@ func (a *stateChainAdapter) MaybeSnapshot(
 	// remains valid after the underlying state has been closed and reopened.
 	stateRoot = future.Immediate(stateRoot.Await())
 
-	a.stateRwMutex.Lock()
-	defer a.stateRwMutex.Unlock()
+	a.stateSwitchMutex.Lock()
+	defer a.stateSwitchMutex.Unlock()
 	newState, err := a.snapshotHandler.Snapshot(blockNumber, a.state)
 	if err != nil {
 		return stateRoot, fmt.Errorf("failed to create snapshot at block %d: %w", blockNumber, err)
 	}
 	a.state = newState
 	return stateRoot, nil
+}
+
+// FlushState flushes pending writes in the state database to disk.
+// It is safe to call concurrently with block application (ApplyBlock) and
+// other archive-side operations.
+func (a *stateChainAdapter) FlushState() error {
+	a.stateSwitchMutex.RLock()
+	defer a.stateSwitchMutex.RUnlock()
+	return a.state.db.Flush()
+}
+
+// GetArchiveBlockHeight returns the highest block currently available in the
+// archive. It is safe to call concurrently with block application.
+func (a *stateChainAdapter) GetArchiveBlockHeight() (height uint64, empty bool, err error) {
+	a.stateSwitchMutex.RLock()
+	defer a.stateSwitchMutex.RUnlock()
+	return a.state.GetArchiveBlockHeight()
+}
+
+// ApplyArchiveBlock re-executes the given block against the archive state for
+// its parent block and returns the resulting receipts. The live state is not
+// modified. It is safe to call concurrently with block application.
+func (a *stateChainAdapter) ApplyArchiveBlock(
+	block *types.Block,
+	interpreter tosca.Interpreter,
+	processor Processor,
+	upgrades opera.Upgrades,
+	corrections map[common.Address]Correction,
+	chainConfig *params.ChainConfig,
+) (types.Receipts, error) {
+	a.stateSwitchMutex.RLock()
+	defer a.stateSwitchMutex.RUnlock()
+	return a.state.ApplyBlock(block, interpreter, processor, upgrades, corrections, chainConfig, nil, true)
 }
 
 func getChainConfigAndUpgrades(block *types.Block, chainID uint64, metadata MetadataStore) (*params.ChainConfig, opera.Upgrades) {

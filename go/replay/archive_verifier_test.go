@@ -27,7 +27,6 @@ import (
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/0xsoniclabs/bertha/utils"
-	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -49,12 +48,15 @@ func TestArchiveVerifier_NewArchiveVerifier_ChecksArchiveRate(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			archive := NewMockArchiveState(ctrl)
+			// The dispatcher goroutine may call GetArchiveBlockHeight for valid rates.
+			archive.EXPECT().GetArchiveBlockHeight().Return(uint64(0), true, nil).AnyTimes()
+
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
 
-			verifier, err := newArchiveVerifier(ctx, cancel, func(func(*State) error) error {
-				return nil
-			}, &BlockDBMetadataStore{}, nil, 123, tc.rate)
+			verifier, err := newArchiveVerifier(ctx, cancel, archive, &BlockDBMetadataStore{}, nil, 123, tc.rate)
 
 			if tc.err {
 				require.ErrorContains(t, err, "archive rate")
@@ -63,6 +65,7 @@ func TestArchiveVerifier_NewArchiveVerifier_ChecksArchiveRate(t *testing.T) {
 				require.NoError(t, err)
 				if tc.verifier {
 					require.NotNil(t, verifier)
+					require.NoError(t, verifier.close())
 				} else {
 					require.Nil(t, verifier)
 				}
@@ -97,11 +100,13 @@ func TestArchiveVerifier_Submit_AddsNonZeroBlocks(t *testing.T) {
 func TestArchiveVerifier_dispatcher_LimitsConcurrency(t *testing.T) {
 	var startedTasks atomic.Int64
 	finish := make(chan struct{})
-	runWithState := func(func(*State) error) error {
+	ctrl := gomock.NewController(t)
+	archive := NewMockArchiveState(ctrl)
+	archive.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
 		startedTasks.Add(1)
 		<-finish
-		return nil
-	}
+		return 0, true, nil
+	}).AnyTimes()
 
 	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
 	require.NoError(t, err)
@@ -116,7 +121,7 @@ func TestArchiveVerifier_dispatcher_LimitsConcurrency(t *testing.T) {
 
 	v := &archiveVerifier{
 		pool:         pool,
-		runWithState: runWithState,
+		archive:      archive,
 		metadata:     &BlockDBMetadataStore{},
 		chainID:      123,
 		ctx:          ctx,
@@ -235,7 +240,7 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 
 			verifier := &archiveVerifier{
 				pool:         pool,
-				runWithState: func(f func(*State) error) error { return f(state) },
+				archive:      chain,
 				metadata:     &BlockDBMetadataStore{},
 				interpreter:  interpreter,
 				chainID:      123,
@@ -269,10 +274,13 @@ func TestArchiveVerifier_verifyBlock_CancelsContextOnFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	injectedErr := fmt.Errorf("injected archive error")
+	ctrl := gomock.NewController(t)
+	archive := NewMockArchiveState(ctrl)
+	// Use an archive that always fails to trigger verifier error.
+	archive.EXPECT().GetArchiveBlockHeight().Return(uint64(0), false, injectedErr)
 	verifier := &archiveVerifier{
-		pool: pool,
-		// Use a runWithState that always fails to trigger verifier error.
-		runWithState: func(func(*State) error) error { return injectedErr },
+		pool:         pool,
+		archive:      archive,
 		metadata:     &BlockDBMetadataStore{},
 		interpreter:  interpreter,
 		chainID:      123,
@@ -298,20 +306,15 @@ func TestArchiveVerifier_verifyBlock_CancelsContextOnFailure(t *testing.T) {
 }
 
 func TestArchiveVerifier_close_WaitsForInFlightVerifications(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	stateDb := carmen.NewMockStateDB(ctrl)
-	// Report the archive as empty so verifyBlock returns immediately after
-	// the archive-height check, without touching the pool or block payloads.
-	stateDb.EXPECT().GetArchiveBlockHeight().Return(uint64(0), true, nil).AnyTimes()
-	state := &State{db: stateDb}
-
 	var startedTasks atomic.Int64
 	finish := make(chan struct{})
-	runWithState := func(fn func(*State) error) error {
+	ctrl := gomock.NewController(t)
+	archive := NewMockArchiveState(ctrl)
+	archive.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
 		startedTasks.Add(1)
 		<-finish
-		return fn(state)
-	}
+		return 0, true, nil
+	}).AnyTimes()
 
 	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
 	require.NoError(t, err)
@@ -326,7 +329,7 @@ func TestArchiveVerifier_close_WaitsForInFlightVerifications(t *testing.T) {
 
 	v := &archiveVerifier{
 		pool:         pool,
-		runWithState: runWithState,
+		archive:      archive,
 		metadata:     &BlockDBMetadataStore{},
 		chainID:      123,
 		ctx:          ctx,
@@ -365,16 +368,17 @@ func TestArchiveVerifier_close_WaitsForInFlightVerifications(t *testing.T) {
 
 func TestArchiveVerifier_close_StopsDispatcher(t *testing.T) {
 	var startedTasks atomic.Int64
-	runWithState := func(func(*State) error) error {
+	ctrl := gomock.NewController(t)
+	archive := NewMockArchiveState(ctrl)
+	// Report an empty archive so verifyBlock returns after the height check
+	// without touching the pool or applying blocks.
+	archive.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
 		startedTasks.Add(1)
-		return nil
-	}
+		return 0, true, nil
+	}).AnyTimes()
 
 	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
 	require.NoError(t, err)
-	// Add blocks with Number > archiveHeight (which defaults to 0) so
-	// verifyBlock exits cleanly after the pool-scan loop without touching
-	// the block payload or invoking additional runWithState calls.
 	for i := 2; i <= 10; i++ {
 		pool.Add(blockWithHashHistory{block: &blockdb.Block{Number: uint64(i)}})
 	}
@@ -384,7 +388,7 @@ func TestArchiveVerifier_close_StopsDispatcher(t *testing.T) {
 
 	v := &archiveVerifier{
 		pool:         pool,
-		runWithState: runWithState,
+		archive:      archive,
 		metadata:     &BlockDBMetadataStore{},
 		chainID:      123,
 		ctx:          ctx,

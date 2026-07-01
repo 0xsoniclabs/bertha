@@ -14,8 +14,11 @@ import (
 
 	future "github.com/0xsoniclabs/carmen/go/common/future"
 	result "github.com/0xsoniclabs/carmen/go/common/result"
+	opera "github.com/0xsoniclabs/sonic/opera"
+	tosca "github.com/0xsoniclabs/tosca/go/tosca"
 	common "github.com/ethereum/go-ethereum/common"
 	types "github.com/ethereum/go-ethereum/core/types"
+	params "github.com/ethereum/go-ethereum/params"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -73,18 +76,32 @@ func (mr *MockChainMockRecorder) ChainID() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChainID", reflect.TypeOf((*MockChain)(nil).ChainID))
 }
 
-// GetBlockHashHistory mocks base method.
-func (m *MockChain) GetBlockHashHistory() *blockHashHistory {
+// CloneBlockHashHistory mocks base method.
+func (m *MockChain) CloneBlockHashHistory() *blockHashHistory {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetBlockHashHistory")
+	ret := m.ctrl.Call(m, "CloneBlockHashHistory")
 	ret0, _ := ret[0].(*blockHashHistory)
 	return ret0
 }
 
-// GetBlockHashHistory indicates an expected call of GetBlockHashHistory.
-func (mr *MockChainMockRecorder) GetBlockHashHistory() *gomock.Call {
+// CloneBlockHashHistory indicates an expected call of CloneBlockHashHistory.
+func (mr *MockChainMockRecorder) CloneBlockHashHistory() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBlockHashHistory", reflect.TypeOf((*MockChain)(nil).GetBlockHashHistory))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloneBlockHashHistory", reflect.TypeOf((*MockChain)(nil).CloneBlockHashHistory))
+}
+
+// GetBlockHash mocks base method.
+func (m *MockChain) GetBlockHash(blockNumber uint64) common.Hash {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetBlockHash", blockNumber)
+	ret0, _ := ret[0].(common.Hash)
+	return ret0
+}
+
+// GetBlockHash indicates an expected call of GetBlockHash.
+func (mr *MockChainMockRecorder) GetBlockHash(blockNumber any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBlockHash", reflect.TypeOf((*MockChain)(nil).GetBlockHash), blockNumber)
 }
 
 // IsMptConformant mocks base method.
@@ -128,4 +145,97 @@ func (m *MockChain) MaybeSnapshot(blockNumber uint64, stateRoot future.Future[re
 func (mr *MockChainMockRecorder) MaybeSnapshot(blockNumber, stateRoot any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaybeSnapshot", reflect.TypeOf((*MockChain)(nil).MaybeSnapshot), blockNumber, stateRoot)
+}
+
+// MockArchiveState is a mock of ArchiveState interface.
+type MockArchiveState struct {
+	ctrl     *gomock.Controller
+	recorder *MockArchiveStateMockRecorder
+	isgomock struct{}
+}
+
+// MockArchiveStateMockRecorder is the mock recorder for MockArchiveState.
+type MockArchiveStateMockRecorder struct {
+	mock *MockArchiveState
+}
+
+// NewMockArchiveState creates a new mock instance.
+func NewMockArchiveState(ctrl *gomock.Controller) *MockArchiveState {
+	mock := &MockArchiveState{ctrl: ctrl}
+	mock.recorder = &MockArchiveStateMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockArchiveState) EXPECT() *MockArchiveStateMockRecorder {
+	return m.recorder
+}
+
+// ApplyArchiveBlock mocks base method.
+func (m *MockArchiveState) ApplyArchiveBlock(block *types.Block, interpreter tosca.Interpreter, processor Processor, upgrades opera.Upgrades, corrections map[common.Address]Correction, chainConfig *params.ChainConfig) (types.Receipts, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ApplyArchiveBlock", block, interpreter, processor, upgrades, corrections, chainConfig)
+	ret0, _ := ret[0].(types.Receipts)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ApplyArchiveBlock indicates an expected call of ApplyArchiveBlock.
+func (mr *MockArchiveStateMockRecorder) ApplyArchiveBlock(block, interpreter, processor, upgrades, corrections, chainConfig any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyArchiveBlock", reflect.TypeOf((*MockArchiveState)(nil).ApplyArchiveBlock), block, interpreter, processor, upgrades, corrections, chainConfig)
+}
+
+// GetArchiveBlockHeight mocks base method.
+func (m *MockArchiveState) GetArchiveBlockHeight() (uint64, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetArchiveBlockHeight")
+	ret0, _ := ret[0].(uint64)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// GetArchiveBlockHeight indicates an expected call of GetArchiveBlockHeight.
+func (mr *MockArchiveStateMockRecorder) GetArchiveBlockHeight() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetArchiveBlockHeight", reflect.TypeOf((*MockArchiveState)(nil).GetArchiveBlockHeight))
+}
+
+// MockStateFlusher is a mock of StateFlusher interface.
+type MockStateFlusher struct {
+	ctrl     *gomock.Controller
+	recorder *MockStateFlusherMockRecorder
+	isgomock struct{}
+}
+
+// MockStateFlusherMockRecorder is the mock recorder for MockStateFlusher.
+type MockStateFlusherMockRecorder struct {
+	mock *MockStateFlusher
+}
+
+// NewMockStateFlusher creates a new mock instance.
+func NewMockStateFlusher(ctrl *gomock.Controller) *MockStateFlusher {
+	mock := &MockStateFlusher{ctrl: ctrl}
+	mock.recorder = &MockStateFlusherMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockStateFlusher) EXPECT() *MockStateFlusherMockRecorder {
+	return m.recorder
+}
+
+// FlushState mocks base method.
+func (m *MockStateFlusher) FlushState() error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FlushState")
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// FlushState indicates an expected call of FlushState.
+func (mr *MockStateFlusherMockRecorder) FlushState() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FlushState", reflect.TypeOf((*MockStateFlusher)(nil).FlushState))
 }

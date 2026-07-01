@@ -42,6 +42,7 @@ func checkBlockResults(
 	block *blockdb.Block,
 	receipts types.Receipts,
 	stateRootFuture future.Future[result.Result[common.Hash]],
+	hashOfParentBlock common.Hash,
 	blockDB blockdb.BlockDB,
 	replayLoopContext *ReplayLoopContext,
 	logger utils.Logger,
@@ -59,7 +60,7 @@ func checkBlockResults(
 		return err
 	}
 
-	if err := checkParentHash(chain, block, logger); err != nil {
+	if err := checkParentHash(block, hashOfParentBlock, logger); err != nil {
 		return err
 	}
 	return nil
@@ -181,11 +182,7 @@ func checkStateRoot(
 
 // checkParentHash checks that the parent hash of the block matches the hash of
 // the previous block in the chain.
-func checkParentHash(chain Chain, block *blockdb.Block, logger utils.Logger) error {
-	hashOfParentBlock := common.Hash{}
-	if block.Number != 0 {
-		hashOfParentBlock = chain.GetBlockHashHistory().GetBlockHash(block.Number - 1)
-	}
+func checkParentHash(block *blockdb.Block, hashOfParentBlock common.Hash, logger utils.Logger) error {
 	parentHash := common.BytesToHash(block.ParentHash)
 	if hashOfParentBlock == (common.Hash{}) {
 		logger.Warn("No block hash set. Parent hash verification skipped", "block_number", block.Number)
