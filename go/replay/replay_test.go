@@ -109,38 +109,38 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 	}
 }
 
-func TestReplay_FailsIfStartBlockIsProvidedWithoutStateDbDir(t *testing.T) {
-	require := require.New(t)
-
-	dir := t.TempDir()
-	genesis := filepath.Join(dir, "genesis.json")
-	require.NoError(os.WriteFile(genesis, []byte(`{"Rules": {"NetworkID": 123}}`), 0644))
-
-	dbPath := filepath.Join(dir, "block-db")
-	options := grocksdb.NewDefaultOptions()
-	options.SetCreateIfMissing(true)
-	defer options.Destroy()
-	db, err := grocksdb.OpenDb(options, dbPath)
-	require.NoError(err)
-
-	writeOptions := grocksdb.NewDefaultWriteOptions()
-	defer writeOptions.Destroy()
-	version := make([]byte, 8)
-	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
-	require.NoError(db.Put(writeOptions, blockdb.MakeVersionKey(), version))
-
-	db.Close()
-
-	err = Replay(t.Context(), ReplayArgs{
-		BlockDBDir:      dbPath,
-		JSONGenesisFile: genesis,
-		StartBlock:      1000,
-		Interpreter:     "sfvm",
-	})
-	require.ErrorContains(
-		err,
-		"existing state or initial database directory must be specified when starting from a non-genesis block",
-	)
+func TestReplay_InvalidFlagCombinationsAreRejected(t *testing.T) {
+	cases := map[string]struct {
+		args    ReplayArgs
+		wantErr string
+	}{
+		"StartBlockGreaterThanEndBlock": {
+			args:    ReplayArgs{StartBlock: 10, EndBlock: 5},
+			wantErr: "start block 10 is greater than end block 5",
+		},
+		"NonGenesisStartWithoutStateOrInitDir": {
+			args:    ReplayArgs{StartBlock: 1000, EndBlock: math.MaxUint64},
+			wantErr: "when starting from a non-genesis block (block 0), an existing state database or initial database directory must be specified",
+		},
+		"ArchiveRateWithoutArchive": {
+			args:    ReplayArgs{ArchiveRate: 10, EndBlock: math.MaxUint64},
+			wantErr: "when using a non-zero archive rate, archive mode must be enabled (pass --with-archive)",
+		},
+		"SnapshotStartBlockGreaterThanEndBlock": {
+			args:    ReplayArgs{EndBlock: math.MaxUint64, SnapshotStartBlock: 100, SnapshotEndBlock: 50},
+			wantErr: "snapshot start block 100 is greater than snapshot end block 50",
+		},
+		"SnapshotIntervalWithZeroNumToKeep": {
+			args:    ReplayArgs{EndBlock: math.MaxUint64, SnapshotInterval: 10, SnapshotNumToKeep: 0, SnapshotEndBlock: math.MaxUint64},
+			wantErr: "when using a non-zero snapshot interval 10, --snapshot-num-to-keep must be greater than 0",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := Replay(t.Context(), tc.args)
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
 }
 
 func TestReplay_InvalidArchiveRateIsReportedAsCreationFailure(t *testing.T) {

@@ -85,6 +85,23 @@ type ReplayArgs struct {
 }
 
 func Replay(ctx context.Context, args ReplayArgs) (err error) {
+	// check combinations of flags that are not supported
+	if args.StartBlock > args.EndBlock {
+		return fmt.Errorf("start block %d is greater than end block %d", args.StartBlock, args.EndBlock)
+	}
+	if args.StartBlock > 0 && args.InitDBDir == "" && args.StateDBDir == "" {
+		return fmt.Errorf("when starting from a non-genesis block (block 0), an existing state database or initial database directory must be specified")
+	}
+	if !args.WithArchive && args.ArchiveRate > 0 {
+		return fmt.Errorf("when using a non-zero archive rate, archive mode must be enabled (pass --with-archive)")
+	}
+	if args.SnapshotStartBlock > args.SnapshotEndBlock {
+		return fmt.Errorf("snapshot start block %d is greater than snapshot end block %d", args.SnapshotStartBlock, args.SnapshotEndBlock)
+	}
+	if args.SnapshotInterval > 0 && args.SnapshotNumToKeep == 0 {
+		return fmt.Errorf("when using a non-zero snapshot interval %d, --snapshot-num-to-keep must be greater than 0", args.SnapshotInterval)
+	}
+
 	endBlock := fmt.Sprintf("%d", args.EndBlock)
 	if args.EndBlock == math.MaxUint64 {
 		endBlock = "max"
@@ -240,16 +257,9 @@ func openBlockDb(args *ReplayArgs) (blockdb.BlockDB, func() error, error) {
 }
 
 func prepareStateDbDir(args *ReplayArgs) (*SnapshotHandler, error) {
-	if args.SnapshotInterval > 0 && args.SnapshotNumToKeep == 0 {
-		return nil, fmt.Errorf("snapshot interval %d is incompatible with --snapshot-num-to-keep=0", args.SnapshotInterval)
-	}
-
 	// If the state database directory is not specified, create a temporary directory.
 	var err error
 	if args.StateDBDir == "" {
-		if args.StartBlock > 0 && args.InitDBDir == "" {
-			return nil, fmt.Errorf("existing state or initial database directory must be specified when starting from a non-genesis block")
-		}
 		args.StateDBDir = os.TempDir()
 		args.StateDBDir, err = os.MkdirTemp(args.StateDBDir, "replay_chain_state_")
 		if err != nil {
