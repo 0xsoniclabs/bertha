@@ -19,7 +19,6 @@ package replay
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"math"
 	"sync"
 	"time"
@@ -38,6 +37,11 @@ const (
 	// running in parallel. When the limit is reached, no more goroutines are
 	// spawned until one of the in-flight verifications finishes.
 	maxConcurrentVerifications = 8
+
+	// dropLogInterval is the period between reports of dropped ticks. Each
+	// report covers only the drops that occurred during the just-elapsed
+	// interval, so the count reflects the recent past.
+	dropLogInterval = time.Minute
 )
 
 // blockWithHashHistory holds a block and the block hash history for that block.
@@ -66,6 +70,7 @@ type archiveVerifier struct {
 	firstErr     error
 	errOnce      sync.Once
 	interval     time.Duration
+	logger       utils.Logger
 }
 
 func newArchiveVerifier(
@@ -76,6 +81,7 @@ func newArchiveVerifier(
 	interpreter tosca.Interpreter,
 	chainID uint64,
 	archiveRate float64,
+	logger utils.Logger,
 ) (*archiveVerifier, error) {
 	if archiveRate == 0 {
 		return nil, nil // Archive verification is disabled.
@@ -101,6 +107,7 @@ func newArchiveVerifier(
 		cancelParent: cancelParent,
 		done:         make(chan struct{}),
 		interval:     interval,
+		logger:       logger,
 	}
 	v.wg.Go(v.dispatcher)
 	return v, nil
@@ -122,6 +129,14 @@ func (v *archiveVerifier) dispatcher() {
 	// full the tick is dropped.
 	sem := make(chan struct{}, maxConcurrentVerifications)
 
+	// dropReportTicker fires periodically to report how many ticks were
+	// dropped during the just-elapsed interval. This bounds log volume and
+	// ensures the reported count always reflects the recent past rather than
+	// accumulating drops across long quiet periods.
+	dropReportTicker := time.NewTicker(dropLogInterval)
+	defer dropReportTicker.Stop()
+	var droppedTicks uint64
+
 	for {
 		select {
 		case <-ticker.C:
@@ -134,6 +149,14 @@ func (v *archiveVerifier) dispatcher() {
 					v.verifyBlock()
 				})
 			default:
+				droppedTicks++
+			}
+		case <-dropReportTicker.C:
+			if droppedTicks > 0 {
+				v.logger.Warn("Archive verification cannot keep up with archive rate",
+					"dropped_ticks", droppedTicks,
+				)
+				droppedTicks = 0
 			}
 		case <-v.done:
 			return
@@ -146,7 +169,7 @@ func (v *archiveVerifier) dispatcher() {
 func (v *archiveVerifier) verifyBlock() {
 	handleError := func(err error) {
 		v.errOnce.Do(func() {
-			slog.Error("Archive verification failed", "error", err)
+			v.logger.Error("Archive verification failed", "error", err)
 			v.firstErr = err
 			v.cancelParent(err)
 		})
