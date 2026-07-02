@@ -59,18 +59,19 @@ type blockWithHashHistory struct {
 type archiveVerifier struct {
 	pool *utils.RandomRetentionPool[blockWithHashHistory]
 
-	archive      ArchiveState
-	metadata     MetadataStore
-	interpreter  tosca.Interpreter
-	chainID      uint64
-	ctx          context.Context
-	cancelParent context.CancelCauseFunc
-	done         chan struct{}
-	wg           sync.WaitGroup
-	firstErr     error
-	errOnce      sync.Once
-	interval     time.Duration
-	logger       utils.Logger
+	archive         ArchiveState
+	metadata        MetadataStore
+	interpreter     tosca.Interpreter
+	chainID         uint64
+	noReceiptsCheck bool
+	ctx             context.Context
+	cancelParent    context.CancelCauseFunc
+	done            chan struct{}
+	wg              sync.WaitGroup
+	firstErr        error
+	errOnce         sync.Once
+	interval        time.Duration
+	logger          utils.Logger
 }
 
 func newArchiveVerifier(
@@ -81,6 +82,7 @@ func newArchiveVerifier(
 	interpreter tosca.Interpreter,
 	chainID uint64,
 	archiveRate float64,
+	noReceiptsCheck bool,
 	logger utils.Logger,
 ) (*archiveVerifier, error) {
 	if archiveRate == 0 {
@@ -98,16 +100,17 @@ func newArchiveVerifier(
 		return nil, fmt.Errorf("failed to create archive verifier pool: %w", err)
 	}
 	v := &archiveVerifier{
-		pool:         pool,
-		archive:      archive,
-		metadata:     metadata,
-		interpreter:  interpreter,
-		chainID:      chainID,
-		ctx:          ctx,
-		cancelParent: cancelParent,
-		done:         make(chan struct{}),
-		interval:     interval,
-		logger:       logger,
+		pool:            pool,
+		archive:         archive,
+		metadata:        metadata,
+		interpreter:     interpreter,
+		chainID:         chainID,
+		noReceiptsCheck: noReceiptsCheck,
+		ctx:             ctx,
+		cancelParent:    cancelParent,
+		done:            make(chan struct{}),
+		interval:        interval,
+		logger:          logger,
 	}
 	v.wg.Go(v.dispatcher)
 	return v, nil
@@ -229,9 +232,11 @@ func (v *archiveVerifier) verifyBlock() {
 		return
 	}
 
-	if err := checkReceipts(item.block, receipts); err != nil {
-		handleError(fmt.Errorf("receipt check failed for block %d: %w", block.Number, err))
-		return
+	if !v.noReceiptsCheck {
+		if err := checkReceipts(item.block, receipts); err != nil {
+			handleError(fmt.Errorf("receipt check failed for block %d: %w", block.Number, err))
+			return
+		}
 	}
 }
 

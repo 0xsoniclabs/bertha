@@ -62,7 +62,7 @@ func TestArchiveVerifier_NewArchiveVerifier_ChecksArchiveRate(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
 
-			verifier, err := newArchiveVerifier(ctx, cancel, archive, &BlockDBMetadataStore{}, nil, 123, tc.rate, slog.Default())
+			verifier, err := newArchiveVerifier(ctx, cancel, archive, &BlockDBMetadataStore{}, nil, 123, tc.rate, false, slog.Default())
 
 			if tc.err {
 				require.ErrorContains(t, err, "archive rate")
@@ -243,10 +243,11 @@ func TestArchiveVerifier_dispatcher_LogsDroppedTicksRateLimited(t *testing.T) {
 
 func TestArchiveVerifier_verifyBlock(t *testing.T) {
 	tests := map[string]struct {
-		numBlocks   int
-		setupPool   func([]*blockdb.Block, *utils.RandomRetentionPool[blockWithHashHistory])
-		verifyCalls int
-		wantErr     string
+		numBlocks       int
+		setupPool       func([]*blockdb.Block, *utils.RandomRetentionPool[blockWithHashHistory])
+		noReceiptsCheck bool
+		verifyCalls     int
+		wantErr         string
 	}{
 		"VerifiesBlocksSuccessfully": {
 			numBlocks: 100,
@@ -273,6 +274,23 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 			},
 			verifyCalls: 1,
 			wantErr:     "receipt check failed",
+		},
+		"SkipsReceiptsCheckWhenDisabled": {
+			numBlocks: 10,
+			setupPool: func(blocks []*blockdb.Block, pool *utils.RandomRetentionPool[blockWithHashHistory]) {
+				pool.Add(blockWithHashHistory{
+					block: &blockdb.Block{
+						Number: blocks[5].Number,
+						// corrupted receipts, but check is disabled
+						Receipts: []*blockdb.TransactionReceipt{{
+							CumulativeGasUsed: 999,
+						}},
+					},
+					hashHistory: &blockHashHistory{},
+				})
+			},
+			noReceiptsCheck: true,
+			verifyCalls:     1,
 		},
 		"SkipsBlocksAboveArchiveHeight": {
 			numBlocks: 5,
@@ -331,15 +349,16 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 			tc.setupPool(protoBlocks, pool)
 
 			verifier := &archiveVerifier{
-				pool:         pool,
-				archive:      chain,
-				metadata:     &BlockDBMetadataStore{},
-				interpreter:  interpreter,
-				chainID:      123,
-				ctx:          ctx,
-				cancelParent: cancel,
-				done:         make(chan struct{}),
-				logger:       slog.Default(),
+				pool:            pool,
+				archive:         chain,
+				metadata:        &BlockDBMetadataStore{},
+				interpreter:     interpreter,
+				chainID:         123,
+				noReceiptsCheck: tc.noReceiptsCheck,
+				ctx:             ctx,
+				cancelParent:    cancel,
+				done:            make(chan struct{}),
+				logger:          slog.Default(),
 			}
 
 			for range tc.verifyCalls {
