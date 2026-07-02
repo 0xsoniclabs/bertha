@@ -290,11 +290,6 @@ func Test_checkBlockResults_FailsIfComputedValuesMismatchStoredOnes(t *testing.T
 
 			chain := NewMockChain(ctrl)
 			chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
-			history := blockHashHistory{}
-			if tc.block.Number != 0 {
-				history.SetBlockHash(tc.block.Number-1, tc.hashOfParent)
-			}
-			chain.EXPECT().GetBlockHashHistory().Return(&history).AnyTimes()
 
 			logger := utils.NewMockLogger(ctrl)
 			logger.EXPECT().Warn(gomock.Any(), gomock.Any()).AnyTimes()
@@ -304,6 +299,7 @@ func Test_checkBlockResults_FailsIfComputedValuesMismatchStoredOnes(t *testing.T
 				tc.block,
 				tc.receipts,
 				tc.stateRootFuture,
+				tc.hashOfParent,
 				nil, // the blockDB is only needed for state root overwriting which is not exercised in this test
 				&ReplayLoopContext{skipStateRootCheck: tc.skipStateRootCheck, skipReceiptsCheck: tc.skipReceiptsCheck},
 				logger,
@@ -417,12 +413,9 @@ func Test_checkParentHash_LogsMessageIfPreviousBlockHashNotSet(t *testing.T) {
 		ParentHash: common.Hash{0xAB}.Bytes(),
 	}
 
-	chain := NewMockChain(ctrl)
-	chain.EXPECT().GetBlockHashHistory().Return(&blockHashHistory{})
-
 	logger := utils.NewMockLogger(ctrl)
 	logger.EXPECT().Warn("No block hash set. Parent hash verification skipped", "block_number", block.Number)
 
-	err := checkParentHash(chain, block, logger)
+	err := checkParentHash(block, common.Hash{}, logger)
 	require.NoError(t, err)
 }

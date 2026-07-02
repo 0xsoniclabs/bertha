@@ -29,7 +29,6 @@ import (
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/tosca/go/tosca"
-	"github.com/ethereum/go-ethereum/core/types"
 )
 
 const (
@@ -56,7 +55,7 @@ type blockWithHashHistory struct {
 type archiveVerifier struct {
 	pool *utils.RandomRetentionPool[blockWithHashHistory]
 
-	runWithState func(func(*State) error) error
+	archive      ArchiveState
 	metadata     MetadataStore
 	interpreter  tosca.Interpreter
 	chainID      uint64
@@ -72,7 +71,7 @@ type archiveVerifier struct {
 func newArchiveVerifier(
 	ctx context.Context,
 	cancelParent context.CancelCauseFunc,
-	runWithState func(func(*State) error) error,
+	archive ArchiveState,
 	metadata MetadataStore,
 	interpreter tosca.Interpreter,
 	chainID uint64,
@@ -94,7 +93,7 @@ func newArchiveVerifier(
 	}
 	v := &archiveVerifier{
 		pool:         pool,
-		runWithState: runWithState,
+		archive:      archive,
 		metadata:     metadata,
 		interpreter:  interpreter,
 		chainID:      chainID,
@@ -153,13 +152,7 @@ func (v *archiveVerifier) verifyBlock() {
 		})
 	}
 
-	var archiveHeight uint64
-	var archiveEmpty bool
-	err := v.runWithState(func(s *State) error {
-		var err error
-		archiveHeight, archiveEmpty, err = s.GetArchiveBlockHeight()
-		return err
-	})
+	archiveHeight, archiveEmpty, err := v.archive.GetArchiveBlockHeight()
 	if err != nil {
 		handleError(fmt.Errorf("failed to get archive height: %w", err))
 		return
@@ -207,12 +200,7 @@ func (v *archiveVerifier) verifyBlock() {
 
 	corrections := v.metadata.GetCorrectionsAtBlock(block.Number)
 
-	var receipts types.Receipts
-	err = v.runWithState(func(s *State) error {
-		var applyErr error
-		receipts, applyErr = s.ApplyBlock(gethBlock, v.interpreter, processor, upgrades, corrections, chainConfig, nil, true)
-		return applyErr
-	})
+	receipts, err := v.archive.ApplyArchiveBlock(gethBlock, v.interpreter, processor, upgrades, corrections, chainConfig)
 	if err != nil {
 		handleError(fmt.Errorf("failed to apply block %d: %w", block.Number, err))
 		return

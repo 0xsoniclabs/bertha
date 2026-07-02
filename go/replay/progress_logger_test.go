@@ -25,7 +25,6 @@ import (
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/0xsoniclabs/bertha/utils"
-	"github.com/0xsoniclabs/carmen/go/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -89,12 +88,8 @@ func TestProgressLogger_ProducesLogMessagesEvery10kSteps(t *testing.T) {
 func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 	require := require.New(t)
 	ctrl := gomock.NewController(t)
-	dbMock := state.NewMockStateDB(ctrl)
-	dbMock.EXPECT().Flush().Return(nil).Times(2)
-	state := &State{
-		db:             dbMock,
-		stateParameter: StateParameters{},
-	}
+	flusher := NewMockStateFlusher(ctrl)
+	flusher.EXPECT().FlushState().Return(nil).Times(2)
 
 	dir := t.TempDir()
 	liveDir := filepath.Join(dir, "live")
@@ -113,7 +108,7 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 	require.NoError(err)
 
 	mockLogger := utils.NewMockLogger(ctrl)
-	logger := startProgressLogger(mockLogger, func(f func(*State) error) error { return f(state) }, dir, true)
+	logger := startProgressLogger(mockLogger, flusher, dir, true)
 	mockLogger.EXPECT().Info(
 		"Processing block",
 		"block", uint64(10000),
@@ -135,7 +130,7 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 	require.NoError(err)
 
 	mockLogger2 := utils.NewMockLogger(ctrl)
-	logger = startProgressLogger(mockLogger2, func(f func(*State) error) error { return f(state) }, dir, true)
+	logger = startProgressLogger(mockLogger2, flusher, dir, true)
 	mockLogger2.EXPECT().Info(
 		"Processing block",
 		"block", uint64(10000),
