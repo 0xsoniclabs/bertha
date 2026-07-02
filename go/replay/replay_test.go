@@ -484,9 +484,11 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := newMockChainWithMaybeSnapshot(ctrl)
+	// ChainID is only called by the pipeline (for signer creation), not by
+	// the linear loop, so the exact count varies with the runner.
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
-	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true).Times(3)
+	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).Times(2)
 
 	// A block history with a few transactions.
 	blocks := []*blockdb.Block{
@@ -552,6 +554,8 @@ func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
 func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := newMockChainWithMaybeSnapshot(ctrl)
+	// ChainID is only called by the pipeline (for signer creation), not by
+	// the linear loop, so the exact count varies with the runner.
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	injectedError := fmt.Errorf("injected error")
@@ -564,6 +568,8 @@ func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
 func failsOnCancelledContext(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := newMockChainWithMaybeSnapshot(ctrl)
+	// ChainID is only called by the pipeline (for signer creation), not by
+	// the linear loop, so the exact count varies with the runner.
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	ctxt, cancel := context.WithCancel(t.Context())
@@ -579,6 +585,8 @@ func failsOnCancelledContext(t *testing.T, run replayer) {
 func failsOnBlockConversionError(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := newMockChainWithMaybeSnapshot(ctrl)
+	// ChainID is only called by the pipeline (for signer creation), not by
+	// the linear loop, so the exact count varies with the runner.
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 	ctxt := t.Context()
@@ -596,8 +604,10 @@ func failsOnBlockConversionError(t *testing.T, run replayer) {
 func failsOnBlockApplicationError(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := newMockChainWithMaybeSnapshot(ctrl)
+	// ChainID is only called by the pipeline (for signer creation), not by
+	// the linear loop, so the exact count varies with the runner.
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).AnyTimes()
+	// The single block has Number=0, so GetBlockHash is never called.
 
 	injectedError := fmt.Errorf("injected error")
 	chain.EXPECT().
@@ -615,8 +625,10 @@ func failsOnBlockApplicationError(t *testing.T, run replayer) {
 func failsOnCommitmentComputationError(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := newMockChainWithMaybeSnapshot(ctrl)
+	// ChainID is only called by the pipeline (for signer creation), not by
+	// the linear loop, so the exact count varies with the runner.
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).AnyTimes()
+	// The single block has Number=0, so GetBlockHash is never called.
 
 	injectedError := fmt.Errorf("injected error")
 	chain.EXPECT().
@@ -664,8 +676,10 @@ func failsOnDifferentReceipts(t *testing.T, run replayer) {
 		t.Run(name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			chain := newMockChainWithMaybeSnapshot(ctrl)
+			// ChainID is only called by the pipeline (for signer creation),
+			// not by the linear loop, so the exact count varies with the runner.
 			chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-			chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).AnyTimes()
+			// The single block has Number=0, so GetBlockHash is never called.
 
 			chain.EXPECT().
 				ApplyBlock(gomock.Any()).
@@ -688,8 +702,10 @@ func failsOnDifferentReceipts(t *testing.T, run replayer) {
 func failsOnParentHashMismatch(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := newMockChainWithMaybeSnapshot(ctrl)
+	// ChainID is only called by the pipeline (for signer creation), not by
+	// the linear loop, so the exact count varies with the runner.
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true)
 
 	hashOfParentBlock := common.Hash{0xAB}
 	chain.EXPECT().GetBlockHash(uint64(0)).Return(hashOfParentBlock)
@@ -716,9 +732,11 @@ func failsOnParentHashMismatch(t *testing.T, run replayer) {
 func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := newMockChainWithMaybeSnapshot(ctrl)
+	// ChainID is only called by the pipeline (for signer creation), not by
+	// the linear loop, so the exact count varies with the runner.
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
-	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true)
+	// The single block has Number=0, so GetBlockHash is never called.
 
 	chain.EXPECT().
 		ApplyBlock(gomock.Any()).
@@ -741,8 +759,10 @@ func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
 func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := newMockChainWithMaybeSnapshot(ctrl)
+	// ChainID is only called by the pipeline (for signer creation), not by
+	// the linear loop, so the exact count varies with the runner.
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true)
 	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
 
 	chain.EXPECT().
@@ -769,8 +789,10 @@ func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
 func skipReceiptsCheckIfNoReceiptsCheckFlagIsSet(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := newMockChainWithMaybeSnapshot(ctrl)
+	// ChainID is only called by the pipeline (for signer creation), not by
+	// the linear loop, so the exact count varies with the runner.
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true)
 	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
 
 	chain.EXPECT().
@@ -795,10 +817,12 @@ func skipReceiptsCheckIfNoReceiptsCheckFlagIsSet(t *testing.T, run replayer) {
 func stopsOnArchiveVerifierFailure(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := newMockChainWithMaybeSnapshot(ctrl)
+	// ChainID is only called by the pipeline (for signer creation), not by
+	// the linear loop, so the exact count varies with the runner.
 	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
-	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).AnyTimes()
-	chain.EXPECT().CloneBlockHashHistory().Return(nil).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true).MinTimes(1)
+	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).MinTimes(1)
+	chain.EXPECT().CloneBlockHashHistory().Return(nil).MinTimes(1)
 
 	// Create a cancellable context, as the Replay function does.
 	ctx, cancel := context.WithCancelCause(t.Context())
@@ -818,7 +842,7 @@ func stopsOnArchiveVerifierFailure(t *testing.T, run replayer) {
 				cancel(injectedErr)
 			}
 			return nil, future.Immediate(result.Ok(common.Hash{})), nil
-		}).AnyTimes()
+		}).MinTimes(int(cancelAfter))
 
 	// Bare verifier without a dispatcher: the cancellation is driven by the
 	// mock above, so we only need submit and close to be no-ops.
@@ -852,8 +876,13 @@ func stopsOnArchiveVerifierFailure(t *testing.T, run replayer) {
 func overwriteStateRootHash(t *testing.T, run replayer) {
 	ctrl := gomock.NewController(t)
 	chain := newMockChainWithMaybeSnapshot(ctrl)
-	chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+	// ChainID is called by checkStateRoot via blockDB.Update. The pipeline runner
+	// additionally calls it in stage 1 for signer creation, so the exact count
+	// depends on the runner.
+	chain.EXPECT().ChainID().Return(uint64(12)).MinTimes(1)
+	// IsMptConformant is called twice per block: once in getExpectedStateRoot
+	// and once in updateStateRoot when overwriting is enabled.
+	chain.EXPECT().IsMptConformant().Return(true).Times(2)
 	chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
 
 	chain.EXPECT().
@@ -893,9 +922,12 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 		// 3 and verify that the other stages are aborted correctly.
 		ctrl := gomock.NewController(t)
 		chain := newMockChainWithMaybeSnapshot(ctrl)
-		chain.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-		chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
-		chain.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).AnyTimes()
+		// Pipeline-only test: ChainID is called once by stage 1 for signer
+		// creation. IsMptConformant is never called: stage 3 processes the
+		// first block whose state-root future returns an error before
+		// getExpectedStateRoot runs, aborting the pipeline.
+		chain.EXPECT().ChainID().Return(uint64(12))
+		// All blocks have Number=0, so GetBlockHash is never called.
 
 		promise, firstHash := future.Create[result.Result[common.Hash]]()
 
@@ -910,7 +942,7 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 		chain.EXPECT().
 			ApplyBlock(gomock.Any()).
 			Return(nil, future.Immediate(result.Ok(common.Hash{0x1})), nil).
-			AnyTimes()
+			MinTimes(1)
 
 		blocks := []*blockdb.Block{}
 		for range 10_000 {
@@ -1409,6 +1441,9 @@ func makeUpdateNetworkRulesLog(diff []byte) *core_types.Log {
 
 func newMockChainWithMaybeSnapshot(ctrl *gomock.Controller) *MockChain {
 	chain := NewMockChain(ctrl)
+	// MaybeSnapshot is called once per successfully applied block. Several
+	// tests using this helper fail before any block is applied, so 0 calls
+	// is a legitimate outcome.
 	chain.EXPECT().
 		MaybeSnapshot(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(
