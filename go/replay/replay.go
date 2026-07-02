@@ -214,7 +214,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		var cancel context.CancelCauseFunc
 		ctx, cancel = context.WithCancelCause(ctx)
 		defer cancel(nil)
-		verifier, err = newArchiveVerifier(ctx, cancel, chain, metadataStore, interpreter, chainID, args.ArchiveRate)
+		verifier, err = newArchiveVerifier(ctx, cancel, chain, metadataStore, interpreter, chainID, args.ArchiveRate, slog.Default())
 		if err != nil {
 			return fmt.Errorf("failed to create archive verifier: %w", err)
 		}

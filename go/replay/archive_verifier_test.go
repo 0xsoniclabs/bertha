@@ -19,9 +19,11 @@ package replay
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
@@ -60,7 +62,7 @@ func TestArchiveVerifier_NewArchiveVerifier_ChecksArchiveRate(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
 
-			verifier, err := newArchiveVerifier(ctx, cancel, archive, &BlockDBMetadataStore{}, nil, 123, tc.rate)
+			verifier, err := newArchiveVerifier(ctx, cancel, archive, &BlockDBMetadataStore{}, nil, 123, tc.rate, slog.Default())
 
 			if tc.err {
 				require.ErrorContains(t, err, "archive rate")
@@ -135,6 +137,7 @@ func TestArchiveVerifier_dispatcher_LimitsConcurrency(t *testing.T) {
 		cancelParent: cancel,
 		done:         make(chan struct{}),
 		interval:     time.Millisecond,
+		logger:       slog.Default(),
 	}
 	v.wg.Go(v.dispatcher)
 
@@ -154,6 +157,88 @@ func TestArchiveVerifier_dispatcher_LimitsConcurrency(t *testing.T) {
 
 	// Close the verifier to stop the dispatcher.
 	require.NoError(t, v.close())
+}
+
+func TestArchiveVerifier_dispatcher_LogsDroppedTicksRateLimited(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+
+		// Count how many drop reports the dispatcher has emitted.
+		var warnCount atomic.Int64
+		logger := utils.NewMockLogger(ctrl)
+		logger.EXPECT().Warn(
+			"Archive verification cannot keep up with archive rate",
+			"dropped_ticks", gomock.Any(),
+		).Do(func(string, ...any) {
+			warnCount.Add(1)
+		}).AnyTimes()
+
+		// blocking controls whether GetArchiveBlockHeight blocks (causing the
+		// concurrency semaphore to fill up and subsequent ticks to be dropped)
+		// or returns immediately (allowing the pool to drain and no drops to
+		// occur).
+		var blocking atomic.Bool
+		blocking.Store(true)
+		unblock := make(chan struct{})
+
+		archive := NewMockArchiveState(ctrl)
+		archive.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
+			if blocking.Load() {
+				<-unblock
+			}
+			return 0, true, nil
+		}).AnyTimes()
+
+		pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
+		require.NoError(t, err)
+		for i := range maxConcurrentVerifications * 2 {
+			pool.Add(blockWithHashHistory{block: &blockdb.Block{Number: uint64(i)}})
+		}
+
+		ctx, cancel := context.WithCancelCause(t.Context())
+		defer cancel(nil)
+
+		// The tick interval is chosen so that (a) many ticks fit into a single
+		// dropLogInterval and (b) it does not evenly divide dropLogInterval, so
+		// main ticks and drop-report ticks never fire at the exact same
+		// instant. If they did, select ordering could push a drop into the
+		// next reporting window and make the test flaky.
+		v := &archiveVerifier{
+			pool:         pool,
+			archive:      archive,
+			metadata:     &BlockDBMetadataStore{},
+			logger:       logger,
+			chainID:      123,
+			ctx:          ctx,
+			cancelParent: cancel,
+			done:         make(chan struct{}),
+			interval:     700 * time.Millisecond,
+		}
+		v.wg.Go(v.dispatcher)
+
+		// Advance past the first dropLogInterval boundary. The semaphore fills
+		// after maxConcurrentVerifications ticks and every subsequent tick is
+		// dropped, so exactly one report is expected.
+		time.Sleep(dropLogInterval)
+		synctest.Wait()
+		require.Equal(t, int64(1), warnCount.Load())
+
+		// Another dropLogInterval passes while drops keep happening; a second
+		// report is expected.
+		time.Sleep(dropLogInterval)
+		synctest.Wait()
+		require.Equal(t, int64(2), warnCount.Load())
+
+		// Stop the drops: let verifyBlock goroutines complete quickly so no
+		// ticks are dropped in the next window. No new report should appear.
+		blocking.Store(false)
+		close(unblock)
+		time.Sleep(dropLogInterval)
+		synctest.Wait()
+		require.Equal(t, int64(2), warnCount.Load())
+
+		require.NoError(t, v.close())
+	})
 }
 
 func TestArchiveVerifier_verifyBlock(t *testing.T) {
@@ -254,6 +339,7 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 				ctx:          ctx,
 				cancelParent: cancel,
 				done:         make(chan struct{}),
+				logger:       slog.Default(),
 			}
 
 			for range tc.verifyCalls {
@@ -294,6 +380,7 @@ func TestArchiveVerifier_verifyBlock_CancelsContextOnFailure(t *testing.T) {
 		ctx:          ctx,
 		cancelParent: cancel,
 		done:         make(chan struct{}),
+		logger:       slog.Default(),
 	}
 
 	// Submit blocks so the pool is non-empty.
@@ -346,6 +433,7 @@ func TestArchiveVerifier_close_WaitsForInFlightVerifications(t *testing.T) {
 		cancelParent: cancel,
 		done:         make(chan struct{}),
 		interval:     time.Millisecond,
+		logger:       slog.Default(),
 	}
 	v.wg.Go(v.dispatcher)
 
@@ -406,6 +494,7 @@ func TestArchiveVerifier_close_StopsDispatcher(t *testing.T) {
 		cancelParent: cancel,
 		done:         make(chan struct{}),
 		interval:     time.Millisecond,
+		logger:       slog.Default(),
 	}
 	v.wg.Go(v.dispatcher)
 
