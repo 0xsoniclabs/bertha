@@ -50,8 +50,12 @@ func TestArchiveVerifier_NewArchiveVerifier_ChecksArchiveRate(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			archive := NewMockArchiveState(ctrl)
-			// The dispatcher goroutine may call GetArchiveBlockHeight for valid rates.
-			archive.EXPECT().GetArchiveBlockHeight().Return(uint64(0), true, nil).AnyTimes()
+			if tc.verifier {
+				// The dispatcher goroutine may or may not have called
+				// GetArchiveBlockHeight before close() is called; the exact
+				// count depends on scheduling, so we only allow it here.
+				archive.EXPECT().GetArchiveBlockHeight().Return(uint64(0), true, nil).AnyTimes()
+			}
 
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
@@ -102,11 +106,14 @@ func TestArchiveVerifier_dispatcher_LimitsConcurrency(t *testing.T) {
 	finish := make(chan struct{})
 	ctrl := gomock.NewController(t)
 	archive := NewMockArchiveState(ctrl)
+	// The dispatcher spawns at least maxConcurrentVerifications tasks that
+	// block on <-finish, and after finish is closed spawns more tasks. The
+	// exact total count depends on scheduling.
 	archive.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
 		startedTasks.Add(1)
 		<-finish
 		return 0, true, nil
-	}).AnyTimes()
+	}).MinTimes(maxConcurrentVerifications)
 
 	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
 	require.NoError(t, err)
@@ -310,11 +317,14 @@ func TestArchiveVerifier_close_WaitsForInFlightVerifications(t *testing.T) {
 	finish := make(chan struct{})
 	ctrl := gomock.NewController(t)
 	archive := NewMockArchiveState(ctrl)
+	// The dispatcher fills the semaphore with maxConcurrentVerifications
+	// blocked tasks before close() is called; after close() the dispatcher
+	// stops spawning, so exactly that many calls happen.
 	archive.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
 		startedTasks.Add(1)
 		<-finish
 		return 0, true, nil
-	}).AnyTimes()
+	}).Times(maxConcurrentVerifications)
 
 	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
 	require.NoError(t, err)
@@ -371,11 +381,12 @@ func TestArchiveVerifier_close_StopsDispatcher(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	archive := NewMockArchiveState(ctrl)
 	// Report an empty archive so verifyBlock returns after the height check
-	// without touching the pool or applying blocks.
+	// without touching the pool or applying blocks. The test waits until at
+	// least 3 tasks have started before closing.
 	archive.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
 		startedTasks.Add(1)
 		return 0, true, nil
-	}).AnyTimes()
+	}).MinTimes(3)
 
 	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
 	require.NoError(t, err)

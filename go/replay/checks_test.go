@@ -289,9 +289,13 @@ func Test_checkBlockResults_FailsIfComputedValuesMismatchStoredOnes(t *testing.T
 			ctrl := gomock.NewController(t)
 
 			chain := NewMockChain(ctrl)
+			// IsMptConformant is only reached if checkReceipts succeeds, so
+			// receipt-error cases will not call it at all.
 			chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 			logger := utils.NewMockLogger(ctrl)
+			// Warn is only emitted for specific cases (e.g. missing state root),
+			// so most subtests do not call it.
 			logger.EXPECT().Warn(gomock.Any(), gomock.Any()).AnyTimes()
 
 			err := checkBlockResults(
@@ -321,8 +325,10 @@ func Test_checkStateRoot_OverwritesStateRoot(t *testing.T) {
 	oldStateRoot := common.HexToHash("0xdeadbeef")
 	newStateRoot := common.HexToHash("0xfeedface")
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainID().Return(chainID).AnyTimes()
-	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+	chain.EXPECT().ChainID().Return(chainID)
+	// IsMptConformant is called twice: once in getExpectedStateRoot and once
+	// in updateStateRoot when overwriting is enabled.
+	chain.EXPECT().IsMptConformant().Return(true).Times(2)
 
 	block := &blockdb.Block{
 		Number:    0,
@@ -366,7 +372,7 @@ func Test_checkStateRoot_LogsMessageIfStateRootNotSet(t *testing.T) {
 
 	stateRoot := common.HexToHash("0xfeedface")
 	chain := NewMockChain(ctrl)
-	chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+	chain.EXPECT().IsMptConformant().Return(true).Times(2)
 
 	blockDB := blockdb.NewMockBlockDB(ctrl)
 	logger := utils.NewMockLogger(ctrl)
