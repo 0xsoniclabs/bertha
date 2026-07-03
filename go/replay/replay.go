@@ -723,7 +723,7 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	a.stateModifyMutex.Lock()
 	defer a.stateModifyMutex.Unlock()
 
-	zoneBlock := tracy.ZoneBegin("ProcessBlock")
+	zoneBlock := tracy.ZoneBegin("LiveBlockProcessing")
 	defer zoneBlock.End()
 
 	// Block 0 is skipped since it is equivalent with the genesis data

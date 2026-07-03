@@ -123,7 +123,7 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
 //
 //replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
 
-// This line is automatically uncommented by the `go-run-with-carmen-and-tracy.sh` script.
+// This line is automatically uncommented by the `go-run-with-tracy.sh` and `go-run-with-carmen-and-tracy.sh` scripts.
 //
 //replace github.com/0xsoniclabs/tracy => ../../tracy
 

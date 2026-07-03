@@ -15,31 +15,32 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-# Script to run go with local carmen modifications enabled.
-# Usage: ./go-run-with-carmen.sh <go-run-args>
-# e.g. ./go-run-with-carmen.sh . replay -g sonic.json -db .blockdb --db-schema 6 --db-variant rust-memory
-# It is assumed that the carmen repository is located next to bertha.
+# Script to run go with tracy profiling enabled.
+# Usage: ./go-run-with-tracy.sh <go-run-args>
+# e.g. ./go-run-with-tracy.sh . replay -g sonic.json -db .blockdb
+# It is assumed that the tracy repository is located next to bertha.
 
 # Exit on error.
 set -e
 # Print all commands before executing.
 set -x
 
-# Revert the patch on exit.
-trap 'git apply --reverse enable-carmen.patch &> /dev/null' EXIT
+# Revert the patches on exit.
+trap 'git apply --reverse enable-tracy.patch &> /dev/null' EXIT
 
-CARMEN_RUST_DIR=$(pwd)/../../carmen/rust
+TRACY_DIR=$(pwd)/../../tracy
 BERTHA_GO_DIR=$(pwd)
 
-# Build carmen.
-cd $CARMEN_RUST_DIR
-cargo build --release $CARMEN_RUST_BUILD_FLAGS
+# Build tracy shared library.
+cd $TRACY_DIR
+git submodule update --recursive --init
+make
 
-# Override the go carmen dependencies to use local modified versions.
+# Override the go tracy dependencies to use local modified versions.
 # Check if the diff can be applied cleanly in reverse. In this case it is already applied.
 # Otherwise apply the diff
 cd $BERTHA_GO_DIR
-git apply --reverse --check enable-carmen.patch 2> /dev/null || git apply enable-carmen.patch
+git apply --reverse --check enable-tracy.patch 2> /dev/null || git apply enable-tracy.patch
 
-# Run go
-go run --tags carmen_rust "$@"
+# Run go with tracy tag.
+go run --tags "enable_tracy" "$@"
