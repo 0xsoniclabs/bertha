@@ -318,97 +318,147 @@ func Test_checkBlockResults_FailsIfComputedValuesMismatchStoredOnes(t *testing.T
 	}
 }
 
-func Test_checkStateRoot_OverwritesStateRoot(t *testing.T) {
-	ctrl := gomock.NewController(t)
-
+func Test_checkStateRoot(t *testing.T) {
 	chainID := uint64(12)
-	oldStateRoot := common.HexToHash("0xdeadbeef")
-	newStateRoot := common.HexToHash("0xfeedface")
-	chain := NewMockChain(ctrl)
-	chain.EXPECT().ChainID().Return(chainID)
-	// IsMptConformant is called twice: once in getExpectedStateRoot and once
-	// in updateStateRoot when overwriting is enabled.
-	chain.EXPECT().IsMptConformant().Return(true).Times(2)
+	computedStateRoot := common.HexToHash("0xab")
+	zeroStateRoot := common.Hash{}
+	otherStateRoot := common.HexToHash("0xcd")
 
-	block := &blockdb.Block{
-		Number:    0,
-		StateRoot: oldStateRoot.Bytes(),
+	cases := map[string]struct {
+		policy                      OverwriteStateRootPolicy
+		storedStateRoot             common.Hash
+		stateRootNotSetSeen         bool
+		skipStateRootCheck          bool
+		expectUpdate                bool
+		expectWarning               bool
+		expectedError               string
+		expectedStateRootNotSetSeen bool
+	}{
+		"On overwrites when stored matches": {
+			policy:          OverwriteStateRootPolicyOn,
+			storedStateRoot: computedStateRoot,
+			expectUpdate:    true,
+		},
+		"On overwrites when stored is zero": {
+			policy:          OverwriteStateRootPolicyOn,
+			storedStateRoot: zeroStateRoot,
+			expectUpdate:    true,
+		},
+		"On overwrites when stored mismatches": {
+			policy:          OverwriteStateRootPolicyOn,
+			storedStateRoot: otherStateRoot,
+			expectUpdate:    true,
+		},
+		"Uninitialized passes when stored matches": {
+			policy:          OverwriteStateRootPolicyUninitialized,
+			storedStateRoot: computedStateRoot,
+		},
+		"Uninitialized writes when stored is zero": {
+			policy:          OverwriteStateRootPolicyUninitialized,
+			storedStateRoot: zeroStateRoot,
+			expectUpdate:    true,
+		},
+		"Uninitialized errors on mismatch": {
+			policy:          OverwriteStateRootPolicyUninitialized,
+			storedStateRoot: otherStateRoot,
+			expectedError:   "state root mismatch",
+		},
+		"Uninitialized with skipStateRootCheck writes when stored is zero": {
+			policy:             OverwriteStateRootPolicyUninitialized,
+			storedStateRoot:    zeroStateRoot,
+			skipStateRootCheck: true,
+			expectUpdate:       true,
+		},
+		"Uninitialized with skipStateRootCheck ignores mismatch": {
+			policy:             OverwriteStateRootPolicyUninitialized,
+			storedStateRoot:    otherStateRoot,
+			skipStateRootCheck: true,
+		},
+		"Off passes when stored matches": {
+			policy:          OverwriteStateRootPolicyOff,
+			storedStateRoot: computedStateRoot,
+		},
+		"Off warns when stored is zero and not yet seen": {
+			policy:                      OverwriteStateRootPolicyOff,
+			storedStateRoot:             zeroStateRoot,
+			expectWarning:               true,
+			expectedStateRootNotSetSeen: true,
+		},
+		"Off does not warn when stored is zero and already seen": {
+			policy:                      OverwriteStateRootPolicyOff,
+			storedStateRoot:             zeroStateRoot,
+			stateRootNotSetSeen:         true,
+			expectedStateRootNotSetSeen: true,
+		},
+		"Off errors on mismatch": {
+			policy:          OverwriteStateRootPolicyOff,
+			storedStateRoot: otherStateRoot,
+			expectedError:   "state root mismatch",
+		},
+		"Off with skipStateRootCheck ignores zero stored root without warning": {
+			policy:             OverwriteStateRootPolicyOff,
+			storedStateRoot:    zeroStateRoot,
+			skipStateRootCheck: true,
+		},
+		"Off with skipStateRootCheck ignores mismatch": {
+			policy:             OverwriteStateRootPolicyOff,
+			storedStateRoot:    otherStateRoot,
+			skipStateRootCheck: true,
+		},
 	}
 
-	blockWithUpdatedStateRoot := &blockdb.Block{
-		Number:    0,
-		StateRoot: newStateRoot.Bytes(),
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+
+			chain := NewMockChain(ctrl)
+			chain.EXPECT().ChainID().Return(chainID).AnyTimes()
+			chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+
+			block := &blockdb.Block{
+				Number:    5,
+				StateRoot: tc.storedStateRoot.Bytes(),
+			}
+
+			blockDB := blockdb.NewMockBlockDB(ctrl)
+			if tc.expectUpdate {
+				updatedBlock := &blockdb.Block{
+					Number:    5,
+					StateRoot: computedStateRoot.Bytes(),
+				}
+				blockDB.EXPECT().Update(chainID, updatedBlock).Return(nil)
+			}
+
+			logger := utils.NewMockLogger(ctrl)
+			if tc.expectWarning {
+				logger.EXPECT().Warn(
+					"No state root set in the block DB. State root verification skipped",
+					"block_number", block.Number,
+				)
+			}
+
+			replayLoopContext := ReplayLoopContext{
+				overwriteStateRoot:  tc.policy,
+				stateRootNotSetSeen: tc.stateRootNotSetSeen,
+				skipStateRootCheck:  tc.skipStateRootCheck,
+			}
+
+			err := checkStateRoot(
+				chain,
+				block,
+				future.Immediate(result.Ok(computedStateRoot)),
+				blockDB,
+				&replayLoopContext,
+				logger,
+			)
+			if tc.expectedError == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tc.expectedError)
+			}
+			require.Equal(t, tc.expectedStateRootNotSetSeen, replayLoopContext.stateRootNotSetSeen)
+		})
 	}
-
-	blockDB := blockdb.NewMockBlockDB(ctrl)
-	blockDB.EXPECT().
-		Update(chainID, blockWithUpdatedStateRoot).
-		Return(nil)
-
-	replayLoopContext := ReplayLoopContext{
-		overwriteStateRoot: New(true, true),
-		stateRootNotSet:    false,
-	}
-
-	logger := utils.NewMockLogger(ctrl)
-
-	err := checkStateRoot(
-		chain,
-		block,
-		future.Immediate(result.Ok(newStateRoot)),
-		blockDB,
-		&replayLoopContext,
-		logger,
-	)
-	require.NoError(t, err)
-}
-
-func Test_checkStateRoot_LogsMessageIfStateRootNotSet(t *testing.T) {
-	ctrl := gomock.NewController(t)
-
-	block := &blockdb.Block{
-		Number: 1,
-	}
-
-	stateRoot := common.HexToHash("0xfeedface")
-	chain := NewMockChain(ctrl)
-	chain.EXPECT().IsMptConformant().Return(true).Times(2)
-
-	blockDB := blockdb.NewMockBlockDB(ctrl)
-	logger := utils.NewMockLogger(ctrl)
-	logger.EXPECT().Warn("No state root set in the block DB. State root verification skipped", "block_number", uint64(1))
-
-	replayLoopContext := ReplayLoopContext{
-		overwriteStateRoot: New(false, false),
-		stateRootNotSet:    false,
-	}
-
-	err := checkStateRoot(
-		chain,
-		block,
-		future.Immediate(result.Ok(stateRoot)),
-		blockDB,
-		&replayLoopContext,
-		logger,
-	)
-	require.NoError(t, err)
-
-	logger = utils.NewMockLogger(ctrl)
-
-	replayLoopContext = ReplayLoopContext{
-		overwriteStateRoot: New(false, false),
-		stateRootNotSet:    true,
-	}
-
-	err = checkStateRoot(
-		chain,
-		block,
-		future.Immediate(result.Ok(stateRoot)),
-		blockDB,
-		&replayLoopContext,
-		logger,
-	)
-	require.NoError(t, err)
 }
 
 func Test_checkParentHash_LogsMessageIfPreviousBlockHashNotSet(t *testing.T) {
