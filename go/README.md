@@ -83,7 +83,9 @@ following command can be used:
 go run --tags enable_tracy . replay -g sonic.json -db ../.blockdb -e 100
 ```
 
-This setup is automated in [go-run-with-carmen-and-tracy.sh](./go-run-with-carmen-and-tracy.sh) which also does the setup to integrate carmen's tracy instrumentation listed below.
+This setup is automated in [go-run-with-tracy.sh](./go-run-with-tracy.sh); use
+[go-run-with-carmen-and-tracy.sh](./go-run-with-carmen-and-tracy.sh) instead if
+you also want Carmen's tracy instrumentation (see below).
 For instance, to run the replay command, the following command can be used:
 ```
 ./go-run-with-carmen-and-tracy.sh . replay -g sonic.json -db ../.blockdb -e 100

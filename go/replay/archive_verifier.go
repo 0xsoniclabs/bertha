@@ -28,6 +28,7 @@ import (
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/tosca/go/tosca"
+	"github.com/0xsoniclabs/tracy"
 )
 
 const (
@@ -170,6 +171,9 @@ func (v *archiveVerifier) dispatcher() {
 }
 
 func (v *archiveVerifier) verifyBlock() {
+	zoneBlock := tracy.ZoneBegin("ArchiveBlockProcessing")
+	defer zoneBlock.End()
+
 	handleError := func(err error) {
 		v.errOnce.Do(func() {
 			v.logger.Error("Archive verification failed", "error", err)

@@ -39,5 +39,5 @@ index 043657d..0baa98b 100644
 -//replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
 +replace github.com/0xsoniclabs/carmen/go => ../../carmen/go
 
- // This line is automatically uncommented by the `go-run-with-carmen-and-tracy.sh` script.
+ // This line is automatically uncommented by the `go-run-with-tracy.sh` and `go-run-with-carmen-and-tracy.sh` scripts.
  //
