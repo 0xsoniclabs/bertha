@@ -312,27 +312,32 @@ func TestReplay_BlockDBAccessMode(t *testing.T) {
 	chainID := uint64(123)
 
 	cases := map[string]struct {
-		overwriteStateRoot      bool
+		overwriteStateRoot      OverwriteStateRootPolicy
 		writeRulesUpdateHeights bool
 		requiresWriteAccess     bool
 	}{
 		"NoOverwriteStateRootAndNoWriteRulesUpdateHeightsRequiresOnlyReadAccess": {
-			overwriteStateRoot:      false,
+			overwriteStateRoot:      OverwriteStateRootPolicyOff,
 			writeRulesUpdateHeights: false,
 			requiresWriteAccess:     false,
 		},
-		"OverwriteStateRootRequiresWriteAccess": {
-			overwriteStateRoot:      true,
+		"OverwriteStateRootOnRequiresWriteAccess": {
+			overwriteStateRoot:      OverwriteStateRootPolicyOn,
+			writeRulesUpdateHeights: false,
+			requiresWriteAccess:     true,
+		},
+		"OverwriteStateRootUninitializedRequiresWriteAccess": {
+			overwriteStateRoot:      OverwriteStateRootPolicyUninitialized,
 			writeRulesUpdateHeights: false,
 			requiresWriteAccess:     true,
 		},
 		"WriteRulesUpdateHeightsRequiresWriteAccess": {
-			overwriteStateRoot:      false,
+			overwriteStateRoot:      OverwriteStateRootPolicyOff,
 			writeRulesUpdateHeights: true,
 			requiresWriteAccess:     true,
 		},
 		"OverwriteStateRootAndWriteRulesUpdateHeightsRequiresWriteAccess": {
-			overwriteStateRoot:      true,
+			overwriteStateRoot:      OverwriteStateRootPolicyOn,
 			writeRulesUpdateHeights: true,
 			requiresWriteAccess:     true,
 		},
@@ -908,7 +913,7 @@ func overwriteStateRootHash(t *testing.T, run replayer) {
 	}})
 	require.NoError(t,
 		run(ctxt, blocks, chain, blockDB, ReplayLoopContext{
-			overwriteStateRoot: New(true, true),
+			overwriteStateRoot: OverwriteStateRootPolicyOn,
 		}, nil, nil),
 		"state root mismatch",
 	)
@@ -1284,21 +1289,6 @@ func Test_updateStateRoot_UpdatesCorrectStateRoot(t *testing.T) {
 	}, block, common.HexToHash("0xfacefeed"))
 
 	require.Equal(common.HexToHash("0xfacefeed").Bytes(), block.VerkleStateRoot)
-}
-
-func Test_FlagWithConfirmation(t *testing.T) {
-	require := require.New(t)
-
-	flag := New(true, false)
-	require.True(flag.IsEnabled())
-	require.False(flag.IsConfirmed())
-
-	flag.Confirm()
-	require.True(flag.IsConfirmed())
-
-	flag.Disable()
-	require.False(flag.IsEnabled())
-	require.True(flag.IsConfirmed())
 }
 
 func TestBlockHashHistory_Clone_ReturnsNilForNilReceiver(t *testing.T) {

@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/0xsoniclabs/bertha/replay"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,4 +62,46 @@ func TestRun_FailedRun_ReportsIssue(t *testing.T) {
 		Run([]string{"test", "verify"}),
 		"failed to open database",
 	)
+}
+
+func TestParseOverwriteStateRootPolicy_AcceptsValidValues(t *testing.T) {
+	cases := map[string]struct {
+		input string
+		want  replay.OverwriteStateRootPolicy
+	}{
+		"Empty":              {"", replay.OverwriteStateRootPolicyOff},
+		"Off":                {"off", replay.OverwriteStateRootPolicyOff},
+		"False":              {"false", replay.OverwriteStateRootPolicyOff},
+		"OffUpperCase":       {"OFF", replay.OverwriteStateRootPolicyOff},
+		"OffWithWhitespace":  {"  off  ", replay.OverwriteStateRootPolicyOff},
+		"Uninitialized":      {"uninitialized", replay.OverwriteStateRootPolicyUninitialized},
+		"UninitializedMixed": {"Uninitialized", replay.OverwriteStateRootPolicyUninitialized},
+		"On":                 {"on", replay.OverwriteStateRootPolicyOn},
+		"True":               {"true", replay.OverwriteStateRootPolicyOn},
+		"OnUpperCase":        {"ON", replay.OverwriteStateRootPolicyOn},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got, err := parseOverwriteStateRootPolicy(tc.input)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestParseOverwriteStateRootPolicy_RejectsInvalidValues(t *testing.T) {
+	cases := map[string]string{
+		"Garbage":        "maybe",
+		"AbbreviatedYes": "y",
+		"AbbreviatedNo":  "n",
+		"NumericTrue":    "1",
+		"NumericFalse":   "0",
+	}
+	for name, input := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := parseOverwriteStateRootPolicy(input)
+			require.Error(t, err)
+			require.ErrorContains(t, err, "`off`, `uninitialized`, `on`")
+		})
+	}
 }

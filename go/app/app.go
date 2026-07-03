@@ -20,6 +20,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"math"
@@ -279,10 +280,10 @@ var (
 		Value: false,
 	}
 
-	overwriteStateRoot = &cli.BoolFlag{
+	overwriteStateRoot = &cli.StringFlag{
 		Name:  "overwrite-state-roots",
-		Usage: "Overwrite the state roots in the block database with the ones computed from the state",
-		Value: false,
+		Usage: "State root handling policy: 'off' verifies and aborts on mismatch; 'uninitialized' writes back only when no state root is stored; 'on' always overwrites.",
+		Value: "off",
 	}
 	noStateRootCheck = &cli.BoolFlag{
 		Name:    "no-state-root-check",
@@ -331,6 +332,10 @@ func getListOfInterpreters() []string {
 }
 
 func parseReplayArgsAndRunReplay(ctx context.Context, c *cli.Command) error {
+	overwriteStateRootPolicy, err := parseOverwriteStateRootPolicy(c.String(overwriteStateRoot.Name))
+	if err != nil {
+		return err
+	}
 	args := replay.ReplayArgs{
 		JSONGenesisFile:         c.String(jsonGenesisFlag.Name),
 		BlockDBDir:              c.String(blockDatabaseDirectoryFlag.Name),
@@ -350,7 +355,7 @@ func parseReplayArgsAndRunReplay(ctx context.Context, c *cli.Command) error {
 		SnapshotEndBlock:        c.Uint64(snapshotEndBlock.Name),
 		SnapshotNumToKeep:       c.Uint64(snapshotNumToKeep.Name),
 		WriteRulesUpdateHeights: c.Bool(writeRulesUpdateHeights.Name),
-		OverwriteStateRoot:      c.Bool(overwriteStateRoot.Name),
+		OverwriteStateRoot:      overwriteStateRootPolicy,
 		NoStateRootCheck:        c.Bool(noStateRootCheck.Name),
 		NoReceiptsCheck:         c.Bool(noReceiptsCheck.Name),
 		LogDBSize:               c.Bool(logDBSize.Name),
@@ -367,4 +372,21 @@ func parseVerifyArgsAndRunVerify(ctx context.Context, c *cli.Command) error {
 		EndBlock:    c.Uint64(endBlockFlag.Name),
 	}
 	return verify.Verify(ctx, args, &utils.ProgressBarFactory{})
+}
+
+// parseOverwriteStateRootPolicy parses a string into an
+// OverwriteStateRootPolicy. The input is case-insensitive and whitespace is
+// trimmed. The empty string maps to OverwriteStateRootPolicyOff. Unknown
+// values return an error listing the canonical ones.
+func parseOverwriteStateRootPolicy(s string) (replay.OverwriteStateRootPolicy, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "off", "false":
+		return replay.OverwriteStateRootPolicyOff, nil
+	case "uninitialized":
+		return replay.OverwriteStateRootPolicyUninitialized, nil
+	case "on", "true":
+		return replay.OverwriteStateRootPolicyOn, nil
+	default:
+		return 0, fmt.Errorf("invalid value for --overwrite-state-roots %q: must be one of `off`, `uninitialized`, `on`", s)
+	}
 }

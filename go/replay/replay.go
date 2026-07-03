@@ -77,12 +77,34 @@ type ReplayArgs struct {
 	SnapshotEndBlock        uint64
 	SnapshotNumToKeep       uint64
 	WriteRulesUpdateHeights bool
-	OverwriteStateRoot      bool
+	OverwriteStateRoot      OverwriteStateRootPolicy
 	NoStateRootCheck        bool
 	NoReceiptsCheck         bool
 	LogDBSize               bool
 	ConfirmAllPrompts       bool
 }
+
+// OverwriteStateRootPolicy controls how the replay reacts to the state root
+// computed from executing a block relative to the state root stored in the
+// block database.
+type OverwriteStateRootPolicy int
+
+const (
+	// OverwriteStateRootPolicyOff verifies computed state roots against the
+	// stored ones and aborts the replay on any mismatch. Blocks with no stored
+	// state root are skipped with a warning (logged at most once per run).
+	OverwriteStateRootPolicyOff OverwriteStateRootPolicy = iota
+
+	// OverwriteStateRootPolicyUninitialized writes computed state roots back to
+	// the block database only when the block has no stored state root yet.
+	// Otherwise it behaves like OverwriteStateRootPolicyOff and aborts on any
+	// mismatch.
+	OverwriteStateRootPolicyUninitialized
+
+	// OverwriteStateRootPolicyOn unconditionally writes computed state roots
+	// back to the block database and skips verification.
+	OverwriteStateRootPolicyOn
+)
 
 func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	// check combinations of flags that are not supported
@@ -202,10 +224,10 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	blocks := blockDb.GetRange(chainID, args.StartBlock, args.EndBlock)
 
 	replayLoopContext := ReplayLoopContext{
-		overwriteStateRoot: New(args.OverwriteStateRoot, args.ConfirmAllPrompts),
-		skipStateRootCheck: args.NoStateRootCheck,
-		stateRootNotSet:    false,
-		skipReceiptsCheck:  args.NoReceiptsCheck,
+		overwriteStateRoot:  args.OverwriteStateRoot,
+		skipStateRootCheck:  args.NoStateRootCheck,
+		stateRootNotSetSeen: false,
+		skipReceiptsCheck:   args.NoReceiptsCheck,
 	}
 
 	// Create the archive verifier if archive mode is enabled.
@@ -234,14 +256,9 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 
 func openBlockDb(args *ReplayArgs) (blockdb.BlockDB, func() error, error) {
 	slog.Info("Opening block database", "directory", args.BlockDBDir)
-	if args.WriteRulesUpdateHeights {
-		slog.Info("Rules update heights writing enabled")
-	}
-	if args.OverwriteStateRoot {
-		slog.Info("State root overwriting enabled")
-	}
 	var dbOpener func(string) (blockdb.RocksDB, error)
-	if args.OverwriteStateRoot || args.WriteRulesUpdateHeights {
+	if args.OverwriteStateRoot != OverwriteStateRootPolicyOff || args.WriteRulesUpdateHeights {
+		slog.Warn("Block database will be opened for writing")
 		dbOpener = blockdb.OpenRocksDBForWriting
 	} else {
 		dbOpener = blockdb.OpenRocksDBForReading
@@ -874,40 +891,11 @@ func updateStateRoot(chain Chain, block *blockdb.Block, stateRoot common.Hash) {
 
 // ReplayLoopContext is a utility struct to hold flags to pass to the `replayLoop` functions.
 type ReplayLoopContext struct {
-	overwriteStateRoot FlagWithConfirmation
-	skipStateRootCheck bool
-	stateRootNotSet    bool
+	overwriteStateRoot  OverwriteStateRootPolicy
+	skipStateRootCheck  bool
+	stateRootNotSetSeen bool
 
 	skipReceiptsCheck bool
-}
-
-// FlagWithConfirmation is a utility struct to hold a boolean flag along with a confirmation flag to track user confirmation.
-type FlagWithConfirmation struct {
-	flag      bool
-	confirmed bool
-}
-
-func New(flag bool, confirmAll bool) FlagWithConfirmation {
-	return FlagWithConfirmation{
-		flag:      flag,
-		confirmed: confirmAll,
-	}
-}
-
-func (f *FlagWithConfirmation) IsEnabled() bool {
-	return f.flag
-}
-
-func (f *FlagWithConfirmation) Disable() {
-	f.flag = false
-}
-
-func (f *FlagWithConfirmation) IsConfirmed() bool {
-	return f.confirmed
-}
-
-func (f *FlagWithConfirmation) Confirm() {
-	f.confirmed = true
 }
 
 // --- block hash history tracking ---

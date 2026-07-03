@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"fmt"
 	"slices"
-	"strings"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
@@ -119,9 +118,17 @@ func checkReceipts(block *blockdb.Block, receipts types.Receipts) error {
 	return nil
 }
 
-// checkStateRoot checks that the computed state root matches the expected
-// state root in the block, and updates the block in the database if overwriting
-// is enabled.
+// checkStateRoot verifies the computed state root against the state root
+// stored in the block DB according to replayLoopContext.overwriteStateRoot:
+//
+//   - OverwriteStateRootPolicyOff: verify computed vs stored. If the stored
+//     root is zero, verification is skipped for that block and a warning is
+//     logged for the first time this happens.
+//   - OverwriteStateRootPolicyUninitialized: if the stored root is zero, the
+//     computed root is written back to the block DB. Otherwise verification
+//     runs as in OverwriteStateRootPolicyOff.
+//   - OverwriteStateRootPolicyOn: the computed root is always written back to
+//     the block DB and verification is skipped.
 func checkStateRoot(
 	chain Chain,
 	block *blockdb.Block,
@@ -130,52 +137,49 @@ func checkStateRoot(
 	replayLoopContext *ReplayLoopContext,
 	logger utils.Logger,
 ) error {
-	overwriteStateRoot := &replayLoopContext.overwriteStateRoot
-	noStateRootCheck := replayLoopContext.skipStateRootCheck
-
 	computedStateRoot, err := stateRootFuture.Await().Get()
 	if err != nil {
 		return fmt.Errorf("failed to get state root after applying block %d: %w", block.Number, err)
 	}
 	expectedStateRoot := getExpectedStateRoot(chain, block)
 
-	if overwriteStateRoot.IsEnabled() {
-		if !overwriteStateRoot.IsConfirmed() && expectedStateRoot != (common.Hash{}) && expectedStateRoot != computedStateRoot {
-			logger.Warn("Block has existing state root", "block_number", block.Number, "existing", expectedStateRoot, "new", computedStateRoot)
-			fmt.Printf("Are you sure you want to overwrite the existing state root (y/n)? ")
-			var response string
-			if _, err := fmt.Scanln(&response); err != nil {
-				return fmt.Errorf("failed to read user input: %w", err)
-			}
-			if strings.ToLower(strings.TrimSpace(response)) != "y" {
-				logger.Info("State roots overriding disabled from this point onward")
-				overwriteStateRoot.Disable() //disabled by the user
-			} else {
-				logger.Info("Overriding state roots from this point onward")
-				overwriteStateRoot.Confirm() //confirmed by the user
-			}
-		}
-
-		// Double check in case user disabled the overwrite
-		if overwriteStateRoot.IsEnabled() {
-			updateStateRoot(chain, block, computedStateRoot)
-			err = blockDB.Update(chain.ChainID(), block)
-			if err != nil {
-				return fmt.Errorf("failed to update block %d in database: %w", block.Number, err)
-			}
+	switch replayLoopContext.overwriteStateRoot {
+	case OverwriteStateRootPolicyOn:
+		return overwriteAndPersistStateRoot(chain, block, computedStateRoot, blockDB)
+	case OverwriteStateRootPolicyUninitialized:
+		if expectedStateRoot == (common.Hash{}) {
+			return overwriteAndPersistStateRoot(chain, block, computedStateRoot, blockDB)
 		}
 	}
 
-	if !noStateRootCheck && !overwriteStateRoot.IsEnabled() {
-		if expectedStateRoot == (common.Hash{}) {
-			if !replayLoopContext.stateRootNotSet {
-				logger.Warn("No state root set in the block DB. State root verification skipped", "block_number", block.Number)
-				replayLoopContext.stateRootNotSet = true
-			}
-		} else if computedStateRoot != expectedStateRoot {
-			return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
-				block.Number, expectedStateRoot, computedStateRoot)
+	if replayLoopContext.skipStateRootCheck {
+		return nil
+	}
+	if expectedStateRoot == (common.Hash{}) {
+		if !replayLoopContext.stateRootNotSetSeen {
+			logger.Warn("No state root set in the block DB. State root verification skipped", "block_number", block.Number)
+			replayLoopContext.stateRootNotSetSeen = true
 		}
+		return nil
+	}
+	if computedStateRoot != expectedStateRoot {
+		return fmt.Errorf("state root mismatch after applying block %d: expected %x, got %x",
+			block.Number, expectedStateRoot, computedStateRoot)
+	}
+	return nil
+}
+
+// overwriteAndPersistStateRoot updates the block's state root with the
+// computed value and persists it to the block database.
+func overwriteAndPersistStateRoot(
+	chain Chain,
+	block *blockdb.Block,
+	computedStateRoot common.Hash,
+	blockDB blockdb.BlockDB,
+) error {
+	updateStateRoot(chain, block, computedStateRoot)
+	if err := blockDB.Update(chain.ChainID(), block); err != nil {
+		return fmt.Errorf("failed to update block %d in database: %w", block.Number, err)
 	}
 	return nil
 }
