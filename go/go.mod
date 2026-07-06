@@ -21,7 +21,7 @@ go 1.26.0
 require github.com/linxGnu/grocksdb v1.8.12
 
 require (
-	github.com/0xsoniclabs/carmen/go v0.0.0-20260512102324-2d892af38ce4
+	github.com/0xsoniclabs/carmen/go v0.0.0-20260706122511-9c789614dbbe
 	github.com/0xsoniclabs/sonic v0.0.0-20260624112538-aadddf0f4449 // v2.2.0-rc.7
 	github.com/0xsoniclabs/tosca v0.0.0-20260429071638-3f4119284c42
 	github.com/0xsoniclabs/tracy v0.0.0-20251027125423-00a5ab7968fb
@@ -76,7 +76,6 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/mattn/go-sqlite3 v1.14.44 // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
