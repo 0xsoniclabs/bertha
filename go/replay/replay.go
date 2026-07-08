@@ -209,7 +209,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}()
 
 	// Prepare the state
-	if err := prepareState(&args, chain, genesis); err != nil {
+	if err := prepareState(&args, chain, blockDb, genesis); err != nil {
 		return fmt.Errorf("failed to prepare state: %w", err)
 	}
 
@@ -351,7 +351,7 @@ func cleanupStateDbDir(args *ReplayArgs, snapshotHandler *SnapshotHandler, outer
 	return err
 }
 
-func prepareState(args *ReplayArgs, chain *stateChainAdapter, genesis *Genesis) error {
+func prepareState(args *ReplayArgs, chain *stateChainAdapter, blockDb blockdb.BlockDB, genesis *Genesis) error {
 	if args.StartBlock == 0 {
 		slog.Info("Applying genesis")
 		// Apply genesis data to the state database.
@@ -359,11 +359,49 @@ func prepareState(args *ReplayArgs, chain *stateChainAdapter, genesis *Genesis) 
 			return fmt.Errorf("failed to apply genesis data: %w", err)
 		}
 	}
+	if err := seedBlockHashHistory(blockDb, chain.chainID, args.StartBlock, chain.blockHashHistory); err != nil {
+		return fmt.Errorf("failed to seed block hash history: %w", err)
+	}
 	stateRoot, err := chain.state.GetStateRoot().Await().Get()
 	if err != nil {
 		return fmt.Errorf("failed to get state root: %w", err)
 	}
 	slog.Info("Loaded state", "root_hash", stateRoot)
+	return nil
+}
+
+func seedBlockHashHistory(
+	blockDb blockdb.BlockDB,
+	chainID uint64,
+	firstBlockToApply uint64,
+	hashHistory *blockHashHistory,
+) error {
+	if firstBlockToApply == 0 {
+		return nil
+	}
+	var start uint64 = 1
+	if firstBlockToApply > blockHashHistoryLen-1 {
+		start = firstBlockToApply - (blockHashHistoryLen - 1)
+	}
+	end := firstBlockToApply
+	count := uint64(0)
+	for block, err := range blockDb.GetRange(chainID, start, end) {
+		if err != nil {
+			return fmt.Errorf("failed to read block for hash history seeding: %w", err)
+		}
+		if block.Number == 0 {
+			continue
+		}
+		hashHistory.SetBlockHash(block.Number-1, common.BytesToHash(block.ParentHash))
+		count++
+	}
+	expected := end - start + 1
+	if count != expected {
+		return fmt.Errorf(
+			"expected %d blocks in [%d, %d] for chain %d, got %d",
+			expected, start, end, chainID, count,
+		)
+	}
 	return nil
 }
 
@@ -900,12 +938,14 @@ type ReplayLoopContext struct {
 
 // --- block hash history tracking ---
 
+const blockHashHistoryLen = 256
+
 // blockHashHistory keeps track of the last 256 block hashes. This is required
 // for the BLOCKHASH opcode in the EVM.
 // It implements the evmcore.DummyChain interface, allowing it to
 // be used with the EVM state processor to serve historic block hashes.
 type blockHashHistory struct {
-	historicHashes [256]common.Hash
+	historicHashes [blockHashHistoryLen]common.Hash
 }
 
 func (h *blockHashHistory) Clone() *blockHashHistory {
@@ -917,11 +957,11 @@ func (h *blockHashHistory) Clone() *blockHashHistory {
 }
 
 func (h *blockHashHistory) GetBlockHash(number uint64) common.Hash {
-	return h.historicHashes[number%256]
+	return h.historicHashes[number%blockHashHistoryLen]
 }
 
 func (h *blockHashHistory) SetBlockHash(number uint64, hash common.Hash) {
-	h.historicHashes[number%256] = hash
+	h.historicHashes[number%blockHashHistoryLen] = hash
 }
 
 func (h *blockHashHistory) Header(_ common.Hash, number uint64) *evmcore.EvmHeader {

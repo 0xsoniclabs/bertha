@@ -1213,6 +1213,143 @@ func TestStateChainAdapter_GetChainConfigAndUpgrades_ReadsFromMetadataStoreForNo
 	}
 }
 
+// synthetic block hash for tests that encodes the block number in the last 8
+// bytes so hashes are unique across a 256-block window.
+func testBlockHash(n uint64) common.Hash {
+	var h common.Hash
+	binary.BigEndian.PutUint64(h[24:], n)
+	return h
+}
+
+func TestSeedBlockHashHistory(t *testing.T) {
+	// makeParents constructs count blocks starting at startNum with ParentHash
+	// set to testBlockHash(number-1), matching the invariant that block N's
+	// ParentHash equals hash(N-1).
+	makeParents := func(startNum uint64, count int) []*blockdb.Block {
+		blocks := make([]*blockdb.Block, count)
+		for i := range blocks {
+			n := startNum + uint64(i)
+			blocks[i] = &blockdb.Block{
+				Number:     n,
+				ParentHash: testBlockHash(n - 1).Bytes(),
+			}
+		}
+		return blocks
+	}
+	// expectedHashes returns the map of block-number → seeded hash for the
+	// inclusive range [first, last].
+	expectedHashes := func(first, last uint64) map[uint64]common.Hash {
+		m := map[uint64]common.Hash{}
+		for n := first; n <= last; n++ {
+			m[n] = testBlockHash(n)
+		}
+		return m
+	}
+
+	const chainID uint64 = 42
+
+	cases := map[string]struct {
+		firstBlockToApply uint64
+		dbBlocks          []*blockdb.Block // nil → GetRange must not be called
+		wantStart         uint64
+		wantEnd           uint64
+		wantHashes        map[uint64]common.Hash
+		wantErr           bool
+	}{
+		"NoSeedingWhenStartBlockIsZero": {
+			firstBlockToApply: 0,
+			dbBlocks:          nil,
+			wantHashes:        map[uint64]common.Hash{},
+		},
+		"SeedsGenesisHashWhenStartingAtBlockOne": {
+			firstBlockToApply: 1,
+			dbBlocks:          makeParents(1, 1),
+			wantStart:         1,
+			wantEnd:           1,
+			wantHashes:        expectedHashes(0, 0),
+		},
+		"SeedsPartialWindowForLowStartBlock": {
+			firstBlockToApply: 100,
+			dbBlocks:          makeParents(1, 100),
+			wantStart:         1,
+			wantEnd:           100,
+			wantHashes:        expectedHashes(0, 99),
+		},
+		"SeedsPartialWindowFor255thBlock": {
+			firstBlockToApply: 255,
+			dbBlocks:          makeParents(1, 255),
+			wantStart:         1,
+			wantEnd:           255,
+			wantHashes:        expectedHashes(0, 254),
+		},
+		"SeedsFullWindowFor256thBlock": {
+			firstBlockToApply: 256,
+			dbBlocks:          makeParents(1, 256),
+			wantStart:         1,
+			wantEnd:           256,
+			wantHashes:        expectedHashes(0, 255),
+		},
+		"SeedsFullWindowForLaterBlock": {
+			firstBlockToApply: 1000,
+			dbBlocks:          makeParents(745, 256),
+			wantStart:         745,
+			wantEnd:           1000,
+			wantHashes:        expectedHashes(744, 999),
+		},
+		"ErrorsWhenNoBlocksInRange": {
+			firstBlockToApply: 100,
+			dbBlocks:          []*blockdb.Block{},
+			wantStart:         1,
+			wantEnd:           100,
+			wantErr:           true,
+		},
+		"ErrorsWhenFewerBlocksThanExpected": {
+			firstBlockToApply: 1000,
+			dbBlocks:          makeParents(745, 100),
+			wantStart:         745,
+			wantEnd:           1000,
+			wantErr:           true,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			db := blockdb.NewMockBlockDB(ctrl)
+			if tc.dbBlocks != nil {
+				db.EXPECT().
+					GetRange(chainID, tc.wantStart, tc.wantEnd).
+					Return(utils.NewIter(tc.dbBlocks))
+			}
+			history := &blockHashHistory{}
+			err := seedBlockHashHistory(db, chainID, tc.firstBlockToApply, history)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			for num, expected := range tc.wantHashes {
+				require.Equal(t, expected, history.GetBlockHash(num))
+			}
+		})
+	}
+}
+
+func TestSeedBlockHashHistory_PropagatesBlockDBError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	db := blockdb.NewMockBlockDB(ctrl)
+
+	var errIter iter.Seq2[*blockdb.Block, error] = func(yield func(*blockdb.Block, error) bool) {
+		yield(nil, fmt.Errorf("boom"))
+	}
+	db.EXPECT().
+		GetRange(uint64(42), uint64(1), uint64(100)).
+		Return(errIter)
+
+	history := &blockHashHistory{}
+	err := seedBlockHashHistory(db, 42, 100, history)
+	require.ErrorContains(t, err, "boom")
+}
+
 func Test_getExpectedStateRoot_ReturnsCorrectStateRoot(t *testing.T) {
 	require := require.New(t)
 
