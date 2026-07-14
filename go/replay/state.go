@@ -290,7 +290,7 @@ func (s *State) ApplyBlock(
 		}
 
 		// Retrieve the receipts from the processed transactions.
-		receipts := make(types.Receipts, len(processed.ProcessedTransactions))
+		receipts = make(types.Receipts, len(processed.ProcessedTransactions))
 		for i, proc := range processed.ProcessedTransactions {
 			receipts[i] = proc.Receipt
 		}
@@ -338,7 +338,6 @@ func (s *State) ApplyBlock(
 			undoList = endBlockRes.UndoList
 			endBlockZone.End()
 		}
-
 	}
 
 	return receipts, vmStateDB.Check()
