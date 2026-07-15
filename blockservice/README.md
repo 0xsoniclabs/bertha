@@ -91,9 +91,7 @@ wget --recursive --no-parent https://sepolia.era1.nimbus.team
 # era files for sepolia
 wget --recursive --no-parent https://sepolia.era.nimbus.team
 # erae files for sepolia
-curl -s "https://data.ethpandaops.io/erae/sepolia/" \
-  | grep -oP '"name":\s*"\Ksepolia-[^"]+\.erae' \
-  | wget -i - -B "https://data.ethpandaops.io/erae/sepolia/" -P sepolia-erae/
+wget --input-file https://data.ethpandaops.io/erae/sepolia/urls.txt -P sepolia-erae/
 # era files for hoodi
 wget --recursive --no-parent https://hoodi.era.nimbus.team
 ```
