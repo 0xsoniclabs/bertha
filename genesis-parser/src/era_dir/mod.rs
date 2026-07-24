@@ -58,6 +58,13 @@ impl<R: FileReader> EraDir<R> {
             }
         }
 
+        if files.is_empty() {
+            return Err(Error::Era(format!(
+                "directory does not contain any {} files",
+                R::EXTENSION
+            )));
+        }
+
         Ok(Self {
             files,
             chain_id,
@@ -257,5 +264,20 @@ fn try_get_beacon_fork(slot_index: u64, chain_id: u64) -> Option<ForkName> {
             HOODI_FULU.. => Some(ForkName::Fulu),
         },
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_fails_for_directory_without_matching_files() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let result = EraDir::<Era1FileReader>::open(dir.path(), 1);
+        assert!(
+            matches!(result, Err(Error::Era(msg)) if msg == "directory does not contain any era1 files")
+        );
     }
 }
