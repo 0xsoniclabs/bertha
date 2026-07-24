@@ -2010,6 +2010,7 @@ dependencies = [
  "flate2",
  "reth-era",
  "rstest",
+ "tempfile",
  "thiserror 2.0.18",
  "tracy-client",
  "types",
