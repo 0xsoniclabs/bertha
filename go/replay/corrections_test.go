@@ -19,6 +19,7 @@ package replay
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 
 	cc "github.com/0xsoniclabs/carmen/go/common"
@@ -94,41 +95,36 @@ func TestCorrections_JSONRoundTrip_WorksWithMapValues(t *testing.T) {
 }
 
 func TestCorrections_decodeFixed_DecodesStringCorrectly(t *testing.T) {
+	input := "0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+	expected := [32]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+		0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
+		0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20}
+
 	tests := map[string]struct {
 		input    string
-		size     int
-		expected []byte
+		expected [32]byte
 	}{
-		"exact size": {
-			input:    "0x01020304",
-			size:     4,
-			expected: []byte{0x01, 0x02, 0x03, 0x04},
+		"lowercase": {
+			input:    input,
+			expected: expected,
 		},
-		"bigger size": {
-			input:    "0x050607",
-			size:     5,
-			expected: []byte{0x00, 0x00, 0x05, 0x06, 0x07},
+		"uppercase": {
+			input:    strings.ToUpper(input),
+			expected: expected,
 		},
 		"no prefix": {
-			input:    "0a0b0c",
-			size:     3,
-			expected: []byte{0x0a, 0x0b, 0x0c},
+			input:    strings.TrimPrefix(input, "0x"),
+			expected: expected,
 		},
 		"empty string": {
 			input:    "",
-			size:     2,
-			expected: []byte{0x00, 0x00},
-		},
-		"uppercase hex": {
-			input:    "0X0D0E0F",
-			size:     3,
-			expected: []byte{0x0d, 0x0e, 0x0f},
+			expected: [32]byte{},
 		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			got, err := decodeFixed(tc.input, tc.size)
+			got, err := decodeHexTo32Bytes(tc.input)
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, got)
 		})
@@ -138,29 +134,21 @@ func TestCorrections_decodeFixed_DecodesStringCorrectly(t *testing.T) {
 func TestCorrections_decodeFixed_ReturnsErrors(t *testing.T) {
 	tests := map[string]struct {
 		input string
-		size  int
 	}{
 		"odd length": {
 			input: "0x123",
-			size:  2,
 		},
 		"too big": {
-			input: "0x01020304",
-			size:  3,
+			input: "0x" + strings.Repeat("01", 33),
 		},
 		"invalid hex": {
-			input: "0xZZ",
-			size:  2,
-		},
-		"negative size": {
-			input: "0x01",
-			size:  -1,
+			input: "0x" + strings.Repeat("zz", 32),
 		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := decodeFixed(tc.input, tc.size)
+			_, err := decodeHexTo32Bytes(tc.input)
 			require.Error(t, err)
 		})
 	}

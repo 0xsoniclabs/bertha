@@ -62,49 +62,40 @@ func (c *Correction) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &tmp); err != nil {
 		return err
 	}
-	if tmp.Balance != nil {
-		c.Balance = tmp.Balance
-	} else {
-		c.Balance = nil
-	}
+	c.Balance = tmp.Balance
 	if len(tmp.Storage) > 0 {
 		c.Storage = make(map[cc.Key]cc.Value, len(tmp.Storage))
 		for k, v := range tmp.Storage {
-			key, err := decodeFixed(k, 32)
+			key, err := decodeHexTo32Bytes(k)
 			if err != nil {
 				return fmt.Errorf("invalid storage key %q: %w", k, err)
 			}
-			value, err := decodeFixed(v, 32)
+			value, err := decodeHexTo32Bytes(v)
 			if err != nil {
 				return fmt.Errorf("invalid storage value %q: %w", v, err)
 			}
 			c.Storage[cc.Key(key)] = cc.Value(value)
 		}
-	} else {
-		c.Storage = nil
 	}
 
 	return nil
 }
 
-// decodeFixed parses a hex string (with optional 0x prefix) into a fixed-size
-// byte array. Shorter inputs are left-padded with zeros.
-func decodeFixed(s string, numBytes int) ([]byte, error) {
-	if numBytes < 0 {
-		return []byte{}, fmt.Errorf("invalid size %d", numBytes)
-	}
+// decodeHexTo32Bytes parses a hex string (with optional 0x prefix) into a fixed-size
+// 32-byte byte array. Shorter inputs are left-padded with zeros.
+func decodeHexTo32Bytes(s string) ([32]byte, error) {
 	s = strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
 	if len(s)%2 == 1 {
-		return []byte{}, fmt.Errorf("odd-length hex string")
+		return [32]byte{}, fmt.Errorf("odd-length hex string")
 	}
 	b, err := hex.DecodeString(s)
 	if err != nil {
-		return []byte{}, err
+		return [32]byte{}, err
 	}
-	if len(b) > numBytes {
-		return []byte{}, fmt.Errorf("value exceeds %d bytes (%d)", numBytes, len(b))
+	if len(b) > 32 {
+		return [32]byte{}, fmt.Errorf("value exceeds 32 bytes (%d)", len(b))
 	}
-	out := make([]byte, numBytes)
-	copy(out[numBytes-len(b):], b)
+	var out [32]byte
+	copy(out[32-len(b):], b)
 	return out, nil
 }

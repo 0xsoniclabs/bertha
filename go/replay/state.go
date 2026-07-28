@@ -24,6 +24,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/0xsoniclabs/bertha/utils"
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/amount"
 	"github.com/0xsoniclabs/carmen/go/common/future"
@@ -303,7 +304,7 @@ func (s *State) ApplyBlock(
 	}
 
 	// Apply corrections if any are provided.
-	applyCorrections(vmStateDB, corrections, block)
+	applyCorrections(vmStateDB, corrections, block, slog.Default())
 
 	if isEthereum(chainConfig.ChainID.Uint64()) {
 		if isPostMerge {
@@ -322,32 +323,32 @@ func (s *State) ApplyBlock(
 	return receipts, vmStateDB.Check()
 }
 
-func applyCorrections(stateDB carmen.VmStateDB, corrections map[common.Address]Correction, block *types.Block) {
+func applyCorrections(stateDB carmen.VmStateDB, corrections map[common.Address]Correction, block *types.Block, logger utils.Logger) {
 	if len(corrections) == 0 {
 		return
 	}
 	stateDB.BeginTransaction()
-	slog.Info("Applying corrections", "block", block.NumberU64())
+	logger.Info("Applying corrections", "block", block.NumberU64())
 	for addr, acc := range corrections {
 		if acc.Balance != nil {
-			slog.Info("Correcting account",
+			logger.Info("Correcting balance",
 				"address", addr.Hex(),
-				"old_balance", stateDB.GetBalance(cc.Address(addr)).ToBig().String(),
-				"new_balance", acc.Balance.ToBig().String(),
+				"old", stateDB.GetBalance(cc.Address(addr)).ToBig().String(),
+				"new", acc.Balance.ToBig().String(),
 			)
 			setBalance(stateDB, addr, acc.Balance.ToBig())
 		}
 		if len(acc.Storage) > 0 {
-			slog.Info("Correcting storage",
+			logger.Info("Correcting storage",
 				"address", addr.Hex(),
 				"storage_keys", len(acc.Storage),
 			)
 			for key, value := range acc.Storage {
-				slog.Info("Correcting storage entry",
+				logger.Info("Correcting storage entry",
 					"address", addr.Hex(),
 					"key", fmt.Sprintf("0x%x", key[:]),
-					"old_value", fmt.Sprintf("0x%x", stateDB.GetState(cc.Address(addr), key)),
-					"new_value", fmt.Sprintf("0x%x", value[:]),
+					"old", fmt.Sprintf("0x%x", stateDB.GetState(cc.Address(addr), key)),
+					"new", fmt.Sprintf("0x%x", value[:]),
 				)
 				stateDB.SetState(cc.Address(addr), key, value)
 			}
