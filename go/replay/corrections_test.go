@@ -120,6 +120,10 @@ func TestCorrections_decodeFixed_DecodesStringCorrectly(t *testing.T) {
 			input:    "",
 			expected: [32]byte{},
 		},
+		"short string": {
+			input:    "0x1234",
+			expected: [32]byte{30: 0x12, 31: 0x34},
+		},
 	}
 
 	for name, tc := range tests {
