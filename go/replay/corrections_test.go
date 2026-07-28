@@ -119,6 +119,11 @@ func TestCorrections_decodeFixed_DecodesStringCorrectly(t *testing.T) {
 			size:     2,
 			expected: []byte{0x00, 0x00},
 		},
+		"uppercase hex": {
+			input:    "0X0D0E0F",
+			size:     3,
+			expected: []byte{0x0d, 0x0e, 0x0f},
+		},
 	}
 
 	for name, tc := range tests {

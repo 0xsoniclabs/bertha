@@ -93,7 +93,7 @@ func decodeFixed(s string, numBytes int) ([]byte, error) {
 	if numBytes < 0 {
 		return []byte{}, fmt.Errorf("invalid size %d", numBytes)
 	}
-	s = strings.TrimPrefix(s, "0x")
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
 	if len(s)%2 == 1 {
 		return []byte{}, fmt.Errorf("odd-length hex string")
 	}

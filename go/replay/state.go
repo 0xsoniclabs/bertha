@@ -337,7 +337,7 @@ func applyCorrections(stateDB carmen.VmStateDB, corrections map[common.Address]C
 			)
 			setBalance(stateDB, addr, acc.Balance.ToBig())
 		}
-		if acc.Storage != nil && len(acc.Storage) > 0 {
+		if len(acc.Storage) > 0 {
 			slog.Info("Correcting storage",
 				"address", addr.Hex(),
 				"storage_keys", len(acc.Storage),
