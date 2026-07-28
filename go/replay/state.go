@@ -24,6 +24,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/0xsoniclabs/bertha/utils"
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/amount"
 	"github.com/0xsoniclabs/carmen/go/common/future"
@@ -303,19 +304,7 @@ func (s *State) ApplyBlock(
 	}
 
 	// Apply corrections if any are provided.
-	if len(corrections) > 0 {
-		vmStateDB.BeginTransaction()
-		slog.Info("Applying corrections", "block", block.NumberU64())
-		for addr, acc := range corrections {
-			slog.Info("Correcting account",
-				"address", addr.Hex(),
-				"old_balance", vmStateDB.GetBalance(cc.Address(addr)).ToBig().String(),
-				"new_balance", acc.Balance.ToBig().String(),
-			)
-			setBalance(vmStateDB, addr, acc.Balance.ToBig())
-		}
-		vmStateDB.EndTransaction()
-	}
+	applyCorrections(vmStateDB, corrections, block, slog.Default())
 
 	if isEthereum(chainConfig.ChainID.Uint64()) {
 		if isPostMerge {
@@ -332,6 +321,41 @@ func (s *State) ApplyBlock(
 	}
 
 	return receipts, vmStateDB.Check()
+}
+
+func applyCorrections(stateDB carmen.VmStateDB, corrections map[common.Address]Correction, block *types.Block, logger utils.Logger) {
+	if len(corrections) == 0 {
+		return
+	}
+	stateDB.BeginTransaction()
+	logger.Info("Applying corrections", "block", block.NumberU64())
+	for addr, acc := range corrections {
+		if acc.Balance != nil {
+			logger.Info("Correcting balance",
+				"address", addr.Hex(),
+				"old", stateDB.GetBalance(cc.Address(addr)).ToBig().String(),
+				"new", acc.Balance.ToBig().String(),
+			)
+			setBalance(stateDB, addr, acc.Balance.ToBig())
+		}
+		if len(acc.Storage) > 0 {
+			logger.Info("Correcting storage",
+				"address", addr.Hex(),
+				"storage_keys", len(acc.Storage),
+			)
+			for key, value := range acc.Storage {
+				logger.Info("Correcting storage entry",
+					"address", addr.Hex(),
+					"key", fmt.Sprintf("0x%x", key[:]),
+					"old", fmt.Sprintf("0x%x", stateDB.GetState(cc.Address(addr), key)),
+					"new", fmt.Sprintf("0x%x", value[:]),
+				)
+				stateDB.SetState(cc.Address(addr), key, value)
+			}
+		}
+	}
+	stateDB.EndTransaction()
+
 }
 
 func setBalance(stateDB carmen.VmStateDB, address common.Address, balance *big.Int) {

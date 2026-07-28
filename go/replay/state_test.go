@@ -25,6 +25,7 @@ import (
 
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
+	"github.com/0xsoniclabs/bertha/utils"
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/amount"
 	"github.com/0xsoniclabs/carmen/go/common/future"
@@ -314,7 +315,10 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 	corrections := Corrections{
 		17: map[common.Address]Correction{
 			{1}: {
-				Balance: *uint256.NewInt(1000),
+				Balance: uint256.NewInt(1000),
+				Storage: map[cc.Key]cc.Value{
+					{3}: {4},
+				},
 			},
 		},
 	}
@@ -345,6 +349,60 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 	require.Empty(t, receipts)
 
 	require.Equal(t, uint64(1000), state.db.GetBalance(cc.Address{1}).Uint64())
+	require.Equal(t, cc.Value{4}, state.db.GetState(cc.Address{1}, cc.Key{3}))
+}
+
+func TestState_applyCorrections_AppliesCorrectionsToStateDB(t *testing.T) {
+	blockNumber := uint64(17)
+	address := common.Address{1}
+	oldBalance := amount.New(0)
+	newBalance := uint256.NewInt(1000)
+	balanceDiff := amount.New(1000)
+	storageKey := cc.Key{1}
+	oldStorageValue := cc.Value{2}
+	newStorageValue := cc.Value{3}
+
+	corrections := Corrections{
+		blockNumber: map[common.Address]Correction{
+			address: {
+				Balance: newBalance,
+				Storage: map[cc.Key]cc.Value{
+					storageKey: newStorageValue,
+				},
+			},
+		},
+	}
+
+	ctrl := gomock.NewController(t)
+	stateDB := carmen.NewMockVmStateDB(ctrl)
+	logger := utils.NewMockLogger(ctrl)
+
+	stateDB.EXPECT().BeginTransaction().Times(1)
+	stateDB.EXPECT().GetBalance(cc.Address(address)).Return(oldBalance).Times(2)
+	stateDB.EXPECT().AddBalance(cc.Address(address), balanceDiff).Times(1)
+	stateDB.EXPECT().GetState(cc.Address(address), storageKey).Return(oldStorageValue).Times(1)
+	stateDB.EXPECT().SetState(cc.Address(address), storageKey, newStorageValue).Times(1)
+	stateDB.EXPECT().EndTransaction().Times(1)
+
+	logger.EXPECT().Info("Applying corrections", "block", blockNumber).Times(1)
+	logger.EXPECT().Info("Correcting balance",
+		"address", address.Hex(),
+		"old", oldBalance.ToBig().String(),
+		"new", newBalance.ToBig().String(),
+	).Times(1)
+	logger.EXPECT().Info("Correcting storage",
+		"address", address.Hex(),
+		"storage_keys", len(corrections[blockNumber][address].Storage),
+	).Times(1)
+	logger.EXPECT().Info("Correcting storage entry",
+		"address", address.Hex(),
+		"key", fmt.Sprintf("0x%x", storageKey[:]),
+		"old", fmt.Sprintf("0x%x", oldStorageValue[:]),
+		"new", fmt.Sprintf("0x%x", newStorageValue[:]),
+	).Times(1)
+
+	block := types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(blockNumber)})
+	applyCorrections(stateDB, corrections[blockNumber], block, logger)
 }
 
 func TestState_ApplyBlock_BlobBaseFeeIsCalculatedFromHeaderForEthereum(t *testing.T) {
