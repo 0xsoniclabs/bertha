@@ -303,19 +303,7 @@ func (s *State) ApplyBlock(
 	}
 
 	// Apply corrections if any are provided.
-	if len(corrections) > 0 {
-		vmStateDB.BeginTransaction()
-		slog.Info("Applying corrections", "block", block.NumberU64())
-		for addr, acc := range corrections {
-			slog.Info("Correcting account",
-				"address", addr.Hex(),
-				"old_balance", vmStateDB.GetBalance(cc.Address(addr)).ToBig().String(),
-				"new_balance", acc.Balance.ToBig().String(),
-			)
-			setBalance(vmStateDB, addr, acc.Balance.ToBig())
-		}
-		vmStateDB.EndTransaction()
-	}
+	applyCorrections(vmStateDB, corrections, block)
 
 	if isEthereum(chainConfig.ChainID.Uint64()) {
 		if isPostMerge {
@@ -332,6 +320,41 @@ func (s *State) ApplyBlock(
 	}
 
 	return receipts, vmStateDB.Check()
+}
+
+func applyCorrections(stateDB carmen.VmStateDB, corrections map[common.Address]Correction, block *types.Block) {
+	if len(corrections) == 0 {
+		return
+	}
+	stateDB.BeginTransaction()
+	slog.Info("Applying corrections", "block", block.NumberU64())
+	for addr, acc := range corrections {
+		if acc.Balance != nil {
+			slog.Info("Correcting account",
+				"address", addr.Hex(),
+				"old_balance", stateDB.GetBalance(cc.Address(addr)).ToBig().String(),
+				"new_balance", acc.Balance.ToBig().String(),
+			)
+			setBalance(stateDB, addr, acc.Balance.ToBig())
+		}
+		if acc.Storage != nil && len(acc.Storage) > 0 {
+			slog.Info("Correcting storage",
+				"address", addr.Hex(),
+				"storage_keys", len(acc.Storage),
+			)
+			for key, value := range acc.Storage {
+				slog.Info("Correcting storage entry",
+					"address", addr.Hex(),
+					"key", fmt.Sprintf("0x%x", key[:]),
+					"old_value", fmt.Sprintf("0x%x", stateDB.GetState(cc.Address(addr), key)),
+					"new_value", fmt.Sprintf("0x%x", value[:]),
+				)
+				stateDB.SetState(cc.Address(addr), key, value)
+			}
+		}
+	}
+	stateDB.EndTransaction()
+
 }
 
 func setBalance(stateDB carmen.VmStateDB, address common.Address, balance *big.Int) {

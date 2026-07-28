@@ -314,7 +314,10 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 	corrections := Corrections{
 		17: map[common.Address]Correction{
 			{1}: {
-				Balance: *uint256.NewInt(1000),
+				Balance: uint256.NewInt(1000),
+				Storage: map[cc.Key]cc.Value{
+					{3}: {4},
+				},
 			},
 		},
 	}
@@ -345,6 +348,7 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 	require.Empty(t, receipts)
 
 	require.Equal(t, uint64(1000), state.db.GetBalance(cc.Address{1}).Uint64())
+	require.Equal(t, cc.Value{4}, state.db.GetState(cc.Address{1}, cc.Key{3}))
 }
 
 func TestState_ApplyBlock_BlobBaseFeeIsCalculatedFromHeaderForEthereum(t *testing.T) {

@@ -39,7 +39,7 @@ func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
 		{Block: 5, Rules: opera.Rules{NetworkID: 146, Upgrades: opera.Upgrades{Sonic: true}}},
 	}
 	corrections := Corrections{
-		10: {common.HexToAddress("0x123"): {Balance: *uint256.NewInt(100)}},
+		10: {common.HexToAddress("0x123"): {Balance: uint256.NewInt(100)}},
 	}
 
 	rulesUpdateHeightsWithGenesisData, err := json.Marshal(storedHeightsWithGenesis)
@@ -341,10 +341,10 @@ func TestBlockDBMetadataStore_GetUpgradesAtBlock_ObtainsUpgradesFromCachedValues
 func TestBlockDBMetadataStore_GetCorrectionsAtBlock_ReturnsCorrections(t *testing.T) {
 	corrections := Corrections{
 		10: {
-			common.HexToAddress("0x123"): {Balance: *uint256.NewInt(100)},
+			common.HexToAddress("0x123"): {Balance: uint256.NewInt(100)},
 		},
 		20: {
-			common.HexToAddress("0x456"): {Balance: *uint256.NewInt(200)},
+			common.HexToAddress("0x456"): {Balance: uint256.NewInt(200)},
 		},
 	}
 
