@@ -36,16 +36,25 @@ import (
 
 func TestVerify_RunWithoutParameters_FailsToOpenMissingDb(t *testing.T) {
 	ctrl := gomock.NewController(t)
+
+	logger := utils.NewMockLogger(ctrl)
+	logger.EXPECT().Info("Opening block database", "directory", "")
+
 	require.ErrorContains(t,
-		Verify(t.Context(), VerifyArgs{}, utils.NewMockProgressIndicatorFactory(ctrl)),
+		Verify(t.Context(), VerifyArgs{}, logger, utils.NewMockProgressIndicatorFactory(ctrl)),
 		"failed to open database",
 	)
 }
 
 func TestVerify_InvalidDirectory_ReportsAnIssue(t *testing.T) {
 	ctrl := gomock.NewController(t)
+
+	directory := t.TempDir()
+	logger := utils.NewMockLogger(ctrl)
+	logger.EXPECT().Info("Opening block database", "directory", directory)
+
 	require.ErrorContains(t,
-		Verify(t.Context(), VerifyArgs{DatabaseDir: t.TempDir()}, utils.NewMockProgressIndicatorFactory(ctrl)),
+		Verify(t.Context(), VerifyArgs{DatabaseDir: directory}, logger, utils.NewMockProgressIndicatorFactory(ctrl)),
 		"failed to open database",
 	)
 }
@@ -76,8 +85,16 @@ func TestVerify_EmptyDatabase_DoesNotReportIssues(t *testing.T) {
 
 	db.Close()
 
+	logger := utils.NewMockLogger(ctrl)
+	logger.EXPECT().Info("Opening block database", "directory", path)
+	logger.EXPECT().Info("Verifying blocks",
+		"chain_id", uint64(0),
+		"start_block", uint64(0),
+		"end_block", uint64(0),
+	)
+
 	require.NoError(
-		Verify(t.Context(), VerifyArgs{DatabaseDir: path}, progressIndicatorFactory),
+		Verify(t.Context(), VerifyArgs{DatabaseDir: path}, logger, progressIndicatorFactory),
 	)
 }
 
@@ -117,9 +134,18 @@ func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
 
 	db.Close()
 
+	logger := utils.NewMockLogger(ctrl)
+	logger.EXPECT().Info("Opening block database", "directory", path)
+	logger.EXPECT().Info("Verifying blocks",
+		"chain_id", chainID,
+		"start_block", uint64(0),
+		"end_block", uint64(blocks-1),
+	)
+
 	require.NoError(
 		Verify(t.Context(),
 			VerifyArgs{DatabaseDir: path, ChainID: chainID, StartBlock: 0, EndBlock: uint64(blocks - 1)},
+			logger,
 			progressIndicatorFactory,
 		),
 	)

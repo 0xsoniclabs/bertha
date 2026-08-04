@@ -36,8 +36,13 @@ type VerifyArgs struct {
 	EndBlock    uint64
 }
 
-func Verify(ctx context.Context, args VerifyArgs, progressIndicatorFactory utils.ProgressIndicatorFactory) (err error) {
-	fmt.Printf("Opening block database in %q ...\n", args.DatabaseDir)
+func Verify(
+	ctx context.Context,
+	args VerifyArgs,
+	logger utils.Logger,
+	progressIndicatorFactory utils.ProgressIndicatorFactory,
+) (err error) {
+	logger.Info("Opening block database", "directory", args.DatabaseDir)
 	database, err := blockdb.OpenRocksDBForReading(args.DatabaseDir)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
@@ -46,7 +51,11 @@ func Verify(ctx context.Context, args VerifyArgs, progressIndicatorFactory utils
 		err = errors.Join(err, database.Close())
 	}()
 
-	fmt.Printf("Verifying blocks for chain ID %d from block %d to block %d ...\n", args.ChainID, args.StartBlock, args.EndBlock)
+	logger.Info("Verifying blocks",
+		"chain_id", args.ChainID,
+		"start_block", args.StartBlock,
+		"end_block", args.EndBlock,
+	)
 
 	numBlocks := int64(args.EndBlock - args.StartBlock + 1)
 	progressIndicator := progressIndicatorFactory.New(numBlocks, "Verifying blocks")
