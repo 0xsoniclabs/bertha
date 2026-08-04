@@ -371,7 +371,7 @@ func parseVerifyArgsAndRunVerify(ctx context.Context, c *cli.Command) error {
 		StartBlock:  c.Uint64(startBlockFlag.Name),
 		EndBlock:    c.Uint64(endBlockFlag.Name),
 	}
-	return verify.Verify(ctx, args, &utils.ProgressBarFactory{})
+	return verify.Verify(ctx, args, slog.Default(), &utils.ProgressBarFactory{})
 }
 
 // parseOverwriteStateRootPolicy parses a string into an
