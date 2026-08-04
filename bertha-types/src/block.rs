@@ -156,6 +156,8 @@ impl Block {
             withdrawals_root: self.withdrawals_root,
             blob_gas_used: self.blob_gas_used,
             excess_blob_gas: self.excess_blob_gas,
+            parent_beacon_block_root: self.parent_beacon_block_root,
+            requests_hash: self.requests_hash,
         }
     }
 
@@ -184,8 +186,8 @@ impl Block {
             withdrawals,
             blob_gas_used: header.blob_gas_used,
             excess_blob_gas: header.excess_blob_gas,
-            parent_beacon_block_root: None,
-            requests_hash: None,
+            parent_beacon_block_root: header.parent_beacon_block_root,
+            requests_hash: header.requests_hash,
             ommer_headers: Vec::new(),
             verkle_state_root: None,
             binary_state_root: None,
