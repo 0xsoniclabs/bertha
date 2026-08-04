@@ -122,26 +122,12 @@ impl Encodable for BlockHeader {
         Encodable::encode(&self.extra_data.as_slice(), out); // <- needs custom encoding
         Encodable::encode(&self.prev_randao, out);
         Encodable::encode(&self.nonce, out);
-        if let Some(val) = self.base_fee_per_gas.as_ref() {
-            Encodable::encode(val, out)
-        } else if self.withdrawals_root.is_some()
-            || self.blob_gas_used.is_some()
-            || self.excess_blob_gas.is_some()
-        {
-            out.put_u8(alloy_rlp::EMPTY_STRING_CODE);
-        }
-        if let Some(val) = self.withdrawals_root.as_ref() {
-            Encodable::encode(val, out)
-        } else if self.blob_gas_used.is_some() || self.excess_blob_gas.is_some() {
-            out.put_u8(alloy_rlp::EMPTY_STRING_CODE);
-        }
-        if let Some(val) = self.blob_gas_used.as_ref() {
-            Encodable::encode(val, out)
-        } else if self.excess_blob_gas.is_some() {
-            out.put_u8(alloy_rlp::EMPTY_STRING_CODE);
-        }
-        if let Some(val) = self.excess_blob_gas.as_ref() {
-            Encodable::encode(val, out)
+        let optional_fields = self.optional_rlp_fields();
+        for field in &optional_fields[..num_encoded_optional_rlp_fields(&optional_fields)] {
+            match field {
+                Some(value) => value.encode(out),
+                None => out.put_u8(alloy_rlp::EMPTY_STRING_CODE),
+            }
         }
     }
 }
@@ -175,54 +161,10 @@ impl Decodable for BlockHeader {
             extra_data: alloy_rlp::Header::decode_bytes(b, false)?.to_vec(), // custom
             prev_randao: Decodable::decode(b)?,
             nonce: Decodable::decode(b)?,
-            base_fee_per_gas: if started_len - b.len() < payload_length {
-                if alloy_rlp::private::Option::map_or(b.first(), false, |b| {
-                    *b == alloy_rlp::EMPTY_STRING_CODE
-                }) {
-                    alloy_rlp::Buf::advance(b, 1);
-                    None
-                } else {
-                    Some(Decodable::decode(b)?)
-                }
-            } else {
-                None
-            },
-            withdrawals_root: if started_len - b.len() < payload_length {
-                if alloy_rlp::private::Option::map_or(b.first(), false, |b| {
-                    *b == alloy_rlp::EMPTY_STRING_CODE
-                }) {
-                    alloy_rlp::Buf::advance(b, 1);
-                    None
-                } else {
-                    Some(Decodable::decode(b)?)
-                }
-            } else {
-                None
-            },
-            blob_gas_used: if started_len - b.len() < payload_length {
-                if alloy_rlp::private::Option::map_or(b.first(), false, |b| {
-                    *b == alloy_rlp::EMPTY_STRING_CODE
-                }) {
-                    alloy_rlp::Buf::advance(b, 1);
-                    None
-                } else {
-                    Some(Decodable::decode(b)?)
-                }
-            } else {
-                None
-            },
-            excess_blob_gas: if started_len - b.len() < payload_length {
-                if alloy_rlp::private::Option::map_or(b.first(), false, |b| {
-                    *b == alloy_rlp::EMPTY_STRING_CODE
-                }) {
-                    alloy_rlp::Buf::advance(b, 1);
-                    None
-                } else {
-                    Some(Decodable::decode(b)?)
-                }
-            } else {
-                None
-            },
+            base_fee_per_gas: decode_optional_field(b, started_len, payload_length)?,
+            withdrawals_root: decode_optional_field(b, started_len, payload_length)?,
+            blob_gas_used: decode_optional_field(b, started_len, payload_length)?,
+            excess_blob_gas: decode_optional_field(b, started_len, payload_length)?,
         };
         let consumed = started_len - b.len();
         if consumed != payload_length {
@@ -252,32 +194,27 @@ impl BlockHeader {
             + Encodable::length(&self.extra_data.as_slice()) // custom
             + Encodable::length(&self.prev_randao)
             + Encodable::length(&self.nonce)
-            + self
-                .base_fee_per_gas
-                .as_ref()
-                .map(Encodable::length)
-                .unwrap_or(
-                    (self.withdrawals_root.is_some()
-                        || self.blob_gas_used.is_some()
-                        || self.excess_blob_gas.is_some()) as usize,
-                )
-            + self
-                .withdrawals_root
-                .as_ref()
-                .map(Encodable::length)
-                .unwrap_or(
-                    (self.blob_gas_used.is_some() || self.excess_blob_gas.is_some()) as usize,
-                )
-            + self
-                .blob_gas_used
-                .as_ref()
-                .map(Encodable::length)
-                .unwrap_or((self.excess_blob_gas.is_some()) as usize)
-            + self
-                .excess_blob_gas
-                .as_ref()
-                .map(Encodable::length)
-                .unwrap_or(0)
+            + self.optional_rlp_fields_length()
+    }
+
+    /// The length of the RLP encoding of all optional fields, including the placeholders.
+    fn optional_rlp_fields_length(&self) -> usize {
+        let fields = self.optional_rlp_fields();
+        fields[..num_encoded_optional_rlp_fields(&fields)]
+            .iter()
+            // a placeholder is encoded as a single byte
+            .map(|field| field.map_or(1, Encodable::length))
+            .sum()
+    }
+
+    /// The optional fields of the header, in the order in which they appear in the RLP encoding.
+    fn optional_rlp_fields(&self) -> [Option<&dyn Encodable>; 4] {
+        [
+            self.base_fee_per_gas.as_ref().map(|v| v as &dyn Encodable),
+            self.withdrawals_root.as_ref().map(|v| v as &dyn Encodable),
+            self.blob_gas_used.as_ref().map(|v| v as &dyn Encodable),
+            self.excess_blob_gas.as_ref().map(|v| v as &dyn Encodable),
+        ]
     }
 
     pub fn compute_hash(&self) -> Hash {
@@ -302,6 +239,33 @@ impl BlockHeader {
 
         may_contain
     }
+}
+
+/// The number of optional header fields that are part of the RLP encoding. Since the fields are
+/// identified by their position, all fields up to and including the last one that is set have to be
+/// encoded, using an empty string as a placeholder for the ones that are not set.
+fn num_encoded_optional_rlp_fields(fields: &[Option<&dyn Encodable>]) -> usize {
+    fields
+        .iter()
+        .rposition(Option::is_some)
+        .map_or(0, |i| i + 1)
+}
+
+/// Decodes an optional header field. Returns [None] if the payload is exhausted or if the field is
+/// encoded as an empty string placeholder.
+fn decode_optional_field<T: Decodable>(
+    b: &mut &[u8],
+    started_len: usize,
+    payload_length: usize,
+) -> alloy_rlp::Result<Option<T>> {
+    if started_len - b.len() >= payload_length {
+        return Ok(None);
+    }
+    if b.first() == Some(&alloy_rlp::EMPTY_STRING_CODE) {
+        alloy_rlp::Buf::advance(b, 1);
+        return Ok(None);
+    }
+    T::decode(b).map(Some)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
