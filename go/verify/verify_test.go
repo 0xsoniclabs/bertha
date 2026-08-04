@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"iter"
+	"math"
 	"slices"
 	"testing"
 
@@ -33,6 +34,19 @@ import (
 	"go.uber.org/mock/gomock"
 	"google.golang.org/protobuf/proto"
 )
+
+func TestVerify_StartBlockAfterEndBlock_ReportsAnIssue(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	require.ErrorContains(t,
+		Verify(
+			t.Context(),
+			VerifyArgs{DatabaseDir: t.TempDir(), StartBlock: 10, EndBlock: 5},
+			utils.NewMockLogger(ctrl),
+			utils.NewMockProgressIndicatorFactory(ctrl),
+		),
+		"start block 10 is greater than end block 5",
+	)
+}
 
 func TestVerify_RunWithoutParameters_FailsToOpenMissingDb(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -59,48 +73,135 @@ func TestVerify_InvalidDirectory_ReportsAnIssue(t *testing.T) {
 	)
 }
 
-func TestVerify_EmptyDatabase_DoesNotReportIssues(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	require := require.New(t)
+func TestVerify_NoBlocksInRange_LogsWarning(t *testing.T) {
+	chainID := uint64(123)
+	storedBlocks := utils.CreateValidBlocks(t, 10) // numbered 0 to 9
 
-	progressIndicatorFactory := utils.NewMockProgressIndicatorFactory(ctrl)
-	// Expect 1 block because interval 0..=0 contains 1 block and the number
-	// of blocks is computed from the requested interval, not from the actual
-	// content of the database.
-	progressIndicatorFactory.EXPECT().New(int64(1), "Verifying blocks").
-		Return(utils.NewMockProgressIndicator(ctrl)).Times(1)
+	tests := map[string]struct {
+		blocks     []*blockdb.Block
+		startBlock uint64
+		endBlock   uint64
+	}{
+		"empty database":            {endBlock: math.MaxUint64},
+		"range above stored blocks": {blocks: storedBlocks, startBlock: 20, endBlock: 30},
+		"range below stored blocks": {blocks: storedBlocks[5:], endBlock: 3},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
 
-	path := t.TempDir()
-	options := grocksdb.NewDefaultOptions()
-	defer options.Destroy()
-	options.SetCreateIfMissing(true)
-	db, err := grocksdb.OpenDb(options, path)
-	require.NoError(err, "failed to create database")
+			directory := createDatabase(t, chainID, test.blocks)
+			logger := utils.NewMockLogger(ctrl)
+			logger.EXPECT().Info("Opening block database", "directory", directory)
+			logger.EXPECT().Warn("No blocks found",
+				"chain_id", chainID,
+				"start_block", test.startBlock,
+				"end_block", test.endBlock,
+			)
 
-	writeOptions := grocksdb.NewDefaultWriteOptions()
-	defer writeOptions.Destroy()
-	version := make([]byte, 8)
-	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
-	require.NoError(db.Put(writeOptions, blockdb.MakeVersionKey(), version), "failed to write database version")
+			// There is nothing to verify, so no progress indicator is created.
+			progressIndicatorFactory := utils.NewMockProgressIndicatorFactory(ctrl)
 
-	db.Close()
+			require.NoError(t, Verify(t.Context(),
+				VerifyArgs{
+					DatabaseDir: directory,
+					ChainID:     chainID,
+					StartBlock:  test.startBlock,
+					EndBlock:    test.endBlock,
+				},
+				logger,
+				progressIndicatorFactory,
+			))
+		})
+	}
+}
 
-	logger := utils.NewMockLogger(ctrl)
-	logger.EXPECT().Info("Opening block database", "directory", path)
-	logger.EXPECT().Info("Verifying blocks",
-		"chain_id", uint64(0),
-		"start_block", uint64(0),
-		"end_block", uint64(0),
-	)
+func TestVerify_BlockRange_IsClampedToStoredBlocks(t *testing.T) {
+	chainID := uint64(123)
+	storedBlocks := utils.CreateValidBlocks(t, 10) // numbered 0 to 9
 
-	require.NoError(
-		Verify(t.Context(), VerifyArgs{DatabaseDir: path}, logger, progressIndicatorFactory),
-	)
+	tests := map[string]struct {
+		blocks         []*blockdb.Block
+		startBlock     uint64
+		endBlock       uint64
+		wantStartBlock uint64
+		wantEndBlock   uint64
+	}{
+		"unbounded end block":      {blocks: storedBlocks, endBlock: math.MaxUint64, wantEndBlock: 9},
+		"end block above highest":  {blocks: storedBlocks, endBlock: 100, wantEndBlock: 9},
+		"end block below highest":  {blocks: storedBlocks, endBlock: 4, wantEndBlock: 4},
+		"start block above lowest": {blocks: storedBlocks, startBlock: 3, endBlock: 100, wantStartBlock: 3, wantEndBlock: 9},
+		"start block below lowest": {blocks: storedBlocks[3:], endBlock: 100, wantStartBlock: 3, wantEndBlock: 9},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+
+			directory := createDatabase(t, chainID, test.blocks)
+
+			logger := utils.NewMockLogger(ctrl)
+			logger.EXPECT().Info("Opening block database", "directory", directory)
+			logger.EXPECT().Info("Verifying blocks",
+				"chain_id", chainID,
+				"start_block", test.wantStartBlock,
+				"end_block", test.wantEndBlock,
+			)
+
+			wantNumBlocks := int64(test.wantEndBlock - test.wantStartBlock + 1)
+			progressIndicator := utils.NewMockProgressIndicator(ctrl)
+			progressIndicator.EXPECT().Add(1).Return(nil).Times(int(wantNumBlocks))
+			progressIndicatorFactory := utils.NewMockProgressIndicatorFactory(ctrl)
+			progressIndicatorFactory.EXPECT().New(wantNumBlocks, "Verifying blocks").
+				Return(progressIndicator)
+
+			require.NoError(t, Verify(t.Context(),
+				VerifyArgs{
+					DatabaseDir: directory,
+					ChainID:     chainID,
+					StartBlock:  test.startBlock,
+					EndBlock:    test.endBlock,
+				},
+				logger,
+				progressIndicatorFactory,
+			))
+		})
+	}
+}
+
+func TestVerify_UnreadableBlockAtRangeBound_ReportsAnIssue(t *testing.T) {
+	chainID := uint64(123)
+
+	tests := map[string]struct {
+		corruptedBlock uint64
+		wantErr        string
+	}{
+		"lowest block":  {corruptedBlock: 0, wantErr: "failed to read lowest block"},
+		"highest block": {corruptedBlock: 9, wantErr: "failed to read highest block"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+
+			directory := createDatabase(t, chainID, utils.CreateValidBlocks(t, 10))
+			corruptBlock(t, directory, chainID, test.corruptedBlock)
+
+			logger := utils.NewMockLogger(ctrl)
+			logger.EXPECT().Info("Opening block database", "directory", directory)
+
+			require.ErrorContains(t,
+				Verify(t.Context(),
+					VerifyArgs{DatabaseDir: directory, ChainID: chainID, EndBlock: math.MaxUint64},
+					logger,
+					utils.NewMockProgressIndicatorFactory(ctrl),
+				),
+				test.wantErr,
+			)
+		})
+	}
 }
 
 func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	require := require.New(t)
 
 	chainID := uint64(123)
 	blocks := 10
@@ -109,46 +210,34 @@ func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
 	progressIndicator.EXPECT().Add(1).Return(nil).Times(blocks)
 	progressIndicatorFactory := utils.NewMockProgressIndicatorFactory(ctrl)
 	progressIndicatorFactory.EXPECT().New(int64(blocks), "Verifying blocks").
-		Return(progressIndicator).Times(1)
+		Return(progressIndicator)
 
-	path := t.TempDir()
-	options := grocksdb.NewDefaultOptions()
-	defer options.Destroy()
-	options.SetCreateIfMissing(true)
-	db, err := grocksdb.OpenDb(options, path)
-	require.NoError(err, "failed to create database")
-
-	writeOptions := grocksdb.NewDefaultWriteOptions()
-	defer writeOptions.Destroy()
-	version := make([]byte, 8)
-	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
-	require.NoError(db.Put(writeOptions, blockdb.MakeVersionKey(), version), "failed to write database version")
-
-	for _, block := range utils.CreateValidBlocks(t, blocks) {
-		key := blockdb.MakeBlockKey(chainID, uint64(block.Number))
-
-		value, err := proto.Marshal(block)
-		require.NoError(err, "failed to marshal block")
-		require.NoError(db.Put(writeOptions, key, value))
-	}
-
-	db.Close()
+	directory := createDatabase(t, chainID, utils.CreateValidBlocks(t, blocks))
 
 	logger := utils.NewMockLogger(ctrl)
-	logger.EXPECT().Info("Opening block database", "directory", path)
+	logger.EXPECT().Info("Opening block database", "directory", directory)
 	logger.EXPECT().Info("Verifying blocks",
 		"chain_id", chainID,
 		"start_block", uint64(0),
 		"end_block", uint64(blocks-1),
 	)
 
-	require.NoError(
+	require.NoError(t,
 		Verify(t.Context(),
-			VerifyArgs{DatabaseDir: path, ChainID: chainID, StartBlock: 0, EndBlock: uint64(blocks - 1)},
+			VerifyArgs{DatabaseDir: directory, ChainID: chainID, StartBlock: 0, EndBlock: uint64(blocks - 1)},
 			logger,
 			progressIndicatorFactory,
 		),
 	)
+}
+
+func TestGetStoredBlockRange_NilBlock_ReportsAnIssue(t *testing.T) {
+	database := blockdb.NewMockBlockDB(gomock.NewController(t))
+	database.EXPECT().GetRange(uint64(1), uint64(2), uint64(3)).
+		Return(utils.NewIter([]*blockdb.Block{nil}))
+
+	_, _, _, err := getStoredBlockRange(database, 1, 2, 3)
+	require.ErrorContains(t, err, "encountered nil block")
 }
 
 func TestVerifyBlocks_ValidBlockHashSequence_DoesNotReportIssues(t *testing.T) {
@@ -236,4 +325,51 @@ func TestVerifyBlock_CorrectHash_VerifyPasses(t *testing.T) {
 
 	hash := gethBlock.Hash()
 	require.NoError(t, verifyBlock(hash, block))
+}
+
+// createDatabase creates a block database holding the given blocks under the given chain ID and
+// returns its directory. The database is closed before returning so that it can be opened again.
+func createDatabase(t *testing.T, chainID uint64, blocks []*blockdb.Block) string {
+	t.Helper()
+	directory := t.TempDir()
+	db, writeOptions := openDatabaseForWriting(t, directory)
+	defer db.Close()
+
+	version := make([]byte, 8)
+	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
+	require.NoError(t, db.Put(writeOptions, blockdb.MakeVersionKey(), version))
+
+	for _, block := range blocks {
+		value, err := proto.Marshal(block)
+		require.NoError(t, err)
+		require.NoError(t, db.Put(writeOptions, blockdb.MakeBlockKey(chainID, block.Number), value))
+	}
+
+	return directory
+}
+
+// corruptBlock replaces the value stored for the given block with data that cannot be parsed.
+// The database is closed before returning so that it can be opened again.
+func corruptBlock(t *testing.T, directory string, chainID uint64, blockNumber uint64) {
+	t.Helper()
+	db, writeOptions := openDatabaseForWriting(t, directory)
+	defer db.Close()
+
+	invalidBlock := []byte{0x00}
+	require.NoError(t, db.Put(writeOptions, blockdb.MakeBlockKey(chainID, blockNumber), invalidBlock))
+}
+
+// openDatabaseForWriting opens the database in the given directory, creating it if it is missing.
+// The returned options are destroyed when the test ends, the database must be closed by the caller.
+func openDatabaseForWriting(t *testing.T, directory string) (*grocksdb.DB, *grocksdb.WriteOptions) {
+	t.Helper()
+	options := grocksdb.NewDefaultOptions()
+	t.Cleanup(options.Destroy)
+	options.SetCreateIfMissing(true)
+	db, err := grocksdb.OpenDb(options, directory)
+	require.NoError(t, err)
+
+	writeOptions := grocksdb.NewDefaultWriteOptions()
+	t.Cleanup(writeOptions.Destroy)
+	return db, writeOptions
 }
