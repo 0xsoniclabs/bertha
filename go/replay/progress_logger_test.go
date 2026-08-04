@@ -85,6 +85,54 @@ func TestProgressLogger_ProducesLogMessagesEvery10kSteps(t *testing.T) {
 	require.NoError(logger.LogProgress(block20k))
 }
 
+func TestProgressLogger_AnchorsBlockTimesAtFirstProcessedBlock(t *testing.T) {
+	require := require.New(t)
+	ctrl := gomock.NewController(t)
+	mockLogger := utils.NewMockLogger(ctrl)
+
+	logger := startProgressLogger(mockLogger, nil, "", false)
+
+	// The replay does not necessarily start at the genesis block.
+	block10k, err := convert.ConvertToGethBlock(&blockdb.Block{
+		Number:    10_000,
+		Timestamp: 123,
+	})
+	require.NoError(err)
+	block20k, err := convert.ConvertToGethBlock(&blockdb.Block{
+		Number:    20_000,
+		Timestamp: 123,
+	})
+	require.NoError(err)
+
+	// The first block only anchors the times, it is not reported.
+	require.NoError(logger.LogProgress(block10k))
+	require.Equal(time.Unix(123, 0).UTC(), logger.firstBlockTime)
+	require.Equal(time.Unix(123, 0).UTC(), logger.lastReportedBlockTime)
+
+	// Without the anchor, realtime would use the difference to the 0 timestamp.
+	mockLogger.EXPECT().Info(
+		"Processing block",
+		"block", uint64(20_000),
+		"block_time", time.Unix(123, 0).UTC().Format(time.RFC3339),
+		"elapsed", gomock.Any(),
+		"txs/s", 0,
+		"MGas/s", 0,
+		"realtime", 0,
+	)
+	require.NoError(logger.LogProgress(block20k))
+
+	mockLogger.EXPECT().Info(
+		"Replay finished",
+		"elapsed", gomock.Any(),
+		"txs", uint64(0),
+		"TGas", float64(0),
+		"txs/s", 0,
+		"MGas/s", 0,
+		"realtime", 0,
+	)
+	logger.LogSummary()
+}
+
 func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 	require := require.New(t)
 	ctrl := gomock.NewController(t)
@@ -100,6 +148,11 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 	err := os.WriteFile(filePath, data, 0644)
 	require.NoError(err)
 
+	anchor, err := convert.ConvertToGethBlock(&blockdb.Block{
+		Number:    0,
+		Timestamp: 1000,
+	})
+	require.NoError(err)
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:       10000,
 		Timestamp:    1000,
@@ -109,6 +162,7 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 
 	mockLogger := utils.NewMockLogger(ctrl)
 	logger := startProgressLogger(mockLogger, flusher, dir, true)
+	require.NoError(logger.LogProgress(anchor))
 	mockLogger.EXPECT().Info(
 		"Processing block",
 		"block", uint64(10000),
@@ -131,6 +185,7 @@ func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
 
 	mockLogger2 := utils.NewMockLogger(ctrl)
 	logger = startProgressLogger(mockLogger2, flusher, dir, true)
+	require.NoError(logger.LogProgress(anchor))
 	mockLogger2.EXPECT().Info(
 		"Processing block",
 		"block", uint64(10000),

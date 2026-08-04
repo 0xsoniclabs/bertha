@@ -61,12 +61,14 @@ func (p *progressLogger) LogProgress(block *types.Block) error {
 	p.txCounter += uint64(len(block.Transactions()))
 	p.gasCounter += block.GasUsed()
 
-	number := block.NumberU64()
-	if number == 0 {
+	// The first block only anchors the metrics, there is no interval to report on yet.
+	if p.firstBlockTime.IsZero() {
 		p.firstBlockTime = p.lastProcessedBlockTime
 		p.lastReportedBlockTime = p.lastProcessedBlockTime
 		return nil
 	}
+
+	number := block.NumberU64()
 
 	// Periodically log the progress of the replay.
 	if number%10_000 != 0 {
