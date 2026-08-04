@@ -71,7 +71,7 @@ rstest = "0.26.1"
 rstest_reuse = "0.7.0"
 
 # mocking
-mockall = "0.14.0"
+mockall = "0.15.0"
 wiremock = "0.6.3"
 
 # async utils
