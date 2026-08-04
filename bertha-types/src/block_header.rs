@@ -14,11 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-use alloy_rlp::{Decodable, Encodable};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 use ethbloom::{BloomRef, Input};
 use serde::{Deserialize, Serialize};
 
-use crate::{Address, AsHex, Bloom, Hash, U256};
+use crate::{Address, AsHex, Bloom, Hash, RlpString, U256};
 
 /// An Ethereum-compatible block header.
 ///
@@ -97,189 +97,21 @@ impl Default for BlockHeader {
 
 impl Encodable for BlockHeader {
     fn length(&self) -> usize {
-        let payload_length = self.alloy_rlp_payload_length();
-        payload_length + alloy_rlp::length_of_length(payload_length)
+        RlpBlockHeader::from(self).length()
     }
 
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        alloy_rlp::Header {
-            list: true,
-            payload_length: self.alloy_rlp_payload_length(),
-        }
-        .encode(out);
-        Encodable::encode(&self.parent_hash, out);
-        Encodable::encode(&self.ommers_hash, out);
-        Encodable::encode(&self.beneficiary, out);
-        Encodable::encode(&self.state_root, out);
-        Encodable::encode(&self.transactions_root, out);
-        Encodable::encode(&self.receipts_root, out);
-        Encodable::encode(&self.logs_bloom, out);
-        Encodable::encode(&self.difficulty, out);
-        Encodable::encode(&self.number, out);
-        Encodable::encode(&self.gas_limit, out);
-        Encodable::encode(&self.gas_used, out);
-        Encodable::encode(&self.timestamp, out);
-        Encodable::encode(&self.extra_data.as_slice(), out); // <- needs custom encoding
-        Encodable::encode(&self.prev_randao, out);
-        Encodable::encode(&self.nonce, out);
-        if let Some(val) = self.base_fee_per_gas.as_ref() {
-            Encodable::encode(val, out)
-        } else if self.withdrawals_root.is_some()
-            || self.blob_gas_used.is_some()
-            || self.excess_blob_gas.is_some()
-        {
-            out.put_u8(alloy_rlp::EMPTY_STRING_CODE);
-        }
-        if let Some(val) = self.withdrawals_root.as_ref() {
-            Encodable::encode(val, out)
-        } else if self.blob_gas_used.is_some() || self.excess_blob_gas.is_some() {
-            out.put_u8(alloy_rlp::EMPTY_STRING_CODE);
-        }
-        if let Some(val) = self.blob_gas_used.as_ref() {
-            Encodable::encode(val, out)
-        } else if self.excess_blob_gas.is_some() {
-            out.put_u8(alloy_rlp::EMPTY_STRING_CODE);
-        }
-        if let Some(val) = self.excess_blob_gas.as_ref() {
-            Encodable::encode(val, out)
-        }
+        RlpBlockHeader::from(self).encode(out)
     }
 }
 
 impl Decodable for BlockHeader {
     fn decode(b: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let alloy_rlp::Header {
-            list,
-            payload_length,
-        } = alloy_rlp::Header::decode(b)?;
-        if !list {
-            return Err(alloy_rlp::Error::UnexpectedString);
-        }
-        let started_len = b.len();
-        if started_len < payload_length {
-            return Err(alloy_rlp::Error::InputTooShort);
-        }
-        let this = Self {
-            parent_hash: Decodable::decode(b)?,
-            ommers_hash: Decodable::decode(b)?,
-            beneficiary: Decodable::decode(b)?,
-            state_root: Decodable::decode(b)?,
-            transactions_root: Decodable::decode(b)?,
-            receipts_root: Decodable::decode(b)?,
-            logs_bloom: Decodable::decode(b)?,
-            difficulty: Decodable::decode(b)?,
-            number: Decodable::decode(b)?,
-            gas_limit: Decodable::decode(b)?,
-            gas_used: Decodable::decode(b)?,
-            timestamp: Decodable::decode(b)?,
-            extra_data: alloy_rlp::Header::decode_bytes(b, false)?.to_vec(), // custom
-            prev_randao: Decodable::decode(b)?,
-            nonce: Decodable::decode(b)?,
-            base_fee_per_gas: if started_len - b.len() < payload_length {
-                if alloy_rlp::private::Option::map_or(b.first(), false, |b| {
-                    *b == alloy_rlp::EMPTY_STRING_CODE
-                }) {
-                    alloy_rlp::Buf::advance(b, 1);
-                    None
-                } else {
-                    Some(Decodable::decode(b)?)
-                }
-            } else {
-                None
-            },
-            withdrawals_root: if started_len - b.len() < payload_length {
-                if alloy_rlp::private::Option::map_or(b.first(), false, |b| {
-                    *b == alloy_rlp::EMPTY_STRING_CODE
-                }) {
-                    alloy_rlp::Buf::advance(b, 1);
-                    None
-                } else {
-                    Some(Decodable::decode(b)?)
-                }
-            } else {
-                None
-            },
-            blob_gas_used: if started_len - b.len() < payload_length {
-                if alloy_rlp::private::Option::map_or(b.first(), false, |b| {
-                    *b == alloy_rlp::EMPTY_STRING_CODE
-                }) {
-                    alloy_rlp::Buf::advance(b, 1);
-                    None
-                } else {
-                    Some(Decodable::decode(b)?)
-                }
-            } else {
-                None
-            },
-            excess_blob_gas: if started_len - b.len() < payload_length {
-                if alloy_rlp::private::Option::map_or(b.first(), false, |b| {
-                    *b == alloy_rlp::EMPTY_STRING_CODE
-                }) {
-                    alloy_rlp::Buf::advance(b, 1);
-                    None
-                } else {
-                    Some(Decodable::decode(b)?)
-                }
-            } else {
-                None
-            },
-        };
-        let consumed = started_len - b.len();
-        if consumed != payload_length {
-            return Err(alloy_rlp::Error::ListLengthMismatch {
-                expected: payload_length,
-                got: consumed,
-            });
-        }
-        Ok(this)
+        RlpBlockHeader::<RlpString>::decode(b).map(Self::from)
     }
 }
 
 impl BlockHeader {
-    fn alloy_rlp_payload_length(&self) -> usize {
-        Encodable::length(&self.parent_hash)
-            + Encodable::length(&self.ommers_hash)
-            + Encodable::length(&self.beneficiary)
-            + Encodable::length(&self.state_root)
-            + Encodable::length(&self.transactions_root)
-            + Encodable::length(&self.receipts_root)
-            + Encodable::length(&self.logs_bloom)
-            + Encodable::length(&self.difficulty)
-            + Encodable::length(&self.number)
-            + Encodable::length(&self.gas_limit)
-            + Encodable::length(&self.gas_used)
-            + Encodable::length(&self.timestamp)
-            + Encodable::length(&self.extra_data.as_slice()) // custom
-            + Encodable::length(&self.prev_randao)
-            + Encodable::length(&self.nonce)
-            + self
-                .base_fee_per_gas
-                .as_ref()
-                .map(Encodable::length)
-                .unwrap_or(
-                    (self.withdrawals_root.is_some()
-                        || self.blob_gas_used.is_some()
-                        || self.excess_blob_gas.is_some()) as usize,
-                )
-            + self
-                .withdrawals_root
-                .as_ref()
-                .map(Encodable::length)
-                .unwrap_or(
-                    (self.blob_gas_used.is_some() || self.excess_blob_gas.is_some()) as usize,
-                )
-            + self
-                .blob_gas_used
-                .as_ref()
-                .map(Encodable::length)
-                .unwrap_or((self.excess_blob_gas.is_some()) as usize)
-            + self
-                .excess_blob_gas
-                .as_ref()
-                .map(Encodable::length)
-                .unwrap_or(0)
-    }
-
     pub fn compute_hash(&self) -> Hash {
         let rlp = alloy_rlp::encode(self);
         alloy_primitives::keccak256(rlp).0
@@ -301,6 +133,86 @@ impl BlockHeader {
         }
 
         may_contain
+    }
+}
+
+/// The RLP representation of a [BlockHeader].
+///
+/// The extra data must be encoded as a RLP string, not as the list that [`Vec<u8>`] would produce.
+/// It is generic so encoding can borrow it as [`&[u8]`](slice) while decoding owns an [RlpString].
+#[derive(RlpEncodable, RlpDecodable)]
+#[rlp(trailing)]
+struct RlpBlockHeader<E> {
+    pub parent_hash: Hash,
+    pub ommers_hash: Hash,
+    pub beneficiary: Address,
+    pub state_root: Hash,
+    pub transactions_root: Hash,
+    pub receipts_root: Hash,
+    pub logs_bloom: Bloom,
+    pub difficulty: U256,
+    pub number: u64,
+    pub gas_limit: u64,
+    pub gas_used: u64,
+    pub timestamp: u64,
+    pub extra_data: E,
+    pub prev_randao: Hash,
+    pub nonce: [u8; 8],
+    pub base_fee_per_gas: Option<U256>,
+    pub withdrawals_root: Option<Hash>,
+    pub blob_gas_used: Option<u64>,
+    pub excess_blob_gas: Option<u64>,
+}
+
+impl<'a> From<&'a BlockHeader> for RlpBlockHeader<&'a [u8]> {
+    fn from(value: &'a BlockHeader) -> Self {
+        Self {
+            parent_hash: value.parent_hash,
+            ommers_hash: value.ommers_hash,
+            beneficiary: value.beneficiary,
+            state_root: value.state_root,
+            transactions_root: value.transactions_root,
+            receipts_root: value.receipts_root,
+            logs_bloom: value.logs_bloom,
+            difficulty: value.difficulty,
+            number: value.number,
+            gas_limit: value.gas_limit,
+            gas_used: value.gas_used,
+            timestamp: value.timestamp,
+            extra_data: value.extra_data.as_slice(),
+            prev_randao: value.prev_randao,
+            nonce: value.nonce,
+            base_fee_per_gas: value.base_fee_per_gas,
+            withdrawals_root: value.withdrawals_root,
+            blob_gas_used: value.blob_gas_used,
+            excess_blob_gas: value.excess_blob_gas,
+        }
+    }
+}
+
+impl From<RlpBlockHeader<RlpString>> for BlockHeader {
+    fn from(value: RlpBlockHeader<RlpString>) -> Self {
+        Self {
+            parent_hash: value.parent_hash,
+            ommers_hash: value.ommers_hash,
+            beneficiary: value.beneficiary,
+            state_root: value.state_root,
+            transactions_root: value.transactions_root,
+            receipts_root: value.receipts_root,
+            logs_bloom: value.logs_bloom,
+            difficulty: value.difficulty,
+            number: value.number,
+            gas_limit: value.gas_limit,
+            gas_used: value.gas_used,
+            timestamp: value.timestamp,
+            extra_data: value.extra_data.0,
+            prev_randao: value.prev_randao,
+            nonce: value.nonce,
+            base_fee_per_gas: value.base_fee_per_gas,
+            withdrawals_root: value.withdrawals_root,
+            blob_gas_used: value.blob_gas_used,
+            excess_blob_gas: value.excess_blob_gas,
+        }
     }
 }
 
@@ -626,6 +538,40 @@ mod tests {
         assert_eq!(
             alloy_rlp::decode_exact::<BlockHeader>(&rlp).unwrap(),
             header
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::none(None, None, None, None, "")]
+    #[case::first(Some(U256::from(7u64)), None, None, None, "07")]
+    #[case::second(None, Some([0x11; 32]), None, None, "80a01111111111111111111111111111111111111111111111111111111111111111")]
+    #[case::third(None, None, Some(9), None, "808009")]
+    #[case::fourth(None, None, None, Some(3), "80808003")]
+    #[case::first_third(Some(U256::from(7u64)), None, Some(9), None, "078009")]
+    fn optional_rlp_fields_are_encoded_positionally(
+        #[case] base_fee_per_gas: Option<U256>,
+        #[case] withdrawals_root: Option<Hash>,
+        #[case] blob_gas_used: Option<u64>,
+        #[case] excess_blob_gas: Option<u64>,
+        #[case] encoded_suffix: &str,
+    ) {
+        let encoded_suffix = const_hex::decode(encoded_suffix).unwrap();
+        let header = BlockHeader {
+            base_fee_per_gas,
+            withdrawals_root,
+            blob_gas_used,
+            excess_blob_gas,
+            ..Default::default()
+        };
+        let encoded = alloy_rlp::encode(&header);
+        assert_eq!(
+            encoded_suffix,
+            encoded[encoded.len() - encoded_suffix.len()..]
+        );
+        assert_eq!(encoded.len(), header.length());
+        assert_eq!(
+            header,
+            alloy_rlp::decode_exact::<BlockHeader>(&encoded).unwrap()
         );
     }
 

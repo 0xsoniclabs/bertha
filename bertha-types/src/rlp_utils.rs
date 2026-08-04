@@ -63,6 +63,10 @@ impl<T> RlpNil<T> {
 pub struct RlpString(pub Vec<u8>);
 
 impl Encodable for RlpString {
+    fn length(&self) -> usize {
+        self.0.as_slice().length()
+    }
+
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.0.as_slice().encode(out);
     }
