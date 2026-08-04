@@ -59,14 +59,20 @@ pub struct BlockHeader {
     /// encoded to a fixed length array of 8 bytes.
     pub nonce: [u8; 8],
 
-    // Optional fields that have been added by EIP-1559, EIP-4895 and EIP-4844 and may not be
-    // present in older blocks.
-    /// geth: BaseFee, JSON RPC: baseFeePerGas
+    // Optional fields that have been added by later hard forks and may not be present in older
+    // blocks.
+    /// geth: BaseFee, JSON RPC: baseFeePerGas. Added by EIP-1559 (London).
     pub base_fee_per_gas: Option<U256>,
-    /// geth: WithdrawalsHash, JSON RPC: withdrawalsRoot
+    /// geth: WithdrawalsHash, JSON RPC: withdrawalsRoot. Added by EIP-4895 (Shanghai).
     pub withdrawals_root: Option<Hash>,
+    /// Added by EIP-4844 (Cancun).
     pub blob_gas_used: Option<u64>,
+    /// Added by EIP-4844 (Cancun).
     pub excess_blob_gas: Option<u64>,
+    /// geth: ParentBeaconRoot. Added by EIP-4788 (Cancun). Only present on Ethereum, not on Sonic.
+    pub parent_beacon_block_root: Option<Hash>,
+    /// Added by EIP-7685 (Prague). Only present on Ethereum, not on Sonic.
+    pub requests_hash: Option<Hash>,
 }
 
 impl Default for BlockHeader {
@@ -81,16 +87,18 @@ impl Default for BlockHeader {
             logs_bloom: [0; 256],
             difficulty: U256::default(),
             number: u64::default(),
-            gas_limit: 0,
-            gas_used: 0,
-            timestamp: 0,
+            gas_limit: u64::default(),
+            gas_used: u64::default(),
+            timestamp: u64::default(),
             extra_data: Vec::new(),
             prev_randao: Hash::default(),
             nonce: <[u8; 8]>::default(),
-            base_fee_per_gas: None,
-            withdrawals_root: None,
-            blob_gas_used: None,
-            excess_blob_gas: None,
+            base_fee_per_gas: Option::default(),
+            withdrawals_root: Option::default(),
+            blob_gas_used: Option::default(),
+            excess_blob_gas: Option::default(),
+            parent_beacon_block_root: Option::default(),
+            requests_hash: Option::default(),
         }
     }
 }
@@ -162,6 +170,8 @@ struct RlpBlockHeader<E> {
     pub withdrawals_root: Option<Hash>,
     pub blob_gas_used: Option<u64>,
     pub excess_blob_gas: Option<u64>,
+    pub parent_beacon_block_root: Option<Hash>,
+    pub requests_hash: Option<Hash>,
 }
 
 impl<'a> From<&'a BlockHeader> for RlpBlockHeader<&'a [u8]> {
@@ -186,6 +196,8 @@ impl<'a> From<&'a BlockHeader> for RlpBlockHeader<&'a [u8]> {
             withdrawals_root: value.withdrawals_root,
             blob_gas_used: value.blob_gas_used,
             excess_blob_gas: value.excess_blob_gas,
+            parent_beacon_block_root: value.parent_beacon_block_root,
+            requests_hash: value.requests_hash,
         }
     }
 }
@@ -212,6 +224,8 @@ impl From<RlpBlockHeader<RlpString>> for BlockHeader {
             withdrawals_root: value.withdrawals_root,
             blob_gas_used: value.blob_gas_used,
             excess_blob_gas: value.excess_blob_gas,
+            parent_beacon_block_root: value.parent_beacon_block_root,
+            requests_hash: value.requests_hash,
         }
     }
 }
@@ -238,6 +252,8 @@ struct JsonRpcBlockHeader {
     pub withdrawals_root: Option<AsHex<Hash>>,
     pub blob_gas_used: Option<AsHex<u64>>,
     pub excess_blob_gas: Option<AsHex<u64>>,
+    pub parent_beacon_block_root: Option<AsHex<Hash>>,
+    pub requests_hash: Option<AsHex<Hash>>,
     // Fields that are part of the JSON RPC response but we currently don't use:
     // pub timestamp_nano: AsHex<u64>,
     // pub hash: AsHex<Hash>,
@@ -270,6 +286,8 @@ impl From<JsonRpcBlockHeader> for BlockHeader {
             withdrawals_root: value.withdrawals_root.map(|v| v.0),
             blob_gas_used: value.blob_gas_used.map(|v| v.0),
             excess_blob_gas: value.excess_blob_gas.map(|v| v.0),
+            parent_beacon_block_root: value.parent_beacon_block_root.map(|v| v.0),
+            requests_hash: value.requests_hash.map(|v| v.0),
         }
     }
 }
@@ -296,6 +314,8 @@ impl From<BlockHeader> for JsonRpcBlockHeader {
             withdrawals_root: value.withdrawals_root.map(AsHex),
             blob_gas_used: value.blob_gas_used.map(AsHex),
             excess_blob_gas: value.excess_blob_gas.map(AsHex),
+            parent_beacon_block_root: value.parent_beacon_block_root.map(AsHex),
+            requests_hash: value.requests_hash.map(AsHex),
         }
     }
 }
@@ -332,6 +352,12 @@ mod tests {
         "excessBlobGas": "0x0"
     "#;
 
+    // Optional fields which only exist on Ethereum, but not on Sonic.
+    const ETHEREUM_ONLY_FIELDS: &str = r#"
+        "parentBeaconBlockRoot": "0x73e56887babcbf9a6396c5b5507d473a83779e6d0463ecf12c66d230a830b327",
+        "requestsHash": "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    "#;
+
     // These fields are not part of the header, but are returned by the JSON RPC call.
     const EXTRA_FIELDS: &str = r#"
         "timestampNano": "0x183401ece3fb7315",
@@ -348,9 +374,66 @@ mod tests {
         "uncles": []
     "#;
 
+    /// Ethereum mainnet block 19434267, a Cancun block carrying `parentBeaconBlockRoot`
+    /// (EIP-4788) but no `requestsHash`.
+    const CANCUN_HEADER: &str = r#"{
+        "parentHash": "0x459782063a33c29a1d55318874442faed23b9b37740dc490bdb0f7983603dea6",
+        "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+        "miner": "0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5",
+        "stateRoot": "0x2fcf575e93545ea023ed54c3be8ddf46ff8128d2a821809c0e52319f3131fdec",
+        "transactionsRoot": "0x3d6d9a820e8e755c3c8fa60601816c54a8ce0dc5e306268e18159603aa4e86eb",
+        "receiptsRoot": "0xfd4f23d5fa89bc86c6f20260afadb7c2d461ecd39730ba89e3cdc19bc19dcf6a",
+        "logsBloom": "0x3ae766736d80b3f39cb0dbb2df5cdf2bd53ff574afdb6726e62df971e6af653bb4463d59833bee0d7dd51f227c5fa38f5ebf05ddd9a7ecf9c7d7b0c0946e6b8c5592d7a949f4abe8eb3b5eff55aeff64d7f54a999d5fdaca373d5e7fbf7ddc33f6db6625e2c68e430f8f54d875583e5bf67f95a1557effaf9bda4cfefefd1dd6bf7ed3f997ed8de7becfff4b8973163f85198defe5e3cf9c5d7eacfe1fdab5b9eb84055e5caa6ed7aeff56d7db71f5ffd7a356a8d9bb129c6caf459734a9f358c336b52e00b317dbc5f8b9ae09b7bee692f1617a5dac785e13aa4167d1bef93e3dfdbe9ca69f4ffc94d596cba75a9ec2e6fd55a87bb6677b05ad5b9b7f9d57cf",
+        "difficulty": "0x0",
+        "number": "0x1288e1b",
+        "gasLimit": "0x1c9c380",
+        "gasUsed": "0x16f880a",
+        "timestamp": "0x65f342b7",
+        "extraData": "0x6265617665726275696c642e6f7267",
+        "mixHash": "0x78da915db44b61353205b61bbc4439216d9651bd83b2044a3f13e970b78312db",
+        "nonce": "0x0000000000000000",
+        "baseFeePerGas": "0xb3c312478",
+        "withdrawalsRoot": "0xa491643859ad876b419011c7e10374e961cd0fdff1267a6f3a638ffd10dedcee",
+        "blobGasUsed": "0x80000",
+        "excessBlobGas": "0xc0000",
+        "parentBeaconBlockRoot": "0x73e56887babcbf9a6396c5b5507d473a83779e6d0463ecf12c66d230a830b327"
+    }"#;
+    const CANCUN_HEADER_HASH: &str =
+        "0x8769113ab476aff022937753117ed909c5aea7f40e11d097a206401f8e41fc94";
+
+    /// Ethereum mainnet block 22675756, a Prague block carrying both `parentBeaconBlockRoot`
+    /// (EIP-4788) and `requestsHash` (EIP-7685).
+    const PRAGUE_HEADER: &str = r#"{
+        "parentHash": "0x3d3bb9edd78e83b6ebfe9dd07c1faea49dc7e0d5cc2497cd5b550ba5b47e99c6",
+        "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+        "miner": "0x388c818ca8b9251b393131c08a736a67ccb19297",
+        "stateRoot": "0xf44f9db805886f1c65c42c908241fe85b46d3523fff4120f6a4a6f7aca01d50d",
+        "transactionsRoot": "0x6ddec6df63618af12f718cf65b6039606bdfa3125719ed38478319aafc8f3d9d",
+        "receiptsRoot": "0x4defc47576887aa2370e9278b721f1ca91d5cfa47887610ee8356e28991fdd54",
+        "logsBloom": "0x77ec580001350878817008b2b21c14ceb08d2e5b80c98004e7bdc0f4e051800b0830c101b4500a1412180f20432283855a80c11a8d047087241190003764138088440a42422d0bab689cc11a98028a7540a00402124c88e3053421c88800000048d7921e022204e205e8cc530c178d70040b00754841c6d085233f916c2b931501c408298775c03f68ed100741923360a8a0304111c004080428a950603063241e0dad0c40946ca20d1cd4e05180ac18414a8208ee804510c8800074294648083415290a1646a001002a330296805672452240c200241710800d1b2260546e90883aad818425c1a6206cc03508d1880de20e40e4401f1658098800ec0239e266",
+        "difficulty": "0x0",
+        "number": "0x15a012c",
+        "gasLimit": "0x2255100",
+        "gasUsed": "0x8aad38",
+        "timestamp": "0x68486fcf",
+        "extraData": "0x",
+        "mixHash": "0xd61fff411bd67bc199b6f6c127eecc2c3974553e8a960c7be89b24645c8ed682",
+        "nonce": "0x0000000000000000",
+        "baseFeePerGas": "0x9de40dd0",
+        "withdrawalsRoot": "0x9f2111cee1c2804747c0ec617a919a831bb1ce6cd5f56fe3775ac35644ec29e4",
+        "blobGasUsed": "0x120000",
+        "excessBlobGas": "0x0",
+        "parentBeaconBlockRoot": "0x179ce54d3a9dc03f7b44337d6bfe72e74588260ba69883360c5f81d2f8eec6be",
+        "requestsHash": "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }"#;
+    const PRAGUE_HEADER_HASH: &str =
+        "0x8232bfb917cb96aad4f553f6daf82cc3b11bc0734434467cf89b8a18365db112";
+
     #[test]
     fn can_be_deserialized_from_json() {
-        let json: String = format!("{{{REQUIRED_FIELDS},{OPTIONAL_FIELDS},{EXTRA_FIELDS}}}");
+        let json: String = format!(
+            "{{{REQUIRED_FIELDS},{OPTIONAL_FIELDS},{ETHEREUM_ONLY_FIELDS},{EXTRA_FIELDS}}}"
+        );
         let header: BlockHeader = serde_json::from_str(json.as_str()).unwrap();
         assert_eq!(
             header.parent_hash,
@@ -432,6 +515,24 @@ mod tests {
         );
         assert_eq!(header.blob_gas_used, Some(0));
         assert_eq!(header.excess_blob_gas, Some(0));
+        assert_eq!(
+            header.parent_beacon_block_root,
+            Some(
+                Hash::try_from_hex(
+                    "0x73e56887babcbf9a6396c5b5507d473a83779e6d0463ecf12c66d230a830b327"
+                )
+                .unwrap()
+            )
+        );
+        assert_eq!(
+            header.requests_hash,
+            Some(
+                Hash::try_from_hex(
+                    "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                )
+                .unwrap()
+            )
+        );
     }
 
     #[test]
@@ -458,9 +559,12 @@ mod tests {
             withdrawals_root: Some(Hash::try_from_hex("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421").unwrap()),
             blob_gas_used: Some(0),
             excess_blob_gas: Some(0),
+            parent_beacon_block_root: Some(Hash::try_from_hex("0x73e56887babcbf9a6396c5b5507d473a83779e6d0463ecf12c66d230a830b327").unwrap()),
+            requests_hash: Some(Hash::try_from_hex("0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855").unwrap()),
         };
         let serialized = serde_json::to_string(&header).unwrap();
-        let json: String = format!("{{{REQUIRED_FIELDS},{OPTIONAL_FIELDS}}}");
+        let json: String =
+            format!("{{{REQUIRED_FIELDS},{OPTIONAL_FIELDS},{ETHEREUM_ONLY_FIELDS}}}");
         let json = json.replace(" ", "").replace("\n", "");
         assert_eq!(serialized, json);
     }
@@ -487,6 +591,8 @@ mod tests {
             withdrawals_root: None,
             blob_gas_used: None,
             excess_blob_gas: None,
+            parent_beacon_block_root: None,
+            requests_hash: None,
         };
         let rlp = const_hex::decode(
             "f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
@@ -522,6 +628,8 @@ mod tests {
             withdrawals_root: None,
             blob_gas_used: None,
             excess_blob_gas: None,
+            parent_beacon_block_root: None,
+            requests_hash: None,
         };
         let rlp = const_hex::decode(
             "f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
@@ -583,6 +691,8 @@ mod tests {
         assert_eq!(header.withdrawals_root, None);
         assert_eq!(header.blob_gas_used, None);
         assert_eq!(header.excess_blob_gas, None);
+        assert_eq!(header.parent_beacon_block_root, None);
+        assert_eq!(header.requests_hash, None);
 
         let json: String = format!("{{{REQUIRED_FIELDS}, \"baseFeePerGas\": null }}");
         let header: BlockHeader = serde_json::from_str(json.as_str()).unwrap();
@@ -602,6 +712,17 @@ mod tests {
         let mut header = header;
         header.gas_used += 1;
         assert_ne!(header.compute_hash(), hash);
+    }
+
+    #[rstest::rstest]
+    #[case::cancun(CANCUN_HEADER, CANCUN_HEADER_HASH)]
+    #[case::prague(PRAGUE_HEADER, PRAGUE_HEADER_HASH)]
+    fn compute_hash_produces_correct_hash_for_ethereum_headers(
+        #[case] header_json: &str,
+        #[case] expected_hash: &str,
+    ) {
+        let header: BlockHeader = serde_json::from_str(header_json).unwrap();
+        assert_eq!(header.compute_hash().to_hex(), expected_hash);
     }
 
     #[test]
