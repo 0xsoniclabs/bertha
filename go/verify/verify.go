@@ -42,6 +42,10 @@ func Verify(
 	logger utils.Logger,
 	progressIndicatorFactory utils.ProgressIndicatorFactory,
 ) (err error) {
+	if args.StartBlock > args.EndBlock {
+		return fmt.Errorf("start block %d is greater than end block %d", args.StartBlock, args.EndBlock)
+	}
+
 	logger.Info("Opening block database", "directory", args.DatabaseDir)
 	database, err := blockdb.OpenRocksDBForReading(args.DatabaseDir)
 	if err != nil {
@@ -51,26 +55,76 @@ func Verify(
 		err = errors.Join(err, database.Close())
 	}()
 
+	startBlock, endBlock, hasBlocks, err := getStoredBlockRange(database, args.ChainID, args.StartBlock, args.EndBlock)
+	if err != nil {
+		return err
+	}
+	if !hasBlocks {
+		logger.Warn("No blocks found",
+			"chain_id", args.ChainID,
+			"start_block", args.StartBlock,
+			"end_block", args.EndBlock,
+		)
+		return nil
+	}
+
 	logger.Info("Verifying blocks",
 		"chain_id", args.ChainID,
-		"start_block", args.StartBlock,
-		"end_block", args.EndBlock,
+		"start_block", startBlock,
+		"end_block", endBlock,
 	)
 
-	numBlocks := int64(args.EndBlock - args.StartBlock + 1)
+	numBlocks := int64(endBlock - startBlock + 1)
 	progressIndicator := progressIndicatorFactory.New(numBlocks, "Verifying blocks")
 
 	return verifyBlocks(
 		ctx,
 		database.GetRangeRev(
 			args.ChainID,
-			args.StartBlock,
-			args.EndBlock,
+			startBlock,
+			endBlock,
 		),
 		func(uint64) {
 			_ = progressIndicator.Add(1) // update errors are ignored
 		},
 	)
+}
+
+// getStoredBlockRange returns the numbers of the lowest and the highest block stored for the given
+// chain within the given block range. The third result is false if the range contains no block.
+func getStoredBlockRange(
+	database blockdb.BlockDB,
+	chainID uint64,
+	startBlock uint64,
+	endBlock uint64,
+) (uint64, uint64, bool, error) {
+	lowest, hasLowest, err := firstBlockNumber(database.GetRange(chainID, startBlock, endBlock))
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("failed to read lowest block: %w", err)
+	}
+	highest, hasHighest, err := firstBlockNumber(database.GetRangeRev(chainID, startBlock, endBlock))
+	if err != nil {
+		return 0, 0, false, fmt.Errorf("failed to read highest block: %w", err)
+	}
+	if !hasLowest || !hasHighest {
+		return 0, 0, false, nil
+	}
+	return lowest, highest, true, nil
+}
+
+// firstBlockNumber returns the number of the first block of the given sequence. The second result
+// is false if the sequence contains no block.
+func firstBlockNumber(blocks iter.Seq2[*blockdb.Block, error]) (uint64, bool, error) {
+	for block, err := range blocks {
+		if err != nil {
+			return 0, false, err
+		}
+		if block == nil {
+			return 0, false, fmt.Errorf("encountered nil block")
+		}
+		return block.Number, true, nil
+	}
+	return 0, false, nil
 }
 
 func verifyBlocks(
