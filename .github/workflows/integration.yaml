@@ -39,7 +39,7 @@ jobs:
       with:
         components: rustfmt
     - name: setup go
-      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       with:
         go-version: "1.26.0"
         cache-dependency-path: go/go.sum
@@ -93,7 +93,7 @@ jobs:
       with:
         components: rustfmt
     - name: setup go
-      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       with:
         go-version: "1.26.0"
         cache-dependency-path: utils/test_data_generator/go.sum

@@ -35,7 +35,7 @@ jobs:
     - name: checkout
       uses: actions/checkout@v6
     - name: setup go
-      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       with:
         go-version: "1.26.0"
         cache-dependency-path: go/go.sum
@@ -62,7 +62,7 @@ jobs:
     - name: checkout
       uses: actions/checkout@v6
     - name: setup go
-      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       with:
         go-version: "1.26.0"
         cache-dependency-path: utils/scripts/license/go.sum
@@ -77,7 +77,7 @@ jobs:
     - name: checkout
       uses: actions/checkout@v6
     - name: setup go
-      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       with:
         go-version: "1.26.0"
         cache-dependency-path: go/go.sum
@@ -97,7 +97,7 @@ jobs:
     - name: checkout
       uses: actions/checkout@v6
     - name: setup go
-      uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       with:
         go-version: "1.26.0"
         cache-dependency-path: go/go.sum
@@ -127,7 +127,7 @@ jobs:
     #- name: checkout
       #uses: actions/checkout@v6
     #- name: setup go
-      #uses: actions/setup-go@v5 # Use actions/setup-go to specify the Go version
+      #uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       #with:
         #go-version: "1.26.0"
     #- name: install deps
