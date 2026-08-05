@@ -33,7 +33,7 @@ jobs:
 
     steps:
     - name: checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
     - name: install rust
       uses: dtolnay/rust-toolchain@nightly
       with:
@@ -87,7 +87,7 @@ jobs:
 
     steps:
     - name: checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
     - name: install rust
       uses: dtolnay/rust-toolchain@nightly
       with:
@@ -112,7 +112,7 @@ jobs:
 
     steps:
     - name: checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v7
       with:
         path: bertha
     - name: clone Carmen
