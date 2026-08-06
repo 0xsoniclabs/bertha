@@ -206,9 +206,10 @@ var (
 		DefaultText: "OS-defined temporary directory",
 	}
 	initDBFlag = &cli.StringFlag{
-		Name:  "init-db-dir",
-		Usage: "Path to a state database directory to use to init the state database. The database will be copied to a temporary folder or the directory specified by '--state-db-dir' before replaying.",
-		Value: "",
+		Name:    "init-db-dir",
+		Aliases: []string{"idb"},
+		Usage:   "Path to a state database directory to use to init the state database. The database will be copied to a temporary folder or the directory specified by '--state-db-dir' before replaying.",
+		Value:   "",
 	}
 	keepDBFlag = &cli.BoolFlag{
 		Name:  "keep-db",
