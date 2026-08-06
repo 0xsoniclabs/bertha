@@ -20,3 +20,6 @@ updates:
     directory: /
     schedule:
       interval: daily
+    ignore:
+      # The tag is the Rust version, not an action version.
+      - dependency-name: dtolnay/rust-toolchain
