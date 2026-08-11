@@ -19,8 +19,8 @@ module github.com/0xsoniclabs/bertha
 go 1.26.0
 
 require (
-	github.com/0xsoniclabs/carmen/go v0.0.0-20260512102324-2d892af38ce4
-	github.com/0xsoniclabs/sonic v0.0.0-20260624112538-aadddf0f4449 // v2.2.0-rc.7
+	github.com/0xsoniclabs/carmen/go v0.0.0-20260805094353-570a67532cc9
+	github.com/0xsoniclabs/sonic v0.0.0-20260806135512-03b593e39343
 	github.com/0xsoniclabs/tosca v0.0.0-20260429071638-3f4119284c42
 	github.com/0xsoniclabs/tracy v0.0.0-20251027125423-00a5ab7968fb
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
@@ -68,7 +68,6 @@ require (
 	github.com/golang/snappy v1.0.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/hashicorp/golang-lru v1.0.2 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/klauspost/compress v1.19.1 // indirect
