@@ -194,7 +194,7 @@ func (v *archiveVerifier) verifyBlock() {
 	const attempts = 10
 	var item blockWithHashHistory
 	var found bool
-	for i := 0; i < attempts; i++ {
+	for range attempts {
 		entry, ok := v.pool.GetRandom()
 		if !ok {
 			return // no blocks in pool
