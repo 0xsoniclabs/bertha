@@ -41,12 +41,12 @@ func TestRandomRetentionPool_Add_AddsItemsUntilCapacity(t *testing.T) {
 	capacity := 3
 	pool := RandomRetentionPool[int]{items: make([]int, 0, capacity)}
 
-	for i := 0; i < capacity; i++ {
+	for i := range capacity {
 		pool.Add(i)
 	}
 
 	require.Equal(t, capacity, len(pool.items))
-	for i := 0; i < capacity; i++ {
+	for i := range capacity {
 		require.Contains(t, pool.items, i)
 	}
 }
@@ -55,7 +55,7 @@ func TestRandomRetentionPool_Add_ReplacesItemsWhenAtCapacity(t *testing.T) {
 	capacity := 3
 	pool := RandomRetentionPool[int]{items: make([]int, 0, capacity)}
 
-	for i := 0; i < capacity; i++ {
+	for i := range capacity {
 		pool.Add(i)
 	}
 
@@ -72,7 +72,7 @@ func TestRandomRetentionPool_GetRandom_ReturnsItemFromPool(t *testing.T) {
 	capacity := 3
 	pool := RandomRetentionPool[int]{items: []int{0, 1, 2}}
 
-	for i := 0; i < capacity; i++ {
+	for i := range capacity {
 		pool.Add(i)
 	}
 
@@ -94,13 +94,13 @@ func TestRandomRetentionPool_RecentItemsAreMoreLikely(t *testing.T) {
 	pool, err := NewRandomRetentionPool[int](10)
 	require.NoError(t, err)
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		pool.Add(i)
 	}
 
 	smallerCount := 0
 	largerCount := 0
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		item, ok := pool.GetRandom()
 		require.True(t, ok)
 		if item < 50 {

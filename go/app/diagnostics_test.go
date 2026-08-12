@@ -35,7 +35,7 @@ func TestStartDiagnostics_PortZero_PicksFreePortAndLogsAddressAndUserInfo(t *tes
 		"Starting diagnostics server",
 		"address", gomock.Any(),
 		"see", "https://pkg.go.dev/net/http/pprof",
-	).Do(func(msg string, keysAndValues ...interface{}) {
+	).Do(func(msg string, keysAndValues ...any) {
 		address = keysAndValues[1].(string)
 		require.True(t, strings.HasPrefix(address, "http://"))
 		require.True(t, strings.HasSuffix(address, "/debug/pprof"))

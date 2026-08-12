@@ -256,7 +256,7 @@ func TestReplay_StateDbAndSnapshotCleanupBehavior(t *testing.T) {
 			db.Close()
 
 			genesisPath := filepath.Join(dir, "genesis.json")
-			require.NoError(t, os.WriteFile(genesisPath, []byte(fmt.Sprintf(`{"Rules": {"NetworkID": %d}}`, chainID)), 0644))
+			require.NoError(t, os.WriteFile(genesisPath, fmt.Appendf(nil, `{"Rules": {"NetworkID": %d}}`, chainID), 0644))
 			stateDBDir := filepath.Join(dir, "state-db")
 
 			ctx := t.Context()
@@ -370,7 +370,7 @@ func TestReplay_BlockDBAccessMode(t *testing.T) {
 			db.Close()
 
 			genesis := filepath.Join(dir, "genesis.json")
-			require.NoError(t, os.WriteFile(genesis, []byte(fmt.Sprintf(`{"Rules": {"NetworkID": %d}}`, chainID)), 0644))
+			require.NoError(t, os.WriteFile(genesis, fmt.Appendf(nil, `{"Rules": {"NetworkID": %d}}`, chainID), 0644))
 
 			for _, readOnly := range []bool{false, true} {
 				if readOnly {
@@ -1435,7 +1435,7 @@ func TestBlockHashHistory_Clone_ReturnsNilForNilReceiver(t *testing.T) {
 
 func TestBlockHashHistory_Clone_ProducesIndependentCopy(t *testing.T) {
 	original := &blockHashHistory{}
-	for i := uint64(0); i < 256; i++ {
+	for i := range uint64(256) {
 		original.SetBlockHash(i, common.BytesToHash([]byte{byte(i)}))
 	}
 
@@ -1454,10 +1454,10 @@ func TestBlockHashHistory_Clone_ProducesIndependentCopy(t *testing.T) {
 func TestBlockHashHistory_CanSetAndRetrieveHistoricHashes(t *testing.T) {
 	history := &blockHashHistory{}
 	for _, offset := range []uint64{0, 12, 1234} {
-		for i := uint64(0); i < 256; i++ {
+		for i := range uint64(256) {
 			history.SetBlockHash(i+offset, common.BytesToHash([]byte{byte(i + offset)}))
 		}
-		for i := uint64(0); i < 256; i++ {
+		for i := range uint64(256) {
 			expected := common.BytesToHash([]byte{byte(i + offset)})
 			actual := history.GetBlockHash(i + offset)
 			require.Equal(t, expected, actual)

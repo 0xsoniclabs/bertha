@@ -236,8 +236,8 @@ func TestState_ApplyBlock_PrevRandaoIsMixDigestPostMerge(t *testing.T) {
 				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 				gomock.Any(),
 			).DoAndReturn(func(
-				evmBlock *evmcore.EvmBlock, _ interface{}, _ vm.Config,
-				_ uint64, _ *uint64, _ int, _ interface{},
+				evmBlock *evmcore.EvmBlock, _ any, _ vm.Config,
+				_ uint64, _ *uint64, _ int, _ any,
 				difficulty *big.Int, _ uint64,
 			) evmcore.ProcessSummary {
 				require.Equal(t, tt.wantPrevRandao, evmBlock.PrevRandao)
@@ -536,8 +536,8 @@ func TestState_ApplyBlock_ApplySonicVmConfigIfNotEthereumChain(t *testing.T) {
 				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 				gomock.Any(),
 			).DoAndReturn(func(
-				_ *evmcore.EvmBlock, _ interface{}, cfg vm.Config,
-				_ uint64, _ *uint64, _ int, _ interface{},
+				_ *evmcore.EvmBlock, _ any, cfg vm.Config,
+				_ uint64, _ *uint64, _ int, _ any,
 				_ *big.Int, _ uint64,
 			) evmcore.ProcessSummary {
 				require.Equal(t, tt.wantChargeExcessGas, cfg.ChargeExcessGas)
