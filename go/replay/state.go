@@ -199,125 +199,138 @@ func (s *State) ApplyBlock(
 	var stateDB *evmstore.CarmenStateDB
 	var vmStateDB carmen.VmStateDB
 
-	if isArchive {
-		if block.NumberU64() == 0 {
-			return nil, fmt.Errorf("cannot apply genesis block in archive mode")
+	var receipts types.Receipts
+	var lastBlock carmen.StagedBlock
+	for i := range 2 {
+		if i == 1 {
+			lastBlock.Rollback()
 		}
-		archiveBlock := block.NumberU64() - 1
-		archiveDB, err := s.db.GetArchiveStateDB(archiveBlock)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get archive state for block %d: %w", archiveBlock, err)
-		}
-		defer archiveDB.Release()
-		stateDB = evmstore.CreateNonCommittableCarmenStateDb(archiveDB, nil)
-		vmStateDB = archiveDB
-	} else {
-		stateDB = evmstore.CreateCarmenStateDb(s.db, nil)
-		vmStateDB = s.db
-		s.db.BeginBlock()
-	}
 
-	zone := tracy.ZoneBegin("TransactionProcessing")
-	defer zone.End()
-
-	isPostMerge := block.Difficulty().Sign() == 0
-	blobBaseFee := big.NewInt(1)
-	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsCancun(block.Number(), block.Time()) && block.ExcessBlobGas() != nil {
-		blobBaseFee = eip4844.CalcBlobFee(chainConfig, block.Header())
-	}
-	prevRandao := block.Header().MixDigest
-	if !isPostMerge {
-		// Before the Merge, PrevRandao is not used; set to zero. This indicates
-		// to the EVM that the difficulty should be used instead.
-		prevRandao = common.Hash{}
-	}
-
-	evmBlock := &evmcore.EvmBlock{
-		EvmHeader: evmcore.EvmHeader{
-			Number:      block.Number(),
-			ParentHash:  block.ParentHash(),
-			Time:        inter.Timestamp(block.Time() * 1e9),
-			GasLimit:    block.GasLimit(),
-			PrevRandao:  prevRandao,
-			BaseFee:     block.BaseFee(),
-			BlobBaseFee: blobBaseFee,
-			Coinbase:    block.Coinbase(),
-		},
-		Transactions: block.Transactions(),
-	}
-
-	var vmConfig vm.Config
-	if !isEthereum(chainConfig.ChainID.Uint64()) {
-		// Apply Sonic-specific VM settings that are not applicable to Ethereum chains.
-		vmConfig = opera.GetVmConfig(opera.Rules{Upgrades: upgrades})
-	}
-	vmConfig.Interpreter = geth_adapter.NewGethInterpreterFactory(interpreter)
-
-	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsCancun(block.Number(), block.Time()) {
-		// EIP-4788: store the parent beacon block root in the beacon roots contract.
-		if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
-			err := processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.BeaconRootsAddress, beaconRoot.Bytes())
+		if isArchive {
+			if block.NumberU64() == 0 {
+				return nil, fmt.Errorf("cannot apply genesis block in archive mode")
+			}
+			archiveBlock := block.NumberU64() - 1
+			archiveDB, err := s.db.GetArchiveStateDB(archiveBlock)
 			if err != nil {
-				return nil, fmt.Errorf("failed to process EIP-4788 system call: %v", err)
+				return nil, fmt.Errorf("failed to get archive state for block %d: %w", archiveBlock, err)
+			}
+			defer archiveDB.Release()
+			stateDB = evmstore.CreateNonCommittableCarmenStateDb(archiveDB, nil)
+			vmStateDB = archiveDB
+		} else {
+			stateDB = evmstore.CreateCarmenStateDb(s.db, nil)
+			vmStateDB = s.db
+			s.db.BeginBlock()
+		}
+
+		zone := tracy.ZoneBegin("TransactionProcessing")
+		defer zone.End()
+
+		isPostMerge := block.Difficulty().Sign() == 0
+		blobBaseFee := big.NewInt(1)
+		if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsCancun(block.Number(), block.Time()) && block.ExcessBlobGas() != nil {
+			blobBaseFee = eip4844.CalcBlobFee(chainConfig, block.Header())
+		}
+		prevRandao := block.Header().MixDigest
+		if !isPostMerge {
+			// Before the Merge, PrevRandao is not used; set to zero. This indicates
+			// to the EVM that the difficulty should be used instead.
+			prevRandao = common.Hash{}
+		}
+
+		evmBlock := &evmcore.EvmBlock{
+			EvmHeader: evmcore.EvmHeader{
+				Number:      block.Number(),
+				ParentHash:  block.ParentHash(),
+				Time:        inter.Timestamp(block.Time() * 1e9),
+				GasLimit:    block.GasLimit(),
+				PrevRandao:  prevRandao,
+				BaseFee:     block.BaseFee(),
+				BlobBaseFee: blobBaseFee,
+				Coinbase:    block.Coinbase(),
+			},
+			Transactions: block.Transactions(),
+		}
+
+		var vmConfig vm.Config
+		if !isEthereum(chainConfig.ChainID.Uint64()) {
+			// Apply Sonic-specific VM settings that are not applicable to Ethereum chains.
+			vmConfig = opera.GetVmConfig(opera.Rules{Upgrades: upgrades})
+		}
+		vmConfig.Interpreter = geth_adapter.NewGethInterpreterFactory(interpreter)
+
+		if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsCancun(block.Number(), block.Time()) {
+			// EIP-4788: store the parent beacon block root in the beacon roots contract.
+			if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
+				err := processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.BeaconRootsAddress, beaconRoot.Bytes())
+				if err != nil {
+					return nil, fmt.Errorf("failed to process EIP-4788 system call: %v", err)
+				}
 			}
 		}
-	}
 
-	var usedGas uint64
-	processed := processor.ProcessWithDifficulty(
-		evmBlock,
-		stateDB,
-		vmConfig,
-		block.GasLimit(),
-		&usedGas,
-		0, // Tx index offset
-		onLog,
-		block.Difficulty(),
-		math.MaxUint64,
-	)
+		var usedGas uint64
+		processed := processor.ProcessWithDifficulty(
+			evmBlock,
+			stateDB,
+			vmConfig,
+			block.GasLimit(),
+			&usedGas,
+			0, // Tx index offset
+			onLog,
+			block.Difficulty(),
+			math.MaxUint64,
+		)
 
-	// Check that all transactions were processed (i.e., none were skipped).
-	for i, processed := range processed.ProcessedTransactions {
-		if processed.Receipt == nil {
-			return nil, fmt.Errorf("found block with skipped txs at index %d", i)
-		}
-	}
-
-	// Retrieve the receipts from the processed transactions.
-	receipts := make(types.Receipts, len(processed.ProcessedTransactions))
-	for i, proc := range processed.ProcessedTransactions {
-		receipts[i] = proc.Receipt
-	}
-
-	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsPrague(block.Number(), block.Time()) {
-		// EIP-7002: call the withdrawal request contract as a system call.
-		err := processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.WithdrawalQueueAddress, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to process EIP-7002 system call: %v", err)
+		// Check that all transactions were processed (i.e., none were skipped).
+		for i, processed := range processed.ProcessedTransactions {
+			if processed.Receipt == nil {
+				return nil, fmt.Errorf("found block with skipped txs at index %d", i)
+			}
 		}
 
-		// EIP-7251: call the consolidation request contract as a system call.
-		err = processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.ConsolidationQueueAddress, nil)
-		if err != nil {
-			return nil, fmt.Errorf("failed to process EIP-7251 system call: %v", err)
+		// Retrieve the receipts from the processed transactions.
+		receipts = make(types.Receipts, len(processed.ProcessedTransactions))
+		for i, proc := range processed.ProcessedTransactions {
+			receipts[i] = proc.Receipt
 		}
-	}
 
-	// Apply corrections if any are provided.
-	applyCorrections(vmStateDB, corrections, block, slog.Default())
+		if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsPrague(block.Number(), block.Time()) {
+			// EIP-7002: call the withdrawal request contract as a system call.
+			err := processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.WithdrawalQueueAddress, nil)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process EIP-7002 system call: %v", err)
+			}
 
-	if isEthereum(chainConfig.ChainID.Uint64()) {
-		if isPostMerge {
-			creditWithdrawals(block, vmStateDB, chainConfig)
-		} else {
-			accumulateRewards(chainConfig, vmStateDB, block.Header(), block.Uncles())
+			// EIP-7251: call the consolidation request contract as a system call.
+			err = processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.ConsolidationQueueAddress, nil)
+			if err != nil {
+				return nil, fmt.Errorf("failed to process EIP-7251 system call: %v", err)
+			}
 		}
-	}
 
-	if !isArchive {
-		endBlockZone := tracy.ZoneBegin("EndBlock")
-		s.db.EndBlock(block.NumberU64())
-		endBlockZone.End()
+		// Apply corrections if any are provided.
+		applyCorrections(vmStateDB, corrections, block, slog.Default())
+
+		if isEthereum(chainConfig.ChainID.Uint64()) {
+			if isPostMerge {
+				creditWithdrawals(block, vmStateDB, chainConfig)
+			} else {
+				accumulateRewards(chainConfig, vmStateDB, block.Header(), block.Uncles())
+			}
+		}
+
+		if !isArchive {
+			endBlockZone := tracy.ZoneBegin("EndBlock")
+			stagedBlock, err := s.db.EndBlock(block.NumberU64())
+			if err != nil {
+				return nil, fmt.Errorf("failed to end block %d: %v", block.NumberU64(), err)
+			}
+			lastBlock = stagedBlock
+			endBlockZone.End()
+		}
+
 	}
 
 	return receipts, vmStateDB.Check()
