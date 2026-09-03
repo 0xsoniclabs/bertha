@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/0xsoniclabs/bertha/utils"
 	cc "github.com/0xsoniclabs/carmen/go/common"
@@ -199,6 +200,7 @@ func (s *State) ApplyBlock(
 	var stateDB *evmstore.CarmenStateDB
 	var vmStateDB carmen.VmStateDB
 
+	totalStart := time.Now()
 	if isArchive {
 		if block.NumberU64() == 0 {
 			return nil, fmt.Errorf("cannot apply genesis block in archive mode")
@@ -320,6 +322,11 @@ func (s *State) ApplyBlock(
 		endBlockZone.End()
 	}
 
+	totalProcessingTime := time.Since(totalStart)
+	slog.Info("Block processing completed",
+		"block", block.NumberU64(),
+		"total_time", totalProcessingTime,
+	)
 	return receipts, vmStateDB.Check()
 }
 
