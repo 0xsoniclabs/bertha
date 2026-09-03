@@ -23,7 +23,6 @@ import (
 	"math/big"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/0xsoniclabs/bertha/utils"
 	cc "github.com/0xsoniclabs/carmen/go/common"
@@ -202,17 +201,9 @@ func (s *State) ApplyBlock(
 
 	var receipts types.Receipts
 	var lastBlock carmen.StagedBlock
-	var rollbackTime time.Duration
-	var firstRun time.Duration
-	var secondRun time.Duration
-
-	totalStart := time.Now()
 	for i := range 2 {
-		start := time.Now()
 		if i == 1 {
-			rollbackStart := time.Now()
 			lastBlock.Rollback()
-			rollbackTime = time.Since(rollbackStart)
 		}
 
 		if isArchive {
@@ -339,19 +330,8 @@ func (s *State) ApplyBlock(
 			lastBlock = stagedBlock
 			endBlockZone.End()
 		}
-		if i == 0 {
-			firstRun = time.Since(start)
-		} else {
-			secondRun = time.Since(start)
-		}
+
 	}
-	slog.Info("Block processing completed",
-		"block", block.NumberU64(),
-		"first_run", firstRun,
-		"second_run", secondRun,
-		"rollback_time", rollbackTime,
-		"second_run_minus_rollback", secondRun-rollbackTime,
-	)
 
 	return receipts, vmStateDB.Check()
 }
