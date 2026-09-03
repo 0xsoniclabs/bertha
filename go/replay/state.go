@@ -330,9 +330,8 @@ func (s *State) ApplyBlock(
 			lastBlock = stagedBlock
 			endBlockZone.End()
 		}
-
 	}
-
+	_ = stagedBlock.Commit()
 	return receipts, vmStateDB.Check()
 }
 
