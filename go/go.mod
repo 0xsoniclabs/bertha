@@ -19,9 +19,9 @@ module github.com/0xsoniclabs/bertha
 go 1.26.0
 
 require (
-	github.com/0xsoniclabs/carmen/go v0.0.0-20260805094353-570a67532cc9
-	github.com/0xsoniclabs/sonic v0.0.0-20260806135512-03b593e39343
-	github.com/0xsoniclabs/tosca v0.0.0-20260429071638-3f4119284c42
+	github.com/0xsoniclabs/carmen/go v0.0.0-20260908144451-4f46c16131f4
+	github.com/0xsoniclabs/sonic v0.0.0-20260907124745-edab3cec6b7a
+	github.com/0xsoniclabs/tosca v0.0.0-20260908121243-dc11abd0cdd5
 	github.com/0xsoniclabs/tracy v0.0.0-20251027125423-00a5ab7968fb
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
 	github.com/ethereum/go-ethereum v1.17.2
@@ -32,6 +32,9 @@ require (
 	go.uber.org/mock v0.6.0
 	google.golang.org/protobuf v1.36.11
 )
+
+// Provided by the Tosca check-out; see the replace directive below.
+require github.com/ethereum/evmc/v11 v11.0.0 // indirect
 
 require (
 	github.com/DataDog/zstd v1.5.7 // indirect
@@ -74,7 +77,6 @@ require (
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/mattn/go-sqlite3 v1.14.44 // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
@@ -124,4 +126,9 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
 //
 //replace github.com/0xsoniclabs/tracy => ../../tracy
 
-//replace github.com/0xsoniclabs/tosca => ../../tosca
+// The evmrs and evmzero interpreters are loaded from shared libraries built in
+// the Tosca check-out, and Tosca's EVMC bindings are a git submodule that is not
+// part of its Go module. Both are only available in a local check-out.
+replace github.com/0xsoniclabs/tosca => ../../tosca
+
+replace github.com/ethereum/evmc/v11 => ../../tosca/third_party/evmc
