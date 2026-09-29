@@ -245,7 +245,7 @@ func TestState_ApplyBlock_PrevRandaoIsMixDigestPostMerge(t *testing.T) {
 				return evmcore.ProcessSummary{}
 			})
 
-			_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, chainConfig, nil, false)
 			require.NoError(t, err)
 		})
 	}
@@ -273,7 +273,7 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
+	receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, chainConfig, nil, false)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 }
@@ -307,7 +307,7 @@ func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
+	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, chainConfig, nil, false)
 	require.ErrorContains(t, err, "skipped txs")
 }
 
@@ -344,7 +344,7 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, corrections[17], chainConfig, nil, false)
+	receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, corrections[17], chainConfig, nil, false)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 
@@ -488,7 +488,7 @@ func TestState_ApplyBlock_BlobBaseFeeIsCalculatedFromHeaderForEthereum(t *testin
 				tt.upgrades,
 			)
 
-			_, err = state.ApplyBlock(block, testInterpreter(t), processor, tt.upgrades, nil, tt.chainConfig, nil, false)
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{Upgrades: tt.upgrades}, nil, tt.chainConfig, nil, false)
 			if tt.wantErr != "" {
 				require.ErrorContains(t, err, tt.wantErr)
 			} else {
@@ -547,8 +547,59 @@ func TestState_ApplyBlock_ApplySonicVmConfigIfNotEthereumChain(t *testing.T) {
 				return evmcore.ProcessSummary{}
 			})
 
-			_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, tt.chainConfig, nil, false)
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, tt.chainConfig, nil, false)
 			require.NoError(t, err)
+		})
+	}
+}
+
+func TestState_ApplyBlock_ForwardsRulesToVmConfig(t *testing.T) {
+	// Sonic derives the transaction gas cap from MaxEventGas starting with Brio.
+	rules := opera.Rules{Upgrades: opera.GetBrioUpgrades()}
+	rules.Economy.Gas.MaxEventGas = 50_000
+	chainConfig := opera.CreateTransientEvmChainConfig(
+		146,
+		[]opera.UpgradeHeight{opera.MakeUpgradeHeight(rules.Upgrades, 0)},
+		idx.Block(1),
+	)
+
+	tests := map[string]struct {
+		gas     uint64
+		wantErr string
+	}{
+		"at limit":    {gas: 50_000},
+		"above limit": {gas: 50_001, wantErr: "skipped txs"},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+			require.NoError(t, err)
+			defer func() { require.NoError(t, state.Close()) }()
+
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			setBalance(state.db, crypto.PubkeyToAddress(key.PublicKey), big.NewInt(1e18))
+
+			tx := types.MustSignNewTx(key, types.LatestSignerForChainID(chainConfig.ChainID), &types.LegacyTx{
+				Gas:      tt.gas,
+				GasPrice: big.NewInt(1),
+				To:       &common.Address{1},
+			})
+			block := types.NewBlockWithHeader(&types.Header{
+				Number:   big.NewInt(1),
+				GasLimit: 1_000_000,
+				BaseFee:  big.NewInt(1),
+			}).WithBody(types.Body{Transactions: types.Transactions{tx}})
+
+			processor := evmcore.NewStateProcessorForReplay(chainConfig, &blockHashHistory{}, rules.Upgrades)
+
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, rules, nil, chainConfig, nil, false)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
 		})
 	}
 }
@@ -591,7 +642,7 @@ func TestState_ApplyBlock_EthereumCancunBlock_AppliesEIP4788(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
+	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, chainConfig, nil, false)
 	require.NoError(t, err)
 
 	// EIP-4788 stores the beacon root at storage slot (timestamp % 8191) + 8191.
@@ -644,7 +695,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7002(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
+	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, chainConfig, nil, false)
 	require.NoError(t, err)
 
 	// Verify the main side effects of the system calls:
@@ -698,7 +749,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7251(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
+	_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, chainConfig, nil, false)
 	require.NoError(t, err)
 
 	// Verify the main side effects of the system calls:
@@ -771,7 +822,7 @@ func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChainsPostMerge(t *tes
 				tt.upgrades,
 			)
 
-			_, err = state.ApplyBlock(block, testInterpreter(t), processor, tt.upgrades, nil, tt.chainConfig, nil, false)
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{Upgrades: tt.upgrades}, nil, tt.chainConfig, nil, false)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.wantBalanceWei, state.db.GetBalance(cc.Address(withdrawalAddr)).Uint64())
@@ -857,7 +908,7 @@ func TestState_ApplyBlock_RewardsAreAccumulatedInEthereumChainsPreMerge(t *testi
 				tt.upgrades,
 			)
 
-			_, err = state.ApplyBlock(block, testInterpreter(t), processor, tt.upgrades, nil, tt.chainConfig, nil, false)
+			_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{Upgrades: tt.upgrades}, nil, tt.chainConfig, nil, false)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.wantMinerBalance.ToBig(), state.db.GetBalance(cc.Address(coinbase)).ToBig())
@@ -891,7 +942,7 @@ func TestState_ApplyBlock_CanApplyBlockToArchiveState(t *testing.T) {
 	for i := range 3 {
 		block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: uint64(i)})
 		require.NoError(t, err)
-		_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, false)
+		_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, chainConfig, nil, false)
 		require.NoError(t, err)
 	}
 	require.NoError(t, state.db.Flush())
@@ -900,7 +951,7 @@ func TestState_ApplyBlock_CanApplyBlockToArchiveState(t *testing.T) {
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: 1})
 	require.NoError(t, err)
 
-	receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Upgrades{}, nil, chainConfig, nil, true)
+	receipts, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, chainConfig, nil, true)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 }

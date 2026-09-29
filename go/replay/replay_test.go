@@ -1073,7 +1073,7 @@ func TestStateChainAdapter_ApplyBlock_AppliesUpgrades(t *testing.T) {
 		require.Len(t, receipts, 1)
 		require.Equal(t, types.ReceiptStatusSuccessful, receipts[0].Status)
 
-		upgrades := metadataStore.GetUpgradesAtBlock(uint64(blockNr + 1))
+		upgrades := metadataStore.GetRulesAtBlock(uint64(blockNr + 1)).Upgrades
 		if upgrades.SingleProposerBlockFormation {
 			require.Equal(t, uint64(21_000), receipts[0].GasUsed)
 		} else {
@@ -1151,7 +1151,7 @@ func TestStateChainAdapter_ApplyBlock_CommitsRulesUpdateWhenEncounteringAnEpochS
 			require.NoError(t, err)
 
 			mockMetadataStore.EXPECT().GetUpgradeHeights()
-			mockMetadataStore.EXPECT().GetUpgradesAtBlock(uint64(5))
+			mockMetadataStore.EXPECT().GetRulesAtBlock(uint64(5))
 			mockMetadataStore.EXPECT().GetCorrectionsAtBlock(uint64(5))
 
 			if tc.expectCommitRules {
@@ -1164,7 +1164,7 @@ func TestStateChainAdapter_ApplyBlock_CommitsRulesUpdateWhenEncounteringAnEpochS
 	}
 }
 
-func TestStateChainAdapter_GetChainConfigAndUpgrades_ReadsFromMetadataStoreForNonEthereumChains(t *testing.T) {
+func TestStateChainAdapter_GetChainConfigAndRules_ReadsFromMetadataStoreForNonEthereumChains(t *testing.T) {
 	cases := map[string]struct {
 		chainID    uint64
 		isEthereum bool
@@ -1205,10 +1205,10 @@ func TestStateChainAdapter_GetChainConfigAndUpgrades_ReadsFromMetadataStoreForNo
 
 			if !tc.isEthereum {
 				mockMetadataStore.EXPECT().GetUpgradeHeights()
-				mockMetadataStore.EXPECT().GetUpgradesAtBlock(uint64(1))
+				mockMetadataStore.EXPECT().GetRulesAtBlock(uint64(1))
 			}
 
-			getChainConfigAndUpgrades(block, tc.chainID, mockMetadataStore)
+			getChainConfigAndRules(block, tc.chainID, mockMetadataStore)
 		})
 	}
 }

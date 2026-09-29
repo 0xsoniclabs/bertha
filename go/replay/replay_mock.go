@@ -172,18 +172,18 @@ func (m *MockArchiveState) EXPECT() *MockArchiveStateMockRecorder {
 }
 
 // ApplyArchiveBlock mocks base method.
-func (m *MockArchiveState) ApplyArchiveBlock(block *types.Block, interpreter tosca.Interpreter, processor Processor, upgrades opera.Upgrades, corrections map[common.Address]Correction, chainConfig *params.ChainConfig) (types.Receipts, error) {
+func (m *MockArchiveState) ApplyArchiveBlock(block *types.Block, interpreter tosca.Interpreter, processor Processor, rules opera.Rules, corrections map[common.Address]Correction, chainConfig *params.ChainConfig) (types.Receipts, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ApplyArchiveBlock", block, interpreter, processor, upgrades, corrections, chainConfig)
+	ret := m.ctrl.Call(m, "ApplyArchiveBlock", block, interpreter, processor, rules, corrections, chainConfig)
 	ret0, _ := ret[0].(types.Receipts)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ApplyArchiveBlock indicates an expected call of ApplyArchiveBlock.
-func (mr *MockArchiveStateMockRecorder) ApplyArchiveBlock(block, interpreter, processor, upgrades, corrections, chainConfig any) *gomock.Call {
+func (mr *MockArchiveStateMockRecorder) ApplyArchiveBlock(block, interpreter, processor, rules, corrections, chainConfig any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyArchiveBlock", reflect.TypeOf((*MockArchiveState)(nil).ApplyArchiveBlock), block, interpreter, processor, upgrades, corrections, chainConfig)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyArchiveBlock", reflect.TypeOf((*MockArchiveState)(nil).ApplyArchiveBlock), block, interpreter, processor, rules, corrections, chainConfig)
 }
 
 // GetArchiveBlockHeight mocks base method.

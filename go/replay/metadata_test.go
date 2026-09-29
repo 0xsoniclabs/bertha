@@ -306,34 +306,34 @@ func TestBlockDBMetadataStore_CommitRules_NewRulesUpdateIsStoredWhenWriteEnabled
 	}
 }
 
-func TestBlockDBMetadataStore_GetUpgradesAtBlock_ObtainsUpgradesFromCachedValuesBasedOnBlockNumber(t *testing.T) {
-	upgrades := []opera.Upgrades{
-		{Sonic: true},
-		{Sonic: true, Allegro: true},
-		{Sonic: true, SingleProposerBlockFormation: true},
+func TestBlockDBMetadataStore_GetRulesAtBlock_ObtainsRulesFromCachedValuesBasedOnBlockNumber(t *testing.T) {
+	rules := []opera.Rules{
+		{Upgrades: opera.Upgrades{Sonic: true}, Economy: opera.EconomyRules{Gas: opera.GasRules{MaxEventGas: 1}}},
+		{Upgrades: opera.Upgrades{Sonic: true, Allegro: true}, Economy: opera.EconomyRules{Gas: opera.GasRules{MaxEventGas: 2}}},
+		{Upgrades: opera.Upgrades{Sonic: true, SingleProposerBlockFormation: true}, Economy: opera.EconomyRules{Gas: opera.GasRules{MaxEventGas: 3}}},
 	}
 
 	store := &BlockDBMetadataStore{
 		metadata: Metadata{
 			RulesUpdateHeights: []RulesUpdateHeight{
-				{Block: 5, Rules: opera.Rules{Upgrades: upgrades[0]}},
-				{Block: 7, Rules: opera.Rules{Upgrades: upgrades[1]}},
-				{Block: 11, Rules: opera.Rules{Upgrades: upgrades[2]}},
+				{Block: 5, Rules: rules[0]},
+				{Block: 7, Rules: rules[1]},
+				{Block: 11, Rules: rules[2]},
 			},
 		},
 	}
 
 	for blockNr := range 20 {
-		var expect opera.Upgrades
+		var expect opera.Rules
 		if blockNr >= 11 {
-			expect = upgrades[2]
+			expect = rules[2]
 		} else if blockNr >= 7 {
-			expect = upgrades[1]
+			expect = rules[1]
 		} else if blockNr >= 5 {
-			expect = upgrades[0]
+			expect = rules[0]
 		}
 
-		got := store.GetUpgradesAtBlock(uint64(blockNr))
+		got := store.GetRulesAtBlock(uint64(blockNr))
 		require.Equal(t, expect, got)
 	}
 }
