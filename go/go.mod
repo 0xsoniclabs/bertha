@@ -21,7 +21,7 @@ go 1.27.3
 require (
 	github.com/0xsoniclabs/carmen/go v0.0.0-20260930140317-c18d5fe77790
 	github.com/0xsoniclabs/sonic v0.0.0-20261005125121-03bc79db182f
-	github.com/0xsoniclabs/tosca v0.0.0-20260429071638-3f4119284c42
+	github.com/0xsoniclabs/tosca v0.0.0-20261031125318-2f3749cdae1f
 	github.com/0xsoniclabs/tracy v0.0.0-20251027125423-00a5ab7968fb
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
 	github.com/ethereum/go-ethereum v1.17.2
@@ -56,6 +56,8 @@ require (
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
 	github.com/emicklei/dot v1.11.0 // indirect
 	github.com/ethereum/c-kzg-4844/v2 v2.1.8 // indirect
+	// Provided by the Tosca check-out; see the replace directive below.
+	github.com/ethereum/evmc/v11 v11.0.0 // indirect
 	github.com/ethereum/go-bigmodexpfix v0.0.0-20250911101455-f9e208c548ab // indirect
 	//github.com/ethereum/go-verkle v0.2.3-0.20260102081149-aa0a270c0ed0 // indirect
 	github.com/ferranbt/fastssz v1.0.0 // indirect
@@ -123,4 +125,9 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
 //
 //replace github.com/0xsoniclabs/tracy => ../../tracy
 
-//replace github.com/0xsoniclabs/tosca => ../../tosca
+// The evmrs and evmzero interpreters are loaded from shared libraries built in
+// the Tosca check-out, and Tosca's EVMC bindings are a git submodule that is not
+// part of its Go module. Both are only available in a local check-out.
+replace github.com/0xsoniclabs/tosca => ../../tosca
+
+replace github.com/ethereum/evmc/v11 => ../../tosca/third_party/evmc
