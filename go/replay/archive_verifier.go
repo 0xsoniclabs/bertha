@@ -220,17 +220,17 @@ func (v *archiveVerifier) verifyBlock() {
 		return
 	}
 
-	chainConfig, upgrades := getChainConfigAndUpgrades(gethBlock, v.chainID, v.metadata)
+	chainConfig, rules := getChainConfigAndRules(gethBlock, v.chainID, v.metadata)
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
 		item.hashHistory,
-		upgrades,
+		rules.Upgrades,
 	)
 
 	corrections := v.metadata.GetCorrectionsAtBlock(block.Number)
 
-	receipts, err := v.archive.ApplyArchiveBlock(gethBlock, v.interpreter, processor, upgrades, corrections, chainConfig)
+	receipts, err := v.archive.ApplyArchiveBlock(gethBlock, v.interpreter, processor, rules, corrections, chainConfig)
 	if err != nil {
 		handleError(fmt.Errorf("failed to apply block %d: %w", block.Number, err))
 		return

@@ -190,7 +190,7 @@ func (s *State) ApplyBlock(
 	block *types.Block,
 	interpreter tosca.Interpreter,
 	processor Processor,
-	upgrades opera.Upgrades,
+	rules opera.Rules,
 	corrections map[common.Address]Correction,
 	chainConfig *params.ChainConfig,
 	onLog func(*core_types.Log),
@@ -249,7 +249,7 @@ func (s *State) ApplyBlock(
 	var vmConfig vm.Config
 	if !isEthereum(chainConfig.ChainID.Uint64()) {
 		// Apply Sonic-specific VM settings that are not applicable to Ethereum chains.
-		vmConfig = opera.GetVmConfig(opera.Rules{Upgrades: upgrades})
+		vmConfig = opera.GetVmConfig(rules)
 	}
 	vmConfig.Interpreter = geth_adapter.NewGethInterpreterFactory(interpreter)
 

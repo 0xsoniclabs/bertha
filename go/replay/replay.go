@@ -675,7 +675,7 @@ type ArchiveState interface {
 		block *types.Block,
 		interpreter tosca.Interpreter,
 		processor Processor,
-		upgrades opera.Upgrades,
+		rules opera.Rules,
 		corrections map[common.Address]Correction,
 		chainConfig *params.ChainConfig,
 	) (types.Receipts, error)
@@ -781,12 +781,12 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 		}
 	}
 
-	chainConfig, upgrades := getChainConfigAndUpgrades(block, a.chainID, a.metadataStore)
+	chainConfig, rules := getChainConfigAndRules(block, a.chainID, a.metadataStore)
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
 		a.blockHashHistory,
-		upgrades,
+		rules.Upgrades,
 	)
 
 	corrections := a.metadataStore.GetCorrectionsAtBlock(block.NumberU64())
@@ -794,7 +794,7 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	onLog := func(l *core_types.Log) { onNewLog(a.metadataStore, block.NumberU64(), l) }
 
 	// Apply the block to the state database.
-	receipts, err := a.state.ApplyBlock(block, a.interpreter, processor, upgrades, corrections, chainConfig, onLog, false)
+	receipts, err := a.state.ApplyBlock(block, a.interpreter, processor, rules, corrections, chainConfig, onLog, false)
 	if err != nil {
 		stateRoot := future.Future[result.Result[common.Hash]]{}
 		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
@@ -873,19 +873,19 @@ func (a *stateChainAdapter) ApplyArchiveBlock(
 	block *types.Block,
 	interpreter tosca.Interpreter,
 	processor Processor,
-	upgrades opera.Upgrades,
+	rules opera.Rules,
 	corrections map[common.Address]Correction,
 	chainConfig *params.ChainConfig,
 ) (types.Receipts, error) {
 	a.stateSwitchMutex.RLock()
 	defer a.stateSwitchMutex.RUnlock()
-	return a.state.ApplyBlock(block, interpreter, processor, upgrades, corrections, chainConfig, nil, true)
+	return a.state.ApplyBlock(block, interpreter, processor, rules, corrections, chainConfig, nil, true)
 }
 
-func getChainConfigAndUpgrades(block *types.Block, chainID uint64, metadata MetadataStore) (*params.ChainConfig, opera.Upgrades) {
+func getChainConfigAndRules(block *types.Block, chainID uint64, metadata MetadataStore) (*params.ChainConfig, opera.Rules) {
 	if cfg := ethereumChainConfigMap[chainID]; cfg != nil {
 		rules := cfg.Rules(block.Number(), false, block.Time())
-		return cfg, opera.Upgrades{
+		return cfg, opera.Rules{Upgrades: opera.Upgrades{
 			Berlin: rules.IsBerlin,
 			London: rules.IsLondon,
 			Llr:    false,
@@ -897,14 +897,14 @@ func getChainConfigAndUpgrades(block *types.Block, chainID uint64, metadata Meta
 			SingleProposerBlockFormation: false,
 			GasSubsidies:                 false,
 			TransactionBundles:           false,
-		}
+		}}
 	}
 	chainConfig := opera.CreateTransientEvmChainConfig(
 		chainID,
 		metadata.GetUpgradeHeights(),
 		idx.Block(block.NumberU64()),
 	)
-	return chainConfig, metadata.GetUpgradesAtBlock(block.NumberU64())
+	return chainConfig, metadata.GetRulesAtBlock(block.NumberU64())
 }
 
 // getExpectedStateRoot returns the expected state root for the given block, based on the chain type.
