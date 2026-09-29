@@ -67,7 +67,7 @@ tracy-client = { version = "=0.18.2", default-features = false } # "enabled" fea
 
 [dev-dependencies]
 # parameterized tests
-rstest = "0.26.1"
+rstest = "0.27.0"
 rstest_reuse = "0.7.0"
 
 # mocking
