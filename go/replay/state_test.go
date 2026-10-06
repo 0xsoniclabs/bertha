@@ -956,6 +956,57 @@ func TestState_ApplyBlock_CanApplyBlockToArchiveState(t *testing.T) {
 	require.Empty(t, receipts)
 }
 
+func TestState_ApplyBlock_CommitsBlockToTheArchiveState(t *testing.T) {
+	require := require.New(t)
+	state, err := NewState(StateParameters{
+		Directory:   t.TempDir(),
+		WithArchive: true,
+		Schema:      5,
+	})
+	require.NoError(err)
+	defer func() { require.NoError(state.Close()) }()
+
+	chainConfig := opera.CreateTransientEvmChainConfig(
+		1,
+		[]opera.UpgradeHeight{},
+		idx.Block(2),
+	)
+
+	processor := evmcore.NewStateProcessorForReplay(
+		chainConfig,
+		&blockHashHistory{},
+		opera.Upgrades{},
+	)
+
+	corrections := Corrections{
+		1: map[common.Address]Correction{
+			{1}: {Balance: uint256.NewInt(1000)},
+		},
+	}
+
+	for i := range 3 {
+		block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: uint64(i)})
+		require.NoError(err)
+		_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, corrections[uint64(i)], chainConfig, nil, false)
+		require.NoError(err)
+	}
+
+	height, empty, err := state.GetArchiveBlockHeight()
+	require.NoError(err)
+	require.False(empty)
+	require.Equal(uint64(2), height)
+
+	before, err := state.db.GetArchiveStateDB(0)
+	require.NoError(err)
+	defer before.Release()
+	require.Zero(before.GetBalance(cc.Address{1}).Uint64())
+
+	after, err := state.db.GetArchiveStateDB(1)
+	require.NoError(err)
+	defer after.Release()
+	require.Equal(uint64(1000), after.GetBalance(cc.Address{1}).Uint64())
+}
+
 func TestState_setBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
 	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
@@ -982,6 +1033,79 @@ func TestState_setBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
 	setBalance(state.db, addr, balance)
 	have = state.db.GetBalance(cc.Address(addr))
 	require.Equal(t, uint64(750), have.Uint64())
+}
+
+func TestState_endBlockAndCommit_EndsAndCommitsBlock(t *testing.T) {
+	require := require.New(t)
+	ctrl := gomock.NewController(t)
+	db := carmen.NewMockStateDB(ctrl)
+	staged := carmen.NewMockStagedBlock(ctrl)
+
+	waitCalled := false
+	channel := make(chan error, 1)
+	handle := carmen.NewWaitHandle(channel)
+	handle = handle.Then(func(error) error {
+		waitCalled = true
+		return nil
+	})
+	close(channel)
+	gomock.InOrder(
+		db.EXPECT().EndBlock(uint64(42)).Return(staged, nil),
+		staged.EXPECT().Commit().Return(handle, nil),
+	)
+
+	require.NoError(endBlockAndCommit(&State{db: db}, 42))
+	require.True(waitCalled)
+}
+
+func TestState_endBlockAndCommit_ReportsErrors(t *testing.T) {
+	issue := fmt.Errorf("injected error")
+	tests := map[string]struct {
+		setup   func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock)
+		wantErr string
+	}{
+		"end block fails": {
+			setup: func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock) {
+				db.EXPECT().EndBlock(uint64(42)).Return(nil, issue)
+			},
+			wantErr: "failed to end block 42",
+		},
+		"staged block is nil": {
+			setup: func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock) {
+				db.EXPECT().EndBlock(uint64(42)).Return(nil, nil)
+			},
+			wantErr: "staged state is nil",
+		},
+		"commit fails": {
+			setup: func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock) {
+				db.EXPECT().EndBlock(uint64(42)).Return(staged, nil)
+				staged.EXPECT().Commit().Return(nil, issue)
+			},
+			wantErr: "failed to commit block 42",
+		},
+		"wait fails": {
+			setup: func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock) {
+				done := make(chan error, 1)
+				done <- issue
+				db.EXPECT().EndBlock(uint64(42)).Return(staged, nil)
+				staged.EXPECT().Commit().Return(carmen.NewWaitHandle(done), nil)
+			},
+			wantErr: "failed to wait for commit of block 42",
+		},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+			ctrl := gomock.NewController(t)
+			db := carmen.NewMockStateDB(ctrl)
+			staged := carmen.NewMockStagedBlock(ctrl)
+			test.setup(db, staged)
+
+			err := endBlockAndCommit(&State{db: db}, 42)
+			require.ErrorContains(err, test.wantErr)
+		})
+	}
 }
 
 func testInterpreter(t *testing.T) tosca.Interpreter {
