@@ -175,7 +175,9 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 		}
 	}
 	s.db.EndTransaction()
-	endBlockAndCommit(s, 0)
+	if err := endBlockAndCommit(s, 0); err != nil {
+		return err
+	}
 	return s.db.Check()
 }
 
@@ -316,8 +318,11 @@ func (s *State) ApplyBlock(
 
 	if !isArchive {
 		endBlockZone := tracy.ZoneBegin("EndBlock")
-		endBlockAndCommit(s, block.NumberU64())
+		err := endBlockAndCommit(s, block.NumberU64())
 		endBlockZone.End()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return receipts, vmStateDB.Check()

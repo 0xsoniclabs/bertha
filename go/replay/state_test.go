@@ -457,7 +457,7 @@ func TestState_ApplyBlock_BlobBaseFeeIsCalculatedFromHeaderForEthereum(t *testin
 			state.db.BeginTransaction()
 			state.db.AddBalance(cc.Address(sender), amount.New(1e18))
 			state.db.EndTransaction()
-			state.db.EndBlock(0)
+			require.NoError(t, endBlockAndCommit(state, 0))
 
 			// Create a blob tx with BlobFeeCap=1 (below Ethereum's blob base fee).
 			blobHash := common.Hash{0x01, 0xab}
@@ -620,7 +620,7 @@ func TestState_ApplyBlock_EthereumCancunBlock_AppliesEIP4788(t *testing.T) {
 	state.db.BeginTransaction()
 	state.db.SetCode(cc.Address(params.BeaconRootsAddress), params.BeaconRootsCode)
 	state.db.EndTransaction()
-	state.db.EndBlock(0)
+	require.NoError(t, endBlockAndCommit(state, 0))
 
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		// Use a large block number to ensure all forks including London are active.
@@ -675,7 +675,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7002(t *testing.T) {
 	state.db.SetCode(cc.Address(params.WithdrawalQueueAddress), params.WithdrawalQueueCode)
 	state.db.SetState(cc.Address(params.WithdrawalQueueAddress), countSlot, requestCount)
 	state.db.EndTransaction()
-	state.db.EndBlock(0)
+	require.NoError(t, endBlockAndCommit(state, 0))
 
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:        20_000_000,
@@ -729,7 +729,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7251(t *testing.T) {
 	state.db.SetCode(cc.Address(params.ConsolidationQueueAddress), params.ConsolidationQueueCode)
 	state.db.SetState(cc.Address(params.ConsolidationQueueAddress), countSlot, requestCount)
 	state.db.EndTransaction()
-	state.db.EndBlock(0)
+	require.NoError(t, endBlockAndCommit(state, 0))
 
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:        20_000_000,
