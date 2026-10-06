@@ -450,7 +450,8 @@ func accumulateRewards(config *params.ChainConfig, stateDB carmen.VmStateDB, hea
 	stateDB.AddBalance(cc.Address(header.Coinbase), amount.NewFromUint256(reward))
 }
 
-// endBlockAndCommit ends the current block in the state database and commits the changes.
+// endBlockAndCommit calls `EndBlock` on the state database and commits
+// the staged block to the archive.
 func endBlockAndCommit(s *State, blockNum uint64) error {
 	staged, err := s.db.EndBlock(blockNum)
 	if err != nil {
