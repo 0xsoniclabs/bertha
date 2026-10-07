@@ -192,6 +192,23 @@ func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
 	require.Equal(t, value, db.GetState(addr, key))
 }
 
+func TestState_ApplyGenesis_ReturnsErrorIfEndBlockFails(t *testing.T) {
+	require := require.New(t)
+	ctrl := gomock.NewController(t)
+	db := carmen.NewMockStateDB(ctrl)
+
+	issue := fmt.Errorf("injected error")
+	gomock.InOrder(
+		db.EXPECT().BeginBlock(),
+		db.EXPECT().BeginTransaction(),
+		db.EXPECT().EndTransaction(),
+		db.EXPECT().EndBlock(uint64(0)).Return(nil, issue),
+	)
+
+	state := &State{db: db}
+	require.ErrorIs(state.ApplyGenesis(&Genesis{}), issue)
+}
+
 func TestState_ApplyBlock_PrevRandaoIsMixDigestPostMerge(t *testing.T) {
 	tests := map[string]struct {
 		difficulty     *big.Int
@@ -457,7 +474,9 @@ func TestState_ApplyBlock_BlobBaseFeeIsCalculatedFromHeaderForEthereum(t *testin
 			state.db.BeginTransaction()
 			state.db.AddBalance(cc.Address(sender), amount.New(1e18))
 			state.db.EndTransaction()
-			require.NoError(t, endBlockAndCommit(state, 0))
+			handle, err := endBlockAndCommit(state, 0)
+			require.NoError(t, err)
+			require.NoError(t, handle.Wait())
 
 			// Create a blob tx with BlobFeeCap=1 (below Ethereum's blob base fee).
 			blobHash := common.Hash{0x01, 0xab}
@@ -620,7 +639,9 @@ func TestState_ApplyBlock_EthereumCancunBlock_AppliesEIP4788(t *testing.T) {
 	state.db.BeginTransaction()
 	state.db.SetCode(cc.Address(params.BeaconRootsAddress), params.BeaconRootsCode)
 	state.db.EndTransaction()
-	require.NoError(t, endBlockAndCommit(state, 0))
+	handle, err := endBlockAndCommit(state, 0)
+	require.NoError(t, err)
+	require.NoError(t, handle.Wait())
 
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		// Use a large block number to ensure all forks including London are active.
@@ -675,7 +696,9 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7002(t *testing.T) {
 	state.db.SetCode(cc.Address(params.WithdrawalQueueAddress), params.WithdrawalQueueCode)
 	state.db.SetState(cc.Address(params.WithdrawalQueueAddress), countSlot, requestCount)
 	state.db.EndTransaction()
-	require.NoError(t, endBlockAndCommit(state, 0))
+	handle, err := endBlockAndCommit(state, 0)
+	require.NoError(t, err)
+	require.NoError(t, handle.Wait())
 
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:        20_000_000,
@@ -729,7 +752,9 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7251(t *testing.T) {
 	state.db.SetCode(cc.Address(params.ConsolidationQueueAddress), params.ConsolidationQueueCode)
 	state.db.SetState(cc.Address(params.ConsolidationQueueAddress), countSlot, requestCount)
 	state.db.EndTransaction()
-	require.NoError(t, endBlockAndCommit(state, 0))
+	handle, err := endBlockAndCommit(state, 0)
+	require.NoError(t, err)
+	require.NoError(t, handle.Wait())
 
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:        20_000_000,
@@ -990,6 +1015,7 @@ func TestState_ApplyBlock_CommitsBlockToTheArchiveState(t *testing.T) {
 		_, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, corrections[uint64(i)], chainConfig, nil, false)
 		require.NoError(err)
 	}
+	require.NoError(state.db.Flush())
 
 	height, empty, err := state.GetArchiveBlockHeight()
 	require.NoError(err)
@@ -1005,6 +1031,34 @@ func TestState_ApplyBlock_CommitsBlockToTheArchiveState(t *testing.T) {
 	require.NoError(err)
 	defer after.Release()
 	require.Equal(uint64(1000), after.GetBalance(cc.Address{1}).Uint64())
+}
+
+func TestState_ApplyBlock_ReturnsErrorIfEndBlockFails(t *testing.T) {
+	require := require.New(t)
+	ctrl := gomock.NewController(t)
+	db := carmen.NewMockStateDB(ctrl)
+	processor := NewMockProcessor(ctrl)
+
+	issue := fmt.Errorf("injected error")
+	gomock.InOrder(
+		db.EXPECT().BeginBlock(),
+		processor.EXPECT().ProcessWithDifficulty(
+			gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
+			gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
+			gomock.Any(),
+		).Return(evmcore.ProcessSummary{}),
+		db.EXPECT().EndBlock(uint64(5)).Return(nil, issue),
+	)
+
+	block := types.NewBlockWithHeader(&types.Header{
+		Number:   big.NewInt(5),
+		GasLimit: 8_000_000,
+	})
+	chainConfig := opera.CreateTransientEvmChainConfig(146, []opera.UpgradeHeight{}, idx.Block(1))
+
+	state := &State{db: db}
+	_, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, chainConfig, nil, false)
+	require.ErrorIs(err, issue)
 }
 
 func TestState_setBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
@@ -1041,21 +1095,15 @@ func TestState_endBlockAndCommit_EndsAndCommitsBlock(t *testing.T) {
 	db := carmen.NewMockStateDB(ctrl)
 	staged := carmen.NewMockStagedBlock(ctrl)
 
-	waitCalled := false
-	channel := make(chan error, 1)
-	handle := carmen.NewWaitHandle(channel)
-	handle = handle.Then(func(error) error {
-		waitCalled = true
-		return nil
-	})
-	close(channel)
+	handle := carmen.NewWaitHandle(make(chan error))
 	gomock.InOrder(
 		db.EXPECT().EndBlock(uint64(42)).Return(staged, nil),
 		staged.EXPECT().Commit().Return(handle, nil),
 	)
 
-	require.NoError(endBlockAndCommit(&State{db: db}, 42))
-	require.True(waitCalled)
+	got, err := endBlockAndCommit(&State{db: db}, 42)
+	require.NoError(err)
+	require.Same(handle, got)
 }
 
 func TestState_endBlockAndCommit_ReportsErrors(t *testing.T) {
@@ -1083,15 +1131,6 @@ func TestState_endBlockAndCommit_ReportsErrors(t *testing.T) {
 			},
 			wantErr: "failed to commit block 42",
 		},
-		"wait fails": {
-			setup: func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock) {
-				done := make(chan error, 1)
-				done <- issue
-				db.EXPECT().EndBlock(uint64(42)).Return(staged, nil)
-				staged.EXPECT().Commit().Return(carmen.NewWaitHandle(done), nil)
-			},
-			wantErr: "failed to wait for commit of block 42",
-		},
 	}
 
 	for name, test := range tests {
@@ -1102,7 +1141,7 @@ func TestState_endBlockAndCommit_ReportsErrors(t *testing.T) {
 			staged := carmen.NewMockStagedBlock(ctrl)
 			test.setup(db, staged)
 
-			err := endBlockAndCommit(&State{db: db}, 42)
+			_, err := endBlockAndCommit(&State{db: db}, 42)
 			require.ErrorContains(err, test.wantErr)
 		})
 	}
