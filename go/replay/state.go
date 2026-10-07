@@ -175,7 +175,9 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 		}
 	}
 	s.db.EndTransaction()
-	s.db.EndBlock(0)
+	if _, err := endBlockAndCommit(s, 0); err != nil {
+		return err
+	}
 	return s.db.Check()
 }
 
@@ -316,8 +318,12 @@ func (s *State) ApplyBlock(
 
 	if !isArchive {
 		endBlockZone := tracy.ZoneBegin("EndBlock")
-		s.db.EndBlock(block.NumberU64())
+		// Discard the handle as we don't need to wait for the commit to finish here.
+		_, err := endBlockAndCommit(s, block.NumberU64())
 		endBlockZone.End()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return receipts, vmStateDB.Check()
@@ -448,4 +454,22 @@ func accumulateRewards(config *params.ChainConfig, stateDB carmen.VmStateDB, hea
 		reward.Add(reward, r)
 	}
 	stateDB.AddBalance(cc.Address(header.Coinbase), amount.NewFromUint256(reward))
+}
+
+// endBlockAndCommit calls `EndBlock` on the state database and commits
+// the staged block to the archive.
+// It returns the handle to the archive commit operation, or an error if the operation failed.
+func endBlockAndCommit(s *State, blockNum uint64) (*carmen.WaitHandle, error) {
+	staged, err := s.db.EndBlock(blockNum)
+	if err != nil {
+		return nil, fmt.Errorf("failed to end block %d: %w", blockNum, err)
+	}
+	if staged == nil {
+		return nil, fmt.Errorf("failed to end block %d: staged state is nil", blockNum)
+	}
+	handle, err := staged.Commit()
+	if err != nil {
+		return nil, fmt.Errorf("failed to commit block %d: %w", blockNum, err)
+	}
+	return handle, nil
 }
