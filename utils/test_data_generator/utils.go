@@ -25,6 +25,7 @@ import (
 	"math/big"
 	"math/rand"
 	"reflect"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -244,14 +245,14 @@ func toRustByteVec(data []byte) string {
 		return "vec![]"
 	}
 
-	byteString := ""
+	var byteString strings.Builder
 	for i, b := range data {
-		byteString += fmt.Sprintf("%d", b)
+		byteString.WriteString(fmt.Sprintf("%d", b))
 		if i < len(data)-1 {
-			byteString += ", "
+			byteString.WriteString(", ")
 		}
 	}
-	return fmt.Sprintf("vec![%s]", byteString)
+	return fmt.Sprintf("vec![%s]", byteString.String())
 }
 
 // toRustByteArray converts a byte slice to a Rust array string representation.
@@ -260,14 +261,14 @@ func toRustByteArray(data []byte) string {
 		return "[]"
 	}
 
-	byteString := ""
+	var byteString strings.Builder
 	for i, b := range data {
-		byteString += fmt.Sprintf("%d", b)
+		byteString.WriteString(fmt.Sprintf("%d", b))
 		if i < len(data)-1 {
-			byteString += ", "
+			byteString.WriteString(", ")
 		}
 	}
-	return fmt.Sprintf("[%s]", byteString)
+	return fmt.Sprintf("[%s]", byteString.String())
 }
 
 func getUint64FieldCases() []uint64 {

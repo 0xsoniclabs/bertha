@@ -33,8 +33,8 @@ import (
 )
 
 // RPCMarshalHeader converts the given header to the RPC output .
-func RPCMarshalHeader(head *types.Header) map[string]interface{} {
-	result := map[string]interface{}{
+func RPCMarshalHeader(head *types.Header) map[string]any {
+	result := map[string]any{
 		"number":           (*hexutil.Big)(head.Number),
 		"hash":             head.Hash(),
 		"parentHash":       head.ParentHash,
@@ -76,28 +76,28 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 // RPCMarshalBlock converts the given block to the RPC output which depends on fullTx. If inclTx is true transactions are
 // returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
 // transaction hashes.
-func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, receipts []*types.Receipt, config *params.ChainConfig) map[string]interface{} {
+func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool, receipts []*types.Receipt, config *params.ChainConfig) map[string]any {
 	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 
 	if inclTx {
-		formatTx := func(idx int, tx *types.Transaction) interface{} {
+		formatTx := func(idx int, tx *types.Transaction) any {
 			return tx.Hash()
 		}
 		if fullTx {
-			formatTx = func(idx int, tx *types.Transaction) interface{} {
+			formatTx = func(idx int, tx *types.Transaction) any {
 				return NewRPCTransactionFromBlockIndex(block, uint64(idx), config)
 			}
 		}
 		txs := block.Transactions()
-		transactions := make([]interface{}, len(txs))
+		transactions := make([]any, len(txs))
 		for i, tx := range txs {
 			transactions[i] = formatTx(i, tx)
 		}
 		fields["transactions"] = transactions
 	}
 
-	formattedReceipts := make([]interface{}, len(receipts))
+	formattedReceipts := make([]any, len(receipts))
 	for i, receipt := range receipts {
 		formattedReceipts[i] =
 			RpcReceiptJson(receipt)
