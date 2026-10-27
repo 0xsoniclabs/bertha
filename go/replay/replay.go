@@ -80,6 +80,7 @@ type ReplayArgs struct {
 	OverwriteStateRoot      OverwriteStateRootPolicy
 	NoStateRootCheck        bool
 	NoReceiptsCheck         bool
+	FailedBundlesFile       string
 	LogDBSize               bool
 	ConfirmAllPrompts       bool
 }
@@ -159,6 +160,15 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
 	}
 
+	var failedBundles FailedBundles
+	if args.FailedBundlesFile != "" {
+		slog.Info("Loading failed bundles file", "file", args.FailedBundlesFile)
+		failedBundles, err = ReadFailedBundlesFromFile(args.FailedBundlesFile)
+		if err != nil {
+			return err
+		}
+	}
+
 	// Create the interpreter
 	interpreter, err := tosca.NewInterpreter(args.Interpreter)
 	if err != nil {
@@ -192,6 +202,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	chain := &stateChainAdapter{
 		chainID:          chainID,
 		metadataStore:    metadataStore,
+		failedBundles:    failedBundles,
 		blockHashHistory: &blockHashHistory{},
 		interpreter:      interpreter,
 		state:            state,
@@ -712,6 +723,7 @@ type StateFlusher interface {
 type stateChainAdapter struct {
 	chainID          uint64
 	metadataStore    MetadataStore
+	failedBundles    FailedBundles
 	blockHashHistory *blockHashHistory
 	interpreter      tosca.Interpreter
 	state            *State
@@ -794,21 +806,18 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	onLog := func(l *core_types.Log) { onNewLog(a.metadataStore, block.NumberU64(), l) }
 
 	// Apply the block to the state database.
-	receipts, err := a.state.ApplyBlock(block, a.interpreter, processor, rules, corrections, chainConfig, onLog, false)
+	receipts, usedGas, err := a.state.ApplyBlock(block, a.interpreter, processor, rules, corrections, a.failedBundles[block.NumberU64()], chainConfig, onLog, false)
 	if err != nil {
 		stateRoot := future.Future[result.Result[common.Hash]]{}
 		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
 	}
 
 	// Reconstruct the complete header by filling in fields that are derived
-	// from receipts, which are not stored in the block DB when importing
-	// from era files.
+	// from processing the block, which are not stored in the block DB when
+	// importing from era files. The gas used includes failed bundles, which
+	// have no receipts.
 	completeHeader := block.Header()
-	if len(receipts) > 0 {
-		completeHeader.GasUsed = receipts[len(receipts)-1].CumulativeGasUsed
-	} else {
-		completeHeader.GasUsed = 0
-	}
+	completeHeader.GasUsed = usedGas
 	completeHeader.Bloom = types.MergeBloom(receipts)
 	completeHeader.ReceiptHash = types.DeriveSha(receipts, trie.NewStackTrie(nil))
 	*block = *block.WithSeal(completeHeader)
@@ -879,7 +888,8 @@ func (a *stateChainAdapter) ApplyArchiveBlock(
 ) (types.Receipts, error) {
 	a.stateSwitchMutex.RLock()
 	defer a.stateSwitchMutex.RUnlock()
-	return a.state.ApplyBlock(block, interpreter, processor, rules, corrections, chainConfig, nil, true)
+	receipts, _, err := a.state.ApplyBlock(block, interpreter, processor, rules, corrections, a.failedBundles[block.NumberU64()], chainConfig, nil, true)
+	return receipts, err
 }
 
 func getChainConfigAndRules(block *types.Block, chainID uint64, metadata MetadataStore) (*params.ChainConfig, opera.Rules) {

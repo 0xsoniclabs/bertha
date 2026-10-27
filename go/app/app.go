@@ -77,6 +77,7 @@ func getApp() *cli.Command {
 					overwriteStateRoot,
 					noStateRootCheck,
 					noReceiptsCheck,
+					failedBundlesFlag,
 					logDBSize,
 					confirmAllPromptsFlag,
 				},
@@ -300,6 +301,11 @@ var (
 		Value:   false,
 	}
 
+	failedBundlesFlag = &cli.StringFlag{
+		Name:  "failed-bundles",
+		Usage: `JSON file listing envelopes of failed bundles that are missing from their blocks but affected the state, as [{"block": <number>, "pos": <number of block txs before the bundle>, "tx": "<hex-encoded envelope>"}]`,
+	}
+
 	logDBSize = &cli.BoolFlag{
 		Name:    "log-db-size",
 		Aliases: []string{"lds"},
@@ -359,6 +365,7 @@ func parseReplayArgsAndRunReplay(ctx context.Context, c *cli.Command) error {
 		OverwriteStateRoot:      overwriteStateRootPolicy,
 		NoStateRootCheck:        c.Bool(noStateRootCheck.Name),
 		NoReceiptsCheck:         c.Bool(noReceiptsCheck.Name),
+		FailedBundlesFile:       c.String(failedBundlesFlag.Name),
 		LogDBSize:               c.Bool(logDBSize.Name),
 		ConfirmAllPrompts:       c.Bool(confirmAllPromptsFlag.Name),
 	}

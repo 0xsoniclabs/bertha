@@ -34,14 +34,18 @@ import (
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
+	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/evmcore/core_types"
+	"github.com/0xsoniclabs/sonic/gossip/blockproc/bundle"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver/drivercall"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver/driverpos"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/holiman/uint256"
 	"github.com/linxGnu/grocksdb"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -1162,6 +1166,75 @@ func TestStateChainAdapter_ApplyBlock_CommitsRulesUpdateWhenEncounteringAnEpochS
 			require.NoError(t, err)
 		})
 	}
+}
+
+func TestStateChainAdapter_ApplyBlock_ProcessesFailedBundlesInLiveAndArchiveState(t *testing.T) {
+	upgrades := opera.GetBrioUpgrades()
+	upgrades.TransactionBundles = true
+	rules := opera.FakeNetRules(upgrades)
+	chainID := uint64(146)
+	signer := types.LatestSignerForChainID(big.NewInt(int64(chainID)))
+
+	bundleKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	txKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	// Each bundle's single root step runs init code that reverts.
+	envelopes := make([]*types.Transaction, 2)
+	for i := range envelopes {
+		envelopes[i] = bundle.NewBuilder().
+			WithSigner(signer).
+			With(bundle.Step(bundleKey, &types.AccessListTx{
+				Nonce:    uint64(i),
+				Gas:      100_000,
+				GasPrice: big.NewInt(1),
+				Data:     []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.REVERT)},
+			})).
+			Build()
+	}
+
+	state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, state.Close()) }()
+	require.NoError(t, state.ApplyGenesis(&Genesis{Accounts: []Account{
+		{Address: crypto.PubkeyToAddress(bundleKey.PublicKey), Balance: *uint256.NewInt(1e18)},
+		{Address: crypto.PubkeyToAddress(txKey.PublicKey), Balance: *uint256.NewInt(1e18)},
+	}}))
+
+	chain := &stateChainAdapter{
+		chainID: chainID,
+		metadataStore: &BlockDBMetadataStore{metadata: Metadata{
+			RulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: rules}},
+		}},
+		failedBundles:    FailedBundles{1: {{Pos: 0, Tx: envelopes[0]}, {Pos: 1, Tx: envelopes[1]}}},
+		blockHashHistory: &blockHashHistory{},
+		interpreter:      testInterpreter(t),
+		state:            state,
+		snapshotHandler:  &SnapshotHandler{},
+	}
+
+	block := types.NewBlockWithHeader(&types.Header{
+		Number:   big.NewInt(1),
+		GasLimit: 1_000_000,
+		BaseFee:  big.NewInt(1),
+	}).WithBody(types.Body{Transactions: types.Transactions{
+		types.MustSignNewTx(txKey, signer, &types.LegacyTx{Gas: 21_000, GasPrice: big.NewInt(1), To: &common.Address{1}}),
+	}})
+
+	receipts, _, err := chain.ApplyBlock(block)
+	require.NoError(t, err)
+	require.Len(t, receipts, 1)
+	require.Greater(t, receipts[0].CumulativeGasUsed, receipts[0].GasUsed)
+	require.Greater(t, block.GasUsed(), receipts[0].CumulativeGasUsed)
+	require.NoError(t, chain.FlushState())
+
+	chainConfig, _ := getChainConfigAndRules(block, chainID, chain.metadataStore)
+	processor := evmcore.NewStateProcessorForReplay(chainConfig, &blockHashHistory{}, upgrades)
+	archiveReceipts, err := chain.ApplyArchiveBlock(block, testInterpreter(t), processor, rules, nil, chainConfig)
+	require.NoError(t, err)
+	require.Len(t, archiveReceipts, 1)
+	require.Equal(t, receipts[0].CumulativeGasUsed, archiveReceipts[0].CumulativeGasUsed)
 }
 
 func TestStateChainAdapter_GetChainConfigAndRules_ReadsFromMetadataStoreForNonEthereumChains(t *testing.T) {

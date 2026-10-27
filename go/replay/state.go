@@ -32,6 +32,7 @@ import (
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/evmcore/core_types"
+	"github.com/0xsoniclabs/sonic/gossip/blockproc/bundle"
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"
 	"github.com/0xsoniclabs/sonic/inter"
 	"github.com/0xsoniclabs/sonic/inter/state"
@@ -182,8 +183,10 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 }
 
 // ApplyBlock applies the given block to this state, processing all transactions
-// and updating the state accordingly. It returns the receipts of the transactions
-// in the block, or an error if the block could not be processed.
+// and updating the state accordingly. The envelopes of failed bundles are
+// processed at their positions between the block's transactions. It returns the
+// receipts of the transactions in the block and the gas used by all processed
+// transactions, or an error if the block could not be processed.
 //
 // When isArchive is true, the block is re-executed against the archive state
 // for the parent block. In this mode, BeginBlock/EndBlock are not called and
@@ -194,21 +197,31 @@ func (s *State) ApplyBlock(
 	processor Processor,
 	rules opera.Rules,
 	corrections map[common.Address]Correction,
+	failedBundles []FailedBundle,
 	chainConfig *params.ChainConfig,
 	onLog func(*core_types.Log),
 	isArchive bool,
-) (types.Receipts, error) {
+) (types.Receipts, uint64, error) {
+	transactions := block.Transactions()
+	if len(failedBundles) > 0 {
+		var err error
+		transactions, err = insertFailedBundles(transactions, failedBundles)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to insert failed bundles into block %d: %w", block.NumberU64(), err)
+		}
+	}
+
 	var stateDB *evmstore.CarmenStateDB
 	var vmStateDB carmen.VmStateDB
 
 	if isArchive {
 		if block.NumberU64() == 0 {
-			return nil, fmt.Errorf("cannot apply genesis block in archive mode")
+			return nil, 0, fmt.Errorf("cannot apply genesis block in archive mode")
 		}
 		archiveBlock := block.NumberU64() - 1
 		archiveDB, err := s.db.GetArchiveStateDB(archiveBlock)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get archive state for block %d: %w", archiveBlock, err)
+			return nil, 0, fmt.Errorf("failed to get archive state for block %d: %w", archiveBlock, err)
 		}
 		defer archiveDB.Release()
 		stateDB = evmstore.CreateNonCommittableCarmenStateDb(archiveDB, nil)
@@ -245,7 +258,7 @@ func (s *State) ApplyBlock(
 			BlobBaseFee: blobBaseFee,
 			Coinbase:    block.Coinbase(),
 		},
-		Transactions: block.Transactions(),
+		Transactions: transactions,
 	}
 
 	var vmConfig vm.Config
@@ -260,7 +273,7 @@ func (s *State) ApplyBlock(
 		if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
 			err := processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.BeaconRootsAddress, beaconRoot.Bytes())
 			if err != nil {
-				return nil, fmt.Errorf("failed to process EIP-4788 system call: %v", err)
+				return nil, 0, fmt.Errorf("failed to process EIP-4788 system call: %v", err)
 			}
 		}
 	}
@@ -278,30 +291,29 @@ func (s *State) ApplyBlock(
 		math.MaxUint64,
 	)
 
-	// Check that all transactions were processed (i.e., none were skipped).
-	for i, processed := range processed.ProcessedTransactions {
-		if processed.Receipt == nil {
-			return nil, fmt.Errorf("found block with skipped txs at index %d", i)
-		}
-	}
-
-	// Retrieve the receipts from the processed transactions.
-	receipts := make(types.Receipts, len(processed.ProcessedTransactions))
+	// Retrieve the receipts from the processed transactions and check that none
+	// were skipped, except for transactions of failed bundles, which are not
+	// part of the block.
+	receipts := make(types.Receipts, 0, len(processed.ProcessedTransactions))
 	for i, proc := range processed.ProcessedTransactions {
-		receipts[i] = proc.Receipt
+		if proc.Receipt != nil {
+			receipts = append(receipts, proc.Receipt)
+		} else if !bundle.IsBundleOnly(proc.Transaction) || block.Transaction(proc.Transaction.Hash()) != nil {
+			return nil, 0, fmt.Errorf("found block with skipped txs at index %d", i)
+		}
 	}
 
 	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsPrague(block.Number(), block.Time()) {
 		// EIP-7002: call the withdrawal request contract as a system call.
 		err := processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.WithdrawalQueueAddress, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to process EIP-7002 system call: %v", err)
+			return nil, 0, fmt.Errorf("failed to process EIP-7002 system call: %v", err)
 		}
 
 		// EIP-7251: call the consolidation request contract as a system call.
 		err = processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.ConsolidationQueueAddress, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to process EIP-7251 system call: %v", err)
+			return nil, 0, fmt.Errorf("failed to process EIP-7251 system call: %v", err)
 		}
 	}
 
@@ -322,11 +334,27 @@ func (s *State) ApplyBlock(
 		_, err := endBlockAndCommit(s, block.NumberU64())
 		endBlockZone.End()
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
 
-	return receipts, vmStateDB.Check()
+	return receipts, usedGas, vmStateDB.Check()
+}
+
+// insertFailedBundles inserts the envelopes of the given failed bundles, sorted
+// by position, before the transaction at their position.
+func insertFailedBundles(txs types.Transactions, failedBundles []FailedBundle) (types.Transactions, error) {
+	res := make(types.Transactions, 0, len(txs)+len(failedBundles))
+	next := uint64(0)
+	for _, failedBundle := range failedBundles {
+		if failedBundle.Pos > uint64(len(txs)) {
+			return nil, fmt.Errorf("position %d of failed bundle exceeds the number of transactions %d", failedBundle.Pos, len(txs))
+		}
+		res = append(res, txs[next:failedBundle.Pos]...)
+		res = append(res, failedBundle.Tx)
+		next = failedBundle.Pos
+	}
+	return append(res, txs[next:]...), nil
 }
 
 func applyCorrections(stateDB carmen.VmStateDB, corrections map[common.Address]Correction, block *types.Block, logger utils.Logger) {
