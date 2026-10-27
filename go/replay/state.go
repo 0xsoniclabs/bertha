@@ -35,6 +35,7 @@ import (
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/evmcore/core_types"
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"
+	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
 	"github.com/0xsoniclabs/sonic/inter/state"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/tosca/go/geth_adapter"
@@ -157,14 +158,20 @@ func (s *State) GetStateRoot() future.Future[result.Result[common.Hash]] {
 	})
 }
 
-// ApplyGenesis applies the genesis data from the specified file on this state.
-func (s *State) ApplyGenesis(genesis *Genesis) error {
+// ApplyGenesis applies the accounts of the given genesis on this state. The
+// genesis transactions are not executed since they are part of block 1, which
+// is replayed like any other block.
+func (s *State) ApplyGenesis(genesis *makefakegenesis.GenesisJson) error {
 	// apply the genesis accounts to the state
 	s.db.BeginBlock()
 	s.db.BeginTransaction()
 	for _, account := range genesis.Accounts {
 		address := account.Address
-		s.db.AddBalance(cc.Address(address), amount.NewFromUint256(&account.Balance))
+		var balance amount.Amount
+		if account.Balance != nil {
+			balance = amount.NewFromUint256(account.Balance)
+		}
+		s.db.AddBalance(cc.Address(address), balance)
 		if len(account.Code) != 0 {
 			s.db.SetCode(cc.Address(address), account.Code)
 		}

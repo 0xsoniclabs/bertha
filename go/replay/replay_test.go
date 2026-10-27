@@ -36,6 +36,7 @@ import (
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	"github.com/0xsoniclabs/sonic/evmcore/core_types"
 	"github.com/0xsoniclabs/sonic/gossip/blockproc/bundle"
+	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver/drivercall"
@@ -1035,7 +1036,7 @@ func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_ForwardExecutionErro
 			state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
 			require.NoError(t, err)
 			defer func() { require.NoError(t, state.Close()) }()
-			require.NoError(t, state.ApplyGenesis(&Genesis{}))
+			require.NoError(t, state.ApplyGenesis(&makefakegenesis.GenesisJson{}))
 
 			chain := &stateChainAdapter{
 				chainID:          12,
@@ -1089,7 +1090,7 @@ func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_ApplyUpgrades(t *tes
 	defer func() {
 		require.NoError(t, state.Close())
 	}()
-	require.NoError(t, state.ApplyGenesis(&Genesis{}))
+	require.NoError(t, state.ApplyGenesis(&makefakegenesis.GenesisJson{}))
 
 	chain := &stateChainAdapter{
 		chainID:          chainID,
@@ -1208,8 +1209,8 @@ func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_CommitRulesUpdateOnl
 			defer func() {
 				require.NoError(t, state.Close())
 			}()
-			require.NoError(t, state.ApplyGenesis(&Genesis{Accounts: []Account{
-				{Address: address, Balance: *uint256.NewInt(1e18)},
+			require.NoError(t, state.ApplyGenesis(&makefakegenesis.GenesisJson{Accounts: []makefakegenesis.Account{
+				{Address: address, Balance: uint256.NewInt(1e18)},
 			}}))
 
 			chain := &stateChainAdapter{
@@ -1276,7 +1277,7 @@ func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_OnlyLiveStatePatches
 			state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
 			require.NoError(t, err)
 			defer func() { require.NoError(t, state.Close()) }()
-			require.NoError(t, state.ApplyGenesis(&Genesis{Accounts: []Account{{Address: driver.ContractAddress, Code: driverCode}}}))
+			require.NoError(t, state.ApplyGenesis(&makefakegenesis.GenesisJson{Accounts: []makefakegenesis.Account{{Address: driver.ContractAddress, Code: driverCode}}}))
 
 			chain := &stateChainAdapter{
 				chainID:          123,
@@ -1388,8 +1389,8 @@ func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_ProcessFailedBundles
 	state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, state.Close()) }()
-	require.NoError(t, state.ApplyGenesis(&Genesis{Accounts: []Account{
-		{Address: crypto.PubkeyToAddress(key.PublicKey), Balance: *uint256.NewInt(1e18)},
+	require.NoError(t, state.ApplyGenesis(&makefakegenesis.GenesisJson{Accounts: []makefakegenesis.Account{
+		{Address: crypto.PubkeyToAddress(key.PublicKey), Balance: uint256.NewInt(1e18)},
 	}}))
 
 	chain := &stateChainAdapter{

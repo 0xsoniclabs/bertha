@@ -43,6 +43,7 @@ import (
 	_ "github.com/0xsoniclabs/carmen/go/state/gostate"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/evmcore/core_types"
+	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver/drivercall"
@@ -146,11 +147,11 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 
 	// Load genesis data
 	slog.Info("Loading genesis file", "file", args.JSONGenesisFile)
-	genesis, err := ReadGenesisFromFile(args.JSONGenesisFile)
+	genesis, err := makefakegenesis.LoadGenesisJson(args.JSONGenesisFile)
 	if err != nil {
 		return fmt.Errorf("failed to read genesis file %q: %w", args.JSONGenesisFile, err)
 	}
-	chainID := genesis.ChainID
+	chainID := genesis.Rules.NetworkID
 
 	// Create the metadata store
 	slog.Info("Initializing metadata store")
@@ -351,7 +352,7 @@ func cleanupStateDbDir(args *ReplayArgs, snapshotHandler *SnapshotHandler, outer
 	return err
 }
 
-func prepareState(args *ReplayArgs, chain *stateChainAdapter, blockDb blockdb.BlockDB, genesis *Genesis) error {
+func prepareState(args *ReplayArgs, chain *stateChainAdapter, blockDb blockdb.BlockDB, genesis *makefakegenesis.GenesisJson) error {
 	if args.StartBlock == 0 {
 		slog.Info("Applying genesis")
 		// Apply genesis data to the state database.
