@@ -246,13 +246,14 @@ func (s *State) ApplyBlock(
 	}
 	vmConfig.Interpreter = geth_adapter.NewGethInterpreterFactory(interpreter)
 
+	// EVM for the system calls; the chain is not needed for the current system calls.
+	evm := vm.NewEVM(evmcore.NewEVMBlockContextWithDifficulty(&evmBlock.EvmHeader, nil, nil, big.NewInt(0)), stateDB, chainConfig, vmConfig)
+
 	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsCancun(block.Number(), block.Time()) {
 		// EIP-4788: store the parent beacon block root in the beacon roots contract.
 		if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
-			err := processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.BeaconRootsAddress, beaconRoot.Bytes())
-			if err != nil {
-				return nil, 0, fmt.Errorf("failed to process EIP-4788 system call: %v", err)
-			}
+			core.ProcessBeaconBlockRoot(*beaconRoot, evm)
+			stateDB.EndTransaction()
 		}
 	}
 
@@ -292,14 +293,18 @@ func (s *State) ApplyBlock(
 	}
 
 	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsPrague(block.Number(), block.Time()) {
-		// EIP-7002: call the withdrawal request contract as a system call.
-		err := processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.WithdrawalQueueAddress, nil)
+		// EIP-7002: call the withdrawal request contract as a system call. The
+		// requests are not needed for replay.
+		err := core.ProcessWithdrawalQueue(&[][]byte{}, evm)
+		stateDB.EndTransaction()
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to process EIP-7002 system call: %v", err)
 		}
 
-		// EIP-7251: call the consolidation request contract as a system call.
-		err = processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.ConsolidationQueueAddress, nil)
+		// EIP-7251: call the consolidation request contract as a system call. The
+		// requests are not needed for replay.
+		err = core.ProcessConsolidationQueue(&[][]byte{}, evm)
+		stateDB.EndTransaction()
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to process EIP-7251 system call: %v", err)
 		}
@@ -392,43 +397,6 @@ func setBalance(stateDB carmen.VmStateDB, address common.Address, balance *big.I
 		diff, _ := amount.NewFromBigInt(new(big.Int).Sub(cur, balance))
 		stateDB.SubBalance(addr, diff)
 	}
-}
-
-// processSystemCall executes a system call to the given address with the provided input data.
-func processSystemCall(
-	header *evmcore.EvmHeader,
-	stateDB *evmstore.CarmenStateDB,
-	chainConfig *params.ChainConfig,
-	vmConfig vm.Config,
-	addr common.Address,
-	data []byte,
-) error {
-	// the chain is not needed for the current system calls
-	blockContext := evmcore.NewEVMBlockContextWithDifficulty(header, nil, nil, big.NewInt(0))
-	evm := vm.NewEVM(blockContext, stateDB, chainConfig, vmConfig)
-
-	msg := &core.Message{
-		From:      params.SystemAddress,
-		GasLimit:  30_000_000,
-		GasPrice:  common.Big0,
-		GasFeeCap: common.Big0,
-		GasTipCap: common.Big0,
-		To:        &addr,
-		Data:      data,
-	}
-
-	txContext, err := evmcore.NewEVMTxContext(msg)
-	if err != nil {
-		return fmt.Errorf("failed to create EVM transaction context: %w", err)
-	}
-	evm.SetTxContext(txContext)
-	stateDB.AddAddressToAccessList(addr)
-	defer stateDB.EndTransaction()
-	_, _, err = evm.Call(msg.From, *msg.To, msg.Data, msg.GasLimit, common.U2560)
-	if err != nil {
-		return fmt.Errorf("failed to execute system call: %w", err)
-	}
-	return nil
 }
 
 func creditWithdrawals(block *types.Block, stateDB carmen.VmStateDB, chainConfig *params.ChainConfig) {
