@@ -41,7 +41,7 @@ jobs:
     - name: setup go
       uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       with:
-        go-version: "1.26.0"
+        go-version: "1.27.3"
         cache-dependency-path: go/go.sum
     - name: install protoc
       uses: arduino/setup-protoc@v3
@@ -95,7 +95,7 @@ jobs:
     - name: setup go
       uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       with:
-        go-version: "1.26.0"
+        go-version: "1.27.3"
         cache-dependency-path: utils/test_data_generator/go.sum
     - name: generate test data
       working-directory: utils/test_data_generator

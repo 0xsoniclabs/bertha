@@ -16,7 +16,7 @@
 
 module github.com/0xsoniclabs/bertha
 
-go 1.26.0
+go 1.27.3
 
 require (
 	github.com/0xsoniclabs/carmen/go v0.0.0-20260930140317-c18d5fe77790
@@ -28,6 +28,7 @@ require (
 	github.com/holiman/uint256 v1.3.2
 	github.com/linxGnu/grocksdb v1.8.12
 	github.com/schollz/progressbar/v3 v3.19.1
+	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v3 v3.10.1
 	go.uber.org/mock v0.6.0
 	google.golang.org/protobuf v1.36.11
@@ -89,7 +90,6 @@ require (
 	github.com/rogpeppe/go-internal v1.16.0 // indirect
 	github.com/shirou/gopsutil v3.21.11+incompatible // indirect
 	github.com/status-im/keycard-go v0.3.3 // indirect
-	github.com/stretchr/testify v1.11.1
 	github.com/supranational/blst v0.3.17 // indirect
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7 // indirect
 	github.com/tklauser/go-sysconf v0.4.0 // indirect
