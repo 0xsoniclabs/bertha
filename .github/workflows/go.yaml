@@ -37,7 +37,7 @@ jobs:
     - name: setup go
       uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       with:
-        go-version: "1.26.0"
+        go-version: "1.27.3"
         cache-dependency-path: go/go.sum
     - name: install rocksdb
       uses: awalsh128/cache-apt-pkgs-action@latest
@@ -46,12 +46,12 @@ jobs:
     - name: golangci-lint go tools
       uses: golangci/golangci-lint-action@v9
       with:
-        version: v2.12.2
+        version: v2.15.0
         working-directory: go
     - name: golangci-lint test_data_generator
       uses: golangci/golangci-lint-action@v9
       with:
-        version: v2.12.2
+        version: v2.15.0
         working-directory: utils/test_data_generator
 
   license-check:
@@ -64,7 +64,7 @@ jobs:
     - name: setup go
       uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       with:
-        go-version: "1.26.0"
+        go-version: "1.27.3"
         cache-dependency-path: utils/scripts/license/go.sum
     - name: check license headers
       run: go run ./utils/scripts/license/add_license_header.go -dir . -check
@@ -79,7 +79,7 @@ jobs:
     - name: setup go
       uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       with:
-        go-version: "1.26.0"
+        go-version: "1.27.3"
         cache-dependency-path: go/go.sum
     - name: install rocksdb
       uses: awalsh128/cache-apt-pkgs-action@latest
@@ -99,12 +99,16 @@ jobs:
     - name: setup go
       uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       with:
-        go-version: "1.26.0"
+        go-version: "1.27.3"
         cache-dependency-path: go/go.sum
-    - name: install rocksdb, protobuf compiler
+    - name: install rocksdb
       uses: awalsh128/cache-apt-pkgs-action@latest
       with:
-        packages: librocksdb-dev protobuf-compiler
+        packages: librocksdb-dev
+    - name: install protoc
+      uses: arduino/setup-protoc@v3
+      with:
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
     - name: install protoc-gen-go
       run: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
     - name: regenerate protobuf definitions
@@ -129,7 +133,7 @@ jobs:
     #- name: setup go
       #uses: actions/setup-go@v7 # Use actions/setup-go to specify the Go version
       #with:
-        #go-version: "1.26.0"
+        #go-version: "1.27.3"
     #- name: install deps
       #run: |
         #sudo apt-get install protobuf-compiler
