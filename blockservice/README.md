@@ -4,13 +4,13 @@ The block service allows to manage, transfer and retrieve block datasets for Eth
 
 ## Dependencies
 
-- The [`protoc` protobuf compiler](https://protobuf.dev/installation/) (tested with version 3.21.12, the default on Ubuntu 24.04)
-- [RocksDB](https://rocksdb.org/) (tested with version 8.9, the default on Ubuntu 24.04)
+- The [`protoc` protobuf compiler](https://protobuf.dev/installation/) (tested with version 3.21.12, the default on Ubuntu 26.04)
+- [RocksDB](https://rocksdb.org/) (tested with version 9.11, the default on Ubuntu 26.04)
 - [Clang](https://clang.llvm.org/get_started.html) for generating the RocksDB Rust bindings
 
 ## Installation
 
-On Ubuntu 24.04, run
+On Ubuntu 26.04, run
 
 ```
 sudo apt-get install librocksdb-dev protobuf-compiler clang

@@ -29,7 +29,7 @@ on:
 jobs:
   import-verify-replay:
     name: import-verify-replay
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
     - name: checkout
@@ -83,7 +83,7 @@ jobs:
 
   generate-test-data:
     name: generate-test-data
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
     - name: checkout
@@ -108,7 +108,7 @@ jobs:
 
   carmen-tracy-patch:
     name: carmen-tracy-patches
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
     - name: checkout
