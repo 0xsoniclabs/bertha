@@ -26,7 +26,7 @@ require (
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
 	github.com/ethereum/go-ethereum v1.17.2
 	github.com/holiman/uint256 v1.3.2
-	github.com/linxGnu/grocksdb v1.8.12
+	github.com/linxGnu/grocksdb v1.9.9
 	github.com/schollz/progressbar/v3 v3.19.1
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v3 v3.10.1

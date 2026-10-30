@@ -27,7 +27,7 @@ on:
 jobs:
   targets-main:
     name: targets main
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: check PR targets main
         env:
