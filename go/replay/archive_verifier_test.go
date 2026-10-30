@@ -260,7 +260,8 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 			setupPool: func(blocks []*blockdb.Block, pool *utils.RandomRetentionPool[blockWithHashHistory]) {
 				pool.Add(blockWithHashHistory{
 					block: &blockdb.Block{
-						Number: blocks[5].Number,
+						Number:    blocks[5].Number,
+						ExtraData: make([]byte, 12),
 						// corrupted receipts
 						Receipts: []*blockdb.TransactionReceipt{{
 							CumulativeGasUsed: 999,
@@ -277,7 +278,8 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 			setupPool: func(blocks []*blockdb.Block, pool *utils.RandomRetentionPool[blockWithHashHistory]) {
 				pool.Add(blockWithHashHistory{
 					block: &blockdb.Block{
-						Number: blocks[5].Number,
+						Number:    blocks[5].Number,
+						ExtraData: make([]byte, 12),
 						// corrupted receipts, but check is disabled
 						Receipts: []*blockdb.TransactionReceipt{{
 							CumulativeGasUsed: 999,

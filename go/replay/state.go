@@ -22,6 +22,7 @@ import (
 	"math"
 	"math/big"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/0xsoniclabs/bertha/utils"
@@ -182,8 +183,10 @@ func (s *State) ApplyGenesis(genesis *Genesis) error {
 }
 
 // ApplyBlock applies the given block to this state, processing all transactions
-// and updating the state accordingly. It returns the receipts of the transactions
-// in the block, or an error if the block could not be processed.
+// and updating the state accordingly. The envelopes of failed bundles are
+// processed at their positions between the block's transactions. It returns the
+// receipts of the transactions in the block and the gas used by all processed
+// transactions, or an error if the block could not be processed.
 //
 // When isArchive is true, the block is re-executed against the archive state
 // for the parent block. In this mode, BeginBlock/EndBlock are not called and
@@ -194,21 +197,31 @@ func (s *State) ApplyBlock(
 	processor Processor,
 	rules opera.Rules,
 	corrections map[common.Address]Correction,
+	failedBundles []FailedBundle,
 	chainConfig *params.ChainConfig,
 	onLog func(*core_types.Log),
 	isArchive bool,
-) (types.Receipts, error) {
+) (types.Receipts, uint64, error) {
+	transactions := block.Transactions()
+	if len(failedBundles) > 0 {
+		var err error
+		transactions, err = insertFailedBundles(transactions, failedBundles)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to insert failed bundles into block %d: %w", block.NumberU64(), err)
+		}
+	}
+
 	var stateDB *evmstore.CarmenStateDB
 	var vmStateDB carmen.VmStateDB
 
 	if isArchive {
 		if block.NumberU64() == 0 {
-			return nil, fmt.Errorf("cannot apply genesis block in archive mode")
+			return nil, 0, fmt.Errorf("cannot apply genesis block in archive mode")
 		}
 		archiveBlock := block.NumberU64() - 1
 		archiveDB, err := s.db.GetArchiveStateDB(archiveBlock)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get archive state for block %d: %w", archiveBlock, err)
+			return nil, 0, fmt.Errorf("failed to get archive state for block %d: %w", archiveBlock, err)
 		}
 		defer archiveDB.Release()
 		stateDB = evmstore.CreateNonCommittableCarmenStateDb(archiveDB, nil)
@@ -234,18 +247,29 @@ func (s *State) ApplyBlock(
 		prevRandao = common.Hash{}
 	}
 
+	blockTime := inter.Timestamp(block.Time() * 1e9)
+	if !isEthereum(chainConfig.ChainID.Uint64()) {
+		// Sonic keeps the nanoseconds of the block time in the extra data, which
+		// the time periods of bundles are checked against.
+		nanos, _, err := inter.DecodeExtraData(block.Extra())
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to decode extra data of block %d: %w", block.NumberU64(), err)
+		}
+		blockTime += inter.Timestamp(nanos)
+	}
+
 	evmBlock := &evmcore.EvmBlock{
 		EvmHeader: evmcore.EvmHeader{
 			Number:      block.Number(),
 			ParentHash:  block.ParentHash(),
-			Time:        inter.Timestamp(block.Time() * 1e9),
+			Time:        blockTime,
 			GasLimit:    block.GasLimit(),
 			PrevRandao:  prevRandao,
 			BaseFee:     block.BaseFee(),
 			BlobBaseFee: blobBaseFee,
 			Coinbase:    block.Coinbase(),
 		},
-		Transactions: block.Transactions(),
+		Transactions: transactions,
 	}
 
 	var vmConfig vm.Config
@@ -260,7 +284,7 @@ func (s *State) ApplyBlock(
 		if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
 			err := processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.BeaconRootsAddress, beaconRoot.Bytes())
 			if err != nil {
-				return nil, fmt.Errorf("failed to process EIP-4788 system call: %v", err)
+				return nil, 0, fmt.Errorf("failed to process EIP-4788 system call: %v", err)
 			}
 		}
 	}
@@ -278,30 +302,39 @@ func (s *State) ApplyBlock(
 		math.MaxUint64,
 	)
 
-	// Check that all transactions were processed (i.e., none were skipped).
-	for i, processed := range processed.ProcessedTransactions {
-		if processed.Receipt == nil {
-			return nil, fmt.Errorf("found block with skipped txs at index %d", i)
-		}
+	// Retrieve the receipts from the processed transactions and check that none
+	// of them were skipped and that none of the failed bundles added receipts.
+	// Transactions of failed bundles are not part of the block, and a skipped
+	// bundle is returned as its envelope.
+	receipts := make(types.Receipts, 0, len(processed.ProcessedTransactions))
+	isFailedBundle := func(hash common.Hash) bool {
+		return slices.ContainsFunc(failedBundles, func(b FailedBundle) bool { return b.Tx.Hash() == hash })
 	}
-
-	// Retrieve the receipts from the processed transactions.
-	receipts := make(types.Receipts, len(processed.ProcessedTransactions))
-	for i, proc := range processed.ProcessedTransactions {
-		receipts[i] = proc.Receipt
+	for _, proc := range processed.ProcessedTransactions {
+		hash := proc.Transaction.Hash()
+		if proc.Receipt == nil {
+			if isFailedBundle(hash) {
+				return nil, 0, fmt.Errorf("failed bundle %v was skipped", hash)
+			}
+			return nil, 0, fmt.Errorf("tx %v was skipped", hash)
+		}
+		if cause := processed.CausedBy[hash]; isFailedBundle(cause) {
+			return nil, 0, fmt.Errorf("failed bundle %v added a receipt for tx %v", cause, hash)
+		}
+		receipts = append(receipts, proc.Receipt)
 	}
 
 	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsPrague(block.Number(), block.Time()) {
 		// EIP-7002: call the withdrawal request contract as a system call.
 		err := processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.WithdrawalQueueAddress, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to process EIP-7002 system call: %v", err)
+			return nil, 0, fmt.Errorf("failed to process EIP-7002 system call: %v", err)
 		}
 
 		// EIP-7251: call the consolidation request contract as a system call.
 		err = processSystemCall(&evmBlock.EvmHeader, stateDB, chainConfig, vmConfig, params.ConsolidationQueueAddress, nil)
 		if err != nil {
-			return nil, fmt.Errorf("failed to process EIP-7251 system call: %v", err)
+			return nil, 0, fmt.Errorf("failed to process EIP-7251 system call: %v", err)
 		}
 	}
 
@@ -322,11 +355,27 @@ func (s *State) ApplyBlock(
 		_, err := endBlockAndCommit(s, block.NumberU64())
 		endBlockZone.End()
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
 
-	return receipts, vmStateDB.Check()
+	return receipts, usedGas, vmStateDB.Check()
+}
+
+// insertFailedBundles inserts the envelopes of the given failed bundles, sorted
+// by position, before the transaction at their position.
+func insertFailedBundles(txs types.Transactions, failedBundles []FailedBundle) (types.Transactions, error) {
+	res := make(types.Transactions, 0, len(txs)+len(failedBundles))
+	next := uint64(0)
+	for _, failedBundle := range failedBundles {
+		if failedBundle.Pos > uint64(len(txs)) {
+			return nil, fmt.Errorf("position %d of failed bundle exceeds the number of transactions %d", failedBundle.Pos, len(txs))
+		}
+		res = append(res, txs[next:failedBundle.Pos]...)
+		res = append(res, failedBundle.Tx)
+		next = failedBundle.Pos
+	}
+	return append(res, txs[next:]...), nil
 }
 
 func applyCorrections(stateDB carmen.VmStateDB, corrections map[common.Address]Correction, block *types.Block, logger utils.Logger) {

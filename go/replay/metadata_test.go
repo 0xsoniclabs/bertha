@@ -24,6 +24,7 @@ import (
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -48,19 +49,42 @@ func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
 	require.NoError(t, err)
 	correctionsData, err := json.Marshal(corrections)
 	require.NoError(t, err)
+	txs := []*types.Transaction{
+		types.NewTx(&types.LegacyTx{Nonce: 0}),
+		types.NewTx(&types.LegacyTx{Nonce: 1}),
+		types.NewTx(&types.LegacyTx{Nonce: 2}),
+	}
+	failedBundles := FailedBundles{
+		7: {{Pos: 0, Tx: txs[0]}, {Pos: 2, Tx: txs[1]}},
+		9: {{Pos: 1, Tx: txs[2]}},
+	}
+	type failedBundleEntry struct {
+		Block uint64 `json:"block"`
+		Pos   uint64 `json:"pos"`
+		Tx    string `json:"tx"`
+	}
+	failedBundlesData, err := json.Marshal([]failedBundleEntry{
+		{Block: 7, Pos: 0, Tx: encodeTx(t, txs[0])},
+		{Block: 7, Pos: 2, Tx: encodeTx(t, txs[1])},
+		{Block: 9, Pos: 1, Tx: encodeTx(t, txs[2])},
+	})
+	require.NoError(t, err)
 
 	testCases := map[string]struct {
 		rulesUpdateHeightsData   []byte
 		correctionsData          []byte
+		failedBundlesData        []byte
 		expectErr                string
 		expectLog                func(logger *utils.MockLogger)
 		expectRulesUpdateHeights []RulesUpdateHeight
 		expectCorrections        Corrections
+		expectFailedBundles      FailedBundles
 	}{
-		"no rules update heights, no corrections": {
+		"none": {
 			expectLog: func(logger *utils.MockLogger) {
 				logger.EXPECT().Warn("No rules update heights available").Times(1)
 				logger.EXPECT().Warn("No corrections available").Times(1)
+				logger.EXPECT().Warn("No failed bundles available").Times(1)
 			},
 			expectRulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: genesisRules}},
 		},
@@ -69,6 +93,7 @@ func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
 			expectLog: func(logger *utils.MockLogger) {
 				logger.EXPECT().Info("Loaded rules update heights from block db", "num_rules_update_heights", len(storedHeightsWithGenesis)).Times(1)
 				logger.EXPECT().Warn("No corrections available").Times(1)
+				logger.EXPECT().Warn("No failed bundles available").Times(1)
 			},
 			expectRulesUpdateHeights: storedHeightsWithGenesis,
 		},
@@ -77,6 +102,7 @@ func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
 			expectLog: func(logger *utils.MockLogger) {
 				logger.EXPECT().Info("Loaded rules update heights from block db", "num_rules_update_heights", 1).Times(1)
 				logger.EXPECT().Warn("No corrections available").Times(1)
+				logger.EXPECT().Warn("No failed bundles available").Times(1)
 			},
 			expectRulesUpdateHeights: storedHeightsWithGenesis,
 		},
@@ -85,19 +111,33 @@ func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
 			expectLog: func(logger *utils.MockLogger) {
 				logger.EXPECT().Warn("No rules update heights available").Times(1)
 				logger.EXPECT().Info("Loaded corrections from block db", "num_corrections", len(corrections)).Times(1)
+				logger.EXPECT().Warn("No failed bundles available").Times(1)
 			},
 			expectRulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: genesisRules}},
 			expectCorrections:        corrections,
 		},
-		"both": {
+		"only failed bundles": {
+			failedBundlesData: failedBundlesData,
+			expectLog: func(logger *utils.MockLogger) {
+				logger.EXPECT().Warn("No rules update heights available").Times(1)
+				logger.EXPECT().Warn("No corrections available").Times(1)
+				logger.EXPECT().Info("Loaded failed bundles from block db", "num_blocks", len(failedBundles)).Times(1)
+			},
+			expectRulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: genesisRules}},
+			expectFailedBundles:      failedBundles,
+		},
+		"all": {
 			rulesUpdateHeightsData: rulesUpdateHeightsWithGenesisData,
 			correctionsData:        correctionsData,
+			failedBundlesData:      failedBundlesData,
 			expectLog: func(logger *utils.MockLogger) {
 				logger.EXPECT().Info("Loaded rules update heights from block db", "num_rules_update_heights", len(storedHeightsWithGenesis)).Times(1)
 				logger.EXPECT().Info("Loaded corrections from block db", "num_corrections", len(corrections)).Times(1)
+				logger.EXPECT().Info("Loaded failed bundles from block db", "num_blocks", len(failedBundles)).Times(1)
 			},
 			expectRulesUpdateHeights: storedHeightsWithGenesis,
 			expectCorrections:        corrections,
+			expectFailedBundles:      failedBundles,
 		},
 		"genesis rules mismatch": {
 			rulesUpdateHeightsData: func() []byte {
@@ -123,6 +163,14 @@ func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
 				logger.EXPECT().Warn("No rules update heights available").Times(1)
 			},
 		},
+		"invalid failed bundles": {
+			failedBundlesData: []byte("not-json"),
+			expectErr:         "failed to parse stored failed bundles",
+			expectLog: func(logger *utils.MockLogger) {
+				logger.EXPECT().Warn("No rules update heights available").Times(1)
+				logger.EXPECT().Warn("No corrections available").Times(1)
+			},
+		},
 	}
 
 	for name, tc := range testCases {
@@ -133,6 +181,7 @@ func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
 
 			db.EXPECT().GetRulesUpdateHeights(genesisRules.NetworkID).Return(tc.rulesUpdateHeightsData, nil).Times(1)
 			db.EXPECT().GetCorrections(genesisRules.NetworkID).Return(tc.correctionsData, nil).Times(1)
+			db.EXPECT().GetFailedBundles(genesisRules.NetworkID).Return(tc.failedBundlesData, nil).Times(1)
 
 			if tc.expectLog != nil {
 				tc.expectLog(logger)
@@ -147,6 +196,7 @@ func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tc.expectRulesUpdateHeights, store.metadata.RulesUpdateHeights)
 			require.Equal(t, tc.expectCorrections, store.metadata.Corrections)
+			require.Equal(t, failedBundleHashes(tc.expectFailedBundles), failedBundleHashes(store.metadata.FailedBundles))
 		})
 	}
 }
@@ -355,6 +405,21 @@ func TestBlockDBMetadataStore_GetCorrectionsAtBlock_ReturnsCorrections(t *testin
 	require.Equal(t, corrections[10], store.GetCorrectionsAtBlock(10))
 	require.Equal(t, corrections[20], store.GetCorrectionsAtBlock(20))
 	require.Nil(t, store.GetCorrectionsAtBlock(30))
+}
+
+func TestBlockDBMetadataStore_GetFailedBundlesAtBlock_ReturnsFailedBundles(t *testing.T) {
+	failedBundles := FailedBundles{
+		10: {{Pos: 0, Tx: types.NewTx(&types.LegacyTx{Nonce: 1})}},
+		20: {{Pos: 1, Tx: types.NewTx(&types.LegacyTx{Nonce: 2})}},
+	}
+
+	store := &BlockDBMetadataStore{
+		metadata: Metadata{FailedBundles: failedBundles},
+	}
+
+	require.Equal(t, failedBundles[10], store.GetFailedBundlesAtBlock(10))
+	require.Equal(t, failedBundles[20], store.GetFailedBundlesAtBlock(20))
+	require.Nil(t, store.GetFailedBundlesAtBlock(30))
 }
 
 func TestRulesUpdateHeights_MarshalUnmarshal_IsIdentity(t *testing.T) {
