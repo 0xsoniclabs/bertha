@@ -231,6 +231,59 @@ func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
 	)
 }
 
+func TestVerify_StoredFailedBundles_TolerateHashMismatches(t *testing.T) {
+	chainID := uint64(146)
+	blocks := utils.CreateValidBlocks(t, 3)
+	blocks[2].ParentHash = common.Hash{1}.Bytes() // the hash of block 1 mismatches
+
+	directory := createDatabase(t, chainID, blocks)
+	db, writeOptions := openDatabaseForWriting(t, directory)
+	require.NoError(t, db.Put(writeOptions, blockdb.MakeFailedBundlesKey(chainID), []byte(`[{"block": 1, "pos": 0, "tx": "0x01"}]`)))
+	db.Close()
+
+	ctrl := gomock.NewController(t)
+	logger := utils.NewMockLogger(ctrl)
+	logger.EXPECT().Info("Opening block database", "directory", directory)
+	logger.EXPECT().Info("Verifying blocks", "chain_id", chainID, "start_block", uint64(0), "end_block", uint64(2))
+	logger.EXPECT().Warn("Tolerated hash mismatch of block with failed bundles; further tolerated hash mismatches are not reported", "block", uint64(1))
+	progressIndicator := utils.NewMockProgressIndicator(ctrl)
+	progressIndicator.EXPECT().Add(1).Return(nil).Times(3)
+	progressIndicatorFactory := utils.NewMockProgressIndicatorFactory(ctrl)
+	progressIndicatorFactory.EXPECT().New(int64(3), "Verifying blocks").Return(progressIndicator)
+
+	args := VerifyArgs{DatabaseDir: directory, ChainID: chainID, StartBlock: 0, EndBlock: 2}
+	require.NoError(t, Verify(t.Context(), args, logger, progressIndicatorFactory))
+}
+
+func TestVerify_InvalidStoredFailedBundles_ReportsAnIssue(t *testing.T) {
+	tests := map[string]struct {
+		failedBundles string
+		wantErr       string
+	}{
+		"not JSON":      {failedBundles: `not-json`, wantErr: "failed to parse stored failed bundles: invalid character"},
+		"missing block": {failedBundles: `[{"block": 1}, {"pos": 0}]`, wantErr: "failed to parse stored failed bundles: entry 1 has no block"},
+		"null block":    {failedBundles: `[{"block": null}]`, wantErr: "failed to parse stored failed bundles: entry 0 has no block"},
+		"null entry":    {failedBundles: `[null]`, wantErr: "failed to parse stored failed bundles: entry 0 has no block"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			chainID := uint64(146)
+			directory := createDatabase(t, chainID, utils.CreateValidBlocks(t, 3))
+			db, writeOptions := openDatabaseForWriting(t, directory)
+			require.NoError(t, db.Put(writeOptions, blockdb.MakeFailedBundlesKey(chainID), []byte(tt.failedBundles)))
+			db.Close()
+
+			ctrl := gomock.NewController(t)
+			logger := utils.NewMockLogger(ctrl)
+			logger.EXPECT().Info("Opening block database", "directory", directory)
+			logger.EXPECT().Info("Verifying blocks", "chain_id", chainID, "start_block", uint64(0), "end_block", uint64(2))
+
+			args := VerifyArgs{DatabaseDir: directory, ChainID: chainID, StartBlock: 0, EndBlock: 2}
+			require.ErrorContains(t, Verify(t.Context(), args, logger, utils.NewMockProgressIndicatorFactory(ctrl)), tt.wantErr)
+		})
+	}
+}
+
 func TestGetStoredBlockRange_NilBlock_ReportsAnIssue(t *testing.T) {
 	database := blockdb.NewMockBlockDB(gomock.NewController(t))
 	database.EXPECT().GetRange(uint64(1), uint64(2), uint64(3)).
@@ -249,21 +302,51 @@ func TestVerifyBlocks_ValidBlockHashSequence_DoesNotReportIssues(t *testing.T) {
 	// the hash of the block itself.
 	slices.Reverse(validBlocks)
 
-	require.NoError(t, verifyBlocks(t.Context(), utils.NewIter(validBlocks), nil))
+	require.NoError(t, verifyBlocks(t.Context(), utils.NewIter(validBlocks), nil, nil, nil))
 }
 
 func TestVerifyBlocks_InvalidBlockHash_IssueIsDetected(t *testing.T) {
 	blocks := []*blockdb.Block{{}, {}, {}}
 	require.ErrorContains(t,
-		verifyBlocks(t.Context(), utils.NewIter(blocks), nil),
+		verifyBlocks(t.Context(), utils.NewIter(blocks), nil, nil, nil),
 		"lock verification failed for block 0: block hash mismatch",
 	)
+}
+
+func TestVerifyBlocks_OnlyHashMismatchOfBlockWithFailedBundles_IsTolerated(t *testing.T) {
+	mismatching := &blockdb.Block{Number: 1}
+	unconvertible := &blockdb.Block{Number: 1, Transactions: []*blockdb.Transaction{{TransactionType: 99_999}}}
+	withFailedBundles := map[uint64]bool{0: true, 1: true}
+	tests := map[string]struct {
+		block                   *blockdb.Block // block 1, whose hash mismatches the parent hash of block 2
+		blocksWithFailedBundles map[uint64]bool
+		wantErr                 string
+	}{
+		"block with failed bundles":               {block: mismatching, blocksWithFailedBundles: withFailedBundles},
+		"block without failed bundles":            {block: mismatching, blocksWithFailedBundles: map[uint64]bool{0: true}, wantErr: "block verification failed for block 1: block hash mismatch"},
+		"unconvertible block with failed bundles": {block: unconvertible, blocksWithFailedBundles: withFailedBundles, wantErr: "block verification failed for block 1: failed to convert block"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			logger := utils.NewMockLogger(ctrl)
+			// The hashes of blocks 1 and 0 mismatch, but only the first is reported.
+			blocks := utils.NewIter([]*blockdb.Block{{Number: 2}, tt.block, {Number: 0}})
+
+			if tt.wantErr != "" {
+				require.ErrorContains(t, verifyBlocks(t.Context(), blocks, tt.blocksWithFailedBundles, nil, logger), tt.wantErr)
+				return
+			}
+			logger.EXPECT().Warn("Tolerated hash mismatch of block with failed bundles; further tolerated hash mismatches are not reported", "block", uint64(1))
+			require.NoError(t, verifyBlocks(t.Context(), blocks, tt.blocksWithFailedBundles, nil, logger))
+		})
+	}
 }
 
 func TestVerifyBlocks_NilBlockInput_AbortsWithError(t *testing.T) {
 	blocks := []*blockdb.Block{{}, nil}
 	require.ErrorContains(t,
-		verifyBlocks(t.Context(), utils.NewIter(blocks), nil),
+		verifyBlocks(t.Context(), utils.NewIter(blocks), nil, nil, nil),
 		"encountered nil block",
 	)
 }
@@ -276,7 +359,7 @@ func TestVerifyBlocks_ErrorDuringBlockRetrieval_AbortsWithError(t *testing.T) {
 		}
 	}()
 
-	got := verifyBlocks(t.Context(), blocks, nil)
+	got := verifyBlocks(t.Context(), blocks, nil, nil, nil)
 	require.ErrorContains(t, got, "failed to get block")
 	require.ErrorIs(t, got, issue)
 }
@@ -294,7 +377,7 @@ func TestVerifyBlocks_CancelledContext_ValidationAbortsWithError(t *testing.T) {
 		}
 	}
 
-	got := verifyBlocks(ctxt, utils.NewIter(blocks), progressCounter)
+	got := verifyBlocks(ctxt, utils.NewIter(blocks), nil, progressCounter, nil)
 	want := ctxt.Err()
 	require.Error(t, want, "context should be cancelled")
 	require.ErrorIs(t, got, want)

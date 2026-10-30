@@ -90,6 +90,7 @@ async fn multiple_clients_fetch_blocks_from_the_same_server_concurrently() {
             [146] SONIC: SONIC test chain
             ├── rules update heights: no
             ├── corrections: no
+            ├── failed bundles: no
             └── {} - {}
             ", from, to}
         );

@@ -132,6 +132,12 @@ pub trait BlockDb {
     /// Stores the JSON-encoded corrections for the specified chain-ID.
     fn put_corrections(&mut self, chain_id: u64, data: &[u8]) -> Result<(), Error>;
 
+    /// Retrieves the JSON-encoded failed bundles for the specified chain-ID.
+    fn get_failed_bundles(&self, chain_id: u64) -> Result<Option<Vec<u8>>, Error>;
+
+    /// Stores the JSON-encoded failed bundles for the specified chain-ID.
+    fn put_failed_bundles(&mut self, chain_id: u64, data: &[u8]) -> Result<(), Error>;
+
     /// Retrieves a block for the specified chain-ID and block number.
     /// Returns [None] if the block does not exist.
     fn get(&self, chain_id: u64, block_number: u64) -> Result<Option<Block>, Error>;
@@ -328,6 +334,22 @@ where
         Ok(())
     }
 
+    fn get_failed_bundles(&self, chain_id: u64) -> Result<Option<Vec<u8>>, Error> {
+        self.db.get_raw(&make_failed_bundles_key(chain_id))
+    }
+
+    fn put_failed_bundles(&mut self, chain_id: u64, data: &[u8]) -> Result<(), Error> {
+        let mut chain_ids = self.get_chain_ids()?;
+        if let Err(idx) = chain_ids.binary_search(&chain_id) {
+            chain_ids.insert(idx, chain_id);
+        }
+        self.execute_in_batch(|batch| {
+            batch.put_raw(&make_failed_bundles_key(chain_id), data);
+            batch.put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids(chain_ids));
+        })?;
+        Ok(())
+    }
+
     fn get(&self, chain_id: u64, block_number: u64) -> Result<Option<Block>, Error> {
         self.get_bytes(chain_id, block_number)?
             .map(|data| {
@@ -495,6 +517,7 @@ where
 //   - suffix 0x00 => block ranges as (start, end) u64 pairs (big-endian)
 //   - suffix 0x01 => rules update heights (JSON)
 //   - suffix 0x02 => corrections (JSON)
+//   - suffix 0x03 => failed bundles (JSON)
 // - Blocks (17-byte keys): [0x02 prefix, chain_id (8 bytes big endian), block_number (8 bytes big
 //   endian)] => protobuf block.
 
@@ -601,6 +624,15 @@ pub fn make_corrections_key(chain_id: u64) -> [u8; 10] {
     key[0] = 0x01;
     key[1..9].copy_from_slice(&chain_id.to_be_bytes());
     key[9] = 0x02;
+    key
+}
+
+/// Returns the key for storing the failed bundles for the given chain ID.
+pub fn make_failed_bundles_key(chain_id: u64) -> [u8; 10] {
+    let mut key = [0u8; 10];
+    key[0] = 0x01;
+    key[1..9].copy_from_slice(&chain_id.to_be_bytes());
+    key[9] = 0x03;
     key
 }
 
@@ -1085,6 +1117,112 @@ mod tests {
 
         assert_eq!(
             db.kv_db().get_raw(&make_corrections_key(chain_id)).unwrap(),
+            Some(data)
+        );
+        assert_eq!(
+            db.kv_db().get_raw(&CHAIN_IDS_KEY).unwrap(),
+            Some(serialize_chain_ids([1, 2, 3]))
+        );
+    }
+
+    #[rstest::rstest]
+    #[case::no_failed_bundles(None)]
+    #[case::failed_bundles(Some(vec![1, 2, 3]))]
+    fn kv_db_backed_block_db_get_failed_bundles_returns_data_stored_at_key(
+        #[case] stored_payload: Option<Vec<u8>>,
+    ) {
+        let chain_id = 1;
+        let mut kv_db = MockKvDb::new();
+        kv_db
+            .expect_get_raw()
+            .with(eq(make_failed_bundles_key(chain_id)))
+            .return_once({
+                let values = stored_payload.clone();
+                move |_| Ok(values)
+            })
+            .times(1);
+        let db = KvDbBackedBlockDb { db: kv_db };
+        let result = db.get_failed_bundles(chain_id);
+        assert_eq!(result, Ok(stored_payload));
+    }
+
+    #[rstest::rstest]
+    #[case::no_failed_bundles(None)]
+    #[case::failed_bundles(Some(vec![1, 2, 3]))]
+    fn rocks_block_db_get_failed_bundles_returns_data_stored_at_key(
+        #[case] stored_payload: Option<Vec<u8>>,
+    ) {
+        let chain_id = 1;
+        let (_tmpdir, db) = create_rocks_block_db();
+        if let Some(payload) = &stored_payload {
+            db.kv_db()
+                .put_raw(&make_failed_bundles_key(chain_id), payload)
+                .unwrap();
+        }
+        let result = db.get_failed_bundles(chain_id);
+        assert_eq!(result, Ok(stored_payload));
+    }
+
+    #[rstest::rstest]
+    #[case::chain_id_exists(vec![1, 2, 3])]
+    #[case::chain_id_not_exists(vec![1, 3])]
+    fn kv_db_backed_block_db_put_failed_bundles_stores_data_at_key_and_adds_chain_id(
+        #[case] existing_chain_ids: Vec<u64>,
+    ) {
+        let chain_id = 2;
+        let data = vec![1, 2, 3];
+        let mut kv_db = MockKvDb::new();
+        let mut kv_db_batch = MockKvDbBatch::new();
+        kv_db
+            .expect_get_raw()
+            .with(eq(CHAIN_IDS_KEY))
+            .return_once(move |_| Ok(Some(serialize_chain_ids(existing_chain_ids))))
+            .times(1);
+        kv_db_batch
+            .expect_put_raw()
+            .with(eq(make_failed_bundles_key(chain_id)), eq(data.clone()))
+            .return_once(|_, _| ())
+            .times(1);
+        kv_db_batch
+            .expect_put_raw()
+            .with(eq(CHAIN_IDS_KEY), eq(serialize_chain_ids([1, 2, 3])))
+            .return_once(|_, _| ())
+            .times(1);
+        kv_db_batch
+            .expect_size()
+            .return_once(move || UNIQUE_IDENTIFIER)
+            .times(1);
+        kv_db
+            .expect_batch_raw()
+            .return_once(move || kv_db_batch)
+            .times(1);
+        kv_db
+            .expect_write_batch_raw()
+            .withf(move |b| b.size() == UNIQUE_IDENTIFIER)
+            .return_once(|_| Ok(()))
+            .times(1);
+        let mut db = KvDbBackedBlockDb { db: kv_db };
+        assert!(db.put_failed_bundles(chain_id, &data).is_ok());
+    }
+
+    #[rstest::rstest]
+    #[case::chain_id_exists(vec![1, 2, 3])]
+    #[case::chain_id_not_exists(vec![1, 3])]
+    fn rocks_block_db_put_failed_bundles_stores_data_at_key_and_adds_chain_id(
+        #[case] existing_chain_ids: Vec<u64>,
+    ) {
+        let chain_id = 2;
+        let data = vec![1, 2, 3];
+        let (_tmpdir, mut db) = create_rocks_block_db();
+        db.kv_db()
+            .put_raw(&CHAIN_IDS_KEY, &serialize_chain_ids(existing_chain_ids))
+            .unwrap();
+        db.put_failed_bundles(chain_id, &data).unwrap();
+
+        assert_eq!(
+            db.kv_db()
+                .get_raw(&make_failed_bundles_key(chain_id))
+                .unwrap(),
             Some(data)
         );
         assert_eq!(
@@ -2314,6 +2452,21 @@ mod tests {
     }
 
     #[test]
+    fn make_failed_bundles_key_returns_10_byte_key_consisting_of_prefix_0x01_and_be_chain_id_and_suffix_0x03()
+     {
+        let chain_id = 258;
+        let key = make_failed_bundles_key(chain_id);
+        assert_eq!(
+            key,
+            [
+                1, // prefix
+                0, 0, 0, 0, 0, 0, 1, 2, // chain ID
+                3, // suffix
+            ]
+        );
+    }
+
+    #[test]
     fn make_block_key_returns_17_byte_key_consisting_of_prefix_0x02_and_be_chain_id_and_be_block_number()
      {
         let chain_id = 258;
@@ -2335,6 +2488,7 @@ mod tests {
             make_block_ranges_key(0),
             make_rules_update_heights_key(0),
             make_corrections_key(0),
+            make_failed_bundles_key(0),
         ];
         for global_metadata_key in global_metadata_keys {
             for chain_metadata_key in chain_metadata_keys {
@@ -2349,6 +2503,7 @@ mod tests {
             make_block_ranges_key(u64::MAX),
             make_rules_update_heights_key(u64::MAX),
             make_corrections_key(u64::MAX),
+            make_failed_bundles_key(u64::MAX),
         ];
         let block_data_key = make_block_key(u64::MIN, 0);
         for chain_metadata_key in chain_metadata_keys {

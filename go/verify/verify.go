@@ -19,6 +19,7 @@ package verify
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -74,6 +75,26 @@ func Verify(
 		"end_block", endBlock,
 	)
 
+	failedBundlesData, err := database.GetFailedBundles(args.ChainID)
+	if err != nil {
+		return fmt.Errorf("failed to get failed bundles: %w", err)
+	}
+	var failedBundles []struct {
+		Block *uint64 `json:"block"`
+	}
+	if failedBundlesData != nil {
+		if err := json.Unmarshal(failedBundlesData, &failedBundles); err != nil {
+			return fmt.Errorf("failed to parse stored failed bundles: %w", err)
+		}
+	}
+	blocksWithFailedBundles := map[uint64]bool{}
+	for i, failedBundle := range failedBundles {
+		if failedBundle.Block == nil {
+			return fmt.Errorf("failed to parse stored failed bundles: entry %d has no block", i)
+		}
+		blocksWithFailedBundles[*failedBundle.Block] = true
+	}
+
 	numBlocks := int64(endBlock - startBlock + 1)
 	progressIndicator := progressIndicatorFactory.New(numBlocks, "Verifying blocks")
 
@@ -84,9 +105,11 @@ func Verify(
 			startBlock,
 			endBlock,
 		),
+		blocksWithFailedBundles,
 		func(uint64) {
 			_ = progressIndicator.Add(1) // update errors are ignored
 		},
+		logger,
 	)
 }
 
@@ -127,12 +150,19 @@ func firstBlockNumber(blocks iter.Seq2[*blockdb.Block, error]) (uint64, bool, er
 	return 0, false, nil
 }
 
+// verifyBlocks checks that the hash of each block matches the parent hash of
+// its successor, given before it. The gas used by failed bundles is missing from
+// the receipts, from which the block hash is computed, so hash mismatches of
+// blocks with failed bundles are tolerated with a warning.
 func verifyBlocks(
 	ctx context.Context,
 	blocks iter.Seq2[*blockdb.Block, error],
+	blocksWithFailedBundles map[uint64]bool,
 	onVerifiedBlock func(number uint64),
+	logger utils.Logger,
 ) error {
 	first := true
+	warned := false
 	blockHash := common.Hash{}
 	for block, err := range blocks {
 		if ctx.Err() != nil {
@@ -146,7 +176,13 @@ func verifyBlocks(
 		}
 
 		if !first {
-			if err := verifyBlock(blockHash, block); err != nil {
+			err := verifyBlock(blockHash, block)
+			tolerated := errors.Is(err, errBlockHashMismatch) && blocksWithFailedBundles[block.Number]
+			if tolerated && !warned {
+				warned = true
+				logger.Warn("Tolerated hash mismatch of block with failed bundles; further tolerated hash mismatches are not reported", "block", block.Number)
+			}
+			if err != nil && !tolerated {
 				return fmt.Errorf("block verification failed for block %d: %w", block.Number, err)
 			}
 		}
@@ -170,8 +206,10 @@ func verifyBlock(
 
 	got := gethBlock.Hash()
 	if got != hash {
-		return fmt.Errorf("block hash mismatch: expected %x, got %x", hash, got)
+		return fmt.Errorf("%w: expected %x, got %x", errBlockHashMismatch, hash, got)
 	}
 
 	return nil
 }
+
+var errBlockHashMismatch = errors.New("block hash mismatch")

@@ -41,6 +41,7 @@ type BlockDB interface {
 	GetRulesUpdateHeights(chainID uint64) ([]byte, error)
 	PutRulesUpdateHeights(chainID uint64, data []byte) error
 	GetCorrections(chainID uint64) ([]byte, error)
+	GetFailedBundles(chainID uint64) ([]byte, error)
 	Close() error
 }
 
@@ -242,6 +243,14 @@ func (db RocksDB) GetCorrections(chainID uint64) ([]byte, error) {
 	return db.db.GetBytes(readOptions, MakeCorrectionsKey(chainID))
 }
 
+// GetFailedBundles returns the raw (JSON-encoded) failed bundles for the given chain ID.
+// Returns nil if no data is stored for the chain ID.
+func (db RocksDB) GetFailedBundles(chainID uint64) ([]byte, error) {
+	readOptions := grocksdb.NewDefaultReadOptions()
+	defer readOptions.Destroy()
+	return db.db.GetBytes(readOptions, MakeFailedBundlesKey(chainID))
+}
+
 // CurrentVersion is the version of the block database format. The version
 // should be incremented whenever a change is made to the key/value layout or
 // the protobuf format.
@@ -269,6 +278,16 @@ func MakeCorrectionsKey(chainID uint64) []byte {
 	key[0] = 0x01
 	binary.BigEndian.PutUint64(key[1:9], chainID)
 	key[9] = 0x02
+	return key
+}
+
+// MakeFailedBundlesKey creates a 10-byte key for the failed bundles of the given chain ID.
+// The key layout matches the Rust blockservice: [0x01, chain_id (8 bytes BE), 0x03].
+func MakeFailedBundlesKey(chainID uint64) []byte {
+	key := make([]byte, 10)
+	key[0] = 0x01
+	binary.BigEndian.PutUint64(key[1:9], chainID)
+	key[9] = 0x03
 	return key
 }
 

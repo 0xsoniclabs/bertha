@@ -112,6 +112,7 @@ async fn client_list_remote_then_fetch_then_list_then_view() {
         [146] SONIC: SONIC test chain
         ├── rules update heights: no
         ├── corrections: no
+        ├── failed bundles: no
         └── 5 - 5
         "}
     );
