@@ -278,7 +278,7 @@ var (
 	writeRulesUpdateHeights = &cli.BoolFlag{
 		Name:  "write-rules-update-heights",
 		Usage: "Write newly detected rules update heights to the block database",
-		Value: false,
+		Value: true,
 	}
 
 	overwriteStateRoot = &cli.StringFlag{
