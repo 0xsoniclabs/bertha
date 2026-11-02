@@ -30,6 +30,7 @@ import (
 	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/tosca/go/tosca"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
@@ -51,7 +52,7 @@ func TestArchiveVerifier_NewArchiveVerifier_ChecksArchiveRate(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
-			archive := NewMockArchiveState(ctrl)
+			archive := NewMockArchiveChain(ctrl)
 			if tc.verifier {
 				// The dispatcher goroutine may or may not have called
 				// GetArchiveBlockHeight before close() is called; the exact
@@ -62,7 +63,7 @@ func TestArchiveVerifier_NewArchiveVerifier_ChecksArchiveRate(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
 
-			verifier, err := newArchiveVerifier(ctx, cancel, archive, &BlockDBMetadataStore{}, nil, 123, tc.rate, false, slog.Default())
+			verifier, err := newArchiveVerifier(ctx, cancel, archive, tc.rate, false, slog.Default())
 
 			if tc.err {
 				require.ErrorContains(t, err, "archive rate")
@@ -107,7 +108,7 @@ func TestArchiveVerifier_dispatcher_LimitsConcurrency(t *testing.T) {
 	var startedTasks atomic.Int64
 	finish := make(chan struct{})
 	ctrl := gomock.NewController(t)
-	archive := NewMockArchiveState(ctrl)
+	archive := NewMockArchiveChain(ctrl)
 	// The dispatcher spawns at least maxConcurrentVerifications tasks that
 	// block on <-finish, and after finish is closed spawns more tasks. The
 	// exact total count depends on scheduling.
@@ -131,8 +132,6 @@ func TestArchiveVerifier_dispatcher_LimitsConcurrency(t *testing.T) {
 	v := &archiveVerifier{
 		pool:         pool,
 		archive:      archive,
-		metadata:     &BlockDBMetadataStore{},
-		chainID:      123,
 		ctx:          ctx,
 		cancelParent: cancel,
 		done:         make(chan struct{}),
@@ -181,7 +180,7 @@ func TestArchiveVerifier_dispatcher_LogsDroppedTicksRateLimited(t *testing.T) {
 		blocking.Store(true)
 		unblock := make(chan struct{})
 
-		archive := NewMockArchiveState(ctrl)
+		archive := NewMockArchiveChain(ctrl)
 		archive.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
 			if blocking.Load() {
 				<-unblock
@@ -206,9 +205,7 @@ func TestArchiveVerifier_dispatcher_LogsDroppedTicksRateLimited(t *testing.T) {
 		v := &archiveVerifier{
 			pool:         pool,
 			archive:      archive,
-			metadata:     &BlockDBMetadataStore{},
 			logger:       logger,
-			chainID:      123,
 			ctx:          ctx,
 			cancelParent: cancel,
 			done:         make(chan struct{}),
@@ -351,9 +348,6 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 			verifier := &archiveVerifier{
 				pool:            pool,
 				archive:         chain,
-				metadata:        &BlockDBMetadataStore{},
-				interpreter:     interpreter,
-				chainID:         123,
 				noReceiptsCheck: tc.noReceiptsCheck,
 				ctx:             ctx,
 				cancelParent:    cancel,
@@ -375,27 +369,49 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 	}
 }
 
+func TestArchiveVerifier_verifyBlock_AppliesBlockWithItsHashHistory(t *testing.T) {
+	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
+	require.NoError(t, err)
+	hashHistory := &blockHashHistory{}
+	hashHistory.SetBlockHash(1, common.Hash{1})
+	pool.Add(blockWithHashHistory{block: &blockdb.Block{Number: 2}, hashHistory: hashHistory})
+
+	ctrl := gomock.NewController(t)
+	archive := NewMockArchiveChain(ctrl)
+	archive.EXPECT().GetArchiveBlockHeight().Return(uint64(1), false, nil)
+	archive.EXPECT().ApplyArchiveBlock(gomock.Any(), hashHistory)
+
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	verifier := &archiveVerifier{
+		pool:         pool,
+		archive:      archive,
+		ctx:          ctx,
+		cancelParent: cancel,
+		done:         make(chan struct{}),
+		logger:       slog.Default(),
+	}
+
+	verifier.verifyBlock()
+
+	require.NoError(t, verifier.close())
+}
+
 func TestArchiveVerifier_verifyBlock_CancelsContextOnFailure(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
-
-	interpreter, err := tosca.NewInterpreter("sfvm")
-	require.NoError(t, err)
 
 	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
 	require.NoError(t, err)
 
 	injectedErr := fmt.Errorf("injected archive error")
 	ctrl := gomock.NewController(t)
-	archive := NewMockArchiveState(ctrl)
+	archive := NewMockArchiveChain(ctrl)
 	// Use an archive that always fails to trigger verifier error.
 	archive.EXPECT().GetArchiveBlockHeight().Return(uint64(0), false, injectedErr)
 	verifier := &archiveVerifier{
 		pool:         pool,
 		archive:      archive,
-		metadata:     &BlockDBMetadataStore{},
-		interpreter:  interpreter,
-		chainID:      123,
 		ctx:          ctx,
 		cancelParent: cancel,
 		done:         make(chan struct{}),
@@ -422,7 +438,7 @@ func TestArchiveVerifier_close_WaitsForInFlightVerifications(t *testing.T) {
 	var startedTasks atomic.Int64
 	finish := make(chan struct{})
 	ctrl := gomock.NewController(t)
-	archive := NewMockArchiveState(ctrl)
+	archive := NewMockArchiveChain(ctrl)
 	// The dispatcher fills the semaphore with maxConcurrentVerifications
 	// blocked tasks before close() is called; after close() the dispatcher
 	// stops spawning, so exactly that many calls happen.
@@ -446,8 +462,6 @@ func TestArchiveVerifier_close_WaitsForInFlightVerifications(t *testing.T) {
 	v := &archiveVerifier{
 		pool:         pool,
 		archive:      archive,
-		metadata:     &BlockDBMetadataStore{},
-		chainID:      123,
 		ctx:          ctx,
 		cancelParent: cancel,
 		done:         make(chan struct{}),
@@ -486,7 +500,7 @@ func TestArchiveVerifier_close_WaitsForInFlightVerifications(t *testing.T) {
 func TestArchiveVerifier_close_StopsDispatcher(t *testing.T) {
 	var startedTasks atomic.Int64
 	ctrl := gomock.NewController(t)
-	archive := NewMockArchiveState(ctrl)
+	archive := NewMockArchiveChain(ctrl)
 	// Report an empty archive so verifyBlock returns after the height check
 	// without touching the pool or applying blocks. The test waits until at
 	// least 3 tasks have started before closing.
@@ -507,8 +521,6 @@ func TestArchiveVerifier_close_StopsDispatcher(t *testing.T) {
 	v := &archiveVerifier{
 		pool:         pool,
 		archive:      archive,
-		metadata:     &BlockDBMetadataStore{},
-		chainID:      123,
 		ctx:          ctx,
 		cancelParent: cancel,
 		done:         make(chan struct{}),

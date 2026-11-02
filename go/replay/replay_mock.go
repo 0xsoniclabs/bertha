@@ -14,11 +14,8 @@ import (
 
 	future "github.com/0xsoniclabs/carmen/go/common/future"
 	result "github.com/0xsoniclabs/carmen/go/common/result"
-	opera "github.com/0xsoniclabs/sonic/opera"
-	tosca "github.com/0xsoniclabs/tosca/go/tosca"
 	common "github.com/ethereum/go-ethereum/common"
 	types "github.com/ethereum/go-ethereum/core/types"
-	params "github.com/ethereum/go-ethereum/params"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -147,47 +144,47 @@ func (mr *MockChainMockRecorder) MaybeSnapshot(blockNumber, stateRoot any) *gomo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaybeSnapshot", reflect.TypeOf((*MockChain)(nil).MaybeSnapshot), blockNumber, stateRoot)
 }
 
-// MockArchiveState is a mock of ArchiveState interface.
-type MockArchiveState struct {
+// MockArchiveChain is a mock of ArchiveChain interface.
+type MockArchiveChain struct {
 	ctrl     *gomock.Controller
-	recorder *MockArchiveStateMockRecorder
+	recorder *MockArchiveChainMockRecorder
 	isgomock struct{}
 }
 
-// MockArchiveStateMockRecorder is the mock recorder for MockArchiveState.
-type MockArchiveStateMockRecorder struct {
-	mock *MockArchiveState
+// MockArchiveChainMockRecorder is the mock recorder for MockArchiveChain.
+type MockArchiveChainMockRecorder struct {
+	mock *MockArchiveChain
 }
 
-// NewMockArchiveState creates a new mock instance.
-func NewMockArchiveState(ctrl *gomock.Controller) *MockArchiveState {
-	mock := &MockArchiveState{ctrl: ctrl}
-	mock.recorder = &MockArchiveStateMockRecorder{mock}
+// NewMockArchiveChain creates a new mock instance.
+func NewMockArchiveChain(ctrl *gomock.Controller) *MockArchiveChain {
+	mock := &MockArchiveChain{ctrl: ctrl}
+	mock.recorder = &MockArchiveChainMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockArchiveState) EXPECT() *MockArchiveStateMockRecorder {
+func (m *MockArchiveChain) EXPECT() *MockArchiveChainMockRecorder {
 	return m.recorder
 }
 
 // ApplyArchiveBlock mocks base method.
-func (m *MockArchiveState) ApplyArchiveBlock(block *types.Block, interpreter tosca.Interpreter, processor Processor, rules opera.Rules, corrections map[common.Address]Correction, chainConfig *params.ChainConfig) (types.Receipts, error) {
+func (m *MockArchiveChain) ApplyArchiveBlock(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ApplyArchiveBlock", block, interpreter, processor, rules, corrections, chainConfig)
+	ret := m.ctrl.Call(m, "ApplyArchiveBlock", block, hashHistory)
 	ret0, _ := ret[0].(types.Receipts)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ApplyArchiveBlock indicates an expected call of ApplyArchiveBlock.
-func (mr *MockArchiveStateMockRecorder) ApplyArchiveBlock(block, interpreter, processor, rules, corrections, chainConfig any) *gomock.Call {
+func (mr *MockArchiveChainMockRecorder) ApplyArchiveBlock(block, hashHistory any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyArchiveBlock", reflect.TypeOf((*MockArchiveState)(nil).ApplyArchiveBlock), block, interpreter, processor, rules, corrections, chainConfig)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyArchiveBlock", reflect.TypeOf((*MockArchiveChain)(nil).ApplyArchiveBlock), block, hashHistory)
 }
 
 // GetArchiveBlockHeight mocks base method.
-func (m *MockArchiveState) GetArchiveBlockHeight() (uint64, bool, error) {
+func (m *MockArchiveChain) GetArchiveBlockHeight() (uint64, bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetArchiveBlockHeight")
 	ret0, _ := ret[0].(uint64)
@@ -197,9 +194,9 @@ func (m *MockArchiveState) GetArchiveBlockHeight() (uint64, bool, error) {
 }
 
 // GetArchiveBlockHeight indicates an expected call of GetArchiveBlockHeight.
-func (mr *MockArchiveStateMockRecorder) GetArchiveBlockHeight() *gomock.Call {
+func (mr *MockArchiveChainMockRecorder) GetArchiveBlockHeight() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetArchiveBlockHeight", reflect.TypeOf((*MockArchiveState)(nil).GetArchiveBlockHeight))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetArchiveBlockHeight", reflect.TypeOf((*MockArchiveChain)(nil).GetArchiveBlockHeight))
 }
 
 // MockStateFlusher is a mock of StateFlusher interface.
