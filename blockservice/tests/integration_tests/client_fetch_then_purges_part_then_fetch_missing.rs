@@ -108,6 +108,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
         [146] SONIC: SONIC test chain
         ├── rules update heights: no
         ├── corrections: no
+        ├── failed bundles: no
         └── 0 - 9
         "}
     );
@@ -150,6 +151,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
             [146] SONIC: SONIC test chain
             ├── rules update heights: no
             ├── corrections: no
+            ├── failed bundles: no
             ├── 0 - 4
             └── 9 - 9
         "}
@@ -194,6 +196,7 @@ async fn client_fetch_then_purges_part_then_fetch_missing() {
         [146] SONIC: SONIC test chain
         ├── rules update heights: no
         ├── corrections: no
+        ├── failed bundles: no
         └── 0 - 9
         "}
     );

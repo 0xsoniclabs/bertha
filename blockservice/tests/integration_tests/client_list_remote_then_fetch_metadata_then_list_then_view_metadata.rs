@@ -132,6 +132,7 @@ async fn client_list_remote_then_fetch_metadata_then_list_then_view_metadata() {
         [146] SONIC: SONIC test chain
         ├── rules update heights: yes
         ├── corrections: yes
+        ├── failed bundles: no
         └── no blocks
         "}
     );

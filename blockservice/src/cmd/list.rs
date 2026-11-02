@@ -29,6 +29,7 @@ pub async fn list(
     }
     let (cfg, db) = open_app_dir(app_dir, true)?;
     let auth_token = cfg.get_auth_token().cloned();
+    let is_remote = url.is_some();
     let chain_listings: Vec<(u64, Vec<BlockRange>, bool, bool)> = if let Some(url) = url {
         let mut client = RpcClient::try_new(url, auth_token).await?;
         let chain_listings = client.list(chain_id).await?;
@@ -89,6 +90,12 @@ pub async fn list(
             "├── rules update heights: {has_rules_update_heights_str}"
         )?;
         writeln!(writer, "├── corrections: {has_corrections_str}")?;
+        // Failed bundles are not served over gRPC.
+        if !is_remote {
+            let has_failed_bundles = db.get_failed_bundles(chain_id)?.is_some();
+            let has_failed_bundles_str = if has_failed_bundles { "yes" } else { "no" };
+            writeln!(writer, "├── failed bundles: {has_failed_bundles_str}")?;
+        }
 
         if ranges.is_empty() {
             writeln!(writer, "└── no blocks")?;
@@ -205,7 +212,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn print_availability_of_rules_update_heights_and_corrections() {
+    async fn print_availability_of_rules_update_heights_corrections_and_failed_bundles() {
         let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
         init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
 
@@ -218,6 +225,7 @@ mod tests {
                 [1] (no name): (no description)
                 ├── rules update heights: no
                 ├── corrections: no
+                ├── failed bundles: no
                 └── no blocks
                 ",
             }
@@ -227,6 +235,7 @@ mod tests {
         db.put_rules_update_heights(1, b"rules-update-heights")
             .unwrap();
         db.put_corrections(1, b"corrections").unwrap();
+        db.put_failed_bundles(1, b"failed-bundles").unwrap();
         drop(db);
 
         let mut buf = Vec::new();
@@ -238,6 +247,7 @@ mod tests {
                 [1] (no name): (no description)
                 ├── rules update heights: yes
                 ├── corrections: yes
+                ├── failed bundles: yes
                 └── no blocks
                 ",
             }
@@ -259,6 +269,7 @@ mod tests {
                 [1] (no name): (no description)
                 ├── rules update heights: no
                 ├── corrections: no
+                ├── failed bundles: no
                 └── no blocks
                ",
             }
@@ -287,6 +298,7 @@ mod tests {
                 [1] (no name): (no description)
                 ├── rules update heights: no
                 ├── corrections: no
+                ├── failed bundles: no
                 ├── 2 - 4
                 └── 6 - 8
                 "
@@ -312,11 +324,13 @@ mod tests {
                 [1] (no name): (no description)
                 ├── rules update heights: no
                 ├── corrections: no
+                ├── failed bundles: no
                 ├── 2 - 4
                 └── 6 - 8
                 [3] (no name): (no description)
                 ├── rules update heights: no
                 ├── corrections: no
+                ├── failed bundles: no
                 └── 3 - 5
                 ",
             }
@@ -337,6 +351,7 @@ mod tests {
                 [1] (no name): (no description)
                 ├── rules update heights: no
                 ├── corrections: no
+                ├── failed bundles: no
                 └── no blocks
                 ",
             }
@@ -359,6 +374,7 @@ mod tests {
                 [1] Test Chain: A test chain
                 ├── rules update heights: no
                 ├── corrections: no
+                ├── failed bundles: no
                 └── no blocks
                 ",
             }
@@ -394,11 +410,13 @@ mod tests {
                 [7] (no name): (no description)
                 ├── rules update heights: no
                 ├── corrections: no
+                ├── failed bundles: no
                 ├── 2 - 4
                 └── 6 - 8
                 [32] Test Chain: A test chain
                 ├── rules update heights: no
                 ├── corrections: no
+                ├── failed bundles: no
                 └── no blocks
                 ",
             }

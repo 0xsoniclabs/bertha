@@ -14,9 +14,10 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-use std::{cmp, path::Path};
+use std::{cmp, collections::HashSet, path::Path};
 
 use bertha_types::{Hash, HexConvert};
+use serde::Deserialize;
 
 use crate::{
     app_dir::open_app_dir,
@@ -34,22 +35,31 @@ pub fn verify(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (_cfg, db) = open_app_dir(app_dir, true)?;
 
+    let blocks_with_failed_bundles: HashSet<u64> = match db.get_failed_bundles(chain_id)? {
+        Some(data) => serde_json::from_slice::<Vec<FailedBundle>>(&data)
+            .map_err(|err| format!("failed to parse stored failed bundles: {err}"))?
+            .into_iter()
+            .map(|failed_bundle| failed_bundle.block)
+            .collect(),
+        None => HashSet::new(),
+    };
+
     let mut errors = 0;
+    let mut warned = false;
 
     if let (Some(block_number), Some(expected_hash)) = (block_number, block_hash) {
         if let Some(block) = db.get(chain_id, block_number)? {
-            let block_hash = block.to_header().compute_hash();
-            if block_hash != expected_hash {
-                errors += 1;
-                writeln!(
-                    writer,
-                    "[chain ID {}] block hash verification failed for block {}: expected hash {}, got {}.",
-                    chain_id,
-                    block_number,
-                    expected_hash.to_hex(),
-                    block_hash.to_hex()
-                )?;
-            }
+            check_block_hash(
+                chain_id,
+                block_number,
+                block.to_header().compute_hash(),
+                expected_hash,
+                "the given hash",
+                &blocks_with_failed_bundles,
+                &mut warned,
+                &mut errors,
+                &mut writer,
+            )?;
         } else {
             errors += 1;
             writeln!(
@@ -97,17 +107,17 @@ pub fn verify(
         if prev_block_number + 1 != block_number {
             prev_block_hash = None; // there was a gap so we have to skip the parent hash check
         }
-        if let Some(prev_block_hash) = prev_block_hash
-            && block.parent_hash != prev_block_hash
-        {
-            errors += 1;
-            writeln!(
-                writer,
-                "[chain ID {}] parent hash verification failed for block {}: expected hash {}, got {}.",
+        if let Some(prev_block_hash) = prev_block_hash {
+            check_block_hash(
                 chain_id,
-                block_number,
-                prev_block_hash.to_hex(),
-                block.parent_hash.to_hex()
+                prev_block_number,
+                prev_block_hash,
+                block.parent_hash,
+                format_args!("the parent hash in block {block_number}"),
+                &blocks_with_failed_bundles,
+                &mut warned,
+                &mut errors,
+                &mut writer,
             )?;
         }
         prev_block_number = block_number;
@@ -129,6 +139,49 @@ pub fn verify(
     }
 
     Ok(())
+}
+
+/// An entry of the stored failed bundles, of which only the block is read.
+#[derive(Deserialize)]
+struct FailedBundle {
+    block: u64,
+}
+
+/// Checks `block_hash` of the given block against `expected_hash`, taken from `expected_source`,
+/// and reports a mismatch, counted in `errors`. A mismatch of a block with failed bundles is
+/// tolerated, with a warning about the first one.
+#[allow(clippy::too_many_arguments)]
+fn check_block_hash(
+    chain_id: u64,
+    block_number: u64,
+    block_hash: Hash,
+    expected_hash: Hash,
+    expected_source: impl std::fmt::Display,
+    blocks_with_failed_bundles: &HashSet<u64>,
+    warned: &mut bool,
+    errors: &mut u64,
+    mut writer: impl std::io::Write,
+) -> std::io::Result<()> {
+    if block_hash == expected_hash {
+        return Ok(());
+    }
+    if blocks_with_failed_bundles.contains(&block_number) {
+        if !*warned {
+            *warned = true;
+            writeln!(
+                writer,
+                "[chain ID {chain_id}] warning: tolerated hash mismatch of block {block_number}, which contains failed bundles; further tolerated hash mismatches are not reported."
+            )?;
+        }
+        return Ok(());
+    }
+    *errors += 1;
+    writeln!(
+        writer,
+        "[chain ID {chain_id}] hash verification failed for block {block_number}: hash is {}, but {expected_source} is {}.",
+        block_hash.to_hex(),
+        expected_hash.to_hex()
+    )
 }
 
 #[cfg(test)]
@@ -231,10 +284,10 @@ mod tests {
             );
         } else {
             assert_eq!(output, format!(
-                "[chain ID {chain_id}] block hash verification failed for block {}: expected hash {}, got {}.\n[chain ID {chain_id}] Verification completed with 1 errors.\n",
+                "[chain ID {chain_id}] hash verification failed for block {}: hash is {}, but the given hash is {}.\n[chain ID {chain_id}] Verification completed with 1 errors.\n",
                 block.number,
-                hash.to_hex(),
                 block.to_header().compute_hash().to_hex(),
+                hash.to_hex(),
             ).as_bytes());
         };
     }
@@ -360,12 +413,101 @@ mod tests {
             );
         } else {
             assert_eq!(output, format!(
-                "[chain ID {chain_id}] parent hash verification failed for block {}: expected hash {}, got {}.\n[chain ID {chain_id}] Verification completed with 1 errors.\n",
-                block1.number,
+                "[chain ID {chain_id}] hash verification failed for block {}: hash is {}, but the parent hash in block {} is {}.\n[chain ID {chain_id}] Verification completed with 1 errors.\n",
+                block0.number,
                 block0.to_header().compute_hash().to_hex(),
+                block1.number,
                 block1.parent_hash.to_hex()
             ).as_bytes());
         };
+    }
+
+    #[rstest]
+    #[case::block_with_failed_bundles(true)]
+    #[case::block_without_failed_bundles(false)]
+    fn tolerates_hash_mismatches_only_of_blocks_with_failed_bundles(
+        #[case] has_failed_bundles: bool,
+    ) {
+        let chain_id = 146;
+
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
+
+        // The hash of block 2 is not checked, as it has no successor.
+        let failed_bundles: &[u8] = if has_failed_bundles {
+            br#"[{"block": 0, "pos": 0, "tx": "0x01"}, {"block": 1, "pos": 0, "tx": "0x01"}]"#
+        } else {
+            br#"[{"block": 2, "pos": 0, "tx": "0x01"}]"#
+        };
+        db.put_failed_bundles(chain_id, failed_bundles).unwrap();
+        // The parent hashes of blocks 1 and 2 stand for the actual hashes of their parents.
+        let blocks: Vec<_> = (0..3)
+            .map(|number| Block {
+                number,
+                ..Block::default()
+            })
+            .collect();
+        for block in &blocks {
+            db.put(chain_id, block.clone()).unwrap();
+        }
+        drop(db);
+
+        let mut output = Vec::new();
+        verify(
+            tmpdir.path(),
+            chain_id,
+            Some(0),
+            Some(Hash::default()),
+            &CancellationToken::new(),
+            &mut output,
+        )
+        .unwrap();
+
+        let hash = |number: usize| blocks[number].to_header().compute_hash().to_hex();
+        let expected = if has_failed_bundles {
+            format!(
+                "[chain ID {chain_id}] warning: tolerated hash mismatch of block 0, which contains failed bundles; further tolerated hash mismatches are not reported.\n\
+                [chain ID {chain_id}] Blocks verified successfully.\n"
+            )
+        } else {
+            format!(
+                "[chain ID {chain_id}] hash verification failed for block 0: hash is {}, but the given hash is {zero}.\n\
+                [chain ID {chain_id}] hash verification failed for block 0: hash is {}, but the parent hash in block 1 is {zero}.\n\
+                [chain ID {chain_id}] hash verification failed for block 1: hash is {}, but the parent hash in block 2 is {zero}.\n\
+                [chain ID {chain_id}] Verification completed with 3 errors.\n",
+                hash(0),
+                hash(0),
+                hash(1),
+                zero = Hash::default().to_hex(),
+            )
+        };
+        assert_eq!(String::from_utf8(output).unwrap(), expected);
+    }
+
+    #[test]
+    fn fails_on_invalid_stored_failed_bundles() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+        let (_, mut db) = open_app_dir(tmpdir.path(), false).unwrap();
+        db.put_failed_bundles(146, b"not-json").unwrap();
+        drop(db);
+
+        let result = verify(
+            tmpdir.path(),
+            146,
+            None,
+            None,
+            &CancellationToken::new(),
+            std::io::sink(),
+        );
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("failed to parse stored failed bundles")
+        );
     }
 
     #[test]

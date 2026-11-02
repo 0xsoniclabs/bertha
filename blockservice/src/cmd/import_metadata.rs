@@ -56,6 +56,25 @@ pub fn import_corrections(
     Ok(())
 }
 
+/// Reads the contents of `file` and stores them as the failed bundles for `chain_id` in the
+/// block database located at `app_dir`.
+pub fn import_failed_bundles(
+    app_dir: impl AsRef<Path>,
+    chain_id: u64,
+    file: impl AsRef<Path>,
+    mut writer: impl std::io::Write,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (_cfg, mut db) = open_app_dir(app_dir, false)?;
+
+    let data = std::fs::read(file)?;
+    db.put_failed_bundles(chain_id, &data)?;
+    writeln!(
+        writer,
+        "Failed bundles for chain ID {chain_id} imported successfully."
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +148,40 @@ mod tests {
             Some(data.as_ref())
         );
         assert_eq!(buf, b"Corrections for chain ID 1 imported successfully.\n");
+    }
+
+    #[test]
+    fn import_failed_bundles_fails_if_app_dir_is_not_initialized() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+
+        let result = import_failed_bundles(tmpdir.path(), 1, "/dev/null", std::io::sink());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains(&format!(
+            "no blockservice.toml found at {} - did you forget to run init?",
+            tmpdir.path().display()
+        )));
+    }
+
+    #[test]
+    fn import_failed_bundles_stores_file_contents() {
+        let tmpdir = TestDir::try_new(Permissions::ReadWrite).unwrap();
+        init_app_dir(tmpdir.path(), std::io::sink()).unwrap();
+
+        let data = b"failed bundles";
+        let file = tmpdir.path().join("failed_bundles.json");
+        std::fs::write(&file, data).unwrap();
+
+        let mut buf = Vec::new();
+        import_failed_bundles(tmpdir.path(), 1, &file, &mut buf).unwrap();
+
+        let (_, db) = crate::app_dir::open_app_dir(tmpdir.path(), true).unwrap();
+        assert_eq!(
+            db.get_failed_bundles(1).unwrap().as_deref(),
+            Some(data.as_ref())
+        );
+        assert_eq!(
+            buf,
+            b"Failed bundles for chain ID 1 imported successfully.\n"
+        );
     }
 }

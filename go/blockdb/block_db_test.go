@@ -49,6 +49,8 @@ func TestOpenRocksDB(t *testing.T) {
 			"get rules update heights returns nil when not stored":      testRocksDB_GetRulesUpdateHeights_ReturnsNilWhenNotStored,
 			"get corrections returns stored data":                       testRocksDB_GetCorrections_ReturnsStoredData,
 			"get corrections returns nil when not stored":               testRocksDB_GetCorrections_ReturnsNilWhenNotStored,
+			"get failed bundles returns stored data":                    testRocksDB_GetFailedBundles_ReturnsStoredData,
+			"get failed bundles returns nil when not stored":            testRocksDB_GetFailedBundles_ReturnsNilWhenNotStored,
 		}
 
 		for name, test := range tests {
@@ -661,6 +663,44 @@ func testRocksDB_GetCorrections_ReturnsNilWhenNotStored(t *testing.T, dbOpener O
 	}()
 
 	got, err := rocksDB.GetCorrections(3)
+	require.NoError(t, err)
+	require.Nil(t, got)
+}
+
+func testRocksDB_GetFailedBundles_ReturnsStoredData(t *testing.T, dbOpener OpenRocksDBFunc) {
+	chainID := uint64(3)
+	data := []byte(`failed bundles data`)
+
+	path := t.TempDir()
+	db, err := createDB(path)
+	require.NoError(t, err)
+	require.NoError(t, db.putRaw(MakeFailedBundlesKey(chainID), data))
+	db.close()
+
+	rocksDB, err := dbOpener(path)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, rocksDB.Close())
+	}()
+
+	got, err := rocksDB.GetFailedBundles(chainID)
+	require.NoError(t, err)
+	require.Equal(t, data, got)
+}
+
+func testRocksDB_GetFailedBundles_ReturnsNilWhenNotStored(t *testing.T, dbOpener OpenRocksDBFunc) {
+	path := t.TempDir()
+	db, err := createDB(path)
+	require.NoError(t, err)
+	db.close()
+
+	rocksDB, err := dbOpener(path)
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, rocksDB.Close())
+	}()
+
+	got, err := rocksDB.GetFailedBundles(3)
 	require.NoError(t, err)
 	require.Nil(t, got)
 }

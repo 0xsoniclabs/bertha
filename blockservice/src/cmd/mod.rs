@@ -22,7 +22,7 @@ use std::{
 pub use fetch::fetch;
 pub use fetch_metadata::fetch_metadata;
 pub use import::{import_era, import_era1, import_erae, import_gfile};
-pub use import_metadata::{import_corrections, import_rules_update_heights};
+pub use import_metadata::{import_corrections, import_failed_bundles, import_rules_update_heights};
 use indicatif::{ProgressBar, style::TemplateError};
 pub use init::init;
 pub use list::list;
@@ -184,6 +184,9 @@ pub async fn execute(
         }
         Command::ImportCorrections { chain, file } => {
             cmd::import_corrections(args.dir, chain.to_chain_id(), file, &mut output)
+        }
+        Command::ImportFailedBundles { chain, file } => {
+            cmd::import_failed_bundles(args.dir, chain.to_chain_id(), file, &mut output)
         }
         Command::Fetch {
             url,

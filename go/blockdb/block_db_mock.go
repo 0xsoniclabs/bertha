@@ -84,6 +84,21 @@ func (mr *MockBlockDBMockRecorder) GetCorrections(chainID any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCorrections", reflect.TypeOf((*MockBlockDB)(nil).GetCorrections), chainID)
 }
 
+// GetFailedBundles mocks base method.
+func (m *MockBlockDB) GetFailedBundles(chainID uint64) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetFailedBundles", chainID)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetFailedBundles indicates an expected call of GetFailedBundles.
+func (mr *MockBlockDBMockRecorder) GetFailedBundles(chainID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFailedBundles", reflect.TypeOf((*MockBlockDB)(nil).GetFailedBundles), chainID)
+}
+
 // GetRange mocks base method.
 func (m *MockBlockDB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error] {
 	m.ctrl.T.Helper()
