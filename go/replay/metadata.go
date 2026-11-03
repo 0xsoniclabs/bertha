@@ -34,8 +34,8 @@ import (
 
 //go:generate mockgen -source=metadata.go -destination=metadata_mock.go -package=replay
 
-// MetadataStore is an interface for storing and retrieving chain rules and
-// corrections.
+// MetadataStore is an interface for storing and retrieving chain rules,
+// corrections and failed bundles.
 type MetadataStore interface {
 	// PatchRules patches the rules that will be committed by CommitRules with
 	// the provided json opera.Rules patch.
@@ -55,6 +55,10 @@ type MetadataStore interface {
 	// GetCorrectionsAtBlock returns the account corrections to be applied at the
 	// given block number, or nil if there are none.
 	GetCorrectionsAtBlock(blockNumber uint64) map[common.Address]Correction
+
+	// GetFailedBundlesAtBlock returns the failed bundles of the given block
+	// number, sorted by position, or nil if there are none.
+	GetFailedBundlesAtBlock(blockNumber uint64) []FailedBundle
 }
 
 // BlockDBMetadataStore is a MetadataStore implementation backed by the block
@@ -79,6 +83,10 @@ func NewBlockDBMetadataStore(db blockdb.BlockDB, rules opera.Rules, logger utils
 	correctionsData, err := db.GetCorrections(rules.NetworkID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get corrections from block db: %w", err)
+	}
+	failedBundlesData, err := db.GetFailedBundles(rules.NetworkID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get failed bundles from block db: %w", err)
 	}
 
 	var rulesUpdateHeights []RulesUpdateHeight
@@ -114,11 +122,22 @@ func NewBlockDBMetadataStore(db blockdb.BlockDB, rules opera.Rules, logger utils
 		logger.Warn("No corrections available")
 	}
 
+	var failedBundles FailedBundles
+	if failedBundlesData != nil {
+		if err := json.Unmarshal(failedBundlesData, &failedBundles); err != nil {
+			return nil, fmt.Errorf("failed to parse stored failed bundles: %w", err)
+		}
+		logger.Info("Loaded failed bundles from block db", "num_blocks", len(failedBundles))
+	} else {
+		logger.Warn("No failed bundles available")
+	}
+
 	return &BlockDBMetadataStore{
 		db: db,
 		metadata: Metadata{
 			RulesUpdateHeights: rulesUpdateHeights,
 			Corrections:        corrections,
+			FailedBundles:      failedBundles,
 		},
 		logger:                  logger,
 		writeRulesUpdateHeights: writeRulesHeights,
@@ -233,11 +252,20 @@ func (s *BlockDBMetadataStore) GetCorrectionsAtBlock(blockNumber uint64) map[com
 	return s.metadata.Corrections[blockNumber]
 }
 
+// GetFailedBundlesAtBlock returns the failed bundles of the given block number.
+func (s *BlockDBMetadataStore) GetFailedBundlesAtBlock(blockNumber uint64) []FailedBundle {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	return s.metadata.FailedBundles[blockNumber]
+}
+
 // Metadata holds chain-specific metadata consisting of the heights of rules
-// updates and corrections for the account state.
+// updates, corrections for the account state and failed bundles.
 type Metadata struct {
 	RulesUpdateHeights []RulesUpdateHeight
 	Corrections        Corrections
+	FailedBundles      FailedBundles
 }
 
 // RulesUpdateHeight represents a rules update that becomes effective at a specific block.

@@ -777,21 +777,18 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	onLog := func(l *core_types.Log) { onNewLog(a.metadataStore, block.NumberU64(), l) }
 
 	// Apply the block to the state database.
-	receipts, err := a.applyBlockLocked(block, a.blockHashHistory, onLog, false)
+	receipts, usedGas, err := a.applyBlockLocked(block, a.blockHashHistory, onLog, false)
 	if err != nil {
 		stateRoot := future.Future[result.Result[common.Hash]]{}
 		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
 	}
 
 	// Reconstruct the complete header by filling in fields that are derived
-	// from receipts, which are not stored in the block DB when importing
-	// from era files.
+	// from processing the block, which are not stored in the block DB when
+	// importing from era files. The gas used includes failed bundles, which
+	// have no receipts.
 	completeHeader := block.Header()
-	if len(receipts) > 0 {
-		completeHeader.GasUsed = receipts[len(receipts)-1].CumulativeGasUsed
-	} else {
-		completeHeader.GasUsed = 0
-	}
+	completeHeader.GasUsed = usedGas
 	completeHeader.Bloom = types.MergeBloom(receipts)
 	completeHeader.ReceiptHash = types.DeriveSha(receipts, trie.NewStackTrie(nil))
 	*block = *block.WithSeal(completeHeader)
@@ -856,7 +853,8 @@ func (a *stateChainAdapter) GetArchiveBlockHeight() (height uint64, empty bool, 
 func (a *stateChainAdapter) ApplyArchiveBlock(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
 	a.stateSwitchMutex.RLock()
 	defer a.stateSwitchMutex.RUnlock()
-	return a.applyBlockLocked(block, hashHistory, nil, true)
+	receipts, _, err := a.applyBlockLocked(block, hashHistory, nil, true)
+	return receipts, err
 }
 
 // applyBlockLocked applies the given block with the metadata of the block to
@@ -867,7 +865,7 @@ func (a *stateChainAdapter) applyBlockLocked(
 	hashHistory *blockHashHistory,
 	onLog func(*core_types.Log),
 	isArchive bool,
-) (types.Receipts, error) {
+) (types.Receipts, uint64, error) {
 	chainConfig, rules := getChainConfigAndRules(block, a.chainID, a.metadataStore)
 
 	processor := evmcore.NewStateProcessorForReplay(
@@ -877,8 +875,11 @@ func (a *stateChainAdapter) applyBlockLocked(
 	)
 
 	corrections := a.metadataStore.GetCorrectionsAtBlock(block.NumberU64())
+	failedBundles := a.metadataStore.GetFailedBundlesAtBlock(block.NumberU64())
 
-	return a.state.ApplyBlock(block, a.interpreter, processor, rules, corrections, chainConfig, onLog, isArchive)
+	return a.state.ApplyBlock(
+		block, a.interpreter, processor, rules, corrections, failedBundles, chainConfig, onLog, isArchive,
+	)
 }
 
 func getChainConfigAndRules(block *types.Block, chainID uint64, metadata MetadataStore) (*params.ChainConfig, opera.Rules) {

@@ -69,6 +69,20 @@ func (mr *MockMetadataStoreMockRecorder) GetCorrectionsAtBlock(blockNumber any) 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCorrectionsAtBlock", reflect.TypeOf((*MockMetadataStore)(nil).GetCorrectionsAtBlock), blockNumber)
 }
 
+// GetFailedBundlesAtBlock mocks base method.
+func (m *MockMetadataStore) GetFailedBundlesAtBlock(blockNumber uint64) []FailedBundle {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetFailedBundlesAtBlock", blockNumber)
+	ret0, _ := ret[0].([]FailedBundle)
+	return ret0
+}
+
+// GetFailedBundlesAtBlock indicates an expected call of GetFailedBundlesAtBlock.
+func (mr *MockMetadataStoreMockRecorder) GetFailedBundlesAtBlock(blockNumber any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetFailedBundlesAtBlock", reflect.TypeOf((*MockMetadataStore)(nil).GetFailedBundlesAtBlock), blockNumber)
+}
+
 // GetRulesAtBlock mocks base method.
 func (m *MockMetadataStore) GetRulesAtBlock(blockNumber uint64) opera.Rules {
 	m.ctrl.T.Helper()

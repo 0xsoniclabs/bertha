@@ -29,7 +29,7 @@ import (
 
 // CreateValidBlocks creates a sequence of valid blocks with proper parent-child relationships.
 // The first block has no parent, and each subsequent block's parent is the
-// previous block.
+// previous block. Each block has the 12 bytes of extra data of Sonic blocks.
 func CreateValidBlocks(t *testing.T, num int) []*blockdb.Block {
 	t.Helper()
 	blocks := make([]*blockdb.Block, num)
@@ -39,6 +39,7 @@ func CreateValidBlocks(t *testing.T, num int) []*blockdb.Block {
 			Number:     uint64(i),
 			ParentHash: bytes.Clone(lastHash[:]),
 			StateRoot:  types.EmptyRootHash[:],
+			ExtraData:  make([]byte, 12),
 		}
 		blocks[i] = next
 
