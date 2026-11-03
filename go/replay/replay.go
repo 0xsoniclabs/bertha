@@ -769,7 +769,7 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 		isEpochSealingTx := err == nil
 		if isEpochSealingTx {
 			if err := a.metadataStore.CommitRules(block.NumberU64()); err != nil {
-				return nil, future.Future[result.Result[common.Hash]]{}, fmt.Errorf("failed to commit rules at block %d: %v", block.NumberU64(), err)
+				return nil, future.Future[result.Result[common.Hash]]{}, fmt.Errorf("failed to commit rules at block %d: %w", block.NumberU64(), err)
 			}
 		}
 	}
@@ -779,8 +779,7 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	// Apply the block to the state database.
 	receipts, usedGas, err := a.applyBlockLocked(block, a.blockHashHistory, onLog, false)
 	if err != nil {
-		stateRoot := future.Future[result.Result[common.Hash]]{}
-		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
+		return nil, future.Future[result.Result[common.Hash]]{}, err
 	}
 
 	// Reconstruct the complete header by filling in fields that are derived
@@ -848,9 +847,13 @@ func (a *stateChainAdapter) GetArchiveBlockHeight() (height uint64, empty bool, 
 
 // ApplyArchiveBlock re-executes the given block against the archive state for
 // its parent block, using the given hash history of the block, and returns the
-// resulting receipts. The live state is not modified. It is safe to call
+// resulting receipts. Block 0 is skipped since it is equivalent with the
+// genesis data import. The live state is not modified. It is safe to call
 // concurrently with block application.
 func (a *stateChainAdapter) ApplyArchiveBlock(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
+	if block.NumberU64() == 0 {
+		return nil, nil
+	}
 	a.stateSwitchMutex.RLock()
 	defer a.stateSwitchMutex.RUnlock()
 	receipts, _, err := a.applyBlockLocked(block, hashHistory, nil, true)
