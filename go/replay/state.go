@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/0xsoniclabs/bertha/utils"
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/amount"
@@ -34,7 +35,6 @@ import (
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/evmcore/core_types"
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"
-	"github.com/0xsoniclabs/sonic/inter"
 	"github.com/0xsoniclabs/sonic/inter/state"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/tosca/go/geth_adapter"
@@ -42,7 +42,6 @@ import (
 	"github.com/0xsoniclabs/tracy"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
-	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
@@ -235,41 +234,9 @@ func (s *State) ApplyBlock(
 	zone := tracy.ZoneBegin("TransactionProcessing")
 	defer zone.End()
 
-	isPostMerge := block.Difficulty().Sign() == 0
-	blobBaseFee := big.NewInt(1)
-	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsCancun(block.Number(), block.Time()) && block.ExcessBlobGas() != nil {
-		blobBaseFee = eip4844.CalcBlobFee(chainConfig, block.Header())
-	}
-	prevRandao := block.Header().MixDigest
-	if !isPostMerge {
-		// Before the Merge, PrevRandao is not used; set to zero. This indicates
-		// to the EVM that the difficulty should be used instead.
-		prevRandao = common.Hash{}
-	}
-
-	blockTime := inter.Timestamp(block.Time() * 1e9)
-	if !isEthereum(chainConfig.ChainID.Uint64()) {
-		// Sonic keeps the nanoseconds of the block time in the extra data, which
-		// the time periods of bundles are checked against.
-		nanos, _, err := inter.DecodeExtraData(block.Extra())
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to decode extra data of block %d: %w", block.NumberU64(), err)
-		}
-		blockTime += inter.Timestamp(nanos)
-	}
-
-	evmBlock := &evmcore.EvmBlock{
-		EvmHeader: evmcore.EvmHeader{
-			Number:      block.Number(),
-			ParentHash:  block.ParentHash(),
-			Time:        blockTime,
-			GasLimit:    block.GasLimit(),
-			PrevRandao:  prevRandao,
-			BaseFee:     block.BaseFee(),
-			BlobBaseFee: blobBaseFee,
-			Coinbase:    block.Coinbase(),
-		},
-		Transactions: transactions,
+	evmBlock, err := convert.ToEvmBlock(block, transactions, chainConfig, isEthereum(chainConfig.ChainID.Uint64()))
+	if err != nil {
+		return nil, 0, err
 	}
 
 	var vmConfig vm.Config
@@ -342,6 +309,7 @@ func (s *State) ApplyBlock(
 	applyCorrections(vmStateDB, corrections, block, slog.Default())
 
 	if isEthereum(chainConfig.ChainID.Uint64()) {
+		isPostMerge := block.Difficulty().Sign() == 0
 		if isPostMerge {
 			creditWithdrawals(block, vmStateDB, chainConfig)
 		} else {

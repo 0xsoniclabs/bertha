@@ -19,10 +19,15 @@ package convert
 import (
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
+	"github.com/0xsoniclabs/sonic/evmcore"
+	"github.com/0xsoniclabs/sonic/inter"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -153,6 +158,113 @@ func TestConvertToGethBlock_ConvertsBlockToGethBlock(t *testing.T) {
 	}
 	require.Equal(t, want.Uncles(), got.Uncles())
 	require.Equal(t, want.Withdrawals(), got.Withdrawals())
+}
+
+func TestToEvmBlock_ConvertsBlockToEvmBlock(t *testing.T) {
+	extra := inter.EncodeExtraData(time.Unix(0, 123), time.Second)
+	excessBlobGas := uint64(10_000_000)
+	chainConfig := params.MainnetChainConfig
+	cancun := *chainConfig.CancunTime
+	cancunTime := inter.Timestamp(cancun * 1e9)
+	blobBaseFee := eip4844.CalcBlobFee(chainConfig, &types.Header{ExcessBlobGas: &excessBlobGas, Time: cancun})
+	cases := map[string]struct {
+		extra           []byte
+		difficulty      int64
+		excessBlobGas   *uint64
+		isEthereum      bool
+		time            uint64
+		wantTime        inter.Timestamp
+		wantPrevRandao  common.Hash
+		wantBlobBaseFee *big.Int
+	}{
+		"sonic": {
+			extra:           extra,
+			time:            5,
+			wantTime:        5e9 + 123,
+			wantPrevRandao:  common.Hash{6},
+			wantBlobBaseFee: big.NewInt(1),
+		},
+		"sonic with excess blob gas": {
+			extra:           extra,
+			excessBlobGas:   &excessBlobGas,
+			time:            cancun,
+			wantTime:        cancunTime + 123,
+			wantPrevRandao:  common.Hash{6},
+			wantBlobBaseFee: big.NewInt(1),
+		},
+		"ethereum": {
+			extra:           extra,
+			isEthereum:      true,
+			time:            cancun,
+			wantTime:        cancunTime,
+			wantPrevRandao:  common.Hash{6},
+			wantBlobBaseFee: big.NewInt(1),
+		},
+		"ethereum with excess blob gas": {
+			excessBlobGas:   &excessBlobGas,
+			isEthereum:      true,
+			time:            cancun,
+			wantTime:        cancunTime,
+			wantPrevRandao:  common.Hash{6},
+			wantBlobBaseFee: blobBaseFee,
+		},
+		"ethereum with excess blob gas before cancun": {
+			excessBlobGas:   &excessBlobGas,
+			isEthereum:      true,
+			time:            cancun - 1,
+			wantTime:        cancunTime - 1e9,
+			wantPrevRandao:  common.Hash{6},
+			wantBlobBaseFee: big.NewInt(1),
+		},
+		"ethereum before merge": {
+			extra:           extra,
+			difficulty:      1,
+			isEthereum:      true,
+			time:            5,
+			wantTime:        5e9,
+			wantBlobBaseFee: big.NewInt(1),
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			block := types.NewBlockWithHeader(&types.Header{
+				ParentHash:    common.Hash{1},
+				Coinbase:      common.Address{2},
+				Difficulty:    big.NewInt(c.difficulty),
+				Number:        big.NewInt(20_000_000),
+				GasLimit:      4,
+				Time:          c.time,
+				Extra:         c.extra,
+				MixDigest:     common.Hash{6},
+				BaseFee:       big.NewInt(7),
+				ExcessBlobGas: c.excessBlobGas,
+			})
+			txs := types.Transactions{types.NewTx(&types.LegacyTx{Nonce: 8})}
+
+			got, err := ToEvmBlock(block, txs, chainConfig, c.isEthereum)
+
+			require.NoError(t, err)
+			require.Equal(t, &evmcore.EvmBlock{
+				EvmHeader: evmcore.EvmHeader{
+					Number:      big.NewInt(20_000_000),
+					ParentHash:  common.Hash{1},
+					Time:        c.wantTime,
+					GasLimit:    4,
+					PrevRandao:  c.wantPrevRandao,
+					BaseFee:     big.NewInt(7),
+					BlobBaseFee: c.wantBlobBaseFee,
+					Coinbase:    common.Address{2},
+				},
+				Transactions: txs,
+			}, got)
+		})
+	}
+}
+
+func TestToEvmBlock_InvalidExtraDataOfSonicBlock_ReturnsError(t *testing.T) {
+	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(4), Extra: []byte{1, 2}})
+	_, err := ToEvmBlock(block, nil, params.MainnetChainConfig, false)
+	require.ErrorContains(t, err, "failed to decode extra data of block 4")
 }
 
 func TestToBerthaTransaction_ConvertsGethTransactionToBerthaTransaction(t *testing.T) {

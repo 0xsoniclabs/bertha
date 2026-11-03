@@ -41,7 +41,6 @@ import (
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
-	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -213,22 +212,12 @@ func TestState_ApplyGenesis_ReturnsErrorIfEndBlockFails(t *testing.T) {
 	require.ErrorIs(state.ApplyGenesis(&Genesis{}), issue)
 }
 
-func TestState_ApplyBlock_PrevRandaoIsMixDigestPostMerge(t *testing.T) {
+func TestState_ApplyBlock_ForwardsDifficultyToProcessor(t *testing.T) {
 	tests := map[string]struct {
-		difficulty     *big.Int
-		mixDigest      common.Hash
-		wantPrevRandao common.Hash
+		difficulty *big.Int
 	}{
-		"pre-merge": {
-			difficulty:     big.NewInt(1000),
-			mixDigest:      common.Hash{0xab},
-			wantPrevRandao: common.Hash{},
-		},
-		"post-merge": {
-			difficulty:     big.NewInt(0),
-			mixDigest:      common.Hash{0xab},
-			wantPrevRandao: common.Hash{0xab},
-		},
+		"pre-merge":  {difficulty: big.NewInt(1000)},
+		"post-merge": {difficulty: big.NewInt(0)},
 	}
 
 	for name, tt := range tests {
@@ -242,7 +231,6 @@ func TestState_ApplyBlock_PrevRandaoIsMixDigestPostMerge(t *testing.T) {
 
 			block := types.NewBlockWithHeader(&types.Header{
 				Difficulty: tt.difficulty,
-				MixDigest:  tt.mixDigest,
 				GasLimit:   8_000_000,
 			})
 
@@ -257,11 +245,10 @@ func TestState_ApplyBlock_PrevRandaoIsMixDigestPostMerge(t *testing.T) {
 				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 				gomock.Any(),
 			).DoAndReturn(func(
-				evmBlock *evmcore.EvmBlock, _ interface{}, _ vm.Config,
+				_ *evmcore.EvmBlock, _ interface{}, _ vm.Config,
 				_ uint64, _ *uint64, _ int, _ interface{},
 				difficulty *big.Int, _ uint64,
 			) evmcore.ProcessSummary {
-				require.Equal(t, tt.wantPrevRandao, evmBlock.PrevRandao)
 				require.Equal(t, tt.difficulty, difficulty)
 				return evmcore.ProcessSummary{}
 			})
@@ -424,102 +411,6 @@ func TestState_applyCorrections_AppliesCorrectionsToStateDB(t *testing.T) {
 
 	block := types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(blockNumber)})
 	applyCorrections(stateDB, corrections[blockNumber], block, logger)
-}
-
-func TestState_ApplyBlock_BlobBaseFeeIsCalculatedFromHeaderForEthereum(t *testing.T) {
-	sonicChainConfig := opera.CreateTransientEvmChainConfig(
-		uint64(146),
-		[]opera.UpgradeHeight{},
-		idx.Block(1),
-	)
-
-	cancunTime := *params.MainnetChainConfig.CancunTime
-	// excessBlobGas causes CalcBlobFee to return a value > 1.
-	excessBlobGas := uint64(3338477)
-	blobGasUsed := uint64(0)
-
-	expectedEthBlobFee := eip4844.CalcBlobFee(params.MainnetChainConfig, &types.Header{ExcessBlobGas: &excessBlobGas, Time: cancunTime})
-	require.True(t, expectedEthBlobFee.Cmp(big.NewInt(1)) > 0,
-		"blob base fee with non-zero ExcessBlobGas should be > 1, got %s", expectedEthBlobFee)
-
-	// A blob tx with BlobFeeCap=1 is below the Ethereum blob base fee (>1)
-	// but meets the Sonic default (1). This causes the tx to be rejected on
-	// Ethereum but processed on Sonic.
-	tests := map[string]struct {
-		chainConfig *params.ChainConfig
-		upgrades    opera.Upgrades
-		wantErr     string
-	}{
-		"Ethereum": {
-			chainConfig: params.MainnetChainConfig,
-			upgrades:    opera.Upgrades{},
-			wantErr:     "was skipped",
-		},
-		"Sonic": {
-			chainConfig: sonicChainConfig,
-			upgrades:    opera.GetSonicUpgrades(),
-			wantErr:     "",
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
-			require.NoError(t, err)
-			defer func() { require.NoError(t, state.Close()) }()
-
-			key, err := crypto.GenerateKey()
-			require.NoError(t, err)
-			sender := crypto.PubkeyToAddress(key.PublicKey)
-			signer := types.LatestSignerForChainID(tt.chainConfig.ChainID)
-
-			// Fund the sender.
-			state.db.BeginBlock()
-			state.db.BeginTransaction()
-			state.db.AddBalance(cc.Address(sender), amount.New(1e18))
-			state.db.EndTransaction()
-			handle, err := endBlockAndCommit(state, 0)
-			require.NoError(t, err)
-			require.NoError(t, handle.Wait())
-
-			// Create a blob tx with BlobFeeCap=1 (below Ethereum's blob base fee).
-			blobHash := common.Hash{0x01, 0xab}
-			tx := types.MustSignNewTx(key, signer, &types.BlobTx{
-				ChainID:    uint256.MustFromBig(tt.chainConfig.ChainID),
-				Nonce:      0,
-				GasTipCap:  uint256.NewInt(0),
-				GasFeeCap:  uint256.NewInt(0),
-				Gas:        21_000,
-				To:         common.Address{1},
-				BlobFeeCap: uint256.NewInt(1), // intentionally too low for Ethereum
-				BlobHashes: []common.Hash{blobHash},
-			})
-
-			block := types.NewBlockWithHeader(&types.Header{
-				Number:        big.NewInt(20_000_000),
-				Time:          cancunTime,
-				Extra:         make([]byte, 12),
-				GasLimit:      30_000_000,
-				BaseFee:       big.NewInt(0),
-				ExcessBlobGas: &excessBlobGas,
-				BlobGasUsed:   &blobGasUsed,
-				MixDigest:     common.Hash{1}, // non-zero PrevRandao
-			}).WithBody(types.Body{Transactions: types.Transactions{tx}})
-
-			processor := evmcore.NewStateProcessorForReplay(
-				tt.chainConfig,
-				&blockHashHistory{},
-				tt.upgrades,
-			)
-
-			_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{Upgrades: tt.upgrades}, nil, nil, tt.chainConfig, nil, false)
-			if tt.wantErr != "" {
-				require.ErrorContains(t, err, tt.wantErr)
-			} else {
-				require.NoError(t, err)
-			}
-		})
-	}
 }
 
 func TestState_ApplyBlock_ApplySonicVmConfigIfNotEthereumChain(t *testing.T) {
