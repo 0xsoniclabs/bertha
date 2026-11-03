@@ -26,8 +26,6 @@ import (
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/0xsoniclabs/bertha/utils"
-	"github.com/0xsoniclabs/sonic/evmcore"
-	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/0xsoniclabs/tracy"
 )
 
@@ -60,10 +58,7 @@ type blockWithHashHistory struct {
 type archiveVerifier struct {
 	pool *utils.RandomRetentionPool[blockWithHashHistory]
 
-	archive         ArchiveState
-	metadata        MetadataStore
-	interpreter     tosca.Interpreter
-	chainID         uint64
+	archive         ArchiveChain
 	noReceiptsCheck bool
 	ctx             context.Context
 	cancelParent    context.CancelCauseFunc
@@ -78,10 +73,7 @@ type archiveVerifier struct {
 func newArchiveVerifier(
 	ctx context.Context,
 	cancelParent context.CancelCauseFunc,
-	archive ArchiveState,
-	metadata MetadataStore,
-	interpreter tosca.Interpreter,
-	chainID uint64,
+	archive ArchiveChain,
 	archiveRate float64,
 	noReceiptsCheck bool,
 	logger utils.Logger,
@@ -103,9 +95,6 @@ func newArchiveVerifier(
 	v := &archiveVerifier{
 		pool:            pool,
 		archive:         archive,
-		metadata:        metadata,
-		interpreter:     interpreter,
-		chainID:         chainID,
 		noReceiptsCheck: noReceiptsCheck,
 		ctx:             ctx,
 		cancelParent:    cancelParent,
@@ -220,17 +209,7 @@ func (v *archiveVerifier) verifyBlock() {
 		return
 	}
 
-	chainConfig, rules := getChainConfigAndRules(gethBlock, v.chainID, v.metadata)
-
-	processor := evmcore.NewStateProcessorForReplay(
-		chainConfig,
-		item.hashHistory,
-		rules.Upgrades,
-	)
-
-	corrections := v.metadata.GetCorrectionsAtBlock(block.Number)
-
-	receipts, err := v.archive.ApplyArchiveBlock(gethBlock, v.interpreter, processor, rules, corrections, chainConfig)
+	receipts, err := v.archive.ApplyArchiveBlock(gethBlock, item.hashHistory)
 	if err != nil {
 		handleError(fmt.Errorf("failed to apply block %d: %w", block.Number, err))
 		return

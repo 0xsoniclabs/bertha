@@ -236,7 +236,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		var cancel context.CancelCauseFunc
 		ctx, cancel = context.WithCancelCause(ctx)
 		defer cancel(nil)
-		verifier, err = newArchiveVerifier(ctx, cancel, chain, metadataStore, interpreter, chainID, args.ArchiveRate, args.NoReceiptsCheck, slog.Default())
+		verifier, err = newArchiveVerifier(ctx, cancel, chain, args.ArchiveRate, args.NoReceiptsCheck, slog.Default())
 		if err != nil {
 			return fmt.Errorf("failed to create archive verifier: %w", err)
 		}
@@ -666,19 +666,12 @@ type Chain interface {
 	CloneBlockHashHistory() *blockHashHistory
 }
 
-// ArchiveState exposes the subset of state operations required by the archive
+// ArchiveChain exposes the subset of chain operations required by the archive
 // verifier. Implementations must be safe to call concurrently with block
 // application on the same underlying state.
-type ArchiveState interface {
+type ArchiveChain interface {
 	GetArchiveBlockHeight() (height uint64, empty bool, err error)
-	ApplyArchiveBlock(
-		block *types.Block,
-		interpreter tosca.Interpreter,
-		processor Processor,
-		rules opera.Rules,
-		corrections map[common.Address]Correction,
-		chainConfig *params.ChainConfig,
-	) (types.Receipts, error)
+	ApplyArchiveBlock(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error)
 }
 
 // StateFlusher exposes the state-flush operation required by the progress
@@ -781,20 +774,10 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 		}
 	}
 
-	chainConfig, rules := getChainConfigAndRules(block, a.chainID, a.metadataStore)
-
-	processor := evmcore.NewStateProcessorForReplay(
-		chainConfig,
-		a.blockHashHistory,
-		rules.Upgrades,
-	)
-
-	corrections := a.metadataStore.GetCorrectionsAtBlock(block.NumberU64())
-
 	onLog := func(l *core_types.Log) { onNewLog(a.metadataStore, block.NumberU64(), l) }
 
 	// Apply the block to the state database.
-	receipts, err := a.state.ApplyBlock(block, a.interpreter, processor, rules, corrections, chainConfig, onLog, false)
+	receipts, err := a.applyBlockLocked(block, a.blockHashHistory, onLog, false)
 	if err != nil {
 		stateRoot := future.Future[result.Result[common.Hash]]{}
 		return nil, stateRoot, fmt.Errorf("failed to apply block %d: %w", block.NumberU64(), err)
@@ -867,19 +850,35 @@ func (a *stateChainAdapter) GetArchiveBlockHeight() (height uint64, empty bool, 
 }
 
 // ApplyArchiveBlock re-executes the given block against the archive state for
-// its parent block and returns the resulting receipts. The live state is not
-// modified. It is safe to call concurrently with block application.
-func (a *stateChainAdapter) ApplyArchiveBlock(
-	block *types.Block,
-	interpreter tosca.Interpreter,
-	processor Processor,
-	rules opera.Rules,
-	corrections map[common.Address]Correction,
-	chainConfig *params.ChainConfig,
-) (types.Receipts, error) {
+// its parent block, using the given hash history of the block, and returns the
+// resulting receipts. The live state is not modified. It is safe to call
+// concurrently with block application.
+func (a *stateChainAdapter) ApplyArchiveBlock(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
 	a.stateSwitchMutex.RLock()
 	defer a.stateSwitchMutex.RUnlock()
-	return a.state.ApplyBlock(block, interpreter, processor, rules, corrections, chainConfig, nil, true)
+	return a.applyBlockLocked(block, hashHistory, nil, true)
+}
+
+// applyBlockLocked applies the given block with the metadata of the block to
+// the state, see State.ApplyBlock. The caller must hold a read lock on
+// stateSwitchMutex, and for live blocks also stateModifyMutex.
+func (a *stateChainAdapter) applyBlockLocked(
+	block *types.Block,
+	hashHistory *blockHashHistory,
+	onLog func(*core_types.Log),
+	isArchive bool,
+) (types.Receipts, error) {
+	chainConfig, rules := getChainConfigAndRules(block, a.chainID, a.metadataStore)
+
+	processor := evmcore.NewStateProcessorForReplay(
+		chainConfig,
+		hashHistory,
+		rules.Upgrades,
+	)
+
+	corrections := a.metadataStore.GetCorrectionsAtBlock(block.NumberU64())
+
+	return a.state.ApplyBlock(block, a.interpreter, processor, rules, corrections, chainConfig, onLog, isArchive)
 }
 
 func getChainConfigAndRules(block *types.Block, chainID uint64, metadata MetadataStore) (*params.ChainConfig, opera.Rules) {

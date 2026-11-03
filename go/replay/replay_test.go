@@ -1164,6 +1164,85 @@ func TestStateChainAdapter_ApplyBlock_CommitsRulesUpdateWhenEncounteringAnEpochS
 	}
 }
 
+func TestStateChainAdapter_ApplyArchiveBlock_UsesMetadataOfTheBlock(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	metadataStore := NewMockMetadataStore(ctrl)
+	metadataStore.EXPECT().GetUpgradeHeights().Times(2)
+	metadataStore.EXPECT().GetRulesAtBlock(uint64(1))
+	metadataStore.EXPECT().GetCorrectionsAtBlock(uint64(1))
+	metadataStore.EXPECT().GetRulesAtBlock(uint64(2))
+	metadataStore.EXPECT().GetCorrectionsAtBlock(uint64(2))
+
+	state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, state.Close()) }()
+
+	chain := &stateChainAdapter{
+		chainID:          123,
+		metadataStore:    metadataStore,
+		blockHashHistory: &blockHashHistory{},
+		interpreter:      testInterpreter(t),
+		state:            state,
+	}
+
+	_, _, err = chain.ApplyBlock(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1)}))
+	require.NoError(t, err)
+	require.NoError(t, chain.FlushState())
+
+	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(2)})
+	_, err = chain.ApplyArchiveBlock(block, &blockHashHistory{})
+	require.NoError(t, err)
+}
+
+func TestStateChainAdapter_ApplyArchiveBlock_UsesGivenHashHistory(t *testing.T) {
+	// Init code that reverts if BLOCKHASH(1) is zero.
+	initCode := common.FromHex("0x600140600a57600080fd5b00")
+	tests := map[string]struct {
+		hashOfBlock1 common.Hash
+		wantStatus   uint64
+	}{
+		"HashKnown":   {hashOfBlock1: common.Hash{1}, wantStatus: types.ReceiptStatusSuccessful},
+		"HashUnknown": {wantStatus: types.ReceiptStatusFailed},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
+			require.NoError(t, err)
+			defer func() { require.NoError(t, state.Close()) }()
+
+			chain := &stateChainAdapter{
+				chainID:          123,
+				metadataStore:    &BlockDBMetadataStore{},
+				blockHashHistory: &blockHashHistory{},
+				interpreter:      testInterpreter(t),
+				state:            state,
+			}
+			for number := range uint64(2) {
+				_, _, err = chain.ApplyBlock(types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(number + 1)}))
+				require.NoError(t, err)
+			}
+			require.NoError(t, chain.FlushState())
+
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			tx := types.MustSignNewTx(key, types.LatestSignerForChainID(big.NewInt(123)), &types.LegacyTx{Gas: 100_000, Data: initCode})
+			block, err := convert.ConvertToGethBlock(&blockdb.Block{
+				Number:       3,
+				GasLimit:     100_000,
+				Transactions: []*blockdb.Transaction{convert.ToBerthaTransaction(tx)},
+			})
+			require.NoError(t, err)
+
+			hashHistory := &blockHashHistory{}
+			hashHistory.SetBlockHash(1, tc.hashOfBlock1)
+			receipts, err := chain.ApplyArchiveBlock(block, hashHistory)
+			require.NoError(t, err)
+			require.Len(t, receipts, 1)
+			require.Equal(t, tc.wantStatus, receipts[0].Status)
+		})
+	}
+}
+
 func TestStateChainAdapter_GetChainConfigAndRules_ReadsFromMetadataStoreForNonEthereumChains(t *testing.T) {
 	cases := map[string]struct {
 		chainID    uint64
