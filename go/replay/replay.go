@@ -759,7 +759,9 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 
 	// Block 0 is skipped since it is equivalent with the genesis data
 	// import. The archive does not accept two blocks with the same number.
+	// Only its hash is recorded, for BLOCKHASH in the blocks after it.
 	if block.NumberU64() == 0 {
+		a.blockHashHistory.SetBlockHash(0, block.Hash())
 		return nil, a.state.GetStateRoot(), nil
 	}
 
