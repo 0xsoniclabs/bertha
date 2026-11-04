@@ -41,12 +41,13 @@ import (
 	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/0xsoniclabs/tracy"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/beacon"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/holiman/uint256"
 	// Uncomment to enable experimental Carmen features.
 	//_ "github.com/0xsoniclabs/carmen/go/experimental"
 )
@@ -314,12 +315,8 @@ func (s *State) ApplyBlock(
 	applyCorrections(vmStateDB, corrections, block, slog.Default())
 
 	if isEthereum(chainConfig.ChainID.Uint64()) {
-		isPostMerge := block.Difficulty().Sign() == 0
-		if isPostMerge {
-			creditWithdrawals(block, vmStateDB, chainConfig)
-		} else {
-			accumulateRewards(chainConfig, vmStateDB, block.Header(), block.Uncles())
-		}
+		// Credit the block and uncle rewards pre-merge and the withdrawals post-merge.
+		beacon.New(ethash.NewFaker()).Finalize(chainConfigReader{config: chainConfig}, block.Header(), stateDB, block.Body())
 	}
 
 	if !isArchive {
@@ -399,46 +396,15 @@ func setBalance(stateDB carmen.VmStateDB, address common.Address, balance *big.I
 	}
 }
 
-func creditWithdrawals(block *types.Block, stateDB carmen.VmStateDB, chainConfig *params.ChainConfig) {
-	// Derived from https://github.com/0xsoniclabs/go-ethereum/blob/949ae6d396a5798262c0d228a8de0e3fa504e00c/consensus/beacon/consensus.go#L329-L342
-	for _, w := range block.Withdrawals() {
-		// Convert amount from gwei to wei.
-		amnt := new(uint256.Int).SetUint64(w.Amount)
-		amnt = amnt.Mul(amnt, uint256.NewInt(params.GWei))
-		stateDB.AddBalance(cc.Address(w.Address), amount.NewFromUint256(amnt))
-	}
+// chainConfigReader provides the Config method of consensus.ChainHeaderReader;
+// its other methods panic.
+type chainConfigReader struct {
+	consensus.ChainHeaderReader
+	config *params.ChainConfig
 }
 
-// accumulateRewards credits the coinbase of the given block with the mining
-// reward. The total reward consists of the static block reward and rewards for
-// included uncles. The coinbase of each uncle block is also rewarded.
-// Copied from
-// https://github.com/0xsoniclabs/go-ethereum/blob/949ae6d396a5798262c0d228a8de0e3fa504e00c/consensus/ethash/consensus.go#L570
-func accumulateRewards(config *params.ChainConfig, stateDB carmen.VmStateDB, header *types.Header, uncles []*types.Header) {
-	// Select the correct block reward based on chain progression
-	blockReward := ethash.FrontierBlockReward
-	if config.IsByzantium(header.Number) {
-		blockReward = ethash.ByzantiumBlockReward
-	}
-	if config.IsConstantinople(header.Number) {
-		blockReward = ethash.ConstantinopleBlockReward
-	}
-	// Accumulate the rewards for the miner and any included uncles
-	reward := new(uint256.Int).Set(blockReward)
-	r := new(uint256.Int)
-	hNum, _ := uint256.FromBig(header.Number)
-	for _, uncle := range uncles {
-		uNum, _ := uint256.FromBig(uncle.Number)
-		r.AddUint64(uNum, 8)
-		r.Sub(r, hNum)
-		r.Mul(r, blockReward)
-		r.Rsh(r, 3)
-		stateDB.AddBalance(cc.Address(uncle.Coinbase), amount.NewFromUint256(r))
-
-		r.Rsh(blockReward, 5)
-		reward.Add(reward, r)
-	}
-	stateDB.AddBalance(cc.Address(header.Coinbase), amount.NewFromUint256(reward))
+func (r chainConfigReader) Config() *params.ChainConfig {
+	return r.config
 }
 
 // endBlockAndCommit calls `EndBlock` on the state database and commits
