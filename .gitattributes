@@ -1,1 +1,1 @@
-data/failed_bundles/*.json filter=lfs diff=lfs merge=lfs -text
+data/failed_bundles/sonic.json filter=lfs diff=lfs merge=lfs -text

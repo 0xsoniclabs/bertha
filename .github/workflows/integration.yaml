@@ -56,7 +56,11 @@ jobs:
     - name: init blockdb
       run: cargo run -- init
     - name: import g-file
-      run: cargo run -- import-gfile data/genesis/small.g
+      run: cargo run -- import-gfile data/genesis/synthetic.g
+    - name: import corrections
+      run: cargo run -- import-corrections 4003 data/corrections/synthetic.json
+    - name: import failed bundles
+      run: cargo run -- import-failed-bundles 4003 data/failed_bundles/synthetic.json
     - name: verify blockdb (Rust)
       run: cargo run -- verify 4003
     - name: verify blockdb (Go)
@@ -64,22 +68,22 @@ jobs:
       run: go run . verify --database-dir ../.blockdb --chain-id 4003
     - name: replay blocks [baseline]
       working-directory: go
-      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json
+      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json --write-rules-update-heights=false
     - name: replay blocks [snapshot]
       working-directory: go
-      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json --snapshot-interval 10
+      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json --write-rules-update-heights=false --snapshot-interval 10
     - name: replay blocks [archive]
       working-directory: go
-      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json --with-archive
+      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json --write-rules-update-heights=false --with-archive
     - name: replay blocks [archive+snapshot]
       working-directory: go
-      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json --with-archive --snapshot-interval 10
+      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json --write-rules-update-heights=false --with-archive --snapshot-interval 10
     - name: replay blocks [archive+load]
       working-directory: go
-      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json --with-archive --archive-rate 10000
+      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json --write-rules-update-heights=false --with-archive --archive-rate 10000
     - name: replay blocks [archive+load+snapshot]
       working-directory: go
-      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/small.json --with-archive --archive-rate 10000 --snapshot-interval 10
+      run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json --write-rules-update-heights=false --with-archive --archive-rate 10000 --snapshot-interval 10
 
   generate-test-data:
     name: generate-test-data
