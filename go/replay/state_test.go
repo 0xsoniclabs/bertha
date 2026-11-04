@@ -35,6 +35,7 @@ import (
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/gossip/blockproc/bundle"
+	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
 	"github.com/0xsoniclabs/sonic/inter"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/tosca/go/tosca"
@@ -154,11 +155,11 @@ func TestState_GetStateRoot_ForwardsErrorFromDatabase(t *testing.T) {
 }
 
 func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
-	genesis := &Genesis{
-		Accounts: []Account{
+	genesis := &makefakegenesis.GenesisJson{
+		Accounts: []makefakegenesis.Account{
 			{
 				Address: common.Address{1},
-				Balance: *uint256.NewInt(1000),
+				Balance: uint256.NewInt(1000),
 				Nonce:   1,
 				Code:    []byte{1, 2, 3},
 				Storage: map[common.Hash]common.Hash{
@@ -166,6 +167,7 @@ func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
 					common.HexToHash("0x3"): common.HexToHash("0x4"),
 				},
 			},
+			{Address: common.Address{2}},
 		},
 	}
 
@@ -193,6 +195,8 @@ func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
 	key = cc.Key(common.HexToHash("0x3"))
 	value = cc.Value(common.HexToHash("0x4"))
 	require.Equal(t, value, db.GetState(addr, key))
+
+	require.Zero(t, db.GetBalance(cc.Address{2}).Uint64())
 }
 
 func TestState_ApplyGenesis_ReturnsErrorIfEndBlockFails(t *testing.T) {
@@ -209,7 +213,7 @@ func TestState_ApplyGenesis_ReturnsErrorIfEndBlockFails(t *testing.T) {
 	)
 
 	state := &State{db: db}
-	require.ErrorIs(state.ApplyGenesis(&Genesis{}), issue)
+	require.ErrorIs(state.ApplyGenesis(&makefakegenesis.GenesisJson{}), issue)
 }
 
 func TestState_ApplyBlock_ForwardsDifficultyToProcessor(t *testing.T) {
