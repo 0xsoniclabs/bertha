@@ -23,9 +23,13 @@ import (
 	"math/big"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
+	"github.com/0xsoniclabs/sonic/evmcore"
+	"github.com/0xsoniclabs/sonic/inter"
 	"github.com/0xsoniclabs/tracy"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/holiman/uint256"
 )
@@ -108,6 +112,42 @@ func ConvertToGethBlock(block *blockdb.Block) (*types.Block, error) {
 			Uncles:       uncles,
 			Withdrawals:  withdrawals,
 		}), nil
+}
+
+// ToEvmBlock converts the given block to an EVM block that runs the given
+// transactions.
+func ToEvmBlock(block *types.Block, transactions types.Transactions, chainConfig *params.ChainConfig, isEthereum bool) (*evmcore.EvmBlock, error) {
+	blobBaseFee := big.NewInt(1)
+	if isEthereum && chainConfig.IsCancun(block.Number(), block.Time()) && block.ExcessBlobGas() != nil {
+		blobBaseFee = eip4844.CalcBlobFee(chainConfig, block.Header())
+	}
+	blockTime := inter.Timestamp(block.Time() * 1e9)
+	if !isEthereum {
+		nanos, _, err := inter.DecodeExtraData(block.Extra())
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode extra data of block %d: %w", block.NumberU64(), err)
+		}
+		blockTime += inter.Timestamp(nanos)
+	}
+	prevRandao := block.MixDigest()
+	if block.Difficulty().Sign() != 0 {
+		// Before the Merge, PrevRandao is unused and set to zero, which tells the EVM
+		// to use the difficulty instead.
+		prevRandao = common.Hash{}
+	}
+	return &evmcore.EvmBlock{
+		EvmHeader: evmcore.EvmHeader{
+			Number:      block.Number(),
+			ParentHash:  block.ParentHash(),
+			Time:        blockTime,
+			GasLimit:    block.GasLimit(),
+			PrevRandao:  prevRandao,
+			BaseFee:     block.BaseFee(),
+			BlobBaseFee: blobBaseFee,
+			Coinbase:    block.Coinbase(),
+		},
+		Transactions: transactions,
+	}, nil
 }
 
 func ToBerthaTransaction(tx *types.Transaction) *blockdb.Transaction {
