@@ -189,7 +189,7 @@ func (v *archiveVerifier) verifyBlock() {
 			return // no blocks in pool
 		}
 
-		if entry.block.Number == 0 || entry.block.Number-1 > archiveHeight {
+		if entry.block.Number > archiveHeight+1 {
 			continue // block is not in archive yet
 		}
 
