@@ -17,6 +17,11 @@
 package ethereum
 
 import (
+	"iter"
+	"math/big"
+
+	"github.com/0xsoniclabs/bertha/blockdb"
+	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
@@ -26,7 +31,6 @@ import (
 var ethereumChainConfigMap = map[uint64]*params.ChainConfig{
 	params.MainnetChainConfig.ChainID.Uint64(): params.MainnetChainConfig,
 	params.SepoliaChainConfig.ChainID.Uint64(): params.SepoliaChainConfig,
-	params.HoleskyChainConfig.ChainID.Uint64(): params.HoleskyChainConfig,
 	params.HoodiChainConfig.ChainID.Uint64():   params.HoodiChainConfig,
 }
 
@@ -54,4 +58,40 @@ func getChainConfigAndUpgrades(block *types.Block, chainID uint64) (*params.Chai
 		GasSubsidies:                 false,
 		TransactionBundles:           false,
 	}
+}
+
+// EndBeforeUnsupportedFork ends the given blocks of an Ethereum chain before the
+// first block of a fork that is not supported yet, so that the replay of the
+// blocks before it finishes successfully.
+func EndBeforeUnsupportedFork(blocks iter.Seq2[*blockdb.Block, error], chainID uint64, logger utils.Logger) iter.Seq2[*blockdb.Block, error] {
+	chainConfig := ethereumChainConfigMap[chainID]
+	return func(yield func(*blockdb.Block, error) bool) {
+		for block, err := range blocks {
+			if err == nil {
+				if fork := unsupportedFork(chainConfig, new(big.Int).SetUint64(block.Number), block.Timestamp); fork != "" {
+					logger.Warn("Ending replay before the first block of an unsupported fork", "fork", fork, "block", block.Number, "timestamp", block.Timestamp)
+					return
+				}
+			}
+			if !yield(block, err) {
+				return
+			}
+		}
+	}
+}
+
+// unsupportedFork returns the name of the latest fork active at a block with the
+// given number and time that the Sonic technology stack does not support yet
+// (Amsterdam, Bogota or UBT), or an empty string if there is none.
+// TODO: remove forks from this list once they are supported.
+func unsupportedFork(chainConfig *params.ChainConfig, number *big.Int, time uint64) string {
+	switch {
+	case chainConfig.IsBogota(number, time):
+		return "Bogota"
+	case chainConfig.IsAmsterdam(number, time):
+		return "Amsterdam"
+	case chainConfig.IsUBT(number, time):
+		return "UBT"
+	}
+	return ""
 }
