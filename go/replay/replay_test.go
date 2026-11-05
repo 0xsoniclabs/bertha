@@ -996,9 +996,10 @@ func applyArchiveBlock(chain *stateChainAdapter, block *types.Block) (types.Rece
 
 func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_SkipBlockZero(t *testing.T) {
 	tests := map[string]struct {
-		apply func(chain *stateChainAdapter, block *types.Block) (types.Receipts, error)
+		apply       func(chain *stateChainAdapter, block *types.Block) (types.Receipts, error)
+		recordsHash bool
 	}{
-		"ApplyBlock":        {apply: applyLiveBlock},
+		"ApplyBlock":        {apply: applyLiveBlock, recordsHash: true},
 		"ApplyArchiveBlock": {apply: applyArchiveBlock},
 	}
 
@@ -1015,10 +1016,15 @@ func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_SkipBlockZero(t *tes
 				state:            state,
 			}
 
-			receipts, err := tt.apply(chain, types.NewBlockWithHeader(&types.Header{Number: big.NewInt(0)}))
+			block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(0)})
+			receipts, err := tt.apply(chain, block)
 			require.NoError(t, err)
 			require.Nil(t, receipts)
-			require.Equal(t, &blockHashHistory{}, chain.blockHashHistory)
+			want := &blockHashHistory{}
+			if tt.recordsHash {
+				want.SetBlockHash(0, block.Hash())
+			}
+			require.Equal(t, want, chain.blockHashHistory)
 		})
 	}
 }
