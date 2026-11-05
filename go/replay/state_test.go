@@ -666,6 +666,47 @@ func TestState_ApplyBlock_EthereumPragueBlock_FailsWithoutRequestContracts(t *te
 	require.ErrorContains(t, err, "failed to process post-execution of block 20000000")
 }
 
+func TestState_ApplyBlock_RejectsForksAfterOsakaBeforeModifyingState(t *testing.T) {
+	const forkTime = uint64(2_000_000_000)
+	bogota := *params.MainnetChainConfig
+	bogota.BogotaTime = new(forkTime)
+	ubt := *params.MainnetChainConfig
+	ubt.UBTTime = new(forkTime)
+
+	tests := map[string]struct {
+		chainConfig *params.ChainConfig
+		timestamp   uint64
+	}{
+		"Sepolia Amsterdam": {chainConfig: params.SepoliaChainConfig, timestamp: *params.SepoliaChainConfig.AmsterdamTime},
+		"Bogota":            {chainConfig: &bogota, timestamp: forkTime},
+		"UBT":               {chainConfig: &ubt, timestamp: forkTime},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+			require.NoError(t, err)
+			defer func() { require.NoError(t, state.Close()) }()
+
+			withdrawalAddr := common.Address{0xAB}
+			block, err := convert.ConvertToGethBlock(&blockdb.Block{
+				Number:      20_000_000,
+				Timestamp:   tt.timestamp,
+				GasLimit:    30_000_000,
+				PrevRandao:  []byte{1},
+				Withdrawals: []*blockdb.Withdrawal{{Address: withdrawalAddr.Bytes(), Amount: 1000}},
+			})
+			require.NoError(t, err)
+
+			processor := evmcore.NewStateProcessorForReplay(tt.chainConfig, &blockHashHistory{}, opera.Upgrades{})
+
+			_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, tt.chainConfig, nil, false)
+			require.ErrorContains(t, err, "which is not supported yet")
+			require.Zero(t, state.db.GetBalance(cc.Address(withdrawalAddr)).Uint64())
+		})
+	}
+}
+
 func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChainsPostShanghai(t *testing.T) {
 	const sonicChainID = uint64(146)
 	sonicUpgrades := opera.GetSonicUpgrades()

@@ -210,6 +210,10 @@ func (s *State) ApplyBlock(
 	onLog func(*core_types.Log),
 	isArchive bool,
 ) (types.Receipts, uint64, error) {
+	if !isForkSupported(chainConfig, block.Number(), block.Time()) {
+		return nil, 0, fmt.Errorf("block %d at time %d is subject to the Amsterdam fork, which is not supported yet", block.NumberU64(), block.Time())
+	}
+
 	transactions := block.Transactions()
 	if len(failedBundles) > 0 {
 		var err error
@@ -395,6 +399,13 @@ func setBalance(stateDB carmen.VmStateDB, address common.Address, balance *big.I
 		diff, _ := amount.NewFromBigInt(new(big.Int).Sub(cur, balance))
 		stateDB.SubBalance(addr, diff)
 	}
+}
+
+// isForkSupported reports whether the fork of a block with the given number and
+// time is supported. The Sonic technology stack does not support Amsterdam yet,
+// TODO enable once supported.
+func isForkSupported(chainConfig *params.ChainConfig, number *big.Int, time uint64) bool {
+	return !chainConfig.IsAmsterdam(number, time) && !chainConfig.IsBogota(number, time) && !chainConfig.IsUBT(number, time)
 }
 
 // chainConfigReader provides the Config method of consensus.ChainHeaderReader;
