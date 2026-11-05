@@ -22,7 +22,6 @@ import "github.com/ethereum/go-ethereum/params"
 var ethereumChainConfigMap = map[uint64]*params.ChainConfig{
 	params.MainnetChainConfig.ChainID.Uint64(): params.MainnetChainConfig,
 	params.SepoliaChainConfig.ChainID.Uint64(): params.SepoliaChainConfig,
-	params.HoleskyChainConfig.ChainID.Uint64(): params.HoleskyChainConfig,
 	params.HoodiChainConfig.ChainID.Uint64():   params.HoodiChainConfig,
 }
 

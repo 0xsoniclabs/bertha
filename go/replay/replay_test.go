@@ -1498,10 +1498,6 @@ func TestStateChainAdapter_GetChainConfigAndRules_ReadsFromMetadataStoreForNonEt
 			chainID:    11155111,
 			isEthereum: true,
 		},
-		"Holesky": {
-			chainID:    17000,
-			isEthereum: true,
-		},
 		"Hoodi": {
 			chainID:    560048,
 			isEthereum: true,
