@@ -16,7 +16,11 @@
 
 package replay
 
-import "github.com/ethereum/go-ethereum/params"
+import (
+	"math/big"
+
+	"github.com/ethereum/go-ethereum/params"
+)
 
 // ethereumChainConfigMap maps chain IDs of Ethereum networks to their corresponding chain configurations.
 var ethereumChainConfigMap = map[uint64]*params.ChainConfig{
@@ -29,4 +33,20 @@ var ethereumChainConfigMap = map[uint64]*params.ChainConfig{
 func isEthereum(chainID uint64) bool {
 	_, exists := ethereumChainConfigMap[chainID]
 	return exists
+}
+
+// unsupportedFork returns the name of the latest fork active at a block with the
+// given number and time that the Sonic technology stack does not support yet
+// (Amsterdam, Bogota or UBT), or an empty string if there is none.
+// TODO: remove forks from this list once they are supported.
+func unsupportedFork(chainConfig *params.ChainConfig, number *big.Int, time uint64) string {
+	switch {
+	case chainConfig.IsBogota(number, time):
+		return "Bogota"
+	case chainConfig.IsAmsterdam(number, time):
+		return "Amsterdam"
+	case chainConfig.IsUBT(number, time):
+		return "UBT"
+	}
+	return ""
 }

@@ -1547,10 +1547,12 @@ func TestEndBeforeUnsupportedFork_EndsEthereumChainsBeforeTheFirstUnsupportedBlo
 
 	tests := map[string]struct {
 		chainID uint64
+		warns   bool
 		want    []uint64
 	}{
 		"Sepolia": {
 			chainID: params.SepoliaChainConfig.ChainID.Uint64(),
+			warns:   true,
 			want:    []uint64{20_000_000, 20_000_001},
 		},
 		"Sonic": {
@@ -1561,8 +1563,13 @@ func TestEndBeforeUnsupportedFork_EndsEthereumChainsBeforeTheFirstUnsupportedBlo
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
+			logger := utils.NewMockLogger(gomock.NewController(t))
+			if tt.warns {
+				logger.EXPECT().Warn("Ending replay before the first block of an unsupported fork", "fork", "Amsterdam", "block", uint64(20_000_002), "timestamp", amsterdamTime)
+			}
+
 			var got []uint64
-			for block, err := range endBeforeUnsupportedFork(blocks, tt.chainID) {
+			for block, err := range endBeforeUnsupportedFork(blocks, tt.chainID, logger) {
 				require.NoError(t, err)
 				got = append(got, block.Number)
 			}
@@ -1578,7 +1585,7 @@ func TestEndBeforeUnsupportedFork_ForwardsErrors(t *testing.T) {
 	}
 
 	var errs []error
-	for _, err := range endBeforeUnsupportedFork(blocks, params.SepoliaChainConfig.ChainID.Uint64()) {
+	for _, err := range endBeforeUnsupportedFork(blocks, params.SepoliaChainConfig.ChainID.Uint64(), utils.NewMockLogger(gomock.NewController(t))) {
 		errs = append(errs, err)
 	}
 	require.Equal(t, []error{injected}, errs)

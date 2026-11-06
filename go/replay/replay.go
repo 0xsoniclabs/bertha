@@ -222,7 +222,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	onBlockDone := func(block *types.Block) error { return progressLogger.LogProgress(block) }
 	defer func() { progressLogger.LogSummary() }()
 
-	blocks := endBeforeUnsupportedFork(blockDb.GetRange(chainID, args.StartBlock, args.EndBlock), chainID)
+	blocks := endBeforeUnsupportedFork(blockDb.GetRange(chainID, args.StartBlock, args.EndBlock), chainID, slog.Default())
 
 	replayLoopContext := ReplayLoopContext{
 		overwriteStateRoot:  args.OverwriteStateRoot,
@@ -258,16 +258,18 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 // endBeforeUnsupportedFork ends the given blocks of an Ethereum chain before the
 // first block of a fork that is not supported yet, so that the replay of the
 // blocks before it finishes successfully.
-func endBeforeUnsupportedFork(blocks iter.Seq2[*blockdb.Block, error], chainID uint64) iter.Seq2[*blockdb.Block, error] {
+func endBeforeUnsupportedFork(blocks iter.Seq2[*blockdb.Block, error], chainID uint64, logger utils.Logger) iter.Seq2[*blockdb.Block, error] {
 	chainConfig := ethereumChainConfigMap[chainID]
 	if chainConfig == nil {
 		return blocks
 	}
 	return func(yield func(*blockdb.Block, error) bool) {
 		for block, err := range blocks {
-			if err == nil && !isForkSupported(chainConfig, new(big.Int).SetUint64(block.Number), block.Timestamp) {
-				slog.Warn("Ending replay before the first block of an unsupported fork", "block", block.Number, "timestamp", block.Timestamp)
-				return
+			if err == nil {
+				if fork := unsupportedFork(chainConfig, new(big.Int).SetUint64(block.Number), block.Timestamp); fork != "" {
+					logger.Warn("Ending replay before the first block of an unsupported fork", "fork", fork, "block", block.Number, "timestamp", block.Timestamp)
+					return
+				}
 			}
 			if !yield(block, err) {
 				return

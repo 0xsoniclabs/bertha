@@ -397,13 +397,6 @@ func setBalance(stateDB carmen.VmStateDB, address common.Address, balance *big.I
 	}
 }
 
-// isForkSupported reports whether the fork of a block with the given number and
-// time is supported. The Sonic technology stack does not support Amsterdam yet,
-// TODO enable once supported.
-func isForkSupported(chainConfig *params.ChainConfig, number *big.Int, time uint64) bool {
-	return !chainConfig.IsAmsterdam(number, time) && !chainConfig.IsBogota(number, time) && !chainConfig.IsUBT(number, time)
-}
-
 // chainConfigReader provides the Config method of consensus.ChainHeaderReader;
 // its other methods panic.
 type chainConfigReader struct {
