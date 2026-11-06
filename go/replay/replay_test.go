@@ -117,13 +117,11 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 }
 
 func TestReplay_EthereumChainEndsSuccessfullyBeforeUnsupportedFork(t *testing.T) {
-	require := require.New(t)
-
 	chainID := params.SepoliaChainConfig.ChainID.Uint64()
 
 	dir := t.TempDir()
 	genesis := filepath.Join(dir, "genesis.json")
-	require.NoError(os.WriteFile(genesis, fmt.Appendf(nil, `{
+	require.NoError(t, os.WriteFile(genesis, fmt.Appendf(nil, `{
 		"Rules": {
 			"NetworkID": %d
 		}
@@ -134,33 +132,47 @@ func TestReplay_EthereumChainEndsSuccessfullyBeforeUnsupportedFork(t *testing.T)
 	options.SetCreateIfMissing(true)
 	defer options.Destroy()
 	db, err := grocksdb.OpenDb(options, path)
-	require.NoError(err, "failed to create database")
+	require.NoError(t, err)
 
 	writeOptions := grocksdb.NewDefaultWriteOptions()
 	defer writeOptions.Destroy()
 	version := make([]byte, 8)
 	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
-	require.NoError(db.Put(writeOptions, blockdb.MakeVersionKey(), version), "failed to write database version")
+	require.NoError(t, db.Put(writeOptions, blockdb.MakeVersionKey(), version))
 
-	amsterdamBlock := &blockdb.Block{Number: 1, Timestamp: *params.SepoliaChainConfig.AmsterdamTime}
-	for _, block := range []*blockdb.Block{{Number: 0}, amsterdamBlock} {
+	genesisBlock, err := convert.ConvertToGethBlock(&blockdb.Block{})
+	require.NoError(t, err)
+	amsterdamBlock := &blockdb.Block{Number: 2, Timestamp: *params.SepoliaChainConfig.AmsterdamTime}
+	for _, block := range []*blockdb.Block{{Number: 0}, {Number: 1, ParentHash: genesisBlock.Hash().Bytes()}, amsterdamBlock} {
 		value, err := proto.Marshal(block)
-		require.NoError(err, "failed to marshal block")
-		require.NoError(db.Put(writeOptions, blockdb.MakeBlockKey(chainID, block.Number), value))
+		require.NoError(t, err)
+		require.NoError(t, db.Put(writeOptions, blockdb.MakeBlockKey(chainID, block.Number), value))
 	}
 	db.Close()
 
 	for _, usePipeline := range []bool{false, true} {
 		t.Run(fmt.Sprintf("pipeline=%t", usePipeline), func(t *testing.T) {
+			require := require.New(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
 			require.NoError(Replay(t.Context(), ReplayArgs{
 				BlockDBDir:      path,
 				JSONGenesisFile: genesis,
+				StateDBDir:      stateDir,
+				KeepDB:          true,
+				WithArchive:     true,
 				EndBlock:        math.MaxUint64,
 				UsePipeline:     usePipeline,
 				Interpreter:     "sfvm",
 				DBSchema:        5,
 				DBVariant:       "go-file",
 			}))
+
+			state, err := NewState(StateParameters{Directory: stateDir, WithArchive: true, Schema: 5, Variant: "go-file"})
+			require.NoError(err)
+			defer func() { require.NoError(state.Close()) }()
+			height, _, err := state.GetArchiveBlockHeight()
+			require.NoError(err)
+			require.Equal(uint64(1), height)
 		})
 	}
 }
