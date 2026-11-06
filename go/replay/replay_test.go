@@ -46,6 +46,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/core/vm/program"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/holiman/uint256"
 	"github.com/linxGnu/grocksdb"
@@ -111,6 +112,67 @@ func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
 					DBVariant:       "go-file",
 				}),
 			)
+		})
+	}
+}
+
+func TestReplay_EthereumChainEndsSuccessfullyBeforeUnsupportedFork(t *testing.T) {
+	chainID := params.SepoliaChainConfig.ChainID.Uint64()
+
+	dir := t.TempDir()
+	genesis := filepath.Join(dir, "genesis.json")
+	require.NoError(t, os.WriteFile(genesis, fmt.Appendf(nil, `{
+		"Rules": {
+			"NetworkID": %d
+		}
+	}`, chainID), 0644))
+
+	path := filepath.Join(dir, "sepolia-db")
+	options := grocksdb.NewDefaultOptions()
+	options.SetCreateIfMissing(true)
+	defer options.Destroy()
+	db, err := grocksdb.OpenDb(options, path)
+	require.NoError(t, err)
+
+	writeOptions := grocksdb.NewDefaultWriteOptions()
+	defer writeOptions.Destroy()
+	version := make([]byte, 8)
+	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
+	require.NoError(t, db.Put(writeOptions, blockdb.MakeVersionKey(), version))
+
+	genesisBlock, err := convert.ConvertToGethBlock(&blockdb.Block{})
+	require.NoError(t, err)
+	amsterdamBlock := &blockdb.Block{Number: 2, Timestamp: *params.SepoliaChainConfig.AmsterdamTime}
+	for _, block := range []*blockdb.Block{{Number: 0}, {Number: 1, ParentHash: genesisBlock.Hash().Bytes()}, amsterdamBlock} {
+		value, err := proto.Marshal(block)
+		require.NoError(t, err)
+		require.NoError(t, db.Put(writeOptions, blockdb.MakeBlockKey(chainID, block.Number), value))
+	}
+	db.Close()
+
+	for _, usePipeline := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pipeline=%t", usePipeline), func(t *testing.T) {
+			require := require.New(t)
+			stateDir := filepath.Join(t.TempDir(), "state")
+			require.NoError(Replay(t.Context(), ReplayArgs{
+				BlockDBDir:      path,
+				JSONGenesisFile: genesis,
+				StateDBDir:      stateDir,
+				KeepDB:          true,
+				WithArchive:     true,
+				EndBlock:        math.MaxUint64,
+				UsePipeline:     usePipeline,
+				Interpreter:     "sfvm",
+				DBSchema:        5,
+				DBVariant:       "go-file",
+			}))
+
+			state, err := NewState(StateParameters{Directory: stateDir, WithArchive: true, Schema: 5, Variant: "go-file"})
+			require.NoError(err)
+			defer func() { require.NoError(state.Close()) }()
+			height, _, err := state.GetArchiveBlockHeight()
+			require.NoError(err)
+			require.Equal(uint64(1), height)
 		})
 	}
 }
@@ -406,6 +468,62 @@ func TestReplay_BlockDBAccessMode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestEndBeforeUnsupportedFork_EndsEthereumChainsBeforeTheFirstUnsupportedBlock(t *testing.T) {
+	amsterdamTime := *params.SepoliaChainConfig.AmsterdamTime
+	blocks := func(yield func(*blockdb.Block, error) bool) {
+		for i, timestamp := range []uint64{amsterdamTime - 2, amsterdamTime - 1, amsterdamTime, amsterdamTime + 1} {
+			if !yield(&blockdb.Block{Number: 20_000_000 + uint64(i), Timestamp: timestamp}, nil) {
+				return
+			}
+		}
+	}
+
+	tests := map[string]struct {
+		chainID uint64
+		warns   bool
+		want    []uint64
+	}{
+		"Sepolia": {
+			chainID: params.SepoliaChainConfig.ChainID.Uint64(),
+			warns:   true,
+			want:    []uint64{20_000_000, 20_000_001},
+		},
+		"Sonic": {
+			chainID: 146,
+			want:    []uint64{20_000_000, 20_000_001, 20_000_002, 20_000_003},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			logger := utils.NewMockLogger(gomock.NewController(t))
+			if tt.warns {
+				logger.EXPECT().Warn("Ending replay before the first block of an unsupported fork", "fork", "Amsterdam", "block", uint64(20_000_002), "timestamp", amsterdamTime)
+			}
+
+			var got []uint64
+			for block, err := range endBeforeUnsupportedFork(blocks, tt.chainID, logger) {
+				require.NoError(t, err)
+				got = append(got, block.Number)
+			}
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestEndBeforeUnsupportedFork_ForwardsErrors(t *testing.T) {
+	injected := fmt.Errorf("injected")
+	blocks := func(yield func(*blockdb.Block, error) bool) {
+		yield(nil, injected)
+	}
+
+	var errs []error
+	for _, err := range endBeforeUnsupportedFork(blocks, params.SepoliaChainConfig.ChainID.Uint64(), utils.NewMockLogger(gomock.NewController(t))) {
+		errs = append(errs, err)
+	}
+	require.Equal(t, []error{injected}, errs)
 }
 
 func TestReplayLoop(t *testing.T) {
@@ -1496,10 +1614,6 @@ func TestStateChainAdapter_GetChainConfigAndRules_ReadsFromMetadataStoreForNonEt
 		},
 		"Sepolia": {
 			chainID:    11155111,
-			isEthereum: true,
-		},
-		"Holesky": {
-			chainID:    17000,
 			isEthereum: true,
 		},
 		"Hoodi": {

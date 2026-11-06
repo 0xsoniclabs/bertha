@@ -1,8 +1,8 @@
 diff --git a/go/replay/state.go b/go/replay/state.go
-index 639b0c3..e9f22ec 100644
+index 0ec1ca0..c5134e2 100644
 --- a/go/replay/state.go
 +++ b/go/replay/state.go
-@@ -49,7 +49,8 @@ import (
+@@ -51,7 +51,8 @@ import (
  	"github.com/ethereum/go-ethereum/core/vm"
  	"github.com/ethereum/go-ethereum/params"
  	// Uncomment to enable experimental Carmen features.
@@ -13,13 +13,13 @@ index 639b0c3..e9f22ec 100644
 
  //go:generate mockgen -source=state.go -destination=state_mock.go -package=replay
 diff --git a/go/go.mod b/go/go.mod
-index 70724ed..e9ca885 100644
+index 2a2f26e..eb6795d 100644
 --- a/go/go.mod
 +++ b/go/go.mod
 @@ -50,13 +50,13 @@ require (
+ 	github.com/cockroachdb/tokenbucket v0.0.0-20250429170803-42689b6311bb // indirect
  	github.com/consensys/gnark-crypto v0.20.1 // indirect
  	github.com/crate-crypto/go-eth-kzg v1.5.0 // indirect
- 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 -	//github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
 +	github.com/crate-crypto/go-ipa v0.0.0-20240724233137-53bbb0ceb27a // indirect
  	github.com/deckarep/golang-set/v2 v2.9.0 // indirect
@@ -30,9 +30,9 @@ index 70724ed..e9ca885 100644
 -	//github.com/ethereum/go-verkle v0.2.3-0.20260102081149-aa0a270c0ed0 // indirect
 +	github.com/ethereum/go-verkle v0.2.3-0.20260102081149-aa0a270c0ed0 // indirect
  	github.com/ferranbt/fastssz v1.0.0 // indirect
+ 	github.com/fjl/jsonw v0.1.0 // indirect
  	github.com/fsnotify/fsnotify v1.10.1 // indirect
- 	github.com/getsentry/sentry-go v0.48.0 // indirect
-@@ -119,7 +119,7 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
+@@ -116,7 +116,7 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
 
  // This line is automatically uncommented by the `go-run-with-carmen.sh` and `go-run-with-carmen-and-tracy.sh` scripts.
  //

@@ -507,10 +507,11 @@ func TestState_ApplyBlock_ForwardsRulesToVmConfig(t *testing.T) {
 				To:       &common.Address{1},
 			})
 			block := types.NewBlockWithHeader(&types.Header{
-				Number:   big.NewInt(1),
-				GasLimit: 1_000_000,
-				BaseFee:  big.NewInt(1),
-				Extra:    make([]byte, 12),
+				Number:    big.NewInt(1),
+				GasLimit:  1_000_000,
+				BaseFee:   big.NewInt(1),
+				Extra:     make([]byte, 12),
+				MixDigest: common.Hash{1}, // Osaka rules, and thus the gas cap, only apply post-merge
 			}).WithBody(types.Body{Transactions: types.Transactions{tx}})
 
 			processor := evmcore.NewStateProcessorForReplay(chainConfig, &blockHashHistory{}, rules.Upgrades)
@@ -578,7 +579,7 @@ func TestState_ApplyBlock_EthereumCancunBlock_AppliesEIP4788(t *testing.T) {
 	require.Equal(t, cc.Value(beaconRoot), gotRoot)
 }
 
-func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7002(t *testing.T) {
+func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7002AndEIP7251(t *testing.T) {
 	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, state.Close()) }()
@@ -588,69 +589,15 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7002(t *testing.T) {
 	excessBlobGas := uint64(0)
 	blobGasUsed := uint64(0)
 
-	// Deploy the EIP-7002 contract and pre-populate the
-	// WITHDRAWAL_REQUEST_COUNT slot (slot 1) to simulate requests queued during
-	// a prior block. The system call will compute new excess from this count.
+	// Deploy the EIP-7002 and EIP-7251 contracts and pre-populate their
+	// REQUEST_COUNT slot (slot 1) to simulate requests queued during a prior
+	// block. The system calls will compute the new excess from this count.
 	requestCount := cc.Value{31: 3} // 3 requests queued
-	countSlot := cc.Key{31: 1}      // WITHDRAWAL_REQUEST_COUNT_SLOT = 1
+	countSlot := cc.Key{31: 1}      // REQUEST_COUNT_SLOT = 1
 	state.db.BeginBlock()
 	state.db.BeginTransaction()
 	state.db.SetCode(cc.Address(params.WithdrawalQueueAddress), params.WithdrawalQueueCode)
 	state.db.SetState(cc.Address(params.WithdrawalQueueAddress), countSlot, requestCount)
-	state.db.EndTransaction()
-	handle, err := endBlockAndCommit(state, 0)
-	require.NoError(t, err)
-	require.NoError(t, handle.Wait())
-
-	block, err := convert.ConvertToGethBlock(&blockdb.Block{
-		Number:        20_000_000,
-		Timestamp:     pragueTime,
-		GasLimit:      30_000_000,
-		ExcessBlobGas: &excessBlobGas,
-		BlobGasUsed:   &blobGasUsed,
-		// A non-zero PrevRandao activates post-merge EVM rules (Random != nil),
-		// which enables Shanghai opcodes like PUSH0 used by the system contracts.
-		PrevRandao: []byte{1},
-	})
-	require.NoError(t, err)
-
-	processor := evmcore.NewStateProcessorForReplay(
-		chainConfig,
-		&blockHashHistory{},
-		opera.Upgrades{},
-	)
-
-	_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, chainConfig, nil, false)
-	require.NoError(t, err)
-
-	// Verify the main side effects of the system calls:
-	// - EXCESS_REQUESTS (slot 0) = max(0, old_excess + count - TARGET)
-	//   EIP-7002: TARGET=2 → 0 + 3 - 2 = 1
-	// - WITHDRAWAL_REQUEST_COUNT (slot 1) reset to 0
-	excessSlot := cc.Key{} // EXCESS_WITHDRAWAL_REQUESTS_SLOT = 0
-	require.Equal(t, cc.Value{31: 1}, state.db.GetState(cc.Address(params.WithdrawalQueueAddress), excessSlot),
-		"EIP-7002: excess should be count - TARGET_2 = 3 - 2 = 1")
-	require.Equal(t, cc.Value{}, state.db.GetState(cc.Address(params.WithdrawalQueueAddress), countSlot),
-		"EIP-7002: request count should be reset to 0")
-}
-
-func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7251(t *testing.T) {
-	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
-	require.NoError(t, err)
-	defer func() { require.NoError(t, state.Close()) }()
-
-	chainConfig := params.MainnetChainConfig
-	pragueTime := *chainConfig.PragueTime
-	excessBlobGas := uint64(0)
-	blobGasUsed := uint64(0)
-
-	// Deploy the EIP-7251 contract and pre-populate the
-	// CONSOLIDATION_REQUEST_COUNT slot (slot 1) to simulate requests queued during
-	// a prior block. The system call will compute new excess from this count.
-	requestCount := cc.Value{31: 3} // 3 requests queued
-	countSlot := cc.Key{31: 1}      // CONSOLIDATION_REQUEST_COUNT_SLOT = 1
-	state.db.BeginBlock()
-	state.db.BeginTransaction()
 	state.db.SetCode(cc.Address(params.ConsolidationQueueAddress), params.ConsolidationQueueCode)
 	state.db.SetState(cc.Address(params.ConsolidationQueueAddress), countSlot, requestCount)
 	state.db.EndTransaction()
@@ -681,16 +628,45 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7251(t *testing.T) {
 
 	// Verify the main side effects of the system calls:
 	// - EXCESS_REQUESTS (slot 0) = max(0, old_excess + count - TARGET)
+	//   EIP-7002: TARGET=2 → 0 + 3 - 2 = 1
 	//   EIP-7251: TARGET=1 → 0 + 3 - 1 = 2
-	// - CONSOLIDATION_REQUEST_COUNT (slot 1) reset to 0
-	excessSlot := cc.Key{} // EXCESS_CONSOLIDATION_REQUESTS_SLOT = 0
+	// - REQUEST_COUNT (slot 1) reset to 0
+	excessSlot := cc.Key{} // EXCESS_REQUESTS_SLOT = 0
+	require.Equal(t, cc.Value{31: 1}, state.db.GetState(cc.Address(params.WithdrawalQueueAddress), excessSlot),
+		"EIP-7002: excess should be count - TARGET_2 = 3 - 2 = 1")
+	require.Equal(t, cc.Value{}, state.db.GetState(cc.Address(params.WithdrawalQueueAddress), countSlot),
+		"EIP-7002: request count should be reset to 0")
 	require.Equal(t, cc.Value{31: 2}, state.db.GetState(cc.Address(params.ConsolidationQueueAddress), excessSlot),
 		"EIP-7251: excess should be count - TARGET_1 = 3 - 1 = 2")
 	require.Equal(t, cc.Value{}, state.db.GetState(cc.Address(params.ConsolidationQueueAddress), countSlot),
 		"EIP-7251: request count should be reset to 0")
 }
 
-func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChainsPostMerge(t *testing.T) {
+func TestState_ApplyBlock_EthereumPragueBlock_FailsWithoutRequestContracts(t *testing.T) {
+	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, state.Close()) }()
+
+	chainConfig := params.MainnetChainConfig
+	excessBlobGas := uint64(0)
+	blobGasUsed := uint64(0)
+	block, err := convert.ConvertToGethBlock(&blockdb.Block{
+		Number:        20_000_000,
+		Timestamp:     *chainConfig.PragueTime,
+		GasLimit:      30_000_000,
+		ExcessBlobGas: &excessBlobGas,
+		BlobGasUsed:   &blobGasUsed,
+		PrevRandao:    []byte{1},
+	})
+	require.NoError(t, err)
+
+	processor := evmcore.NewStateProcessorForReplay(chainConfig, &blockHashHistory{}, opera.Upgrades{})
+
+	_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, chainConfig, nil, false)
+	require.ErrorContains(t, err, "failed to process post-execution of block 20000000")
+}
+
+func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChainsPostShanghai(t *testing.T) {
 	const sonicChainID = uint64(146)
 	sonicUpgrades := opera.GetSonicUpgrades()
 	sonicChainConfig := opera.CreateTransientEvmChainConfig(
@@ -701,29 +677,30 @@ func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChainsPostMerge(t *tes
 
 	const amountGwei = uint64(1000)
 	withdrawalAddr := common.Address{0xAB}
+	shanghaiTime := *params.MainnetChainConfig.ShanghaiTime
 
 	tests := map[string]struct {
 		chainConfig    *params.ChainConfig
 		upgrades       opera.Upgrades
-		difficulty     uint64
+		timestamp      uint64
 		wantBalanceWei uint64
 	}{
-		"ethereum post-merge": {
+		"ethereum post-Shanghai": {
 			chainConfig:    params.MainnetChainConfig,
 			upgrades:       opera.Upgrades{},
-			difficulty:     0,
+			timestamp:      shanghaiTime,
 			wantBalanceWei: amountGwei * params.GWei,
 		},
-		"ethereum pre-merge": {
+		"ethereum pre-Shanghai": {
 			chainConfig:    params.MainnetChainConfig,
 			upgrades:       opera.Upgrades{},
-			difficulty:     1,
+			timestamp:      shanghaiTime - 1,
 			wantBalanceWei: 0,
 		},
 		"non-ethereum": {
 			chainConfig:    sonicChainConfig,
 			upgrades:       sonicUpgrades,
-			difficulty:     0,
+			timestamp:      shanghaiTime,
 			wantBalanceWei: 0,
 		},
 	}
@@ -735,9 +712,11 @@ func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChainsPostMerge(t *tes
 			defer func() { require.NoError(t, state.Close()) }()
 
 			block, err := convert.ConvertToGethBlock(&blockdb.Block{
-				GasLimit:   8_000_000,
-				Difficulty: tt.difficulty,
-				ExtraData:  make([]byte, 12),
+				// Use a large block number to ensure London, a prerequisite of Shanghai, is active.
+				Number:    20_000_000,
+				Timestamp: tt.timestamp,
+				GasLimit:  8_000_000,
+				ExtraData: make([]byte, 12),
 				Withdrawals: []*blockdb.Withdrawal{
 					{Address: withdrawalAddr.Bytes(), Amount: amountGwei},
 				},
