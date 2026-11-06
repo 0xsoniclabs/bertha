@@ -210,10 +210,6 @@ func (s *State) ApplyBlock(
 	onLog func(*core_types.Log),
 	isArchive bool,
 ) (types.Receipts, uint64, error) {
-	if !isForkSupported(chainConfig, block.Number(), block.Time()) {
-		return nil, 0, fmt.Errorf("block %d at time %d is subject to the Amsterdam fork, which is not supported yet", block.NumberU64(), block.Time())
-	}
-
 	transactions := block.Transactions()
 	if len(failedBundles) > 0 {
 		var err error
