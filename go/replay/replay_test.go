@@ -458,6 +458,62 @@ func TestReplay_BlockDBAccessMode(t *testing.T) {
 	}
 }
 
+func TestEndBeforeUnsupportedFork_EndsEthereumChainsBeforeTheFirstUnsupportedBlock(t *testing.T) {
+	amsterdamTime := *params.SepoliaChainConfig.AmsterdamTime
+	blocks := func(yield func(*blockdb.Block, error) bool) {
+		for i, timestamp := range []uint64{amsterdamTime - 2, amsterdamTime - 1, amsterdamTime, amsterdamTime + 1} {
+			if !yield(&blockdb.Block{Number: 20_000_000 + uint64(i), Timestamp: timestamp}, nil) {
+				return
+			}
+		}
+	}
+
+	tests := map[string]struct {
+		chainID uint64
+		warns   bool
+		want    []uint64
+	}{
+		"Sepolia": {
+			chainID: params.SepoliaChainConfig.ChainID.Uint64(),
+			warns:   true,
+			want:    []uint64{20_000_000, 20_000_001},
+		},
+		"Sonic": {
+			chainID: 146,
+			want:    []uint64{20_000_000, 20_000_001, 20_000_002, 20_000_003},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			logger := utils.NewMockLogger(gomock.NewController(t))
+			if tt.warns {
+				logger.EXPECT().Warn("Ending replay before the first block of an unsupported fork", "fork", "Amsterdam", "block", uint64(20_000_002), "timestamp", amsterdamTime)
+			}
+
+			var got []uint64
+			for block, err := range endBeforeUnsupportedFork(blocks, tt.chainID, logger) {
+				require.NoError(t, err)
+				got = append(got, block.Number)
+			}
+			require.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestEndBeforeUnsupportedFork_ForwardsErrors(t *testing.T) {
+	injected := fmt.Errorf("injected")
+	blocks := func(yield func(*blockdb.Block, error) bool) {
+		yield(nil, injected)
+	}
+
+	var errs []error
+	for _, err := range endBeforeUnsupportedFork(blocks, params.SepoliaChainConfig.ChainID.Uint64(), utils.NewMockLogger(gomock.NewController(t))) {
+		errs = append(errs, err)
+	}
+	require.Equal(t, []error{injected}, errs)
+}
+
 func TestReplayLoop(t *testing.T) {
 	runTests := func(t *testing.T, run replayer) {
 		tests := map[string]func(*testing.T, replayer){
@@ -1533,62 +1589,6 @@ func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_UseTheirHashHistory(
 			require.Equal(t, tc.wantStatus, receipts[0].Status)
 		})
 	}
-}
-
-func TestEndBeforeUnsupportedFork_EndsEthereumChainsBeforeTheFirstUnsupportedBlock(t *testing.T) {
-	amsterdamTime := *params.SepoliaChainConfig.AmsterdamTime
-	blocks := func(yield func(*blockdb.Block, error) bool) {
-		for i, timestamp := range []uint64{amsterdamTime - 2, amsterdamTime - 1, amsterdamTime, amsterdamTime + 1} {
-			if !yield(&blockdb.Block{Number: 20_000_000 + uint64(i), Timestamp: timestamp}, nil) {
-				return
-			}
-		}
-	}
-
-	tests := map[string]struct {
-		chainID uint64
-		warns   bool
-		want    []uint64
-	}{
-		"Sepolia": {
-			chainID: params.SepoliaChainConfig.ChainID.Uint64(),
-			warns:   true,
-			want:    []uint64{20_000_000, 20_000_001},
-		},
-		"Sonic": {
-			chainID: 146,
-			want:    []uint64{20_000_000, 20_000_001, 20_000_002, 20_000_003},
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			logger := utils.NewMockLogger(gomock.NewController(t))
-			if tt.warns {
-				logger.EXPECT().Warn("Ending replay before the first block of an unsupported fork", "fork", "Amsterdam", "block", uint64(20_000_002), "timestamp", amsterdamTime)
-			}
-
-			var got []uint64
-			for block, err := range endBeforeUnsupportedFork(blocks, tt.chainID, logger) {
-				require.NoError(t, err)
-				got = append(got, block.Number)
-			}
-			require.Equal(t, tt.want, got)
-		})
-	}
-}
-
-func TestEndBeforeUnsupportedFork_ForwardsErrors(t *testing.T) {
-	injected := fmt.Errorf("injected")
-	blocks := func(yield func(*blockdb.Block, error) bool) {
-		yield(nil, injected)
-	}
-
-	var errs []error
-	for _, err := range endBeforeUnsupportedFork(blocks, params.SepoliaChainConfig.ChainID.Uint64(), utils.NewMockLogger(gomock.NewController(t))) {
-		errs = append(errs, err)
-	}
-	require.Equal(t, []error{injected}, errs)
 }
 
 func TestStateChainAdapter_GetChainConfigAndRules_ReadsFromMetadataStoreForNonEthereumChains(t *testing.T) {
