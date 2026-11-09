@@ -161,7 +161,7 @@ impl FileReader for EraFileReader {
             let beacon_block =
                 SignedBeaconBlock::<MainnetEthSpec>::from_ssz_bytes_by_fork(&ssz_bytes, fork)
                     .map_err(|e| Error::Era(format!("SSZ decode error: {e:?}")))?;
-            era::convert_block(beacon_block)
+            era::convert_block(beacon_block, chain_id)
         }))
     }
 }

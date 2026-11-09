@@ -21,8 +21,9 @@ use bertha_types::{
     compute_root_hash,
 };
 use lighthouse_types::{SignedBeaconBlock, core::MainnetEthSpec};
+use reth_chainspec::ChainSpec;
 
-use crate::Error;
+use crate::{Error, era_dir::common};
 
 /// Parses transactions from their RLP-encoded representation.
 /// Each item in `data` is expected to be a byte slice containing the RLP encoding of a single
@@ -49,9 +50,13 @@ fn parse_withdrawals(
         .collect()
 }
 
-/// Converts a [`SignedBeaconBlock`] to a [`Block`].
-pub fn convert_block(block: SignedBeaconBlock<MainnetEthSpec>) -> Result<Block, Error> {
-    match block {
+/// Converts a [`SignedBeaconBlock`] to a [`Block`]. Block 0 is taken from the chain spec of the
+/// given chain, since the beacon block at slot 0 carries an empty execution payload instead.
+pub fn convert_block(
+    block: SignedBeaconBlock<MainnetEthSpec>,
+    chain_id: u64,
+) -> Result<Block, Error> {
+    let converted = match block {
         SignedBeaconBlock::Bellatrix(blk) => {
             let block = blk.message.body.execution_payload.execution_payload;
             Ok(Block {
@@ -207,5 +212,66 @@ pub fn convert_block(block: SignedBeaconBlock<MainnetEthSpec>) -> Result<Block, 
             })
         }
         _ => Err(Error::Era("unsupported beacon block fork".to_string())),
+    }?;
+    if converted.number == 0 {
+        return ChainSpec::from_chain_id(chain_id)
+            .map(|spec| common::header_only_block(spec.genesis_header()))
+            .ok_or_else(|| Error::Era(format!("no chain spec for chain {chain_id}")));
+    }
+    Ok(converted)
+}
+
+#[cfg(test)]
+mod tests {
+    use bertha_types::HexConvert;
+    use lighthouse_types::{BeaconBlock, ForkName, ForkVersionDecode};
+    use ssz::Encode;
+
+    use super::*;
+
+    /// Returns a Deneb beacon block with an empty execution payload of the given block number.
+    fn deneb_block(number: u64) -> SignedBeaconBlock<MainnetEthSpec> {
+        let spec = ForkName::Deneb.make_genesis_spec(lighthouse_types::ChainSpec::mainnet());
+        let mut block = BeaconBlock::<MainnetEthSpec>::empty(&spec);
+        block
+            .body_deneb_mut()
+            .unwrap()
+            .execution_payload
+            .execution_payload
+            .block_number = number;
+        // An all-zero signature decodes as the empty signature.
+        let bytes = [&100u32.to_le_bytes()[..], &[0; 96], &block.as_ssz_bytes()].concat();
+        SignedBeaconBlock::from_ssz_bytes_by_fork(&bytes, ForkName::Deneb).unwrap()
+    }
+
+    #[rstest::rstest]
+    #[case::mainnet(
+        1,
+        "0xd4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3"
+    )]
+    #[case::sepolia(
+        11155111,
+        "0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9"
+    )]
+    #[case::hoodi(
+        560048,
+        "0xbbe312868b376a3001692a646dd2d7d1e4406380dfd86b98aa8a34d1557c971b"
+    )]
+    fn convert_block_takes_block_0_from_chain_spec(#[case] chain_id: u64, #[case] hash: &str) {
+        let block = convert_block(deneb_block(0), chain_id).unwrap();
+        assert_eq!(block.to_header().compute_hash().to_hex(), hash);
+    }
+
+    #[test]
+    fn convert_block_takes_other_blocks_from_payload() {
+        let block = convert_block(deneb_block(1), 560048).unwrap();
+        assert_eq!(block.number, 1);
+        assert_eq!(block.state_root, [0; 32]);
+    }
+
+    #[test]
+    fn convert_block_fails_for_block_0_of_unknown_chain() {
+        let result = convert_block(deneb_block(0), 0);
+        assert!(matches!(result, Err(Error::Era(msg)) if msg == "no chain spec for chain 0"));
     }
 }

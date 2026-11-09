@@ -14,9 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-use alloy_consensus::{EthereumTxEnvelope, TxEip4844Variant, TxType};
+use alloy_consensus::{EthereumTxEnvelope, Header, TxEip4844Variant, TxType};
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
-use bertha_types::{AccessListEntry, SetCodeAuthorization, Transaction, TransactionType, U256};
+use bertha_types::{
+    AccessListEntry, Block, SetCodeAuthorization, Transaction, TransactionType, U256,
+};
 
 /// Converts a [`TxType`] to a [`TransactionType`].
 pub fn convert_tx_type(tx_type: TxType) -> TransactionType {
@@ -187,5 +189,34 @@ pub fn convert_transaction(transaction: EthereumTxEnvelope<TxEip4844Variant>) ->
                 s: U256::from_le_bytes(sig.s().to_le_bytes()),
             }
         }
+    }
+}
+
+/// Converts a [`Header`] to a [`Block`] without transactions, receipts, withdrawals and ommers.
+pub fn header_only_block(header: &Header) -> Block {
+    Block {
+        parent_hash: header.parent_hash.0,
+        ommers_hash: header.ommers_hash.0,
+        beneficiary: header.beneficiary.0.0,
+        state_root: header.state_root.0,
+        difficulty: u64::from_le_bytes(header.difficulty.as_le_slice()[..8].try_into().unwrap()),
+        number: header.number,
+        gas_limit: header.gas_limit,
+        timestamp: header.timestamp,
+        extra_data: header.extra_data.0.to_vec(),
+        prev_randao: header.mix_hash.0,
+        nonce: header.nonce.0,
+        transactions: Vec::new(),
+        receipts: Vec::new(),
+        base_fee_per_gas: header.base_fee_per_gas.map(U256::from),
+        withdrawals_root: header.withdrawals_root.map(|w| w.0),
+        withdrawals: Vec::new(),
+        blob_gas_used: header.blob_gas_used,
+        excess_blob_gas: header.excess_blob_gas,
+        parent_beacon_block_root: header.parent_beacon_block_root.map(|r| r.0),
+        requests_hash: header.requests_hash.map(|h| h.0),
+        ommer_headers: Vec::new(),
+        verkle_state_root: None,
+        binary_state_root: None,
     }
 }
