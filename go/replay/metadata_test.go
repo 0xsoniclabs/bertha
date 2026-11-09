@@ -265,6 +265,25 @@ func TestBlockDBMetadataStore_PatchRules_DoesNotModifyStoredRules(t *testing.T) 
 	}
 }
 
+func TestBlockDBMetadataStore_PatchRules_AppliesMinBaseFeeOnlyUpdate(t *testing.T) {
+	newMinBaseFee := big.NewInt(50000000000)
+	for name, upgrades := range opera.GetAllHardForksInOrder() {
+		t.Run(name, func(t *testing.T) {
+			require := require.New(t)
+			rules := opera.FakeNetRules(upgrades)
+			require.NotEqual(rules.Economy.MinBaseFee, newMinBaseFee)
+			store := &BlockDBMetadataStore{
+				metadata: Metadata{RulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: rules}}},
+			}
+
+			err := store.PatchRules(0, fmt.Appendf(nil, `{"Economy":{"MinBaseFee":%d}}`, newMinBaseFee))
+			require.NoError(err)
+			require.NotNil(store.nextRules)
+			require.Equal(newMinBaseFee, store.nextRules.Economy.MinBaseFee)
+		})
+	}
+}
+
 func TestBlockDBMetadataStore_PatchRules_UsesLatestRulesAtOrBeforeBlock(t *testing.T) {
 	rulesAt0 := opera.FakeNetRules(opera.Upgrades{Berlin: true, London: true, Sonic: true})
 	rulesAt10 := rulesAt0

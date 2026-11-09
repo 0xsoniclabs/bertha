@@ -157,11 +157,17 @@ func (s *BlockDBMetadataStore) PatchRules(blockNumber uint64, diff []byte) error
 	if s.nextRules != nil {
 		last = *s.nextRules
 	}
-	// UpdateRules shares the MinBaseFee pointer before Allegro, so copy the
-	// big.Int values to keep the stored rules untouched.
-	last.Economy.MinGasPrice = copyBigInt(last.Economy.MinGasPrice)
-	last.Economy.MinBaseFee = copyBigInt(last.Economy.MinBaseFee)
-	updatedRules, err := opera.UpdateRules(last, diff)
+	if last.Economy.MinGasPrice == nil {
+		last.Economy.MinGasPrice = new(big.Int)
+	}
+	if last.Economy.MinBaseFee == nil {
+		last.Economy.MinBaseFee = new(big.Int)
+	}
+	// UpdateRules modifies MinBaseFee in place before Allegro, so pass a copy to
+	// keep the stored rules and the comparison baseline untouched.
+	input := last
+	input.Economy.MinBaseFee = new(big.Int).Set(last.Economy.MinBaseFee)
+	updatedRules, err := opera.UpdateRules(input, diff)
 	if err != nil {
 		return fmt.Errorf("failed to update rules: %w", err)
 	}
@@ -270,12 +276,4 @@ type Metadata struct {
 type RulesUpdateHeight struct {
 	Block uint64
 	Rules opera.Rules
-}
-
-// copyBigInt returns a copy of the given value, or zero if it is nil.
-func copyBigInt(value *big.Int) *big.Int {
-	if value == nil {
-		return new(big.Int)
-	}
-	return new(big.Int).Set(value)
 }
