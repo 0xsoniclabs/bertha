@@ -47,69 +47,94 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/holiman/uint256"
-	"github.com/linxGnu/grocksdb"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
-	"google.golang.org/protobuf/proto"
 )
 
-func TestReplay_SmallValidDb_DoesNotReportIssues(t *testing.T) {
-	require := require.New(t)
+func defaultReplayArgs() ReplayArgs {
+	return ReplayArgs{
+		Interpreter: "sfvm",
+		DBSchema:    5,
+		DBVariant:   "go-file",
+		EndBlock:    math.MaxUint64,
+	}
+}
 
-	chainID := uint64(123)
-
-	dir := t.TempDir()
-	genesis := filepath.Join(dir, "genesis.json")
-	require.NoError(os.WriteFile(genesis, []byte(`{
-		"Rules": {
-			"NetworkID": 123
+func TestReplay_ReproducesChain(t *testing.T) {
+	modes := map[string]func(*ReplayArgs){
+		"Loop": func(*ReplayArgs) {},
+		"Pipeline": func(args *ReplayArgs) {
+			args.UsePipeline = true
+		},
+		"ArchiveRateEnabled": func(args *ReplayArgs) {
+			args.WithArchive = true
+			args.ArchiveRate = 1e6
+		},
+		"ArchiveRateDisabled": func(args *ReplayArgs) {
+			args.WithArchive = true
+		},
+		"Snapshots": func(args *ReplayArgs) {
+			args.SnapshotInterval = 7
+			args.SnapshotNumToKeep = 2
+			args.SnapshotEndBlock = math.MaxUint64
+		},
+		"GoMemory": func(args *ReplayArgs) {
+			args.DBVariant = "go-memory"
+		},
+		"GoFileFlat": func(args *ReplayArgs) {
+			args.DBVariant = "go-file-flat"
+		},
+	}
+	for network, createDb := range blockDbsByNetwork {
+		for mode, configure := range modes {
+			t.Run(network+"/"+mode, func(t *testing.T) {
+				args := defaultReplayArgs()
+				args.BlockDBDir, args.JSONGenesisFile = createDb(t, nil)
+				args.StateDBDir = filepath.Join(t.TempDir(), "state")
+				configure(&args)
+				require.NoError(t, Replay(t.Context(), args))
+			})
 		}
-	}`), 0644))
-
-	path := filepath.Join(dir, "small-db")
-	options := grocksdb.NewDefaultOptions()
-	options.SetCreateIfMissing(true)
-	defer options.Destroy()
-	db, err := grocksdb.OpenDb(options, path)
-	require.NoError(err, "failed to create database")
-
-	writeOptions := grocksdb.NewDefaultWriteOptions()
-	defer writeOptions.Destroy()
-	version := make([]byte, 8)
-	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
-	require.NoError(db.Put(writeOptions, blockdb.MakeVersionKey(), version), "failed to write database version")
-
-	for _, block := range utils.CreateValidBlocks(t, 10_100) {
-		key := blockdb.MakeBlockKey(chainID, uint64(block.Number))
-
-		value, err := proto.Marshal(block)
-		require.NoError(err, "failed to marshal block")
-		require.NoError(db.Put(writeOptions, key, value))
 	}
+}
 
-	db.Close()
+func TestReplay_ResumesOnKeptState(t *testing.T) {
+	for network, createDb := range blockDbsByNetwork {
+		t.Run(network, func(t *testing.T) {
+			require := require.New(t)
+			args := defaultReplayArgs()
+			args.BlockDBDir, args.JSONGenesisFile = createDb(t, nil)
+			args.StateDBDir = filepath.Join(t.TempDir(), "state")
+			args.KeepDB = true
+			args.EndBlock = 25
+			require.NoError(Replay(t.Context(), args))
 
-	tests := map[string]struct {
-		withArchive bool
-		archiveRate float64
-	}{
-		"NoArchive":           {},
-		"ArchiveRateEnabled":  {withArchive: true, archiveRate: 100},
-		"ArchiveRateDisabled": {withArchive: true, archiveRate: 0},
+			args.EndBlock = math.MaxUint64
+			args.StartBlock = 26
+			require.NoError(Replay(t.Context(), args))
+		})
 	}
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			require.NoError(
-				Replay(t.Context(), ReplayArgs{
-					BlockDBDir:      path,
-					JSONGenesisFile: genesis,
-					WithArchive:     tc.withArchive,
-					ArchiveRate:     tc.archiveRate,
-					Interpreter:     "sfvm",
-					DBSchema:        5,
-					DBVariant:       "go-file",
-				}),
-			)
+}
+
+func TestReplay_AppliesCorrectionsAtTheirBlock(t *testing.T) {
+	for network, createDb := range blockDbsByNetwork {
+		t.Run(network, func(t *testing.T) {
+			args := defaultReplayArgs()
+			args.BlockDBDir, args.JSONGenesisFile = createDb(t, Corrections{
+				30: {common.HexToAddress("0x01"): {Balance: uint256.NewInt(1)}},
+			})
+			require.ErrorContains(t, Replay(t.Context(), args), "state root mismatch after applying block 30:")
+		})
+	}
+}
+
+func TestReplay_Schema4SkipsStateRootCheck(t *testing.T) {
+	for network, createDb := range blockDbsByNetwork {
+		t.Run(network, func(t *testing.T) {
+			args := defaultReplayArgs()
+			args.BlockDBDir, args.JSONGenesisFile = createDb(t, nil)
+			args.DBSchema = 4
+			require.NoError(t, Replay(t.Context(), args))
 		})
 	}
 }
@@ -149,41 +174,14 @@ func TestReplay_InvalidFlagCombinationsAreRejected(t *testing.T) {
 }
 
 func TestReplay_InvalidArchiveRateIsReportedAsCreationFailure(t *testing.T) {
-	require := require.New(t)
-
-	dir := t.TempDir()
-	genesis := filepath.Join(dir, "genesis.json")
-	require.NoError(os.WriteFile(genesis, []byte(`{"Rules": {"NetworkID": 123}}`), 0644))
-
-	dbPath := filepath.Join(dir, "block-db")
-	options := grocksdb.NewDefaultOptions()
-	options.SetCreateIfMissing(true)
-	defer options.Destroy()
-	db, err := grocksdb.OpenDb(options, dbPath)
-	require.NoError(err)
-
-	writeOptions := grocksdb.NewDefaultWriteOptions()
-	defer writeOptions.Destroy()
-	version := make([]byte, 8)
-	binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
-	require.NoError(db.Put(writeOptions, blockdb.MakeVersionKey(), version))
-	db.Close()
-
-	err = Replay(t.Context(), ReplayArgs{
-		BlockDBDir:      dbPath,
-		JSONGenesisFile: genesis,
-		WithArchive:     true,
-		ArchiveRate:     -1,
-		Interpreter:     "sfvm",
-		DBSchema:        5,
-		DBVariant:       "go-file",
-	})
-	require.ErrorContains(err, "failed to create archive verifier")
+	args := defaultReplayArgs()
+	args.BlockDBDir, args.JSONGenesisFile = createSonicBlockDb(t, nil)
+	args.WithArchive = true
+	args.ArchiveRate = -1
+	require.ErrorContains(t, Replay(t.Context(), args), "failed to create archive verifier")
 }
 
 func TestReplay_StateDbAndSnapshotCleanupBehavior(t *testing.T) {
-	chainID := uint64(123)
-
 	cases := map[string]struct {
 		keepDB                bool
 		invalidReplay         bool
@@ -231,38 +229,21 @@ func TestReplay_StateDbAndSnapshotCleanupBehavior(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 
-			// Create block DB with enough blocks for snapshots
-			numBlocks := 20
-			blocks := utils.CreateValidBlocks(t, numBlocks)
+			var corrections Corrections
 			if tc.invalidReplay {
-				// Tamper with a block after a snapshot to trigger a state root mismatch
-				blocks[15].StateRoot = common.Hash{0xFF}.Bytes()
+				// Correct a block after a snapshot to trigger a state root mismatch
+				corrections = Corrections{15: {common.HexToAddress("0x01"): {Balance: uint256.NewInt(1)}}}
 			}
-
-			path := filepath.Join(dir, "block-db")
-			options := grocksdb.NewDefaultOptions()
-			options.SetCreateIfMissing(true)
-			defer options.Destroy()
-			db, err := grocksdb.OpenDb(options, path)
-			require.NoError(t, err)
-
-			writeOptions := grocksdb.NewDefaultWriteOptions()
-			defer writeOptions.Destroy()
-			version := make([]byte, 8)
-			binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
-			require.NoError(t, db.Put(writeOptions, blockdb.MakeVersionKey(), version))
-
-			for _, block := range blocks {
-				key := blockdb.MakeBlockKey(chainID, uint64(block.Number))
-				value, err := proto.Marshal(block)
-				require.NoError(t, err)
-				require.NoError(t, db.Put(writeOptions, key, value))
-			}
-			db.Close()
-
-			genesisPath := filepath.Join(dir, "genesis.json")
-			require.NoError(t, os.WriteFile(genesisPath, []byte(fmt.Sprintf(`{"Rules": {"NetworkID": %d}}`, chainID)), 0644))
 			stateDBDir := filepath.Join(dir, "state-db")
+			args := defaultReplayArgs()
+			args.BlockDBDir, args.JSONGenesisFile = createSonicBlockDb(t, corrections)
+			args.StateDBDir = stateDBDir
+			args.KeepDB = tc.keepDB
+			args.EndBlock = 20
+			args.SnapshotInterval = 10
+			args.SnapshotNumToKeep = 1
+			args.SnapshotEndBlock = math.MaxUint64
+			args.NoReceiptsCheck = true
 
 			ctx := t.Context()
 			if tc.cancelContext {
@@ -271,20 +252,7 @@ func TestReplay_StateDbAndSnapshotCleanupBehavior(t *testing.T) {
 				cancel()
 			}
 
-			err = Replay(ctx, ReplayArgs{
-				BlockDBDir:        path,
-				JSONGenesisFile:   genesisPath,
-				StateDBDir:        stateDBDir,
-				KeepDB:            tc.keepDB,
-				Interpreter:       "sfvm",
-				DBSchema:          5,
-				DBVariant:         "go-file",
-				EndBlock:          uint64(numBlocks),
-				SnapshotInterval:  10,
-				SnapshotNumToKeep: 1,
-				SnapshotEndBlock:  math.MaxUint64,
-				NoReceiptsCheck:   true,
-			})
+			err := Replay(ctx, args)
 
 			if tc.cancelContext {
 				require.ErrorIs(t, err, context.Canceled)
@@ -314,8 +282,6 @@ func TestReplay_StateDbAndSnapshotCleanupBehavior(t *testing.T) {
 }
 
 func TestReplay_BlockDBAccessMode(t *testing.T) {
-	chainID := uint64(123)
-
 	cases := map[string]struct {
 		overwriteStateRoot      OverwriteStateRootPolicy
 		writeRulesUpdateHeights bool
@@ -350,52 +316,22 @@ func TestReplay_BlockDBAccessMode(t *testing.T) {
 
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-
-			numBlocks := 20
-			blockDBPath := filepath.Join(dir, "block-db")
-			options := grocksdb.NewDefaultOptions()
-			options.SetCreateIfMissing(true)
-			defer options.Destroy()
-			db, err := grocksdb.OpenDb(options, blockDBPath)
-			require.NoError(t, err)
-
-			writeOptions := grocksdb.NewDefaultWriteOptions()
-			defer writeOptions.Destroy()
-			version := make([]byte, 8)
-			binary.BigEndian.PutUint64(version, blockdb.CurrentVersion)
-			require.NoError(t, db.Put(writeOptions, blockdb.MakeVersionKey(), version))
-
-			for _, block := range utils.CreateValidBlocks(t, numBlocks) {
-				key := blockdb.MakeBlockKey(chainID, uint64(block.Number))
-				value, err := proto.Marshal(block)
-				require.NoError(t, err)
-				require.NoError(t, db.Put(writeOptions, key, value))
-			}
-			db.Close()
-
-			genesis := filepath.Join(dir, "genesis.json")
-			require.NoError(t, os.WriteFile(genesis, []byte(fmt.Sprintf(`{"Rules": {"NetworkID": %d}}`, chainID)), 0644))
+			args := defaultReplayArgs()
+			args.BlockDBDir, args.JSONGenesisFile = createSonicBlockDb(t, nil)
+			args.OverwriteStateRoot = tc.overwriteStateRoot
+			args.WriteRulesUpdateHeights = tc.writeRulesUpdateHeights
+			args.EndBlock = 20
 
 			for _, readOnly := range []bool{false, true} {
 				if readOnly {
-					require.NoError(t, os.Chmod(blockDBPath, 0555))
+					require.NoError(t, os.Chmod(args.BlockDBDir, 0555))
 					t.Cleanup(func() {
 						// Restore write permissions for cleanup
-						_ = os.Chmod(blockDBPath, 0755)
+						_ = os.Chmod(args.BlockDBDir, 0755)
 					})
 				}
 
-				err := Replay(t.Context(), ReplayArgs{
-					BlockDBDir:              blockDBPath,
-					JSONGenesisFile:         genesis,
-					Interpreter:             "sfvm",
-					DBSchema:                5,
-					DBVariant:               "go-file",
-					OverwriteStateRoot:      tc.overwriteStateRoot,
-					WriteRulesUpdateHeights: tc.writeRulesUpdateHeights,
-					EndBlock:                uint64(numBlocks),
-				})
+				err := Replay(t.Context(), args)
 
 				if tc.requiresWriteAccess && readOnly {
 					require.Error(t, err)
