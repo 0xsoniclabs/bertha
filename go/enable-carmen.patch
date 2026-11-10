@@ -1,17 +1,17 @@
 diff --git a/go/replay/state.go b/go/replay/state.go
-index a1a8fa2..b5a2848 100644
+index 5862689..ad7ea01 100644
 --- a/go/replay/state.go
 +++ b/go/replay/state.go
-@@ -45,7 +45,8 @@ import (
- 	"github.com/ethereum/go-ethereum/core/vm"
- 	"github.com/ethereum/go-ethereum/params"
+@@ -29,7 +29,8 @@ import (
+ 	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
+ 	"github.com/ethereum/go-ethereum/common"
  	// Uncomment to enable experimental Carmen features.
 -	//_ "github.com/0xsoniclabs/carmen/go/experimental"
 +
 +	_ "github.com/0xsoniclabs/carmen/go/experimental"
  )
  
- //go:generate mockgen -source=state.go -destination=state_mock.go -package=replay
+ // State is an abstraction of the Chain State Database. It tracks the balances,
 diff --git a/go/go.mod b/go/go.mod
 index c039660..775ce8f 100644
 --- a/go/go.mod
