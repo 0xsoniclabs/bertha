@@ -37,7 +37,7 @@ import (
 // state root. It is factored out to allow its use in both the simple replay
 // loop and the pipeline version.
 func checkBlockResults(
-	chain Chain,
+	executor HistoryExecutor,
 	block *blockdb.Block,
 	receipts types.Receipts,
 	stateRootFuture future.Future[result.Result[common.Hash]],
@@ -55,7 +55,7 @@ func checkBlockResults(
 		}
 	}
 
-	if err := checkStateRoot(chain, block, stateRootFuture, blockDB, replayLoopContext, logger); err != nil {
+	if err := checkStateRoot(executor, block, stateRootFuture, blockDB, replayLoopContext, logger); err != nil {
 		return err
 	}
 
@@ -130,7 +130,7 @@ func checkReceipts(block *blockdb.Block, receipts types.Receipts) error {
 //   - OverwriteStateRootPolicyOn: the computed root is always written back to
 //     the block DB and verification is skipped.
 func checkStateRoot(
-	chain Chain,
+	executor HistoryExecutor,
 	block *blockdb.Block,
 	stateRootFuture future.Future[result.Result[common.Hash]],
 	blockDB blockdb.BlockDB,
@@ -141,14 +141,14 @@ func checkStateRoot(
 	if err != nil {
 		return fmt.Errorf("failed to get state root after applying block %d: %w", block.Number, err)
 	}
-	expectedStateRoot := getExpectedStateRoot(chain, block)
+	expectedStateRoot := getExpectedStateRoot(executor, block)
 
 	switch replayLoopContext.overwriteStateRoot {
 	case OverwriteStateRootPolicyOn:
-		return overwriteAndPersistStateRoot(chain, block, computedStateRoot, blockDB)
+		return overwriteAndPersistStateRoot(executor, block, computedStateRoot, blockDB)
 	case OverwriteStateRootPolicyUninitialized:
 		if expectedStateRoot == (common.Hash{}) {
-			return overwriteAndPersistStateRoot(chain, block, computedStateRoot, blockDB)
+			return overwriteAndPersistStateRoot(executor, block, computedStateRoot, blockDB)
 		}
 	}
 
@@ -172,13 +172,13 @@ func checkStateRoot(
 // overwriteAndPersistStateRoot updates the block's state root with the
 // computed value and persists it to the block database.
 func overwriteAndPersistStateRoot(
-	chain Chain,
+	executor HistoryExecutor,
 	block *blockdb.Block,
 	computedStateRoot common.Hash,
 	blockDB blockdb.BlockDB,
 ) error {
-	updateStateRoot(chain, block, computedStateRoot)
-	if err := blockDB.Update(chain.ChainID(), block); err != nil {
+	updateStateRoot(executor, block, computedStateRoot)
+	if err := blockDB.Update(executor.ChainID(), block); err != nil {
 		return fmt.Errorf("failed to update block %d in database: %w", block.Number, err)
 	}
 	return nil

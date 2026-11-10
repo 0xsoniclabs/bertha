@@ -288,10 +288,10 @@ func Test_checkBlockResults_FailsIfComputedValuesMismatchStoredOnes(t *testing.T
 		t.Run(name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 
-			chain := NewMockChain(ctrl)
+			executor := NewMockHistoryExecutor(ctrl)
 			// IsMptConformant is only reached if checkReceipts succeeds, so
 			// receipt-error cases will not call it at all.
-			chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+			executor.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 			logger := utils.NewMockLogger(ctrl)
 			// Warn is only emitted for specific cases (e.g. missing state root),
@@ -299,7 +299,7 @@ func Test_checkBlockResults_FailsIfComputedValuesMismatchStoredOnes(t *testing.T
 			logger.EXPECT().Warn(gomock.Any(), gomock.Any()).AnyTimes()
 
 			err := checkBlockResults(
-				chain,
+				executor,
 				tc.block,
 				tc.receipts,
 				tc.stateRootFuture,
@@ -411,9 +411,9 @@ func Test_checkStateRoot(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 
-			chain := NewMockChain(ctrl)
-			chain.EXPECT().ChainID().Return(chainID).AnyTimes()
-			chain.EXPECT().IsMptConformant().Return(true).AnyTimes()
+			executor := NewMockHistoryExecutor(ctrl)
+			executor.EXPECT().ChainID().Return(chainID).AnyTimes()
+			executor.EXPECT().IsMptConformant().Return(true).AnyTimes()
 
 			block := &blockdb.Block{
 				Number:    5,
@@ -444,7 +444,7 @@ func Test_checkStateRoot(t *testing.T) {
 			}
 
 			err := checkStateRoot(
-				chain,
+				executor,
 				block,
 				future.Immediate(result.Ok(computedStateRoot)),
 				blockDB,

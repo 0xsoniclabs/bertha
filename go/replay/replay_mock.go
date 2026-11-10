@@ -19,32 +19,32 @@ import (
 	gomock "go.uber.org/mock/gomock"
 )
 
-// MockChain is a mock of Chain interface.
-type MockChain struct {
+// MockHistoryExecutor is a mock of HistoryExecutor interface.
+type MockHistoryExecutor struct {
 	ctrl     *gomock.Controller
-	recorder *MockChainMockRecorder
+	recorder *MockHistoryExecutorMockRecorder
 	isgomock struct{}
 }
 
-// MockChainMockRecorder is the mock recorder for MockChain.
-type MockChainMockRecorder struct {
-	mock *MockChain
+// MockHistoryExecutorMockRecorder is the mock recorder for MockHistoryExecutor.
+type MockHistoryExecutorMockRecorder struct {
+	mock *MockHistoryExecutor
 }
 
-// NewMockChain creates a new mock instance.
-func NewMockChain(ctrl *gomock.Controller) *MockChain {
-	mock := &MockChain{ctrl: ctrl}
-	mock.recorder = &MockChainMockRecorder{mock}
+// NewMockHistoryExecutor creates a new mock instance.
+func NewMockHistoryExecutor(ctrl *gomock.Controller) *MockHistoryExecutor {
+	mock := &MockHistoryExecutor{ctrl: ctrl}
+	mock.recorder = &MockHistoryExecutorMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockChain) EXPECT() *MockChainMockRecorder {
+func (m *MockHistoryExecutor) EXPECT() *MockHistoryExecutorMockRecorder {
 	return m.recorder
 }
 
 // ApplyBlock mocks base method.
-func (m *MockChain) ApplyBlock(arg0 *types.Block) (types.Receipts, future.Future[result.Result[common.Hash]], error) {
+func (m *MockHistoryExecutor) ApplyBlock(arg0 *types.Block) (types.Receipts, future.Future[result.Result[common.Hash]], error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ApplyBlock", arg0)
 	ret0, _ := ret[0].(types.Receipts)
@@ -54,13 +54,13 @@ func (m *MockChain) ApplyBlock(arg0 *types.Block) (types.Receipts, future.Future
 }
 
 // ApplyBlock indicates an expected call of ApplyBlock.
-func (mr *MockChainMockRecorder) ApplyBlock(arg0 any) *gomock.Call {
+func (mr *MockHistoryExecutorMockRecorder) ApplyBlock(arg0 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyBlock", reflect.TypeOf((*MockChain)(nil).ApplyBlock), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyBlock", reflect.TypeOf((*MockHistoryExecutor)(nil).ApplyBlock), arg0)
 }
 
 // ChainID mocks base method.
-func (m *MockChain) ChainID() uint64 {
+func (m *MockHistoryExecutor) ChainID() uint64 {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ChainID")
 	ret0, _ := ret[0].(uint64)
@@ -68,13 +68,13 @@ func (m *MockChain) ChainID() uint64 {
 }
 
 // ChainID indicates an expected call of ChainID.
-func (mr *MockChainMockRecorder) ChainID() *gomock.Call {
+func (mr *MockHistoryExecutorMockRecorder) ChainID() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChainID", reflect.TypeOf((*MockChain)(nil).ChainID))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ChainID", reflect.TypeOf((*MockHistoryExecutor)(nil).ChainID))
 }
 
 // CloneBlockHashHistory mocks base method.
-func (m *MockChain) CloneBlockHashHistory() *blockHashHistory {
+func (m *MockHistoryExecutor) CloneBlockHashHistory() *blockHashHistory {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CloneBlockHashHistory")
 	ret0, _ := ret[0].(*blockHashHistory)
@@ -82,13 +82,13 @@ func (m *MockChain) CloneBlockHashHistory() *blockHashHistory {
 }
 
 // CloneBlockHashHistory indicates an expected call of CloneBlockHashHistory.
-func (mr *MockChainMockRecorder) CloneBlockHashHistory() *gomock.Call {
+func (mr *MockHistoryExecutorMockRecorder) CloneBlockHashHistory() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloneBlockHashHistory", reflect.TypeOf((*MockChain)(nil).CloneBlockHashHistory))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloneBlockHashHistory", reflect.TypeOf((*MockHistoryExecutor)(nil).CloneBlockHashHistory))
 }
 
 // GetBlockHash mocks base method.
-func (m *MockChain) GetBlockHash(blockNumber uint64) common.Hash {
+func (m *MockHistoryExecutor) GetBlockHash(blockNumber uint64) common.Hash {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetBlockHash", blockNumber)
 	ret0, _ := ret[0].(common.Hash)
@@ -96,13 +96,13 @@ func (m *MockChain) GetBlockHash(blockNumber uint64) common.Hash {
 }
 
 // GetBlockHash indicates an expected call of GetBlockHash.
-func (mr *MockChainMockRecorder) GetBlockHash(blockNumber any) *gomock.Call {
+func (mr *MockHistoryExecutorMockRecorder) GetBlockHash(blockNumber any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBlockHash", reflect.TypeOf((*MockChain)(nil).GetBlockHash), blockNumber)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBlockHash", reflect.TypeOf((*MockHistoryExecutor)(nil).GetBlockHash), blockNumber)
 }
 
 // IsMptConformant mocks base method.
-func (m *MockChain) IsMptConformant() bool {
+func (m *MockHistoryExecutor) IsMptConformant() bool {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "IsMptConformant")
 	ret0, _ := ret[0].(bool)
@@ -110,13 +110,13 @@ func (m *MockChain) IsMptConformant() bool {
 }
 
 // IsMptConformant indicates an expected call of IsMptConformant.
-func (mr *MockChainMockRecorder) IsMptConformant() *gomock.Call {
+func (mr *MockHistoryExecutorMockRecorder) IsMptConformant() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsMptConformant", reflect.TypeOf((*MockChain)(nil).IsMptConformant))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsMptConformant", reflect.TypeOf((*MockHistoryExecutor)(nil).IsMptConformant))
 }
 
 // IsVerkleConformant mocks base method.
-func (m *MockChain) IsVerkleConformant() bool {
+func (m *MockHistoryExecutor) IsVerkleConformant() bool {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "IsVerkleConformant")
 	ret0, _ := ret[0].(bool)
@@ -124,13 +124,13 @@ func (m *MockChain) IsVerkleConformant() bool {
 }
 
 // IsVerkleConformant indicates an expected call of IsVerkleConformant.
-func (mr *MockChainMockRecorder) IsVerkleConformant() *gomock.Call {
+func (mr *MockHistoryExecutorMockRecorder) IsVerkleConformant() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsVerkleConformant", reflect.TypeOf((*MockChain)(nil).IsVerkleConformant))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsVerkleConformant", reflect.TypeOf((*MockHistoryExecutor)(nil).IsVerkleConformant))
 }
 
 // MaybeSnapshot mocks base method.
-func (m *MockChain) MaybeSnapshot(blockNumber uint64, stateRoot future.Future[result.Result[common.Hash]]) (future.Future[result.Result[common.Hash]], error) {
+func (m *MockHistoryExecutor) MaybeSnapshot(blockNumber uint64, stateRoot future.Future[result.Result[common.Hash]]) (future.Future[result.Result[common.Hash]], error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "MaybeSnapshot", blockNumber, stateRoot)
 	ret0, _ := ret[0].(future.Future[result.Result[common.Hash]])
@@ -139,52 +139,52 @@ func (m *MockChain) MaybeSnapshot(blockNumber uint64, stateRoot future.Future[re
 }
 
 // MaybeSnapshot indicates an expected call of MaybeSnapshot.
-func (mr *MockChainMockRecorder) MaybeSnapshot(blockNumber, stateRoot any) *gomock.Call {
+func (mr *MockHistoryExecutorMockRecorder) MaybeSnapshot(blockNumber, stateRoot any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaybeSnapshot", reflect.TypeOf((*MockChain)(nil).MaybeSnapshot), blockNumber, stateRoot)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaybeSnapshot", reflect.TypeOf((*MockHistoryExecutor)(nil).MaybeSnapshot), blockNumber, stateRoot)
 }
 
-// MockArchiveChain is a mock of ArchiveChain interface.
-type MockArchiveChain struct {
+// MockArchiveExecutor is a mock of ArchiveExecutor interface.
+type MockArchiveExecutor struct {
 	ctrl     *gomock.Controller
-	recorder *MockArchiveChainMockRecorder
+	recorder *MockArchiveExecutorMockRecorder
 	isgomock struct{}
 }
 
-// MockArchiveChainMockRecorder is the mock recorder for MockArchiveChain.
-type MockArchiveChainMockRecorder struct {
-	mock *MockArchiveChain
+// MockArchiveExecutorMockRecorder is the mock recorder for MockArchiveExecutor.
+type MockArchiveExecutorMockRecorder struct {
+	mock *MockArchiveExecutor
 }
 
-// NewMockArchiveChain creates a new mock instance.
-func NewMockArchiveChain(ctrl *gomock.Controller) *MockArchiveChain {
-	mock := &MockArchiveChain{ctrl: ctrl}
-	mock.recorder = &MockArchiveChainMockRecorder{mock}
+// NewMockArchiveExecutor creates a new mock instance.
+func NewMockArchiveExecutor(ctrl *gomock.Controller) *MockArchiveExecutor {
+	mock := &MockArchiveExecutor{ctrl: ctrl}
+	mock.recorder = &MockArchiveExecutorMockRecorder{mock}
 	return mock
 }
 
 // EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockArchiveChain) EXPECT() *MockArchiveChainMockRecorder {
+func (m *MockArchiveExecutor) EXPECT() *MockArchiveExecutorMockRecorder {
 	return m.recorder
 }
 
-// ApplyArchiveBlock mocks base method.
-func (m *MockArchiveChain) ApplyArchiveBlock(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
+// ApplyBlockOnArchive mocks base method.
+func (m *MockArchiveExecutor) ApplyBlockOnArchive(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ApplyArchiveBlock", block, hashHistory)
+	ret := m.ctrl.Call(m, "ApplyBlockOnArchive", block, hashHistory)
 	ret0, _ := ret[0].(types.Receipts)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// ApplyArchiveBlock indicates an expected call of ApplyArchiveBlock.
-func (mr *MockArchiveChainMockRecorder) ApplyArchiveBlock(block, hashHistory any) *gomock.Call {
+// ApplyBlockOnArchive indicates an expected call of ApplyBlockOnArchive.
+func (mr *MockArchiveExecutorMockRecorder) ApplyBlockOnArchive(block, hashHistory any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyArchiveBlock", reflect.TypeOf((*MockArchiveChain)(nil).ApplyArchiveBlock), block, hashHistory)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyBlockOnArchive", reflect.TypeOf((*MockArchiveExecutor)(nil).ApplyBlockOnArchive), block, hashHistory)
 }
 
 // GetArchiveBlockHeight mocks base method.
-func (m *MockArchiveChain) GetArchiveBlockHeight() (uint64, bool, error) {
+func (m *MockArchiveExecutor) GetArchiveBlockHeight() (uint64, bool, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetArchiveBlockHeight")
 	ret0, _ := ret[0].(uint64)
@@ -194,9 +194,9 @@ func (m *MockArchiveChain) GetArchiveBlockHeight() (uint64, bool, error) {
 }
 
 // GetArchiveBlockHeight indicates an expected call of GetArchiveBlockHeight.
-func (mr *MockArchiveChainMockRecorder) GetArchiveBlockHeight() *gomock.Call {
+func (mr *MockArchiveExecutorMockRecorder) GetArchiveBlockHeight() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetArchiveBlockHeight", reflect.TypeOf((*MockArchiveChain)(nil).GetArchiveBlockHeight))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetArchiveBlockHeight", reflect.TypeOf((*MockArchiveExecutor)(nil).GetArchiveBlockHeight))
 }
 
 // MockStateFlusher is a mock of StateFlusher interface.

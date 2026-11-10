@@ -152,9 +152,9 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 
 	// Create the block executor
-	var executor BlockExecutor
+	var blockExecutor BlockExecutor
 	if isEthereum(chainID) {
-		executor = &ethereumExecutor{chainID: chainID, interpreter: interpreter}
+		blockExecutor = &ethereumExecutor{chainID: chainID, interpreter: interpreter}
 	} else {
 		// Create the metadata store
 		slog.Info("Initializing metadata store")
@@ -162,7 +162,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		if err != nil {
 			return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
 		}
-		executor = &sonicExecutor{chainID: chainID, metadataStore: metadataStore, interpreter: interpreter}
+		blockExecutor = &sonicExecutor{chainID: chainID, metadataStore: metadataStore, interpreter: interpreter}
 	}
 
 	// Prepare the state database directory
@@ -189,9 +189,9 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	if err != nil {
 		return fmt.Errorf("failed to open state database: %w", err)
 	}
-	chain := &stateChainAdapter{
+	executor := &historyExecutor{
 		chainID:          chainID,
-		executor:         executor,
+		blockExecutor:    blockExecutor,
 		blockHashHistory: &blockHashHistory{},
 		state:            state,
 		schema:           args.DBSchema,
@@ -199,16 +199,16 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 	defer func() {
 		slog.Info("Closing state database", "directory", args.StateDBDir)
-		// The state needs to be accessed through the stateChainAdapter
+		// The state needs to be accessed through the historyExecutor
 		// because it might have been closed and reopened for a snapshot creation.
-		// The stateChainAdapter always holds the currently open state.
-		if chain.state != nil {
-			err = errors.Join(err, chain.state.Close())
+		// The historyExecutor always holds the currently open state.
+		if executor.state != nil {
+			err = errors.Join(err, executor.state.Close())
 		}
 	}()
 
 	// Prepare the state
-	if err := prepareState(&args, chain, blockDb, genesis); err != nil {
+	if err := prepareState(&args, executor, blockDb, genesis); err != nil {
 		return fmt.Errorf("failed to prepare state: %w", err)
 	}
 
@@ -216,7 +216,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	if args.LogDBSize {
 		slog.Warn("DB size log enabled. This will trigger a flush with every progress report and reduce performance")
 	}
-	progressLogger := startProgressLogger(slog.Default(), chain, args.StateDBDir, args.LogDBSize)
+	progressLogger := startProgressLogger(slog.Default(), executor, args.StateDBDir, args.LogDBSize)
 	onBlockDone := func(block *types.Block) error { return progressLogger.LogProgress(block) }
 	defer func() { progressLogger.LogSummary() }()
 
@@ -235,7 +235,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		var cancel context.CancelCauseFunc
 		ctx, cancel = context.WithCancelCause(ctx)
 		defer cancel(nil)
-		verifier, err = newArchiveVerifier(ctx, cancel, chain, args.ArchiveRate, args.NoReceiptsCheck, slog.Default())
+		verifier, err = newArchiveVerifier(ctx, cancel, executor, args.ArchiveRate, args.NoReceiptsCheck, slog.Default())
 		if err != nil {
 			return fmt.Errorf("failed to create archive verifier: %w", err)
 		}
@@ -250,7 +250,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		run = runReplayPipeline
 	}
 
-	return run(ctx, blocks, chain, blockDb, replayLoopContext, onBlockDone, verifier)
+	return run(ctx, blocks, executor, blockDb, replayLoopContext, onBlockDone, verifier)
 }
 
 func openBlockDb(args *ReplayArgs) (blockdb.BlockDB, func() error, error) {
@@ -350,18 +350,18 @@ func cleanupStateDbDir(args *ReplayArgs, snapshotHandler *SnapshotHandler, outer
 	return err
 }
 
-func prepareState(args *ReplayArgs, chain *stateChainAdapter, blockDb blockdb.BlockDB, genesis *makefakegenesis.GenesisJson) error {
+func prepareState(args *ReplayArgs, executor *historyExecutor, blockDb blockdb.BlockDB, genesis *makefakegenesis.GenesisJson) error {
 	if args.StartBlock == 0 {
 		slog.Info("Applying genesis")
 		// Apply genesis data to the state database.
-		if err := chain.state.ApplyGenesis(genesis); err != nil {
+		if err := executor.state.ApplyGenesis(genesis); err != nil {
 			return fmt.Errorf("failed to apply genesis data: %w", err)
 		}
 	}
-	if err := seedBlockHashHistory(blockDb, chain.chainID, args.StartBlock, chain.blockHashHistory); err != nil {
+	if err := seedBlockHashHistory(blockDb, executor.chainID, args.StartBlock, executor.blockHashHistory); err != nil {
 		return fmt.Errorf("failed to seed block hash history: %w", err)
 	}
-	stateRoot, err := chain.state.GetStateRoot().Await().Get()
+	stateRoot, err := executor.state.GetStateRoot().Await().Get()
 	if err != nil {
 		return fmt.Errorf("failed to get state root: %w", err)
 	}
@@ -405,12 +405,12 @@ func seedBlockHashHistory(
 }
 
 // runReplayLoop processes the blocks from the given iterator, applying them
-// to the chain and checking the results against the expected values in the
+// to the state and checking the results against the expected values in the
 // blocks. This is the main business logic of the replay command.
 func runReplayLoop(
 	ctx context.Context,
 	blocks iter.Seq2[*blockdb.Block, error],
-	chain Chain,
+	executor HistoryExecutor,
 	blockDB blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
 	onBlockDone func(block *types.Block) error,
@@ -432,29 +432,29 @@ func runReplayLoop(
 
 		var hashOfParentBlock common.Hash
 		if gethBlock.NumberU64() > 0 {
-			hashOfParentBlock = chain.GetBlockHash(gethBlock.NumberU64() - 1)
+			hashOfParentBlock = executor.GetBlockHash(gethBlock.NumberU64() - 1)
 		}
 
 		// If the archive verifier is enabled, capture the current state of the block hash history.
 		var hashHistoryClone *blockHashHistory
 		if verifier != nil {
-			hashHistoryClone = chain.CloneBlockHashHistory()
+			hashHistoryClone = executor.CloneBlockHashHistory()
 		}
 
 		// Run the transactions in the block against the state database.
-		receipts, stateRoot, err := chain.ApplyBlock(gethBlock)
+		receipts, stateRoot, err := executor.ApplyBlock(gethBlock)
 		if err != nil {
 			return fmt.Errorf("failed to apply block %d: %w", block.Number, err)
 		}
 
 		// Create a snapshot if one is due at this block.
-		stateRoot, err = chain.MaybeSnapshot(gethBlock.NumberU64(), stateRoot)
+		stateRoot, err = executor.MaybeSnapshot(gethBlock.NumberU64(), stateRoot)
 		if err != nil {
 			return fmt.Errorf("failed to create snapshot at block %d: %w", block.Number, err)
 		}
 
 		// Check the receipts against the expected values in the block.
-		if err := checkBlockResults(chain, block, receipts, stateRoot, hashOfParentBlock, blockDB, &replayLoopContext, slog.Default()); err != nil {
+		if err := checkBlockResults(executor, block, receipts, stateRoot, hashOfParentBlock, blockDB, &replayLoopContext, slog.Default()); err != nil {
 			return fmt.Errorf("failed to check block results for block %d: %w", block.Number, err)
 		}
 
@@ -474,13 +474,13 @@ func runReplayLoop(
 }
 
 // runReplayPipeline processes the blocks from the given iterator using a
-// multi-stage pipeline, applying them to the chain and checking the results
+// multi-stage pipeline, applying them to the state and checking the results
 // against the expected values in the blocks. This is an optimized version of
 // the replay logic that can achieve higher throughput.
 func runReplayPipeline(
 	ctx context.Context,
 	blocks iter.Seq2[*blockdb.Block, error],
-	chain Chain,
+	executor HistoryExecutor,
 	blockDB blockdb.BlockDB,
 	replayLoopContext ReplayLoopContext,
 	onBlockDone func(block *types.Block) error,
@@ -490,7 +490,7 @@ func runReplayPipeline(
 
 	// Pipeline stages:
 	//  - decoding of blocks
-	//  - applying blocks to the chain
+	//  - applying blocks to the state
 	//  - checking results
 
 	// Result of first stage: decoded block
@@ -531,7 +531,7 @@ func runReplayPipeline(
 	// Stage 1: Decode blocks
 	wg.Go(func() {
 		defer close(decodedBlocks)
-		signer := types.LatestSignerForChainID(new(big.Int).SetUint64(chain.ChainID()))
+		signer := types.LatestSignerForChainID(new(big.Int).SetUint64(executor.ChainID()))
 		for block, err := range blocks {
 			tracy.FrameMark()
 			if err != nil {
@@ -574,20 +574,20 @@ func runReplayPipeline(
 			gethBlock := decoded.geth
 			var hashOfParentBlock common.Hash
 			if gethBlock.NumberU64() > 0 {
-				hashOfParentBlock = chain.GetBlockHash(gethBlock.NumberU64() - 1)
+				hashOfParentBlock = executor.GetBlockHash(gethBlock.NumberU64() - 1)
 			}
 			// If the archive verifier is enabled, capture the current state of the block hash history.
 			var hashHistoryClone *blockHashHistory
 			if verifier != nil {
-				hashHistoryClone = chain.CloneBlockHashHistory()
+				hashHistoryClone = executor.CloneBlockHashHistory()
 			}
-			receipts, stateRootFuture, err := chain.ApplyBlock(gethBlock)
+			receipts, stateRootFuture, err := executor.ApplyBlock(gethBlock)
 			if err != nil {
 				reportIssue(fmt.Errorf("failed to apply block %d: %w", gethBlock.NumberU64(), err))
 				return
 			}
 			// Create a snapshot if one is due at this block.
-			stateRootFuture, err = chain.MaybeSnapshot(gethBlock.NumberU64(), stateRootFuture)
+			stateRootFuture, err = executor.MaybeSnapshot(gethBlock.NumberU64(), stateRootFuture)
 			if err != nil {
 				reportIssue(fmt.Errorf("failed to create snapshot at block %d: %w", gethBlock.NumberU64(), err))
 				return
@@ -613,7 +613,7 @@ func runReplayPipeline(
 		for result := range results {
 			block := result.decoded.proto
 
-			err := checkBlockResults(chain, block, result.receipts, result.stateRoot, result.hashOfParentBlock, blockDB, &replayLoopContext, slog.Default())
+			err := checkBlockResults(executor, block, result.receipts, result.stateRoot, result.hashOfParentBlock, blockDB, &replayLoopContext, slog.Default())
 			if err != nil {
 				reportIssue(fmt.Errorf("failed to check block results for block %d: %w", block.Number, err))
 				return
@@ -643,8 +643,8 @@ func runReplayPipeline(
 	return *err
 }
 
-// Chain is an interface for an evolving block chain.
-type Chain interface {
+// HistoryExecutor executes a sequence of blocks, one after another, on a state.
+type HistoryExecutor interface {
 	ChainID() uint64
 	IsMptConformant() bool
 	IsVerkleConformant() bool
@@ -665,12 +665,12 @@ type Chain interface {
 	CloneBlockHashHistory() *blockHashHistory
 }
 
-// ArchiveChain exposes the subset of chain operations required by the archive
+// ArchiveExecutor exposes the operations required by the archive
 // verifier. Implementations must be safe to call concurrently with block
 // application on the same underlying state.
-type ArchiveChain interface {
+type ArchiveExecutor interface {
 	GetArchiveBlockHeight() (height uint64, empty bool, err error)
-	ApplyArchiveBlock(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error)
+	ApplyBlockOnArchive(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error)
 }
 
 // StateFlusher exposes the state-flush operation required by the progress
@@ -691,21 +691,21 @@ type BlockExecutor interface {
 	ExecuteBlockOnArchive(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error)
 }
 
-// stateChainAdapter is an adapter that allows the State to be used as a Chain.
-// It executes the blocks with its executor.
+// historyExecutor implements HistoryExecutor, ArchiveExecutor and StateFlusher
+// on a State, executing each block with its BlockExecutor.
 //
-// Concurrency: two mutexes coordinate access to the adapter.
+// Concurrency: two mutexes coordinate access to the historyExecutor.
 //
 //   - stateSwitchMutex guards accesses to the underlying *State pointer.
 //     RLock is held during operations that use the current state (block
 //     application via ApplyBlock, archive queries via GetArchiveBlockHeight
-//     and ApplyArchiveBlock, flushes via FlushState). Lock is held only for
+//     and ApplyBlockOnArchive, flushes via FlushState). Lock is held only for
 //     the snapshot pointer swap in MaybeSnapshot, which closes and reopens
 //     the state database.
 //
 //   - stateModifyMutex serializes live block application. It ensures that at
 //     most one goroutine executes ApplyBlock at a time and protects
-//     mutations to adapter fields performed during block application
+//     mutations to its fields performed during block application
 //     (notably blockHashHistory writes).
 //
 // Together they allow live block application and concurrent archive
@@ -713,9 +713,9 @@ type BlockExecutor interface {
 // pointer is not swapped while any operation is using it. Lock ordering:
 // callers acquiring both locks must take stateSwitchMutex before
 // stateModifyMutex.
-type stateChainAdapter struct {
+type historyExecutor struct {
 	chainID          uint64
-	executor         BlockExecutor
+	blockExecutor    BlockExecutor
 	blockHashHistory *blockHashHistory
 	state            *State
 	stateSwitchMutex sync.RWMutex
@@ -724,45 +724,45 @@ type stateChainAdapter struct {
 	snapshotHandler  *SnapshotHandler
 }
 
-func (a *stateChainAdapter) ChainID() uint64 {
-	return a.chainID
+func (e *historyExecutor) ChainID() uint64 {
+	return e.chainID
 }
 
-func (a *stateChainAdapter) IsMptConformant() bool {
-	return a.schema == 5
+func (e *historyExecutor) IsMptConformant() bool {
+	return e.schema == 5
 }
 
-func (a *stateChainAdapter) IsVerkleConformant() bool {
-	return a.schema == 6
+func (e *historyExecutor) IsVerkleConformant() bool {
+	return e.schema == 6
 }
 
-func (a *stateChainAdapter) GetBlockHash(blockNumber uint64) common.Hash {
-	a.stateSwitchMutex.RLock()
-	defer a.stateSwitchMutex.RUnlock()
-	a.stateModifyMutex.Lock()
-	defer a.stateModifyMutex.Unlock()
-	return a.blockHashHistory.GetBlockHash(blockNumber)
+func (e *historyExecutor) GetBlockHash(blockNumber uint64) common.Hash {
+	e.stateSwitchMutex.RLock()
+	defer e.stateSwitchMutex.RUnlock()
+	e.stateModifyMutex.Lock()
+	defer e.stateModifyMutex.Unlock()
+	return e.blockHashHistory.GetBlockHash(blockNumber)
 }
 
-func (a *stateChainAdapter) CloneBlockHashHistory() *blockHashHistory {
-	a.stateSwitchMutex.RLock()
-	defer a.stateSwitchMutex.RUnlock()
-	a.stateModifyMutex.Lock()
-	defer a.stateModifyMutex.Unlock()
-	return a.blockHashHistory.Clone()
+func (e *historyExecutor) CloneBlockHashHistory() *blockHashHistory {
+	e.stateSwitchMutex.RLock()
+	defer e.stateSwitchMutex.RUnlock()
+	e.stateModifyMutex.Lock()
+	defer e.stateModifyMutex.Unlock()
+	return e.blockHashHistory.Clone()
 }
 
 // ApplyBlock applies the given block to the state database and returns the
 // resulting receipts and state-root future.
-func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
+func (e *historyExecutor) ApplyBlock(block *types.Block) (
 	types.Receipts,
 	future.Future[result.Result[common.Hash]],
 	error,
 ) {
-	a.stateSwitchMutex.RLock()
-	defer a.stateSwitchMutex.RUnlock()
-	a.stateModifyMutex.Lock()
-	defer a.stateModifyMutex.Unlock()
+	e.stateSwitchMutex.RLock()
+	defer e.stateSwitchMutex.RUnlock()
+	e.stateModifyMutex.Lock()
+	defer e.stateModifyMutex.Unlock()
 
 	zoneBlock := tracy.ZoneBegin("LiveBlockProcessing")
 	defer zoneBlock.End()
@@ -771,11 +771,11 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	// import. The archive does not accept two blocks with the same number.
 	// Only its hash is recorded, for BLOCKHASH in the blocks after it.
 	if block.NumberU64() == 0 {
-		a.blockHashHistory.SetBlockHash(0, block.Hash())
-		return nil, a.state.GetStateRoot(), nil
+		e.blockHashHistory.SetBlockHash(0, block.Hash())
+		return nil, e.state.GetStateRoot(), nil
 	}
 
-	receipts, usedGas, err := a.executor.ExecuteBlock(a.state, block, a.blockHashHistory)
+	receipts, usedGas, err := e.blockExecutor.ExecuteBlock(e.state, block, e.blockHashHistory)
 	if err != nil {
 		return nil, future.Future[result.Result[common.Hash]]{}, err
 	}
@@ -790,9 +790,9 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 	completeHeader.ReceiptHash = types.DeriveSha(receipts, trie.NewStackTrie(nil))
 	*block = *block.WithSeal(completeHeader)
 
-	a.blockHashHistory.SetBlockHash(block.NumberU64(), completeHeader.Hash())
+	e.blockHashHistory.SetBlockHash(block.NumberU64(), completeHeader.Hash())
 
-	return receipts, a.state.GetStateRoot(), nil
+	return receipts, e.state.GetStateRoot(), nil
 }
 
 // MaybeSnapshot creates a state database snapshot if one is due at the given
@@ -805,74 +805,74 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 // will block until all in-flight operations holding stateSwitchMutex.RLock()
 // complete. The stateRoot future must be resolved before the state pointer is
 // swapped so it remains valid after the old state DB is closed and reopened.
-func (a *stateChainAdapter) MaybeSnapshot(
+func (e *historyExecutor) MaybeSnapshot(
 	blockNumber uint64,
 	stateRoot future.Future[result.Result[common.Hash]],
 ) (future.Future[result.Result[common.Hash]], error) {
-	if !a.snapshotHandler.ShouldCreateSnapshot(blockNumber) {
+	if !e.snapshotHandler.ShouldCreateSnapshot(blockNumber) {
 		return stateRoot, nil
 	}
 	// Resolve the state-root future before swapping the state pointer so it
 	// remains valid after the underlying state has been closed and reopened.
 	stateRoot = future.Immediate(stateRoot.Await())
 
-	a.stateSwitchMutex.Lock()
-	defer a.stateSwitchMutex.Unlock()
-	newState, err := a.snapshotHandler.Snapshot(blockNumber, a.state)
+	e.stateSwitchMutex.Lock()
+	defer e.stateSwitchMutex.Unlock()
+	newState, err := e.snapshotHandler.Snapshot(blockNumber, e.state)
 	if err != nil {
 		return stateRoot, fmt.Errorf("failed to create snapshot at block %d: %w", blockNumber, err)
 	}
-	a.state = newState
+	e.state = newState
 	return stateRoot, nil
 }
 
 // FlushState flushes pending writes in the state database to disk.
 // It is safe to call concurrently with block application (ApplyBlock) and
 // other archive-side operations.
-func (a *stateChainAdapter) FlushState() error {
-	a.stateSwitchMutex.RLock()
-	defer a.stateSwitchMutex.RUnlock()
-	return a.state.db.Flush()
+func (e *historyExecutor) FlushState() error {
+	e.stateSwitchMutex.RLock()
+	defer e.stateSwitchMutex.RUnlock()
+	return e.state.db.Flush()
 }
 
 // GetArchiveBlockHeight returns the highest block currently available in the
 // archive. It is safe to call concurrently with block application.
-func (a *stateChainAdapter) GetArchiveBlockHeight() (height uint64, empty bool, err error) {
-	a.stateSwitchMutex.RLock()
-	defer a.stateSwitchMutex.RUnlock()
-	return a.state.GetArchiveBlockHeight()
+func (e *historyExecutor) GetArchiveBlockHeight() (height uint64, empty bool, err error) {
+	e.stateSwitchMutex.RLock()
+	defer e.stateSwitchMutex.RUnlock()
+	return e.state.GetArchiveBlockHeight()
 }
 
-// ApplyArchiveBlock re-executes the given block against the archive state for
+// ApplyBlockOnArchive re-executes the given block against the archive state for
 // its parent block, using the given hash history of the block, and returns the
 // resulting receipts. Block 0 is skipped since it is equivalent with the
 // genesis data import. The live state is not modified. It is safe to call
 // concurrently with block application.
-func (a *stateChainAdapter) ApplyArchiveBlock(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
+func (e *historyExecutor) ApplyBlockOnArchive(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
 	if block.NumberU64() == 0 {
 		return nil, nil
 	}
-	a.stateSwitchMutex.RLock()
-	defer a.stateSwitchMutex.RUnlock()
-	return a.executor.ExecuteBlockOnArchive(a.state, block, hashHistory)
+	e.stateSwitchMutex.RLock()
+	defer e.stateSwitchMutex.RUnlock()
+	return e.blockExecutor.ExecuteBlockOnArchive(e.state, block, hashHistory)
 }
 
-// getExpectedStateRoot returns the expected state root for the given block, based on the chain type.
-func getExpectedStateRoot(chain Chain, block *blockdb.Block) common.Hash {
+// getExpectedStateRoot returns the expected state root for the given block, based on the DB schema.
+func getExpectedStateRoot(executor HistoryExecutor, block *blockdb.Block) common.Hash {
 	var stateRoot []byte
-	if chain.IsMptConformant() {
+	if executor.IsMptConformant() {
 		stateRoot = block.StateRoot
-	} else if chain.IsVerkleConformant() {
+	} else if executor.IsVerkleConformant() {
 		stateRoot = block.VerkleStateRoot
 	}
 	return common.BytesToHash(stateRoot)
 }
 
-// updateStateRoot updates the state root in the block based on the chain type.
-func updateStateRoot(chain Chain, block *blockdb.Block, stateRoot common.Hash) {
-	if chain.IsMptConformant() {
+// updateStateRoot updates the state root in the block based on the DB schema.
+func updateStateRoot(executor HistoryExecutor, block *blockdb.Block, stateRoot common.Hash) {
+	if executor.IsMptConformant() {
 		block.StateRoot = stateRoot.Bytes()
-	} else if chain.IsVerkleConformant() {
+	} else if executor.IsVerkleConformant() {
 		block.VerkleStateRoot = stateRoot.Bytes()
 	}
 }

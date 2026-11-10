@@ -52,18 +52,18 @@ func TestArchiveVerifier_NewArchiveVerifier_ChecksArchiveRate(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
-			archive := NewMockArchiveChain(ctrl)
+			executor := NewMockArchiveExecutor(ctrl)
 			if tc.verifier {
 				// The dispatcher goroutine may or may not have called
 				// GetArchiveBlockHeight before close() is called; the exact
 				// count depends on scheduling, so we only allow it here.
-				archive.EXPECT().GetArchiveBlockHeight().Return(uint64(0), true, nil).AnyTimes()
+				executor.EXPECT().GetArchiveBlockHeight().Return(uint64(0), true, nil).AnyTimes()
 			}
 
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
 
-			verifier, err := newArchiveVerifier(ctx, cancel, archive, tc.rate, false, slog.Default())
+			verifier, err := newArchiveVerifier(ctx, cancel, executor, tc.rate, false, slog.Default())
 
 			if tc.err {
 				require.ErrorContains(t, err, "archive rate")
@@ -108,11 +108,11 @@ func TestArchiveVerifier_dispatcher_LimitsConcurrency(t *testing.T) {
 	var startedTasks atomic.Int64
 	finish := make(chan struct{})
 	ctrl := gomock.NewController(t)
-	archive := NewMockArchiveChain(ctrl)
+	executor := NewMockArchiveExecutor(ctrl)
 	// The dispatcher spawns at least maxConcurrentVerifications tasks that
 	// block on <-finish, and after finish is closed spawns more tasks. The
 	// exact total count depends on scheduling.
-	archive.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
+	executor.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
 		startedTasks.Add(1)
 		<-finish
 		return 0, true, nil
@@ -131,7 +131,7 @@ func TestArchiveVerifier_dispatcher_LimitsConcurrency(t *testing.T) {
 
 	v := &archiveVerifier{
 		pool:         pool,
-		archive:      archive,
+		executor:     executor,
 		ctx:          ctx,
 		cancelParent: cancel,
 		done:         make(chan struct{}),
@@ -180,8 +180,8 @@ func TestArchiveVerifier_dispatcher_LogsDroppedTicksRateLimited(t *testing.T) {
 		blocking.Store(true)
 		unblock := make(chan struct{})
 
-		archive := NewMockArchiveChain(ctrl)
-		archive.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
+		executor := NewMockArchiveExecutor(ctrl)
+		executor.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
 			if blocking.Load() {
 				<-unblock
 			}
@@ -204,7 +204,7 @@ func TestArchiveVerifier_dispatcher_LogsDroppedTicksRateLimited(t *testing.T) {
 		// next reporting window and make the test flaky.
 		v := &archiveVerifier{
 			pool:         pool,
-			archive:      archive,
+			executor:     executor,
 			logger:       logger,
 			ctx:          ctx,
 			cancelParent: cancel,
@@ -320,9 +320,9 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 			require.NoError(t, err)
 			defer func() { require.NoError(t, state.Close()) }()
 
-			chain := &stateChainAdapter{
+			executor := &historyExecutor{
 				chainID:          123,
-				executor:         &sonicExecutor{chainID: 123, metadataStore: &BlockDBMetadataStore{}, interpreter: interpreter},
+				blockExecutor:    &sonicExecutor{chainID: 123, metadataStore: &BlockDBMetadataStore{}, interpreter: interpreter},
 				blockHashHistory: &blockHashHistory{},
 				state:            state,
 				schema:           5,
@@ -333,7 +333,7 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 			for _, block := range protoBlocks {
 				gethBlock, err := convert.ConvertToGethBlock(block)
 				require.NoError(t, err)
-				_, _, err = chain.ApplyBlock(gethBlock)
+				_, _, err = executor.ApplyBlock(gethBlock)
 				require.NoError(t, err)
 			}
 			// Flush so the archive height reflects the applied blocks.
@@ -348,7 +348,7 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 
 			verifier := &archiveVerifier{
 				pool:            pool,
-				archive:         chain,
+				executor:        executor,
 				noReceiptsCheck: tc.noReceiptsCheck,
 				ctx:             ctx,
 				cancelParent:    cancel,
@@ -378,15 +378,15 @@ func TestArchiveVerifier_verifyBlock_AppliesBlockWithItsHashHistory(t *testing.T
 	pool.Add(blockWithHashHistory{block: &blockdb.Block{Number: 2}, hashHistory: hashHistory})
 
 	ctrl := gomock.NewController(t)
-	archive := NewMockArchiveChain(ctrl)
-	archive.EXPECT().GetArchiveBlockHeight().Return(uint64(1), false, nil)
-	archive.EXPECT().ApplyArchiveBlock(gomock.Any(), hashHistory)
+	executor := NewMockArchiveExecutor(ctrl)
+	executor.EXPECT().GetArchiveBlockHeight().Return(uint64(1), false, nil)
+	executor.EXPECT().ApplyBlockOnArchive(gomock.Any(), hashHistory)
 
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
 	verifier := &archiveVerifier{
 		pool:         pool,
-		archive:      archive,
+		executor:     executor,
 		ctx:          ctx,
 		cancelParent: cancel,
 		done:         make(chan struct{}),
@@ -407,12 +407,12 @@ func TestArchiveVerifier_verifyBlock_CancelsContextOnFailure(t *testing.T) {
 
 	injectedErr := fmt.Errorf("injected archive error")
 	ctrl := gomock.NewController(t)
-	archive := NewMockArchiveChain(ctrl)
+	executor := NewMockArchiveExecutor(ctrl)
 	// Use an archive that always fails to trigger verifier error.
-	archive.EXPECT().GetArchiveBlockHeight().Return(uint64(0), false, injectedErr)
+	executor.EXPECT().GetArchiveBlockHeight().Return(uint64(0), false, injectedErr)
 	verifier := &archiveVerifier{
 		pool:         pool,
-		archive:      archive,
+		executor:     executor,
 		ctx:          ctx,
 		cancelParent: cancel,
 		done:         make(chan struct{}),
@@ -439,11 +439,11 @@ func TestArchiveVerifier_close_WaitsForInFlightVerifications(t *testing.T) {
 	var startedTasks atomic.Int64
 	finish := make(chan struct{})
 	ctrl := gomock.NewController(t)
-	archive := NewMockArchiveChain(ctrl)
+	executor := NewMockArchiveExecutor(ctrl)
 	// The dispatcher fills the semaphore with maxConcurrentVerifications
 	// blocked tasks before close() is called; after close() the dispatcher
 	// stops spawning, so exactly that many calls happen.
-	archive.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
+	executor.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
 		startedTasks.Add(1)
 		<-finish
 		return 0, true, nil
@@ -462,7 +462,7 @@ func TestArchiveVerifier_close_WaitsForInFlightVerifications(t *testing.T) {
 
 	v := &archiveVerifier{
 		pool:         pool,
-		archive:      archive,
+		executor:     executor,
 		ctx:          ctx,
 		cancelParent: cancel,
 		done:         make(chan struct{}),
@@ -501,11 +501,11 @@ func TestArchiveVerifier_close_WaitsForInFlightVerifications(t *testing.T) {
 func TestArchiveVerifier_close_StopsDispatcher(t *testing.T) {
 	var startedTasks atomic.Int64
 	ctrl := gomock.NewController(t)
-	archive := NewMockArchiveChain(ctrl)
+	executor := NewMockArchiveExecutor(ctrl)
 	// Report an empty archive so verifyBlock returns after the height check
 	// without touching the pool or applying blocks. The test waits until at
 	// least 3 tasks have started before closing.
-	archive.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
+	executor.EXPECT().GetArchiveBlockHeight().DoAndReturn(func() (uint64, bool, error) {
 		startedTasks.Add(1)
 		return 0, true, nil
 	}).MinTimes(3)
@@ -521,7 +521,7 @@ func TestArchiveVerifier_close_StopsDispatcher(t *testing.T) {
 
 	v := &archiveVerifier{
 		pool:         pool,
-		archive:      archive,
+		executor:     executor,
 		ctx:          ctx,
 		cancelParent: cancel,
 		done:         make(chan struct{}),

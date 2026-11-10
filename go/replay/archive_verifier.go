@@ -58,7 +58,7 @@ type blockWithHashHistory struct {
 type archiveVerifier struct {
 	pool *utils.RandomRetentionPool[blockWithHashHistory]
 
-	archive         ArchiveChain
+	executor        ArchiveExecutor
 	noReceiptsCheck bool
 	ctx             context.Context
 	cancelParent    context.CancelCauseFunc
@@ -73,7 +73,7 @@ type archiveVerifier struct {
 func newArchiveVerifier(
 	ctx context.Context,
 	cancelParent context.CancelCauseFunc,
-	archive ArchiveChain,
+	executor ArchiveExecutor,
 	archiveRate float64,
 	noReceiptsCheck bool,
 	logger utils.Logger,
@@ -94,7 +94,7 @@ func newArchiveVerifier(
 	}
 	v := &archiveVerifier{
 		pool:            pool,
-		archive:         archive,
+		executor:        executor,
 		noReceiptsCheck: noReceiptsCheck,
 		ctx:             ctx,
 		cancelParent:    cancelParent,
@@ -171,7 +171,7 @@ func (v *archiveVerifier) verifyBlock() {
 		})
 	}
 
-	archiveHeight, archiveEmpty, err := v.archive.GetArchiveBlockHeight()
+	archiveHeight, archiveEmpty, err := v.executor.GetArchiveBlockHeight()
 	if err != nil {
 		handleError(fmt.Errorf("failed to get archive height: %w", err))
 		return
@@ -209,7 +209,7 @@ func (v *archiveVerifier) verifyBlock() {
 		return
 	}
 
-	receipts, err := v.archive.ApplyArchiveBlock(gethBlock, item.hashHistory)
+	receipts, err := v.executor.ApplyBlockOnArchive(gethBlock, item.hashHistory)
 	if err != nil {
 		handleError(fmt.Errorf("failed to apply block %d: %w", block.Number, err))
 		return
