@@ -163,7 +163,11 @@ func (s *BlockDBMetadataStore) PatchRules(blockNumber uint64, diff []byte) error
 	if last.Economy.MinBaseFee == nil {
 		last.Economy.MinBaseFee = new(big.Int)
 	}
-	updatedRules, err := opera.UpdateRules(last, diff)
+	// UpdateRules modifies MinBaseFee in place before Allegro, so pass a copy to
+	// keep the stored rules and the comparison baseline untouched.
+	input := last
+	input.Economy.MinBaseFee = new(big.Int).Set(last.Economy.MinBaseFee)
+	updatedRules, err := opera.UpdateRules(input, diff)
 	if err != nil {
 		return fmt.Errorf("failed to update rules: %w", err)
 	}

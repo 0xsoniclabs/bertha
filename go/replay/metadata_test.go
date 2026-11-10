@@ -18,6 +18,8 @@ package replay
 
 import (
 	"encoding/json"
+	"fmt"
+	"math/big"
 	"testing"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
@@ -234,6 +236,59 @@ func TestBlockDBMetadataStore_PatchRules_AppliesDiffToNextRules(t *testing.T) {
 	require.NotNil(t, store.nextRules)
 	require.True(t, store.nextRules.Upgrades.Allegro)
 	require.True(t, store.nextRules.Upgrades.Brio)
+}
+
+// Regression test: see PatchRules comment.
+func TestBlockDBMetadataStore_PatchRules_DoesNotModifyStoredRules(t *testing.T) {
+	tests := map[string]struct {
+		newMinBaseFee  *big.Int
+		newMinGasPrice *big.Int // nil leaves MinGasPrice out of the diff
+		makeDiff       func(baseFee, gasPrice *big.Int) []byte
+	}{
+		"base fee and gas price": {
+			newMinBaseFee:  big.NewInt(50000000000),
+			newMinGasPrice: big.NewInt(2000000000),
+			makeDiff: func(baseFee, gasPrice *big.Int) []byte {
+				return fmt.Appendf(nil, `{"Economy":{"MinBaseFee":%d,"MinGasPrice":%d}}`, baseFee, gasPrice)
+			},
+		},
+		"base fee only": {
+			newMinBaseFee: big.NewInt(50000000000),
+			makeDiff: func(baseFee, gasPrice *big.Int) []byte {
+				return fmt.Appendf(nil, `{"Economy":{"MinBaseFee":%d}}`, baseFee)
+			},
+		},
+	}
+	for diffName, test := range tests {
+		for name, upgrades := range opera.GetAllHardForksInOrder() {
+			t.Run(diffName+"/"+name, func(t *testing.T) {
+				require := require.New(t)
+				rules := opera.FakeNetRules(upgrades)
+				originalMinBaseFee := new(big.Int).Set(rules.Economy.MinBaseFee)
+				originalMinGasPrice := new(big.Int).Set(rules.Economy.MinGasPrice)
+
+				require.NotEqual(originalMinBaseFee, test.newMinBaseFee)
+				wantNextMinGasPrice := originalMinGasPrice
+				if test.newMinGasPrice != nil {
+					require.NotEqual(originalMinGasPrice, test.newMinGasPrice)
+					wantNextMinGasPrice = test.newMinGasPrice
+				}
+
+				diff := test.makeDiff(test.newMinBaseFee, test.newMinGasPrice)
+				store := &BlockDBMetadataStore{
+					metadata: Metadata{RulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: rules}}},
+				}
+
+				err := store.PatchRules(0, diff)
+				require.NoError(err)
+				require.NotNil(store.nextRules)
+				require.Equal(test.newMinBaseFee, store.nextRules.Economy.MinBaseFee)
+				require.Equal(wantNextMinGasPrice, store.nextRules.Economy.MinGasPrice)
+				require.Equal(originalMinBaseFee, store.metadata.RulesUpdateHeights[0].Rules.Economy.MinBaseFee)
+				require.Equal(originalMinGasPrice, store.metadata.RulesUpdateHeights[0].Rules.Economy.MinGasPrice)
+			})
+		}
+	}
 }
 
 func TestBlockDBMetadataStore_PatchRules_UsesLatestRulesAtOrBeforeBlock(t *testing.T) {
