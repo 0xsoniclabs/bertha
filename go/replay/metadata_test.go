@@ -240,47 +240,54 @@ func TestBlockDBMetadataStore_PatchRules_AppliesDiffToNextRules(t *testing.T) {
 
 // Regression test: see PatchRules comment.
 func TestBlockDBMetadataStore_PatchRules_DoesNotModifyStoredRules(t *testing.T) {
-	newMinBaseFee := big.NewInt(50000000000)
-	newMinGasPrice := big.NewInt(2000000000)
-	for name, upgrades := range opera.GetAllHardForksInOrder() {
-		t.Run(name, func(t *testing.T) {
-			require := require.New(t)
-			rules := opera.FakeNetRules(upgrades)
-			wantMinBaseFee := new(big.Int).Set(rules.Economy.MinBaseFee)
-			wantMinGasPrice := new(big.Int).Set(rules.Economy.MinGasPrice)
-			require.NotEqual(wantMinBaseFee, newMinBaseFee)
-			require.NotEqual(wantMinGasPrice, newMinGasPrice)
-			store := &BlockDBMetadataStore{
-				metadata: Metadata{RulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: rules}}},
-			}
-
-			err := store.PatchRules(0, fmt.Appendf(nil, `{"Economy":{"MinBaseFee":%d,"MinGasPrice":%d}}`, newMinBaseFee, newMinGasPrice))
-			require.NoError(err)
-			require.NotNil(store.nextRules)
-			require.Equal(newMinBaseFee, store.nextRules.Economy.MinBaseFee)
-			require.Equal(newMinGasPrice, store.nextRules.Economy.MinGasPrice)
-			require.Equal(wantMinBaseFee, store.metadata.RulesUpdateHeights[0].Rules.Economy.MinBaseFee)
-			require.Equal(wantMinGasPrice, store.metadata.RulesUpdateHeights[0].Rules.Economy.MinGasPrice)
-		})
+	tests := map[string]struct {
+		newMinBaseFee  *big.Int
+		newMinGasPrice *big.Int // nil leaves MinGasPrice out of the diff
+		makeDiff       func(baseFee, gasPrice *big.Int) []byte
+	}{
+		"base fee and gas price": {
+			newMinBaseFee:  big.NewInt(50000000000),
+			newMinGasPrice: big.NewInt(2000000000),
+			makeDiff: func(baseFee, gasPrice *big.Int) []byte {
+				return fmt.Appendf(nil, `{"Economy":{"MinBaseFee":%d,"MinGasPrice":%d}}`, baseFee, gasPrice)
+			},
+		},
+		"base fee only": {
+			newMinBaseFee: big.NewInt(50000000000),
+			makeDiff: func(baseFee, gasPrice *big.Int) []byte {
+				return fmt.Appendf(nil, `{"Economy":{"MinBaseFee":%d}}`, baseFee)
+			},
+		},
 	}
-}
+	for diffName, test := range tests {
+		for name, upgrades := range opera.GetAllHardForksInOrder() {
+			t.Run(diffName+"/"+name, func(t *testing.T) {
+				require := require.New(t)
+				rules := opera.FakeNetRules(upgrades)
+				originalMinBaseFee := new(big.Int).Set(rules.Economy.MinBaseFee)
+				originalMinGasPrice := new(big.Int).Set(rules.Economy.MinGasPrice)
 
-func TestBlockDBMetadataStore_PatchRules_AppliesMinBaseFeeOnlyUpdate(t *testing.T) {
-	newMinBaseFee := big.NewInt(50000000000)
-	for name, upgrades := range opera.GetAllHardForksInOrder() {
-		t.Run(name, func(t *testing.T) {
-			require := require.New(t)
-			rules := opera.FakeNetRules(upgrades)
-			require.NotEqual(rules.Economy.MinBaseFee, newMinBaseFee)
-			store := &BlockDBMetadataStore{
-				metadata: Metadata{RulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: rules}}},
-			}
+				require.NotEqual(originalMinBaseFee, test.newMinBaseFee)
+				wantNextMinGasPrice := originalMinGasPrice
+				if test.newMinGasPrice != nil {
+					require.NotEqual(originalMinGasPrice, test.newMinGasPrice)
+					wantNextMinGasPrice = test.newMinGasPrice
+				}
 
-			err := store.PatchRules(0, fmt.Appendf(nil, `{"Economy":{"MinBaseFee":%d}}`, newMinBaseFee))
-			require.NoError(err)
-			require.NotNil(store.nextRules)
-			require.Equal(newMinBaseFee, store.nextRules.Economy.MinBaseFee)
-		})
+				diff := test.makeDiff(test.newMinBaseFee, test.newMinGasPrice)
+				store := &BlockDBMetadataStore{
+					metadata: Metadata{RulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: rules}}},
+				}
+
+				err := store.PatchRules(0, diff)
+				require.NoError(err)
+				require.NotNil(store.nextRules)
+				require.Equal(test.newMinBaseFee, store.nextRules.Economy.MinBaseFee)
+				require.Equal(wantNextMinGasPrice, store.nextRules.Economy.MinGasPrice)
+				require.Equal(originalMinBaseFee, store.metadata.RulesUpdateHeights[0].Rules.Economy.MinBaseFee)
+				require.Equal(originalMinGasPrice, store.metadata.RulesUpdateHeights[0].Rules.Economy.MinGasPrice)
+			})
+		}
 	}
 }
 
