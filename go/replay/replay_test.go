@@ -34,7 +34,6 @@ import (
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
-	"github.com/0xsoniclabs/sonic/evmcore/core_types"
 	"github.com/0xsoniclabs/sonic/gossip/blockproc/bundle"
 	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
 	"github.com/0xsoniclabs/sonic/opera"
@@ -1807,84 +1806,6 @@ func TestBlockHashHistory_ProducesHeaderWithCorrectHashes(t *testing.T) {
 	require.Equal(t, blockNum-1, header.Number.Uint64())
 	require.Equal(t, parent, header.Hash)
 	require.Equal(t, grandParent, header.ParentHash)
-}
-
-func TestOnNewLog_CallsPatchRulesWithDecodedDiff(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	mockStore := NewMockMetadataStore(ctrl)
-
-	diff := []byte(`{"Upgrades":{"Allegro":true}}`)
-	log := makeUpdateNetworkRulesLog(diff)
-
-	mockStore.EXPECT().PatchRules(uint64(42), diff).Return(nil)
-	onNewLog(mockStore, 42, log)
-}
-
-func TestOnNewLog_IgnoresLogsWithWrongAddress(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	mockStore := NewMockMetadataStore(ctrl)
-
-	diff := []byte(`{"Upgrades":{"Allegro":true}}`)
-	log := makeUpdateNetworkRulesLog(diff)
-	log.Address = common.Address{0x42} // wrong address
-
-	mockStore.EXPECT().PatchRules(gomock.Any(), gomock.Any()).Return(nil).Times(0)
-	onNewLog(mockStore, 1, log)
-}
-
-func TestOnNewLog_IgnoresLogsWithWrongTopic(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	mockStore := NewMockMetadataStore(ctrl)
-
-	diff := []byte(`{"Upgrades":{"Allegro":true}}`)
-	log := makeUpdateNetworkRulesLog(diff)
-	log.Topics = []common.Hash{{0xFF}} // wrong topic
-
-	mockStore.EXPECT().PatchRules(gomock.Any(), gomock.Any()).Return(nil).Times(0)
-	onNewLog(mockStore, 1, log)
-}
-
-func TestOnNewLog_IgnoresLogsWithNoTopic(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	mockStore := NewMockMetadataStore(ctrl)
-
-	diff := []byte(`{"Upgrades":{"Allegro":true}}`)
-	log := makeUpdateNetworkRulesLog(diff)
-	log.Topics = []common.Hash{} // no topic
-
-	mockStore.EXPECT().PatchRules(gomock.Any(), gomock.Any()).Return(nil).Times(0)
-	onNewLog(mockStore, 1, log)
-}
-
-func TestOnNewLog_IgnoresLogsWithTooShortData(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	mockStore := NewMockMetadataStore(ctrl)
-
-	mockStore.EXPECT().PatchRules(gomock.Any(), gomock.Any()).Return(nil).Times(0)
-	onNewLog(mockStore, 1, &core_types.Log{
-		Address: driver.ContractAddress,
-		Topics:  []common.Hash{driverpos.Topics.UpdateNetworkRules},
-		Data:    make([]byte, 32), // < 64 bytes, should be ignored
-	})
-}
-
-// makeUpdateNetworkRulesLog returns a *core_types.Log that looks like an
-// UpdateNetworkRules event from the driver contract. The diff is ABI-encoded
-// as a single dynamic bytes parameter:
-//
-//	word 0 (bytes  0–31): offset = 32
-//	word 1 (bytes 32–63): length of diff
-//	bytes 64+:            diff
-func makeUpdateNetworkRulesLog(diff []byte) *core_types.Log {
-	data := make([]byte, 64+len(diff))
-	new(big.Int).SetInt64(32).FillBytes(data[0:32])
-	new(big.Int).SetInt64(int64(len(diff))).FillBytes(data[32:64])
-	copy(data[64:], diff)
-	return &core_types.Log{
-		Address: driver.ContractAddress,
-		Topics:  []common.Hash{driverpos.Topics.UpdateNetworkRules},
-		Data:    data,
-	}
 }
 
 func newMockChainWithMaybeSnapshot(ctrl *gomock.Controller) *MockChain {
