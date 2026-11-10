@@ -41,16 +41,11 @@ import (
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	_ "github.com/0xsoniclabs/carmen/go/state/gostate"
 	"github.com/0xsoniclabs/sonic/evmcore"
-	"github.com/0xsoniclabs/sonic/evmcore/core_types"
 	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
-	"github.com/0xsoniclabs/sonic/opera"
-	"github.com/0xsoniclabs/sonic/opera/contracts/driver/drivercall"
 	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/0xsoniclabs/tracy"
-	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
 )
 
@@ -150,17 +145,24 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 	chainID := genesis.Rules.NetworkID
 
-	// Create the metadata store
-	slog.Info("Initializing metadata store")
-	metadataStore, err := NewBlockDBMetadataStore(blockDb, genesis.Rules, slog.Default(), args.WriteRulesUpdateHeights)
-	if err != nil {
-		return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
-	}
-
 	// Create the interpreter
 	interpreter, err := tosca.NewInterpreter(args.Interpreter)
 	if err != nil {
 		return fmt.Errorf("failed to create interpreter %q: %w", args.Interpreter, err)
+	}
+
+	// Create the block executor
+	var executor BlockExecutor
+	if isEthereum(chainID) {
+		executor = &ethereumExecutor{chainID: chainID, interpreter: interpreter}
+	} else {
+		// Create the metadata store
+		slog.Info("Initializing metadata store")
+		metadataStore, err := NewBlockDBMetadataStore(blockDb, genesis.Rules, slog.Default(), args.WriteRulesUpdateHeights)
+		if err != nil {
+			return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
+		}
+		executor = &sonicExecutor{chainID: chainID, metadataStore: metadataStore, interpreter: interpreter}
 	}
 
 	// Prepare the state database directory
@@ -189,9 +191,8 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 	chain := &stateChainAdapter{
 		chainID:          chainID,
-		metadataStore:    metadataStore,
+		executor:         executor,
 		blockHashHistory: &blockHashHistory{},
-		interpreter:      interpreter,
 		state:            state,
 		schema:           args.DBSchema,
 		snapshotHandler:  snapshotHandler,
@@ -679,7 +680,19 @@ type StateFlusher interface {
 	FlushState() error
 }
 
+// BlockExecutor executes the blocks on a given State.
+type BlockExecutor interface {
+	// ExecuteBlock executes the given block on the live state, serving BLOCKHASH
+	// from hashHistory, and returns its receipts and the gas used by all
+	// processed transactions.
+	ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, uint64, error)
+	// ExecuteBlockOnArchive executes the given block on the archived state of its
+	// parent, serving BLOCKHASH from hashHistory, and returns its receipts.
+	ExecuteBlockOnArchive(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error)
+}
+
 // stateChainAdapter is an adapter that allows the State to be used as a Chain.
+// It executes the blocks with its executor.
 //
 // Concurrency: two mutexes coordinate access to the adapter.
 //
@@ -702,9 +715,8 @@ type StateFlusher interface {
 // stateModifyMutex.
 type stateChainAdapter struct {
 	chainID          uint64
-	metadataStore    MetadataStore
+	executor         BlockExecutor
 	blockHashHistory *blockHashHistory
-	interpreter      tosca.Interpreter
 	state            *State
 	stateSwitchMutex sync.RWMutex
 	stateModifyMutex sync.Mutex
@@ -763,21 +775,7 @@ func (a *stateChainAdapter) ApplyBlock(block *types.Block) (
 		return nil, a.state.GetStateRoot(), nil
 	}
 
-	// Commit all pending rules updates if the block is an epoch sealing block.
-	if block.Transactions().Len() > 0 {
-		_, err := drivercall.ParseSealEpochArgs(block.Transactions()[0])
-		isEpochSealingTx := err == nil
-		if isEpochSealingTx {
-			if err := a.metadataStore.CommitRules(block.NumberU64()); err != nil {
-				return nil, future.Future[result.Result[common.Hash]]{}, fmt.Errorf("failed to commit rules at block %d: %w", block.NumberU64(), err)
-			}
-		}
-	}
-
-	onLog := func(l *core_types.Log) { onNewLog(a.metadataStore, block.NumberU64(), l) }
-
-	// Apply the block to the state database.
-	receipts, usedGas, err := a.applyBlockLocked(block, a.blockHashHistory, onLog, false)
+	receipts, usedGas, err := a.executor.ExecuteBlock(a.state, block, a.blockHashHistory)
 	if err != nil {
 		return nil, future.Future[result.Result[common.Hash]]{}, err
 	}
@@ -856,58 +854,7 @@ func (a *stateChainAdapter) ApplyArchiveBlock(block *types.Block, hashHistory *b
 	}
 	a.stateSwitchMutex.RLock()
 	defer a.stateSwitchMutex.RUnlock()
-	receipts, _, err := a.applyBlockLocked(block, hashHistory, nil, true)
-	return receipts, err
-}
-
-// applyBlockLocked applies the given block with the metadata of the block to
-// the state, see State.ApplyBlock. The caller must hold a read lock on
-// stateSwitchMutex, and for live blocks also stateModifyMutex.
-func (a *stateChainAdapter) applyBlockLocked(
-	block *types.Block,
-	hashHistory *blockHashHistory,
-	onLog func(*core_types.Log),
-	isArchive bool,
-) (types.Receipts, uint64, error) {
-	chainConfig, rules := getChainConfigAndRules(block, a.chainID, a.metadataStore)
-
-	processor := evmcore.NewStateProcessorForReplay(
-		chainConfig,
-		hashHistory,
-		rules.Upgrades,
-	)
-
-	corrections := a.metadataStore.GetCorrectionsAtBlock(block.NumberU64())
-	failedBundles := a.metadataStore.GetFailedBundlesAtBlock(block.NumberU64())
-
-	return a.state.ApplyBlock(
-		block, a.interpreter, processor, rules, corrections, failedBundles, chainConfig, onLog, isArchive,
-	)
-}
-
-func getChainConfigAndRules(block *types.Block, chainID uint64, metadata MetadataStore) (*params.ChainConfig, opera.Rules) {
-	if cfg := ethereumChainConfigMap[chainID]; cfg != nil {
-		rules := cfg.Rules(block.Number(), false, block.Time())
-		return cfg, opera.Rules{Upgrades: opera.Upgrades{
-			Berlin: rules.IsBerlin,
-			London: rules.IsLondon,
-			Llr:    false,
-
-			Sonic:   rules.IsCancun,
-			Allegro: rules.IsPrague,
-			Brio:    rules.IsOsaka,
-
-			SingleProposerBlockFormation: false,
-			GasSubsidies:                 false,
-			TransactionBundles:           false,
-		}}
-	}
-	chainConfig := opera.CreateTransientEvmChainConfig(
-		chainID,
-		metadata.GetUpgradeHeights(),
-		idx.Block(block.NumberU64()),
-	)
-	return chainConfig, metadata.GetRulesAtBlock(block.NumberU64())
+	return a.executor.ExecuteBlockOnArchive(a.state, block, hashHistory)
 }
 
 // getExpectedStateRoot returns the expected state root for the given block, based on the chain type.

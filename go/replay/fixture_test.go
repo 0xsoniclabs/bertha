@@ -46,10 +46,10 @@ import (
 )
 
 // blockDbsByNetwork maps network names to functions that create a block
-// database of empty blocks of the network with the given corrections, and
-// return the database's directory and the genesis file.
-var blockDbsByNetwork = map[string]func(*testing.T, Corrections) (string, string){
-	"Sonic":    createSonicBlockDb,
+// database of empty blocks of the network, and return the database's
+// directory and the genesis file.
+var blockDbsByNetwork = map[string]func(*testing.T) (string, string){
+	"Sonic":    func(t *testing.T) (string, string) { return createSonicBlockDb(t, nil) },
 	"Ethereum": createEthereumBlockDb,
 }
 
@@ -102,10 +102,10 @@ func createSonicBlockDb(t *testing.T, corrections Corrections) (string, string) 
 // createEthereumBlockDb writes a genesis with the chain ID of Hoodi and the
 // system contracts of Hoodi's Cancun and Prague upgrades, and empty post-merge
 // blocks of Hoodi, twelve seconds apart with all but the first 20 after its
-// Prague upgrade, with the given corrections into a new block database, and
-// returns the database's directory and the genesis file. The request contracts start
-// with their excess inhibitor set, which the first Prague block clears.
-func createEthereumBlockDb(t *testing.T, corrections Corrections) (string, string) {
+// Prague upgrade, into a new block database, and returns the database's
+// directory and the genesis file. The request contracts start with their
+// excess inhibitor set, which the first Prague block clears.
+func createEthereumBlockDb(t *testing.T) (string, string) {
 	config := params.HoodiChainConfig
 	rules := opera.Rules{NetworkID: config.ChainID.Uint64()}
 	inhibited := map[common.Hash]common.Hash{{}: common.MaxHash}
@@ -157,7 +157,7 @@ func createEthereumBlockDb(t *testing.T, corrections Corrections) (string, strin
 		blocks = append(blocks, toBlockDbBlock(t, header))
 		parent = header
 	}
-	return writeBlockDb(t, rules, alloc, blocks, corrections)
+	return writeBlockDb(t, rules, alloc, blocks, nil)
 }
 
 // newGenesisState returns an in-memory state holding the given accounts.

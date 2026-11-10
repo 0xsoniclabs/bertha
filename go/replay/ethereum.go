@@ -16,7 +16,11 @@
 
 package replay
 
-import "github.com/ethereum/go-ethereum/params"
+import (
+	"github.com/0xsoniclabs/sonic/opera"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/params"
+)
 
 // ethereumChainConfigMap maps chain IDs of Ethereum networks to their corresponding chain configurations.
 var ethereumChainConfigMap = map[uint64]*params.ChainConfig{
@@ -30,4 +34,24 @@ var ethereumChainConfigMap = map[uint64]*params.ChainConfig{
 func isEthereum(chainID uint64) bool {
 	_, exists := ethereumChainConfigMap[chainID]
 	return exists
+}
+
+// getEthereumChainConfigAndRules returns the config of the given Ethereum chain
+// and the rules holding the upgrades in effect at the given block.
+func getEthereumChainConfigAndRules(block *types.Block, chainID uint64) (*params.ChainConfig, opera.Rules) {
+	cfg := ethereumChainConfigMap[chainID]
+	rules := cfg.Rules(block.Number(), true, block.Time())
+	return cfg, opera.Rules{Upgrades: opera.Upgrades{
+		Berlin: rules.IsBerlin,
+		London: rules.IsLondon,
+		Llr:    false,
+
+		Sonic:   rules.IsCancun,
+		Allegro: rules.IsPrague,
+		Brio:    rules.IsOsaka,
+
+		SingleProposerBlockFormation: false,
+		GasSubsidies:                 false,
+		TransactionBundles:           false,
+	}}
 }

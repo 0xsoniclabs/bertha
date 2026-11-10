@@ -19,6 +19,7 @@ package replay
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"iter"
 	"math"
@@ -35,15 +36,10 @@ import (
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	"github.com/0xsoniclabs/sonic/gossip/blockproc/bundle"
-	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
 	"github.com/0xsoniclabs/sonic/opera"
-	"github.com/0xsoniclabs/sonic/opera/contracts/driver"
-	"github.com/0xsoniclabs/sonic/opera/contracts/driver/drivercall"
-	"github.com/0xsoniclabs/sonic/opera/contracts/driver/driverpos"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/core/vm/program"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/holiman/uint256"
@@ -89,7 +85,7 @@ func TestReplay_ReproducesChain(t *testing.T) {
 		for mode, configure := range modes {
 			t.Run(network+"/"+mode, func(t *testing.T) {
 				args := defaultReplayArgs()
-				args.BlockDBDir, args.JSONGenesisFile = createDb(t, nil)
+				args.BlockDBDir, args.JSONGenesisFile = createDb(t)
 				args.StateDBDir = filepath.Join(t.TempDir(), "state")
 				configure(&args)
 				require.NoError(t, Replay(t.Context(), args))
@@ -103,7 +99,7 @@ func TestReplay_ResumesOnKeptState(t *testing.T) {
 		t.Run(network, func(t *testing.T) {
 			require := require.New(t)
 			args := defaultReplayArgs()
-			args.BlockDBDir, args.JSONGenesisFile = createDb(t, nil)
+			args.BlockDBDir, args.JSONGenesisFile = createDb(t)
 			args.StateDBDir = filepath.Join(t.TempDir(), "state")
 			args.KeepDB = true
 			args.EndBlock = 25
@@ -116,23 +112,11 @@ func TestReplay_ResumesOnKeptState(t *testing.T) {
 	}
 }
 
-func TestReplay_AppliesCorrectionsAtTheirBlock(t *testing.T) {
-	for network, createDb := range blockDbsByNetwork {
-		t.Run(network, func(t *testing.T) {
-			args := defaultReplayArgs()
-			args.BlockDBDir, args.JSONGenesisFile = createDb(t, Corrections{
-				30: {common.HexToAddress("0x01"): {Balance: uint256.NewInt(1)}},
-			})
-			require.ErrorContains(t, Replay(t.Context(), args), "state root mismatch after applying block 30:")
-		})
-	}
-}
-
 func TestReplay_Schema4SkipsStateRootCheck(t *testing.T) {
 	for network, createDb := range blockDbsByNetwork {
 		t.Run(network, func(t *testing.T) {
 			args := defaultReplayArgs()
-			args.BlockDBDir, args.JSONGenesisFile = createDb(t, nil)
+			args.BlockDBDir, args.JSONGenesisFile = createDb(t)
 			args.DBSchema = 4
 			require.NoError(t, Replay(t.Context(), args))
 		})
@@ -412,7 +396,7 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 
 	chain := &stateChainAdapter{
 		chainID:          chainID,
-		metadataStore:    &BlockDBMetadataStore{},
+		executor:         &sonicExecutor{chainID: chainID, metadataStore: &BlockDBMetadataStore{}},
 		blockHashHistory: &blockHashHistory{},
 		state:            state,
 		snapshotHandler:  NewSnapshotHandler(0, 0, math.MaxUint64, 1),
@@ -944,9 +928,9 @@ func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_SkipBlockZero(t *tes
 			require.NoError(t, err)
 			defer func() { require.NoError(t, state.Close()) }()
 
-			// The metadata store expects no calls.
+			// The executor expects no calls.
 			chain := &stateChainAdapter{
-				metadataStore:    NewMockMetadataStore(gomock.NewController(t)),
+				executor:         NewMockBlockExecutor(gomock.NewController(t)),
 				blockHashHistory: &blockHashHistory{},
 				state:            state,
 			}
@@ -964,281 +948,37 @@ func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_SkipBlockZero(t *tes
 	}
 }
 
-func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_ForwardExecutionError(t *testing.T) {
+func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_ForwardToExecutor(t *testing.T) {
+	injected := errors.New("injected")
 	tests := map[string]struct {
-		apply func(chain *stateChainAdapter, block *types.Block) (types.Receipts, error)
+		apply  func(chain *stateChainAdapter, block *types.Block) (types.Receipts, error)
+		expect func(executor *MockBlockExecutorMockRecorder, chain *stateChainAdapter, block *types.Block)
 	}{
-		"ApplyBlock":        {apply: applyLiveBlock},
-		"ApplyArchiveBlock": {apply: applyArchiveBlock},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
-			require.NoError(t, err)
-			defer func() { require.NoError(t, state.Close()) }()
-			require.NoError(t, state.ApplyGenesis(&makefakegenesis.GenesisJson{}))
-
-			chain := &stateChainAdapter{
-				chainID:          12,
-				metadataStore:    &BlockDBMetadataStore{},
-				blockHashHistory: &blockHashHistory{},
-				state:            state,
-			}
-			require.NoError(t, chain.FlushState())
-
-			block, err := convert.ConvertToGethBlock(&blockdb.Block{
-				Number:    1,
-				ExtraData: make([]byte, 12),
-				Transactions: []*blockdb.Transaction{{
-					TransactionType: types.LegacyTxType,
-					Nonce:           123, // skipped, since nonces are 0 in the DB
-				}},
-			})
-			require.NoError(t, err)
-
-			_, err = tt.apply(chain, block)
-			require.EqualError(t, err, fmt.Sprintf("tx %v was skipped", block.Transactions()[0].Hash()))
-		})
-	}
-}
-
-func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_ApplyUpgrades(t *testing.T) {
-	// To see an effect of upgrades, this test uses two different rule sets
-	// such that gas costs for a simple transaction with excess gas differ.
-	// If the single proposer block formation is enabled, no fees are charged
-	// for transactions using too high gas limits. If it is disabled, a 10%
-	// excess gas charge is applied.
-	noExcessGasCharges := opera.GetAllegroUpgrades()
-	noExcessGasCharges.SingleProposerBlockFormation = true
-
-	withExcessGasCharges := opera.GetAllegroUpgrades()
-	withExcessGasCharges.SingleProposerBlockFormation = false
-
-	metadataStore := &BlockDBMetadataStore{
-		metadata: Metadata{
-			RulesUpdateHeights: []RulesUpdateHeight{
-				{Block: 5, Rules: opera.Rules{Upgrades: noExcessGasCharges}},
-				{Block: 10, Rules: opera.Rules{Upgrades: withExcessGasCharges}},
-				{Block: 15, Rules: opera.Rules{Upgrades: noExcessGasCharges}},
-			},
-		},
-	}
-
-	chainID := uint64(2)
-	state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, state.Close())
-	}()
-	require.NoError(t, state.ApplyGenesis(&makefakegenesis.GenesisJson{}))
-
-	chain := &stateChainAdapter{
-		chainID:          chainID,
-		metadataStore:    metadataStore,
-		blockHashHistory: &blockHashHistory{},
-		state:            state,
-		snapshotHandler:  &SnapshotHandler{},
-	}
-
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	signer := types.LatestSignerForChainID(big.NewInt(int64(chainID)))
-
-	requireGasUsedOfRules := func(block *types.Block, receipts types.Receipts) {
-		require.Len(t, receipts, 1)
-		require.Equal(t, types.ReceiptStatusSuccessful, receipts[0].Status)
-
-		upgrades := metadataStore.GetRulesAtBlock(block.NumberU64()).Upgrades
-		if upgrades.SingleProposerBlockFormation {
-			require.Equal(t, uint64(21_000), receipts[0].GasUsed)
-		} else {
-			require.Greater(t, receipts[0].GasUsed, uint64(21_000))
-		}
-	}
-
-	var blocks []*types.Block
-	for blockNr := range 20 {
-		block, err := convert.ConvertToGethBlock(&blockdb.Block{
-			Number:    uint64(blockNr + 1), // skip block 0 (genesis)
-			GasLimit:  100_000,
-			ExtraData: make([]byte, 12),
-			Transactions: []*blockdb.Transaction{
-				convert.ToBerthaTransaction(types.MustSignNewTx(
-					key,
-					signer,
-					&types.LegacyTx{
-						Nonce: uint64(blockNr),
-						To:    &common.Address{0},
-						Gas:   50_000, // extra gas beyond 21_000 to check rule effect
-					},
-				)),
-			},
-		})
-		require.NoError(t, err)
-		blocks = append(blocks, block)
-
-		receipts, _, err := chain.ApplyBlock(block)
-		require.NoError(t, err)
-		requireGasUsedOfRules(block, receipts)
-	}
-	require.NoError(t, chain.FlushState())
-
-	for _, block := range blocks {
-		receipts, err := chain.ApplyArchiveBlock(block, &blockHashHistory{})
-		require.NoError(t, err)
-		requireGasUsedOfRules(block, receipts)
-	}
-}
-
-func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_CommitRulesUpdateOnlyLiveWhenEncounteringAnEpochSealingTx(t *testing.T) {
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	address := crypto.PubkeyToAddress(key.PublicKey)
-	chainID := uint64(2)
-	signer := types.LatestSignerForChainID(big.NewInt(int64(chainID)))
-
-	// An epoch sealing transaction must be an internal transaction to the
-	// driver contract with the correct data.
-	// Internal transitions must have YParity=0 and R=0 which produces V=0,
-	// R=0, which satisfies internaltx.IsInternal.
-	epochSealingTx := convert.ToBerthaTransaction(types.NewTx(
-		&types.LegacyTx{
-			Gas:      25000,
-			To:       &driver.ContractAddress,
-			Data:     drivercall.SealEpoch(nil),
-			GasPrice: big.NewInt(0),
-			V:        big.NewInt(0),
-			R:        big.NewInt(0),
-		},
-	))
-	nonEpochSealingTx := convert.ToBerthaTransaction(types.MustSignNewTx(key, signer,
-		&types.LegacyTx{
-			Gas:      21000,
-			To:       &common.Address{1},
-			GasPrice: big.NewInt(100000),
-		},
-	))
-
-	cases := map[string]struct {
-		apply             func(chain *stateChainAdapter, block *types.Block) (types.Receipts, error)
-		tx                *blockdb.Transaction
-		expectCommitRules bool
-	}{
-		"ApplyBlock with EpochSealingTx": {
-			apply:             applyLiveBlock,
-			tx:                epochSealingTx,
-			expectCommitRules: true,
-		},
-		"ApplyBlock with NonEpochSealingTx": {
+		"ApplyBlock": {
 			apply: applyLiveBlock,
-			tx:    nonEpochSealingTx,
+			expect: func(executor *MockBlockExecutorMockRecorder, chain *stateChainAdapter, block *types.Block) {
+				executor.ExecuteBlock(chain.state, block, chain.blockHashHistory).Return(nil, uint64(0), injected)
+			},
 		},
-		"ApplyArchiveBlock with EpochSealingTx": {
+		"ApplyArchiveBlock": {
 			apply: applyArchiveBlock,
-			tx:    epochSealingTx,
+			expect: func(executor *MockBlockExecutorMockRecorder, chain *stateChainAdapter, block *types.Block) {
+				executor.ExecuteBlockOnArchive(chain.state, block, &blockHashHistory{}).Return(nil, injected)
+			},
 		},
-	}
-
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			mockMetadataStore := NewMockMetadataStore(ctrl)
-
-			state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
-			require.NoError(t, err)
-			defer func() {
-				require.NoError(t, state.Close())
-			}()
-			require.NoError(t, state.ApplyGenesis(&makefakegenesis.GenesisJson{Accounts: []makefakegenesis.Account{
-				{Address: address, Balance: uint256.NewInt(1e18)},
-			}}))
-
-			chain := &stateChainAdapter{
-				chainID:          chainID,
-				metadataStore:    mockMetadataStore,
-				blockHashHistory: &blockHashHistory{},
-				state:            state,
-				snapshotHandler:  &SnapshotHandler{},
-			}
-			require.NoError(t, chain.FlushState())
-
-			block, err := convert.ConvertToGethBlock(&blockdb.Block{
-				GasLimit:     1e18,
-				Number:       1,
-				ExtraData:    make([]byte, 12),
-				Transactions: []*blockdb.Transaction{tc.tx},
-			})
-			require.NoError(t, err)
-
-			mockMetadataStore.EXPECT().GetUpgradeHeights()
-			mockMetadataStore.EXPECT().GetRulesAtBlock(uint64(1))
-			mockMetadataStore.EXPECT().GetCorrectionsAtBlock(uint64(1))
-			mockMetadataStore.EXPECT().GetFailedBundlesAtBlock(uint64(1))
-
-			if tc.expectCommitRules {
-				mockMetadataStore.EXPECT().CommitRules(uint64(1)).Return(nil)
-			}
-
-			receipts, err := tc.apply(chain, block)
-			require.NoError(t, err)
-			require.Len(t, receipts, 1)
-		})
-	}
-}
-
-func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_OnlyLiveStatePatchesRules(t *testing.T) {
-	diff := []byte(`{"Upgrades":{"Allegro":true}}`)
-	// The driver emits its calldata as an UpdateNetworkRules event.
-	driverCode := program.New().
-		Op(vm.CALLDATASIZE).Push(0).Push(0).Op(vm.CALLDATACOPY).
-		Push(driverpos.Topics.UpdateNetworkRules).Op(vm.CALLDATASIZE).Push(0).Op(vm.LOG1).
-		Bytes()
-
-	tests := map[string]struct {
-		apply            func(chain *stateChainAdapter, block *types.Block) (types.Receipts, error)
-		expectPatchRules bool
-	}{
-		"ApplyBlock":        {apply: applyLiveBlock, expectPatchRules: true},
-		"ApplyArchiveBlock": {apply: applyArchiveBlock},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			metadataStore := NewMockMetadataStore(ctrl)
-			metadataStore.EXPECT().GetUpgradeHeights()
-			metadataStore.EXPECT().GetRulesAtBlock(uint64(1))
-			metadataStore.EXPECT().GetCorrectionsAtBlock(uint64(1))
-			metadataStore.EXPECT().GetFailedBundlesAtBlock(uint64(1))
-			if tt.expectPatchRules {
-				metadataStore.EXPECT().PatchRules(uint64(1), diff)
-			}
+			executor := NewMockBlockExecutor(gomock.NewController(t))
+			chain := &stateChainAdapter{executor: executor, blockHashHistory: &blockHashHistory{}, state: &State{}}
+			// Distinguishes the chain's hash history from the empty one of applyArchiveBlock.
+			chain.blockHashHistory.SetBlockHash(0, common.Hash{1})
+			block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1)})
+			tt.expect(executor.EXPECT(), chain, block)
 
-			state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
-			require.NoError(t, err)
-			defer func() { require.NoError(t, state.Close()) }()
-			require.NoError(t, state.ApplyGenesis(&makefakegenesis.GenesisJson{Accounts: []makefakegenesis.Account{{Address: driver.ContractAddress, Code: driverCode}}}))
-
-			chain := &stateChainAdapter{
-				chainID:          123,
-				metadataStore:    metadataStore,
-				blockHashHistory: &blockHashHistory{},
-				interpreter:      testInterpreter(t),
-				state:            state,
-			}
-			require.NoError(t, chain.FlushState())
-
-			key, err := crypto.GenerateKey()
-			require.NoError(t, err)
-			tx := types.MustSignNewTx(key, types.LatestSignerForChainID(big.NewInt(123)), &types.LegacyTx{Gas: 100_000, To: &driver.ContractAddress, Data: makeUpdateNetworkRulesLog(diff).Data})
-			block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 100_000, Extra: make([]byte, 12)}).
-				WithBody(types.Body{Transactions: types.Transactions{tx}})
-
-			receipts, err := tt.apply(chain, block)
-			require.NoError(t, err)
-			require.Len(t, receipts, 1)
-			require.Len(t, receipts[0].Logs, 1)
+			_, err := tt.apply(chain, block)
+			require.ErrorIs(t, err, injected)
 		})
 	}
 }
@@ -1250,9 +990,8 @@ func TestStateChainAdapter_ApplyBlock_CompletesHeaderAndRecordsItsHash(t *testin
 
 	chain := &stateChainAdapter{
 		chainID:          123,
-		metadataStore:    &BlockDBMetadataStore{},
 		blockHashHistory: &blockHashHistory{},
-		interpreter:      testInterpreter(t),
+		executor:         &sonicExecutor{chainID: 123, metadataStore: &BlockDBMetadataStore{}, interpreter: testInterpreter(t)},
 		state:            state,
 	}
 
@@ -1297,12 +1036,11 @@ func TestStateChainAdapter_ApplyBlock_TakesGasUsedFromProcessing(t *testing.T) {
 
 	chain := &stateChainAdapter{
 		chainID: 146,
-		metadataStore: &BlockDBMetadataStore{metadata: Metadata{
+		executor: &sonicExecutor{chainID: 146, metadataStore: &BlockDBMetadataStore{metadata: Metadata{
 			RulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: opera.FakeNetRules(upgrades)}},
 			FailedBundles:      FailedBundles{1: {{Pos: 0, Tx: envelope}}},
-		}},
+		}}, interpreter: testInterpreter(t)},
 		blockHashHistory: &blockHashHistory{},
-		interpreter:      testInterpreter(t),
 		state:            state,
 		snapshotHandler:  &SnapshotHandler{},
 	}
@@ -1312,50 +1050,6 @@ func TestStateChainAdapter_ApplyBlock_TakesGasUsedFromProcessing(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 	require.Equal(t, txBundle.GetTransactionsInReferencedOrder()[0].Gas(), block.GasUsed())
-}
-
-func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_ProcessFailedBundles(t *testing.T) {
-	upgrades := opera.GetBrioUpgrades()
-	upgrades.TransactionBundles = true
-	signer := types.LatestSignerForChainID(big.NewInt(146))
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	// The tx is only valid after the failed bundle has used nonce 0.
-	envelope := bundle.NewBuilder().
-		WithSigner(signer).
-		With(bundle.Step(key, &types.AccessListTx{Gas: 100_000, GasPrice: big.NewInt(1), Data: []byte{byte(vm.INVALID)}})).
-		Build()
-	tx := types.MustSignNewTx(key, signer, &types.LegacyTx{Nonce: 1, Gas: 21_000, GasPrice: big.NewInt(1), To: &common.Address{1}})
-
-	state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
-	require.NoError(t, err)
-	defer func() { require.NoError(t, state.Close()) }()
-	require.NoError(t, state.ApplyGenesis(&makefakegenesis.GenesisJson{Accounts: []makefakegenesis.Account{
-		{Address: crypto.PubkeyToAddress(key.PublicKey), Balance: uint256.NewInt(1e18)},
-	}}))
-
-	chain := &stateChainAdapter{
-		chainID: 146,
-		metadataStore: &BlockDBMetadataStore{metadata: Metadata{
-			RulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: opera.FakeNetRules(upgrades)}},
-			FailedBundles:      FailedBundles{1: {{Pos: 0, Tx: envelope}}},
-		}},
-		blockHashHistory: &blockHashHistory{},
-		interpreter:      testInterpreter(t),
-		state:            state,
-		snapshotHandler:  &SnapshotHandler{},
-	}
-
-	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 1_000_000, BaseFee: big.NewInt(1), Extra: make([]byte, 12)}).
-		WithBody(types.Body{Transactions: types.Transactions{tx}})
-	_, _, err = chain.ApplyBlock(block)
-	require.NoError(t, err)
-	// The archive lags behind the live state.
-	_, _, err = chain.ApplyBlock(types.NewBlockWithHeader(&types.Header{Number: big.NewInt(2), Extra: make([]byte, 12)}))
-	require.NoError(t, err)
-	require.NoError(t, chain.FlushState())
-	_, err = chain.ApplyArchiveBlock(block, &blockHashHistory{})
-	require.NoError(t, err)
 }
 
 func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_UseTheirHashHistory(t *testing.T) {
@@ -1390,9 +1084,8 @@ func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_UseTheirHashHistory(
 
 			chain := &stateChainAdapter{
 				chainID:          123,
-				metadataStore:    &BlockDBMetadataStore{},
 				blockHashHistory: &blockHashHistory{},
-				interpreter:      testInterpreter(t),
+				executor:         &sonicExecutor{chainID: 123, metadataStore: &BlockDBMetadataStore{}, interpreter: testInterpreter(t)},
 				state:            state,
 			}
 			for number := range uint64(2) {
@@ -1416,55 +1109,6 @@ func TestStateChainAdapter_ApplyBlock_And_ApplyArchiveBlock_UseTheirHashHistory(
 			require.NoError(t, err)
 			require.Len(t, receipts, 1)
 			require.Equal(t, tc.wantStatus, receipts[0].Status)
-		})
-	}
-}
-
-func TestStateChainAdapter_GetChainConfigAndRules_ReadsFromMetadataStoreForNonEthereumChains(t *testing.T) {
-	cases := map[string]struct {
-		chainID    uint64
-		isEthereum bool
-	}{
-		"Ethereum Mainnet": {
-			chainID:    1,
-			isEthereum: true,
-		},
-		"Sepolia": {
-			chainID:    11155111,
-			isEthereum: true,
-		},
-		"Holesky": {
-			chainID:    17000,
-			isEthereum: true,
-		},
-		"Hoodi": {
-			chainID:    560048,
-			isEthereum: true,
-		},
-		"Sonic": {
-			chainID:    146,
-			isEthereum: false,
-		},
-		"Unknown Chain": {
-			chainID:    9999,
-			isEthereum: false,
-		},
-	}
-
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			mockMetadataStore := NewMockMetadataStore(ctrl)
-
-			block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: 1})
-			require.NoError(t, err)
-
-			if !tc.isEthereum {
-				mockMetadataStore.EXPECT().GetUpgradeHeights()
-				mockMetadataStore.EXPECT().GetRulesAtBlock(uint64(1))
-			}
-
-			getChainConfigAndRules(block, tc.chainID, mockMetadataStore)
 		})
 	}
 }

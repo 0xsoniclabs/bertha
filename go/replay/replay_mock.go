@@ -236,3 +236,58 @@ func (mr *MockStateFlusherMockRecorder) FlushState() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FlushState", reflect.TypeOf((*MockStateFlusher)(nil).FlushState))
 }
+
+// MockBlockExecutor is a mock of BlockExecutor interface.
+type MockBlockExecutor struct {
+	ctrl     *gomock.Controller
+	recorder *MockBlockExecutorMockRecorder
+	isgomock struct{}
+}
+
+// MockBlockExecutorMockRecorder is the mock recorder for MockBlockExecutor.
+type MockBlockExecutorMockRecorder struct {
+	mock *MockBlockExecutor
+}
+
+// NewMockBlockExecutor creates a new mock instance.
+func NewMockBlockExecutor(ctrl *gomock.Controller) *MockBlockExecutor {
+	mock := &MockBlockExecutor{ctrl: ctrl}
+	mock.recorder = &MockBlockExecutorMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockBlockExecutor) EXPECT() *MockBlockExecutorMockRecorder {
+	return m.recorder
+}
+
+// ExecuteBlock mocks base method.
+func (m *MockBlockExecutor) ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, uint64, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExecuteBlock", state, block, hashHistory)
+	ret0, _ := ret[0].(types.Receipts)
+	ret1, _ := ret[1].(uint64)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// ExecuteBlock indicates an expected call of ExecuteBlock.
+func (mr *MockBlockExecutorMockRecorder) ExecuteBlock(state, block, hashHistory any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteBlock", reflect.TypeOf((*MockBlockExecutor)(nil).ExecuteBlock), state, block, hashHistory)
+}
+
+// ExecuteBlockOnArchive mocks base method.
+func (m *MockBlockExecutor) ExecuteBlockOnArchive(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ExecuteBlockOnArchive", state, block, hashHistory)
+	ret0, _ := ret[0].(types.Receipts)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ExecuteBlockOnArchive indicates an expected call of ExecuteBlockOnArchive.
+func (mr *MockBlockExecutorMockRecorder) ExecuteBlockOnArchive(state, block, hashHistory any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteBlockOnArchive", reflect.TypeOf((*MockBlockExecutor)(nil).ExecuteBlockOnArchive), state, block, hashHistory)
+}
