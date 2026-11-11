@@ -12,8 +12,10 @@ package replay
 import (
 	reflect "reflect"
 
+	state "github.com/0xsoniclabs/bertha/replay/state"
 	future "github.com/0xsoniclabs/carmen/go/common/future"
 	result "github.com/0xsoniclabs/carmen/go/common/result"
+	evmcore "github.com/0xsoniclabs/sonic/evmcore"
 	common "github.com/ethereum/go-ethereum/common"
 	types "github.com/ethereum/go-ethereum/core/types"
 	gomock "go.uber.org/mock/gomock"
@@ -276,9 +278,9 @@ func (m *MockBlockExecutor) EXPECT() *MockBlockExecutorMockRecorder {
 }
 
 // ExecuteBlock mocks base method.
-func (m *MockBlockExecutor) ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, *types.Header, error) {
+func (m *MockBlockExecutor) ExecuteBlock(arg0 *state.State, block *types.Block, hashHistory evmcore.DummyChain) (types.Receipts, *types.Header, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ExecuteBlock", state, block, hashHistory)
+	ret := m.ctrl.Call(m, "ExecuteBlock", arg0, block, hashHistory)
 	ret0, _ := ret[0].(types.Receipts)
 	ret1, _ := ret[1].(*types.Header)
 	ret2, _ := ret[2].(error)
@@ -286,22 +288,22 @@ func (m *MockBlockExecutor) ExecuteBlock(state *State, block *types.Block, hashH
 }
 
 // ExecuteBlock indicates an expected call of ExecuteBlock.
-func (mr *MockBlockExecutorMockRecorder) ExecuteBlock(state, block, hashHistory any) *gomock.Call {
+func (mr *MockBlockExecutorMockRecorder) ExecuteBlock(arg0, block, hashHistory any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteBlock", reflect.TypeOf((*MockBlockExecutor)(nil).ExecuteBlock), state, block, hashHistory)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteBlock", reflect.TypeOf((*MockBlockExecutor)(nil).ExecuteBlock), arg0, block, hashHistory)
 }
 
 // ExecuteBlockOnArchive mocks base method.
-func (m *MockBlockExecutor) ExecuteBlockOnArchive(state *State, block *types.Block, parentHeader *types.Header, hashHistory *blockHashHistory) (types.Receipts, error) {
+func (m *MockBlockExecutor) ExecuteBlockOnArchive(arg0 *state.State, block *types.Block, parentHeader *types.Header, hashHistory evmcore.DummyChain) (types.Receipts, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ExecuteBlockOnArchive", state, block, parentHeader, hashHistory)
+	ret := m.ctrl.Call(m, "ExecuteBlockOnArchive", arg0, block, parentHeader, hashHistory)
 	ret0, _ := ret[0].(types.Receipts)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ExecuteBlockOnArchive indicates an expected call of ExecuteBlockOnArchive.
-func (mr *MockBlockExecutorMockRecorder) ExecuteBlockOnArchive(state, block, parentHeader, hashHistory any) *gomock.Call {
+func (mr *MockBlockExecutorMockRecorder) ExecuteBlockOnArchive(arg0, block, parentHeader, hashHistory any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteBlockOnArchive", reflect.TypeOf((*MockBlockExecutor)(nil).ExecuteBlockOnArchive), state, block, parentHeader, hashHistory)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteBlockOnArchive", reflect.TypeOf((*MockBlockExecutor)(nil).ExecuteBlockOnArchive), arg0, block, parentHeader, hashHistory)
 }

@@ -14,12 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-package replay
+package state
 
 import (
 	"fmt"
 	"os"
 	"strings"
+	"testing"
 
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/amount"
@@ -40,8 +41,8 @@ import (
 // level methods for managing instances in the context of the replay tool.
 type State struct {
 	// TODO: replace with Carmen facade
-	db             carmen.StateDB
-	stateParameter StateParameters
+	DB         carmen.StateDB
+	Parameters StateParameters
 }
 
 // StateParameters is a configuration struct for creating a new State instance.
@@ -51,10 +52,6 @@ type StateParameters struct {
 	Schema      carmen.Schema
 	Variant     carmen.Variant
 }
-
-// stateCacheSize is the size in bytes of the live and the archive cache of a
-// State.
-var stateCacheSize int64 = 10 * 1024 * 1024 * 1024 // 10GB
 
 // NewState creates a new State instance with the given parameters. The
 // resulting state database is empty.
@@ -78,21 +75,27 @@ func NewState(params StateParameters) (*State, error) {
 		}
 	}
 
+	cacheSize := int64(10 * 1024 * 1024 * 1024) // 10GB
+	if testing.Testing() {
+		// Allocating and flushing large caches dominates the run time of the
+		// tests, in particular with the race detector.
+		cacheSize = 1024 * 1024 // 1MB
+	}
 	state, err := carmen.NewState(carmen.Parameters{
 		Directory:    dir,
 		Variant:      params.Variant,
 		Schema:       params.Schema,
 		Archive:      archive,
-		LiveCache:    stateCacheSize,
-		ArchiveCache: stateCacheSize,
+		LiveCache:    cacheSize,
+		ArchiveCache: cacheSize,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create state: %v", err)
 	}
 	db := carmen.CreateCustomStateDBUsing(state, 0)
 	return &State{
-		db:             db,
-		stateParameter: params,
+		DB:         db,
+		Parameters: params,
 	}, nil
 }
 
@@ -100,23 +103,23 @@ func NewState(params StateParameters) (*State, error) {
 // After calling Close, the State instance should not be used anymore.
 // If the state database was already closed, this method has no effect.
 func (s *State) Close() error {
-	if s.db == nil {
+	if s.DB == nil {
 		return nil
 	}
-	err := s.db.Close()
-	s.db = nil
+	err := s.DB.Close()
+	s.DB = nil
 	return err
 }
 
 // GetArchiveBlockHeight returns the highest block currently available in the
 // archive. If the archive is empty, empty is true.
 func (s *State) GetArchiveBlockHeight() (height uint64, empty bool, err error) {
-	return s.db.GetArchiveBlockHeight()
+	return s.DB.GetArchiveBlockHeight()
 }
 
 // GetStateRoot returns the current state root hash of the state database.
 func (s *State) GetStateRoot() future.Future[result.Result[common.Hash]] {
-	return future.Then(s.db.GetCommitment(), func(res result.Result[cc.Hash]) result.Result[common.Hash] {
+	return future.Then(s.DB.GetCommitment(), func(res result.Result[cc.Hash]) result.Result[common.Hash] {
 		value, err := res.Get()
 		if err != nil {
 			return result.Err[common.Hash](err)
@@ -130,37 +133,37 @@ func (s *State) GetStateRoot() future.Future[result.Result[common.Hash]] {
 // is replayed like any other block.
 func (s *State) ApplyGenesis(genesis *makefakegenesis.GenesisJson) error {
 	// apply the genesis accounts to the state
-	s.db.BeginBlock()
-	s.db.BeginTransaction()
+	s.DB.BeginBlock()
+	s.DB.BeginTransaction()
 	for _, account := range genesis.Accounts {
 		address := account.Address
 		var balance amount.Amount
 		if account.Balance != nil {
 			balance = amount.NewFromUint256(account.Balance)
 		}
-		s.db.AddBalance(cc.Address(address), balance)
+		s.DB.AddBalance(cc.Address(address), balance)
 		if len(account.Code) != 0 {
-			s.db.SetCode(cc.Address(address), account.Code)
+			s.DB.SetCode(cc.Address(address), account.Code)
 		}
 		if account.Nonce != 0 {
-			s.db.SetNonce(cc.Address(address), account.Nonce)
+			s.DB.SetNonce(cc.Address(address), account.Nonce)
 		}
 		for key, value := range account.Storage {
-			s.db.SetState(cc.Address(address), cc.Key(key), cc.Value(value))
+			s.DB.SetState(cc.Address(address), cc.Key(key), cc.Value(value))
 		}
 	}
-	s.db.EndTransaction()
-	if _, err := endBlockAndCommit(s, 0); err != nil {
+	s.DB.EndTransaction()
+	if _, err := EndBlockAndCommit(s, 0); err != nil {
 		return err
 	}
-	return s.db.Check()
+	return s.DB.Check()
 }
 
-// endBlockAndCommit calls `EndBlock` on the state database and commits
+// EndBlockAndCommit calls `EndBlock` on the state database and commits
 // the staged block to the archive.
 // It returns the handle to the archive commit operation, or an error if the operation failed.
-func endBlockAndCommit(s *State, blockNum uint64) (*carmen.WaitHandle, error) {
-	staged, err := s.db.EndBlock(blockNum)
+func EndBlockAndCommit(s *State, blockNum uint64) (*carmen.WaitHandle, error) {
+	staged, err := s.DB.EndBlock(blockNum)
 	if err != nil {
 		return nil, fmt.Errorf("failed to end block %d: %w", blockNum, err)
 	}

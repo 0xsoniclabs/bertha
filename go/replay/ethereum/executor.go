@@ -14,18 +14,19 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-package replay
+package ethereum
 
 import (
 	"fmt"
 	"math"
 	"math/big"
 
+	"github.com/0xsoniclabs/bertha/replay/state"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/evmcore/core_types"
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"
-	"github.com/0xsoniclabs/sonic/inter/state"
+	sonicstate "github.com/0xsoniclabs/sonic/inter/state"
 	"github.com/0xsoniclabs/tosca/go/geth_adapter"
 	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/0xsoniclabs/tracy"
@@ -39,15 +40,21 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 )
 
-//go:generate mockgen -source=ethereum_executor.go -destination=ethereum_executor_mock.go -package=replay
+//go:generate mockgen -source=executor.go -destination=executor_mock.go -package=ethereum
 
-// ethereumExecutor is the Ethereum implementation of BlockExecutor.
-type ethereumExecutor struct {
+// Executor is the Ethereum implementation of the replay's BlockExecutor.
+type Executor struct {
 	chainID     uint64
 	interpreter tosca.Interpreter
 }
 
-func (e *ethereumExecutor) ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, *types.Header, error) {
+// NewExecutor returns an Executor for the Ethereum network with the given chain
+// ID.
+func NewExecutor(chainID uint64, interpreter tosca.Interpreter) *Executor {
+	return &Executor{chainID: chainID, interpreter: interpreter}
+}
+
+func (e *Executor) ExecuteBlock(state *state.State, block *types.Block, hashHistory evmcore.DummyChain) (types.Receipts, *types.Header, error) {
 	receipts, usedGas, err := e.applyBlock(state, block, hashHistory, false)
 	if err != nil {
 		return nil, nil, err
@@ -63,19 +70,19 @@ func (e *ethereumExecutor) ExecuteBlock(state *State, block *types.Block, hashHi
 	return receipts, completeHeader, nil
 }
 
-func (e *ethereumExecutor) ExecuteBlockOnArchive(state *State, block *types.Block, _ *types.Header, hashHistory *blockHashHistory) (types.Receipts, error) {
+func (e *Executor) ExecuteBlockOnArchive(state *state.State, block *types.Block, _ *types.Header, hashHistory evmcore.DummyChain) (types.Receipts, error) {
 	receipts, _, err := e.applyBlock(state, block, hashHistory, true)
 	return receipts, err
 }
 
 // applyBlock applies the given block to state, see applyBlockWithProcessor.
-func (e *ethereumExecutor) applyBlock(
-	state *State,
+func (e *Executor) applyBlock(
+	state *state.State,
 	block *types.Block,
-	hashHistory *blockHashHistory,
+	hashHistory evmcore.DummyChain,
 	isArchive bool,
 ) (types.Receipts, uint64, error) {
-	chainConfig, upgrades := getEthereumChainConfigAndUpgrades(block, e.chainID)
+	chainConfig, upgrades := getChainConfigAndUpgrades(block, e.chainID)
 
 	processor := evmcore.NewStateProcessorForReplay(chainConfig, hashHistory, upgrades)
 
@@ -85,7 +92,7 @@ func (e *ethereumExecutor) applyBlock(
 type Processor interface {
 	ProcessWithDifficulty(
 		block *evmcore.EvmBlock,
-		statedb state.StateDB,
+		statedb sonicstate.StateDB,
 		cfg vm.Config,
 		gasLimit uint64,
 		usedGas *uint64,
@@ -100,7 +107,7 @@ type Processor interface {
 // processor and returns its receipts and gas used. With isArchive, it runs on
 // the archive state of the parent block and commits nothing.
 func applyBlockWithProcessor(
-	s *State,
+	s *state.State,
 	block *types.Block,
 	interpreter tosca.Interpreter,
 	processor Processor,
@@ -115,7 +122,7 @@ func applyBlockWithProcessor(
 			return nil, 0, fmt.Errorf("cannot apply genesis block in archive mode")
 		}
 		archiveBlock := block.NumberU64() - 1
-		archiveDB, err := s.db.GetArchiveStateDB(archiveBlock)
+		archiveDB, err := s.DB.GetArchiveStateDB(archiveBlock)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to get archive state for block %d: %w", archiveBlock, err)
 		}
@@ -123,9 +130,9 @@ func applyBlockWithProcessor(
 		stateDB = evmstore.CreateNonCommittableCarmenStateDb(archiveDB, nil)
 		vmStateDB = archiveDB
 	} else {
-		stateDB = evmstore.CreateCarmenStateDb(s.db, nil)
-		vmStateDB = s.db
-		s.db.BeginBlock()
+		stateDB = evmstore.CreateCarmenStateDb(s.DB, nil)
+		vmStateDB = s.DB
+		s.DB.BeginBlock()
 	}
 
 	zone := tracy.ZoneBegin("TransactionProcessing")
@@ -193,7 +200,7 @@ func applyBlockWithProcessor(
 	if !isArchive {
 		endBlockZone := tracy.ZoneBegin("EndBlock")
 		// Discard the handle as we don't need to wait for the commit to finish here.
-		_, err := endBlockAndCommit(s, block.NumberU64())
+		_, err := state.EndBlockAndCommit(s, block.NumberU64())
 		endBlockZone.End()
 		if err != nil {
 			return nil, 0, err

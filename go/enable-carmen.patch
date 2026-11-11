@@ -1,7 +1,7 @@
-diff --git a/go/replay/state.go b/go/replay/state.go
-index 5862689..ad7ea01 100644
---- a/go/replay/state.go
-+++ b/go/replay/state.go
+diff --git a/go/replay/state/state.go b/go/replay/state/state.go
+index 3aed964..653c395 100644
+--- a/go/replay/state/state.go
++++ b/go/replay/state/state.go
 @@ -29,7 +29,8 @@ import (
  	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
  	"github.com/ethereum/go-ethereum/common"

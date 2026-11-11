@@ -20,6 +20,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/0xsoniclabs/bertha/replay/state"
 	"github.com/stretchr/testify/require"
 )
 
@@ -57,8 +58,8 @@ func Test_SnapshotHandler_CreatesAndRemovesSnapshots(t *testing.T) {
 	require := require.New(t)
 
 	dir := t.TempDir()
-	state, err := NewState(
-		StateParameters{Directory: dir, Schema: 5},
+	state, err := state.NewState(
+		state.StateParameters{Directory: dir, Schema: 5},
 	)
 	require.NoError(err)
 	defer func() {
@@ -108,8 +109,8 @@ func Test_SnapshotHandler_GetOldestSnapshotDirReturnsOldestSnapshot(t *testing.T
 	require := require.New(t)
 	dir := t.TempDir()
 
-	state, err := NewState(
-		StateParameters{Directory: dir, Schema: 5},
+	state, err := state.NewState(
+		state.StateParameters{Directory: dir, Schema: 5},
 	)
 	require.NoError(err)
 	defer func() {
@@ -144,8 +145,8 @@ func Test_SnapshotHandler_GetSnapshotDirsReturnsExistingSnapshotList(t *testing.
 	require := require.New(t)
 	dir := t.TempDir()
 
-	state, err := NewState(
-		StateParameters{Directory: dir, Schema: 5},
+	state, err := state.NewState(
+		state.StateParameters{Directory: dir, Schema: 5},
 	)
 	require.NoError(err)
 	defer func() {

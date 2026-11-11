@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+
+	"github.com/0xsoniclabs/bertha/replay/state"
 )
 
 // SnapshotHandler is a utility to handle intermediate state database snapshots, allowing
@@ -53,10 +55,10 @@ func (s *SnapshotHandler) ShouldCreateSnapshot(currentBlock uint64) bool {
 // It closes and reopens the state to ensure all data is flushed to disk,
 // copies the state database directory to a new location, and removes a previous snapshot
 // if needed to keep the specified number of snapshots.
-func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, error) {
-	stateDBDir := state.stateParameter.Directory
+func (s *SnapshotHandler) Snapshot(currentBlock uint64, st *state.State) (*state.State, error) {
+	stateDBDir := st.Parameters.Directory
 	if !s.ShouldCreateSnapshot(currentBlock) {
-		return state, nil
+		return st, nil
 	}
 	slog.Info("Creating state database snapshot", "block_number", currentBlock)
 
@@ -78,7 +80,7 @@ func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, e
 		return nil, fmt.Errorf("failed to remove existing snapshot directory %q: %w", snapshotDir, err)
 	}
 	// Close and reopen the state to ensure all data is flushed to disk
-	err := state.Close()
+	err := st.Close()
 	if err != nil {
 		return nil, fmt.Errorf("failed to close state database before snapshot: %w", err)
 	}
@@ -87,13 +89,13 @@ func (s *SnapshotHandler) Snapshot(currentBlock uint64, state *State) (*State, e
 		return nil, fmt.Errorf("failed to copy state database for snapshot: %w", err)
 	}
 	// Open the state again
-	state, err = NewState(state.stateParameter)
+	st, err = state.NewState(st.Parameters)
 	if err != nil {
 		return nil, fmt.Errorf("failed to reopen state database after snapshot: %w", err)
 	}
 
 	slog.Info("Snapshot created successfully", "snapshot_directory", snapshotDir)
-	return state, nil
+	return st, nil
 }
 
 // GetOldestSnapshotDir returns the path to the oldest snapshot created.

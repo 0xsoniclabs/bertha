@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-package replay
+package state
 
 import (
 	"fmt"
@@ -26,20 +26,12 @@ import (
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
-	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
-
-func TestMain(m *testing.M) {
-	// Allocating and flushing the default caches dominates the run time of the
-	// tests, in particular with the race detector.
-	stateCacheSize = 1024 * 1024 // 1MB
-	os.Exit(m.Run())
-}
 
 func TestState_CanBeCreatedAndClosed(t *testing.T) {
 	for _, archive := range []bool{false, true} {
@@ -122,7 +114,7 @@ func TestState_GetStateRoot_ForwardsCallToDatabase(t *testing.T) {
 		future.Immediate(result.Ok(hash)),
 	)
 
-	state := &State{db: db}
+	state := &State{DB: db}
 
 	got, err := state.GetStateRoot().Await().Get()
 	require.NoError(t, err)
@@ -138,7 +130,7 @@ func TestState_GetStateRoot_ForwardsErrorFromDatabase(t *testing.T) {
 		future.Immediate(result.Err[cc.Hash](issue)),
 	)
 
-	state := &State{db: db}
+	state := &State{DB: db}
 
 	_, err := state.GetStateRoot().Await().Get()
 	require.ErrorIs(t, err, issue)
@@ -172,7 +164,7 @@ func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
 
 	require.NoError(t, state.ApplyGenesis(genesis))
 
-	db := state.db
+	db := state.DB
 	addr := cc.Address{1}
 	require.Equal(t, uint64(1000), db.GetBalance(addr).Uint64())
 	require.Equal(t, uint64(1), db.GetNonce(addr))
@@ -202,11 +194,11 @@ func TestState_ApplyGenesis_ReturnsErrorIfEndBlockFails(t *testing.T) {
 		db.EXPECT().EndBlock(uint64(0)).Return(nil, issue),
 	)
 
-	state := &State{db: db}
+	state := &State{DB: db}
 	require.ErrorIs(state.ApplyGenesis(&makefakegenesis.GenesisJson{}), issue)
 }
 
-func TestState_endBlockAndCommit_EndsAndCommitsBlock(t *testing.T) {
+func TestState_EndBlockAndCommit_EndsAndCommitsBlock(t *testing.T) {
 	require := require.New(t)
 	ctrl := gomock.NewController(t)
 	db := carmen.NewMockStateDB(ctrl)
@@ -218,12 +210,12 @@ func TestState_endBlockAndCommit_EndsAndCommitsBlock(t *testing.T) {
 		staged.EXPECT().Commit().Return(handle, nil),
 	)
 
-	got, err := endBlockAndCommit(&State{db: db}, 42)
+	got, err := EndBlockAndCommit(&State{DB: db}, 42)
 	require.NoError(err)
 	require.Same(handle, got)
 }
 
-func TestState_endBlockAndCommit_ReportsErrors(t *testing.T) {
+func TestState_EndBlockAndCommit_ReportsErrors(t *testing.T) {
 	issue := fmt.Errorf("injected error")
 	tests := map[string]struct {
 		setup   func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock)
@@ -258,15 +250,8 @@ func TestState_endBlockAndCommit_ReportsErrors(t *testing.T) {
 			staged := carmen.NewMockStagedBlock(ctrl)
 			test.setup(db, staged)
 
-			_, err := endBlockAndCommit(&State{db: db}, 42)
+			_, err := EndBlockAndCommit(&State{DB: db}, 42)
 			require.ErrorContains(err, test.wantErr)
 		})
 	}
-}
-
-func testInterpreter(t *testing.T) tosca.Interpreter {
-	t.Helper()
-	interpreter, err := tosca.NewInterpreter("sfvm")
-	require.NoError(t, err)
-	return interpreter
 }

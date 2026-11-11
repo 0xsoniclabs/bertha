@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-package replay
+package sonic
 
 import (
 	"encoding/json"
@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/0xsoniclabs/bertha/replay/state"
 	"github.com/0xsoniclabs/bertha/utils"
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/amount"
@@ -218,7 +219,7 @@ func TestApplyCorrections_AppliesCorrectionsToStateDB(t *testing.T) {
 }
 
 func TestSetBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
-	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, state.Close())
@@ -226,21 +227,21 @@ func TestSetBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
 
 	addr := common.Address{1}
 	balance := big.NewInt(1000)
-	setBalance(state.db, addr, balance)
+	setBalance(state.DB, addr, balance)
 
 	// Check initial balance
-	have := state.db.GetBalance(cc.Address(addr))
+	have := state.DB.GetBalance(cc.Address(addr))
 	require.Equal(t, balance.Uint64(), have.Uint64())
 
 	// Increase balance
 	balance = big.NewInt(1500)
-	setBalance(state.db, addr, balance)
-	have = state.db.GetBalance(cc.Address(addr))
+	setBalance(state.DB, addr, balance)
+	have = state.DB.GetBalance(cc.Address(addr))
 	require.Equal(t, uint64(1500), have.Uint64())
 
 	// Decrease balance
 	balance = big.NewInt(750)
-	setBalance(state.db, addr, balance)
-	have = state.db.GetBalance(cc.Address(addr))
+	setBalance(state.DB, addr, balance)
+	have = state.DB.GetBalance(cc.Address(addr))
 	require.Equal(t, uint64(750), have.Uint64())
 }

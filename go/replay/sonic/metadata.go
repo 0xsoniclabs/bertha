@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-package replay
+package sonic
 
 import (
 	"cmp"
@@ -31,7 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-//go:generate mockgen -source=metadata.go -destination=metadata_mock.go -package=replay
+//go:generate mockgen -source=metadata.go -destination=metadata_mock.go -package=sonic
 
 // MetadataStore is an interface for storing and retrieving chain rules,
 // corrections and failed bundles.
