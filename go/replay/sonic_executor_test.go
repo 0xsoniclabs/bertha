@@ -35,13 +35,14 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/core/vm/program"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/trie"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
 
 // executeLiveBlock executes the block with ExecuteBlock and an empty hash
-// history, and drops the gas used.
+// history, and drops the header.
 func executeLiveBlock(e *sonicExecutor, state *State, block *types.Block) (types.Receipts, error) {
 	receipts, _, err := e.ExecuteBlock(state, block, &blockHashHistory{})
 	return receipts, err
@@ -327,7 +328,7 @@ func TestSonicExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ServeBlockHashFrom
 	}
 }
 
-func TestSonicExecutor_ExecuteBlock_ReturnsGasUsedOfFailedBundles(t *testing.T) {
+func TestSonicExecutor_ExecuteBlock_CompletesHeader(t *testing.T) {
 	upgrades := opera.GetBrioUpgrades()
 	upgrades.TransactionBundles = true
 	key, err := crypto.GenerateKey()
@@ -352,9 +353,20 @@ func TestSonicExecutor_ExecuteBlock_ReturnsGasUsedOfFailedBundles(t *testing.T) 
 		FailedBundles:      FailedBundles{1: {{Pos: 0, Tx: envelope}}},
 	}}, interpreter: testInterpreter(t)}
 
-	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 1_000_000, BaseFee: big.NewInt(1), Extra: make([]byte, 12)})
-	receipts, gasUsed, err := executor.ExecuteBlock(state, block, &blockHashHistory{})
+	// Init code that emits a log, after the failed bundle used nonce 0.
+	tx := types.MustSignNewTx(key, signer, &types.LegacyTx{
+		Nonce:    1,
+		Gas:      100_000,
+		GasPrice: big.NewInt(1),
+		Data:     []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0)},
+	})
+	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 1_000_000, BaseFee: big.NewInt(1), Extra: make([]byte, 12)}).
+		WithBody(types.Body{Transactions: types.Transactions{tx}})
+	receipts, header, err := executor.ExecuteBlock(state, block, &blockHashHistory{})
 	require.NoError(t, err)
-	require.Empty(t, receipts)
-	require.Equal(t, txBundle.GetTransactionsInReferencedOrder()[0].Gas(), gasUsed)
+	require.Len(t, receipts, 1)
+	require.Len(t, receipts[0].Logs, 1)
+	require.Equal(t, receipts[0].GasUsed+txBundle.GetTransactionsInReferencedOrder()[0].Gas(), header.GasUsed)
+	require.Equal(t, types.MergeBloom(receipts), header.Bloom)
+	require.Equal(t, types.DeriveSha(receipts, trie.NewStackTrie(nil)), header.ReceiptHash)
 }

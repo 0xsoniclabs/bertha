@@ -20,6 +20,7 @@ import (
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
 // ethereumExecutor is the Ethereum implementation of BlockExecutor.
@@ -28,8 +29,20 @@ type ethereumExecutor struct {
 	interpreter tosca.Interpreter
 }
 
-func (e *ethereumExecutor) ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, uint64, error) {
-	return e.applyBlock(state, block, hashHistory, false)
+func (e *ethereumExecutor) ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, *types.Header, error) {
+	receipts, usedGas, err := e.applyBlock(state, block, hashHistory, false)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Reconstruct the complete header by filling in fields that are derived
+	// from processing the block, which are not stored in the block DB when
+	// importing from era files.
+	completeHeader := block.Header()
+	completeHeader.GasUsed = usedGas
+	completeHeader.Bloom = types.MergeBloom(receipts)
+	completeHeader.ReceiptHash = types.DeriveSha(receipts, trie.NewStackTrie(nil))
+	return receipts, completeHeader, nil
 }
 
 func (e *ethereumExecutor) ExecuteBlockOnArchive(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {

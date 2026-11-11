@@ -46,7 +46,6 @@ import (
 	"github.com/0xsoniclabs/tracy"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/trie"
 )
 
 //go:generate mockgen -source=replay.go -destination=replay_mock.go -package=replay
@@ -683,9 +682,8 @@ type StateFlusher interface {
 // BlockExecutor executes the blocks on a given State.
 type BlockExecutor interface {
 	// ExecuteBlock executes the given block on the live state, serving BLOCKHASH
-	// from hashHistory, and returns its receipts and the gas used by all
-	// processed transactions.
-	ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, uint64, error)
+	// from hashHistory, and returns its receipts and complete header.
+	ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, *types.Header, error)
 	// ExecuteBlockOnArchive executes the given block on the archived state of its
 	// parent, serving BLOCKHASH from hashHistory, and returns its receipts.
 	ExecuteBlockOnArchive(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error)
@@ -752,8 +750,10 @@ func (e *historyExecutor) CloneBlockHashHistory() *blockHashHistory {
 	return e.blockHashHistory.Clone()
 }
 
-// ApplyBlock applies the given block to the state database and returns the
-// resulting receipts and state-root future.
+// ApplyBlock applies the given block to the state database with the block
+// executor, replaces the header of block by the complete header the block
+// executor returns and records its hash. It returns the receipts and state-root
+// future.
 func (e *historyExecutor) ApplyBlock(block *types.Block) (
 	types.Receipts,
 	future.Future[result.Result[common.Hash]],
@@ -775,22 +775,13 @@ func (e *historyExecutor) ApplyBlock(block *types.Block) (
 		return nil, e.state.GetStateRoot(), nil
 	}
 
-	receipts, usedGas, err := e.blockExecutor.ExecuteBlock(e.state, block, e.blockHashHistory)
+	receipts, header, err := e.blockExecutor.ExecuteBlock(e.state, block, e.blockHashHistory)
 	if err != nil {
 		return nil, future.Future[result.Result[common.Hash]]{}, err
 	}
+	*block = *block.WithSeal(header)
 
-	// Reconstruct the complete header by filling in fields that are derived
-	// from processing the block, which are not stored in the block DB when
-	// importing from era files. The gas used includes failed bundles, which
-	// have no receipts.
-	completeHeader := block.Header()
-	completeHeader.GasUsed = usedGas
-	completeHeader.Bloom = types.MergeBloom(receipts)
-	completeHeader.ReceiptHash = types.DeriveSha(receipts, trie.NewStackTrie(nil))
-	*block = *block.WithSeal(completeHeader)
-
-	e.blockHashHistory.SetBlockHash(block.NumberU64(), completeHeader.Hash())
+	e.blockHashHistory.SetBlockHash(block.NumberU64(), header.Hash())
 
 	return receipts, e.state.GetStateRoot(), nil
 }
