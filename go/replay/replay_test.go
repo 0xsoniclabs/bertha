@@ -35,12 +35,8 @@ import (
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
-	"github.com/0xsoniclabs/sonic/gossip/blockproc/bundle"
-	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/trie"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -372,7 +368,7 @@ type replayer func(
 ) error
 
 func canProcessEmptyBlocks(t *testing.T, run replayer) {
-	chainID := uint64(12)
+	chainID := uint64(1)
 	state, err := NewState(
 		StateParameters{Directory: t.TempDir(), Schema: 5},
 	)
@@ -385,22 +381,24 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	require.NoError(t, err)
 
 	// A block history where nothing ever is happening.
-	block1 := &blockdb.Block{Number: 0, StateRoot: stateRoot[:], ExtraData: make([]byte, 12)}
+	block1 := &blockdb.Block{Number: 0, StateRoot: stateRoot[:]}
 	block1geth, err := convert.ConvertToGethBlock(block1)
 	require.NoError(t, err)
-	block2 := &blockdb.Block{Number: 1, StateRoot: stateRoot[:], ParentHash: block1geth.Hash().Bytes(), ExtraData: make([]byte, 12)}
+	block2 := &blockdb.Block{Number: 1, StateRoot: stateRoot[:], ParentHash: block1geth.Hash().Bytes()}
 	block2geth, err := convert.ConvertToGethBlock(block2)
 	require.NoError(t, err)
-	block3 := &blockdb.Block{Number: 2, StateRoot: stateRoot[:], ParentHash: block2geth.Hash().Bytes(), ExtraData: make([]byte, 12)}
+	block3 := &blockdb.Block{Number: 2, StateRoot: stateRoot[:], ParentHash: block2geth.Hash().Bytes()}
 	blocks := []*blockdb.Block{block1, block2, block3}
 
+	blockExecutor := NewMockBlockExecutor(gomock.NewController(t))
 	executor := &historyExecutor{
 		chainID:          chainID,
-		blockExecutor:    &sonicExecutor{chainID: chainID, metadataStore: &BlockDBMetadataStore{}},
+		blockExecutor:    blockExecutor,
 		blockHashHistory: &blockHashHistory{},
 		state:            state,
 		snapshotHandler:  NewSnapshotHandler(0, 0, math.MaxUint64, 1),
 	}
+	blockExecutor.EXPECT().ExecuteBlock(state, gomock.Any(), executor.blockHashHistory).Return(nil, uint64(0), nil).Times(2)
 
 	iter := utils.NewIter(blocks)
 	counter := 0
@@ -988,129 +986,20 @@ func TestHistoryExecutor_ApplyBlock_CompletesHeaderAndRecordsItsHash(t *testing.
 	require.NoError(t, err)
 	defer func() { require.NoError(t, state.Close()) }()
 
-	executor := &historyExecutor{
-		chainID:          123,
-		blockHashHistory: &blockHashHistory{},
-		blockExecutor:    &sonicExecutor{chainID: 123, metadataStore: &BlockDBMetadataStore{}, interpreter: testInterpreter(t)},
-		state:            state,
-	}
-
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	// Init code that emits a log.
-	tx := types.MustSignNewTx(key, types.LatestSignerForChainID(big.NewInt(123)), &types.LegacyTx{
-		Gas:  100_000,
-		Data: []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0)},
-	})
-	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 100_000, Extra: make([]byte, 12)}).
-		WithBody(types.Body{Transactions: types.Transactions{tx}})
+	blockExecutor := NewMockBlockExecutor(gomock.NewController(t))
+	executor := &historyExecutor{blockExecutor: blockExecutor, blockHashHistory: &blockHashHistory{}, state: state}
+	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1)})
+	want := types.Receipts{{CumulativeGasUsed: 21_000, Bloom: types.Bloom{1}}}
+	// The gas used includes failed bundles, which have no receipts.
+	blockExecutor.EXPECT().ExecuteBlock(state, block, executor.blockHashHistory).Return(want, uint64(50_000), nil)
 
 	receipts, _, err := executor.ApplyBlock(block)
 	require.NoError(t, err)
-	require.Len(t, receipts, 1)
-	require.Len(t, receipts[0].Logs, 1)
-	require.Equal(t, types.MergeBloom(receipts), block.Bloom())
-	require.Equal(t, types.DeriveSha(receipts, trie.NewStackTrie(nil)), block.ReceiptHash())
+	require.Equal(t, want, receipts)
+	require.Equal(t, uint64(50_000), block.GasUsed())
+	require.Equal(t, types.MergeBloom(want), block.Bloom())
+	require.Equal(t, types.DeriveSha(want, trie.NewStackTrie(nil)), block.ReceiptHash())
 	require.Equal(t, block.Hash(), executor.blockHashHistory.GetBlockHash(1))
-}
-
-func TestHistoryExecutor_ApplyBlock_TakesGasUsedFromProcessing(t *testing.T) {
-	upgrades := opera.GetBrioUpgrades()
-	upgrades.TransactionBundles = true
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	// A failed bundle uses gas without adding a receipt. INVALID uses all gas
-	// of the bundle's step.
-	signer := types.LatestSignerForChainID(big.NewInt(146))
-	envelope := bundle.NewBuilder().
-		WithSigner(signer).
-		With(bundle.Step(key, &types.AccessListTx{Gas: 100_000, GasPrice: big.NewInt(1), Data: []byte{byte(vm.INVALID)}})).
-		Build()
-	txBundle, err := bundle.OpenEnvelope(signer, envelope)
-	require.NoError(t, err)
-
-	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
-	require.NoError(t, err)
-	defer func() { require.NoError(t, state.Close()) }()
-	setBalance(state.db, crypto.PubkeyToAddress(key.PublicKey), big.NewInt(1e18))
-
-	executor := &historyExecutor{
-		chainID: 146,
-		blockExecutor: &sonicExecutor{chainID: 146, metadataStore: &BlockDBMetadataStore{metadata: Metadata{
-			RulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: opera.FakeNetRules(upgrades)}},
-			FailedBundles:      FailedBundles{1: {{Pos: 0, Tx: envelope}}},
-		}}, interpreter: testInterpreter(t)},
-		blockHashHistory: &blockHashHistory{},
-		state:            state,
-		snapshotHandler:  &SnapshotHandler{},
-	}
-
-	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 1_000_000, BaseFee: big.NewInt(1), Extra: make([]byte, 12)})
-	receipts, _, err := executor.ApplyBlock(block)
-	require.NoError(t, err)
-	require.Empty(t, receipts)
-	require.Equal(t, txBundle.GetTransactionsInReferencedOrder()[0].Gas(), block.GasUsed())
-}
-
-func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_UseTheirHashHistory(t *testing.T) {
-	// Init code that reverts if BLOCKHASH(1) is zero.
-	initCode := common.FromHex("0x600140600a57600080fd5b00")
-	tests := map[string]struct {
-		apply      func(executor *historyExecutor, block *types.Block) (types.Receipts, error)
-		wantStatus uint64
-	}{
-		"ApplyBlock uses the hashes of the applied blocks": {
-			apply:      applyBlock,
-			wantStatus: types.ReceiptStatusSuccessful,
-		},
-		"ApplyBlockOnArchive uses the given hashes": {
-			apply: func(executor *historyExecutor, block *types.Block) (types.Receipts, error) {
-				hashHistory := &blockHashHistory{}
-				hashHistory.SetBlockHash(1, common.Hash{1})
-				return executor.ApplyBlockOnArchive(block, hashHistory)
-			},
-			wantStatus: types.ReceiptStatusSuccessful,
-		},
-		"ApplyBlockOnArchive ignores the hashes of the applied blocks": {
-			apply:      applyBlockOnArchive,
-			wantStatus: types.ReceiptStatusFailed,
-		},
-	}
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
-			require.NoError(t, err)
-			defer func() { require.NoError(t, state.Close()) }()
-
-			executor := &historyExecutor{
-				chainID:          123,
-				blockHashHistory: &blockHashHistory{},
-				blockExecutor:    &sonicExecutor{chainID: 123, metadataStore: &BlockDBMetadataStore{}, interpreter: testInterpreter(t)},
-				state:            state,
-			}
-			for number := range uint64(2) {
-				_, _, err = executor.ApplyBlock(types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(number + 1), Extra: make([]byte, 12)}))
-				require.NoError(t, err)
-			}
-			require.NoError(t, executor.FlushState())
-
-			key, err := crypto.GenerateKey()
-			require.NoError(t, err)
-			tx := types.MustSignNewTx(key, types.LatestSignerForChainID(big.NewInt(123)), &types.LegacyTx{Gas: 100_000, Data: initCode})
-			block, err := convert.ConvertToGethBlock(&blockdb.Block{
-				Number:       3,
-				GasLimit:     100_000,
-				ExtraData:    make([]byte, 12),
-				Transactions: []*blockdb.Transaction{convert.ToBerthaTransaction(tx)},
-			})
-			require.NoError(t, err)
-
-			receipts, err := tc.apply(executor, block)
-			require.NoError(t, err)
-			require.Len(t, receipts, 1)
-			require.Equal(t, tc.wantStatus, receipts[0].Status)
-		})
-	}
 }
 
 // synthetic block hash for tests that encodes the block number in the last 8

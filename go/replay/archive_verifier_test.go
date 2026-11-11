@@ -27,10 +27,9 @@ import (
 	"time"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
-	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/0xsoniclabs/bertha/utils"
-	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
@@ -239,113 +238,41 @@ func TestArchiveVerifier_dispatcher_LogsDroppedTicksRateLimited(t *testing.T) {
 }
 
 func TestArchiveVerifier_verifyBlock(t *testing.T) {
+	// The archive holds blocks up to 1, so block 2 is the first it can re-execute.
+	const matchingGasUsed = 21_000
+	const differingGasUsed = 999
 	tests := map[string]struct {
-		numBlocks       int
-		setupPool       func([]*blockdb.Block, *utils.RandomRetentionPool[blockWithHashHistory])
+		archiveEmpty    bool
+		blockNumber     uint64
+		storedGasUsed   uint64
 		noReceiptsCheck bool
-		verifyCalls     int
+		wantApply       bool
 		wantErr         string
 	}{
-		"VerifiesBlocksSuccessfully": {
-			numBlocks: 100,
-			setupPool: func(blocks []*blockdb.Block, pool *utils.RandomRetentionPool[blockWithHashHistory]) {
-				for _, block := range blocks[1:] {
-					pool.Add(blockWithHashHistory{block: block, hashHistory: &blockHashHistory{}})
-				}
-			},
-			verifyCalls: 100,
-		},
-		"DetectsCorruption": {
-			numBlocks: 10,
-			setupPool: func(blocks []*blockdb.Block, pool *utils.RandomRetentionPool[blockWithHashHistory]) {
-				pool.Add(blockWithHashHistory{
-					block: &blockdb.Block{
-						Number:    blocks[5].Number,
-						ExtraData: make([]byte, 12),
-						// corrupted receipts
-						Receipts: []*blockdb.TransactionReceipt{{
-							CumulativeGasUsed: 999,
-						}},
-					},
-					hashHistory: &blockHashHistory{},
-				})
-			},
-			verifyCalls: 1,
-			wantErr:     "receipt check failed",
-		},
-		"SkipsReceiptsCheckWhenDisabled": {
-			numBlocks: 10,
-			setupPool: func(blocks []*blockdb.Block, pool *utils.RandomRetentionPool[blockWithHashHistory]) {
-				pool.Add(blockWithHashHistory{
-					block: &blockdb.Block{
-						Number:    blocks[5].Number,
-						ExtraData: make([]byte, 12),
-						// corrupted receipts, but check is disabled
-						Receipts: []*blockdb.TransactionReceipt{{
-							CumulativeGasUsed: 999,
-						}},
-					},
-					hashHistory: &blockHashHistory{},
-				})
-			},
-			noReceiptsCheck: true,
-			verifyCalls:     1,
-		},
-		"SkipsBlocksAboveArchiveHeight": {
-			numBlocks: 5,
-			setupPool: func(_ []*blockdb.Block, pool *utils.RandomRetentionPool[blockWithHashHistory]) {
-				pool.Add(blockWithHashHistory{block: &blockdb.Block{
-					Number: 9999,
-					// corrupted receipts, but should be skipped since it's above the archive height
-					Receipts: []*blockdb.TransactionReceipt{{
-						CumulativeGasUsed: 999,
-					}},
-				}})
-			},
-			verifyCalls: 1,
-		},
+		"matching receipts are accepted":                         {blockNumber: 2, storedGasUsed: matchingGasUsed, wantApply: true},
+		"differing receipts are rejected":                        {blockNumber: 2, storedGasUsed: differingGasUsed, wantApply: true, wantErr: "receipt check failed for block 2"},
+		"differing receipts are accepted without receipts check": {blockNumber: 2, storedGasUsed: differingGasUsed, noReceiptsCheck: true, wantApply: true},
+		"block above archive height is skipped":                  {blockNumber: 3},
+		"block is skipped while archive is empty":                {archiveEmpty: true, blockNumber: 2},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			interpreter, err := tosca.NewInterpreter("sfvm")
+			pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
 			require.NoError(t, err)
+			pool.Add(blockWithHashHistory{block: &blockdb.Block{
+				Number:   tc.blockNumber,
+				Receipts: []*blockdb.TransactionReceipt{{CumulativeGasUsed: tc.storedGasUsed}},
+			}})
 
-			state, err := NewState(StateParameters{
-				Directory:   t.TempDir(),
-				WithArchive: true,
-				Schema:      5,
-				Variant:     "go-file",
-			})
-			require.NoError(t, err)
-			defer func() { require.NoError(t, state.Close()) }()
-
-			executor := &historyExecutor{
-				chainID:          123,
-				blockExecutor:    &sonicExecutor{chainID: 123, metadataStore: &BlockDBMetadataStore{}, interpreter: interpreter},
-				blockHashHistory: &blockHashHistory{},
-				state:            state,
-				schema:           5,
-				snapshotHandler:  NewSnapshotHandler(0, 0, math.MaxUint64, 1),
+			executor := NewMockArchiveExecutor(gomock.NewController(t))
+			executor.EXPECT().GetArchiveBlockHeight().Return(uint64(1), tc.archiveEmpty, nil)
+			if tc.wantApply {
+				executor.EXPECT().ApplyBlockOnArchive(gomock.Any(), gomock.Any()).Return(types.Receipts{{CumulativeGasUsed: matchingGasUsed}}, nil)
 			}
-
-			protoBlocks := utils.CreateValidBlocks(t, tc.numBlocks)
-			for _, block := range protoBlocks {
-				gethBlock, err := convert.ConvertToGethBlock(block)
-				require.NoError(t, err)
-				_, _, err = executor.ApplyBlock(gethBlock)
-				require.NoError(t, err)
-			}
-			// Flush so the archive height reflects the applied blocks.
-			require.NoError(t, state.db.Flush())
 
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
-
-			pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
-			require.NoError(t, err)
-			tc.setupPool(protoBlocks, pool)
-
 			verifier := &archiveVerifier{
 				pool:            pool,
 				executor:        executor,
@@ -356,9 +283,7 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 				logger:          slog.Default(),
 			}
 
-			for range tc.verifyCalls {
-				verifier.verifyBlock()
-			}
+			verifier.verifyBlock()
 
 			err = verifier.close()
 			if tc.wantErr != "" {
