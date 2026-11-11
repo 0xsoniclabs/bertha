@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"iter"
 	"log/slog"
 	"math"
@@ -45,9 +44,7 @@ import (
 	"github.com/0xsoniclabs/sonic/evmcore/core_types"
 	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
 	"github.com/0xsoniclabs/sonic/opera"
-	"github.com/0xsoniclabs/sonic/opera/contracts/driver"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver/drivercall"
-	"github.com/0xsoniclabs/sonic/opera/contracts/driver/driverpos"
 	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/0xsoniclabs/tracy"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
@@ -978,40 +975,4 @@ func (h *blockHashHistory) Header(_ common.Hash, number uint64) *evmcore.EvmHead
 		Hash:       h.GetBlockHash(number),
 		ParentHash: h.GetBlockHash(number - 1),
 	}
-}
-
-// --- rules update handling ---
-
-func onNewLog(metadataStore MetadataStore, blockNumber uint64, l *core_types.Log) {
-	// https://github.com/0xsoniclabs/sonic/blob/c3816115c9ae51682aa475c715aabbe10e0dcef4/gossip/blockproc/drivermodule/driver_txs.go#L351
-	if l.Address == driver.ContractAddress &&
-		len(l.Topics) > 0 &&
-		l.Topics[0] == driverpos.Topics.UpdateNetworkRules &&
-		len(l.Data) >= 64 {
-		diff, err := decodeDataBytes(l)
-		if err != nil {
-			slog.Warn("Failed to decode UpdateNetworkRules event data", "block", blockNumber, "error", err)
-			return
-		}
-		err = metadataStore.PatchRules(blockNumber, diff)
-		if err != nil {
-			slog.Warn("Failed to patch rules", "block", blockNumber, "error", err)
-		}
-	}
-}
-
-// https://github.com/0xsoniclabs/sonic/blob/c3816115c9ae51682aa475c715aabbe10e0dcef4/gossip/blockproc/drivermodule/driver_txs.go#L296
-func decodeDataBytes(l *core_types.Log) ([]byte, error) {
-	if len(l.Data) < 32 {
-		return nil, io.ErrUnexpectedEOF
-	}
-	start := new(big.Int).SetBytes(l.Data[24:32]).Uint64()
-	if start+32 > uint64(len(l.Data)) {
-		return nil, io.ErrUnexpectedEOF
-	}
-	size := new(big.Int).SetBytes(l.Data[start+24 : start+32]).Uint64()
-	if start+32+size > uint64(len(l.Data)) {
-		return nil, io.ErrUnexpectedEOF
-	}
-	return l.Data[start+32 : start+32+size], nil
 }
