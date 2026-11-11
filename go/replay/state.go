@@ -22,7 +22,6 @@ import (
 	"math"
 	"math/big"
 	"os"
-	"slices"
 	"strings"
 
 	"github.com/0xsoniclabs/bertha/convert"
@@ -278,26 +277,9 @@ func (s *State) ApplyBlock(
 		math.MaxUint64,
 	)
 
-	// Retrieve the receipts from the processed transactions and check that none
-	// of them were skipped and that none of the failed bundles added receipts.
-	// Transactions of failed bundles are not part of the block, and a skipped
-	// bundle is returned as its envelope.
-	receipts := make(types.Receipts, 0, len(processed.ProcessedTransactions))
-	isFailedBundle := func(hash common.Hash) bool {
-		return slices.ContainsFunc(failedBundles, func(b FailedBundle) bool { return b.Tx.Hash() == hash })
-	}
-	for _, proc := range processed.ProcessedTransactions {
-		hash := proc.Transaction.Hash()
-		if proc.Receipt == nil {
-			if isFailedBundle(hash) {
-				return nil, 0, fmt.Errorf("failed bundle %v was skipped", hash)
-			}
-			return nil, 0, fmt.Errorf("tx %v was skipped", hash)
-		}
-		if cause := processed.CausedBy[hash]; isFailedBundle(cause) {
-			return nil, 0, fmt.Errorf("failed bundle %v added a receipt for tx %v", cause, hash)
-		}
-		receipts = append(receipts, proc.Receipt)
+	receipts, err := blockReceipts(processed, failedBundles)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsPrague(block.Number(), block.Time()) {
@@ -337,22 +319,6 @@ func (s *State) ApplyBlock(
 	}
 
 	return receipts, usedGas, vmStateDB.Check()
-}
-
-// insertFailedBundles inserts the envelopes of the given failed bundles, sorted
-// by position, before the transaction at their position.
-func insertFailedBundles(txs types.Transactions, failedBundles []FailedBundle) (types.Transactions, error) {
-	res := make(types.Transactions, 0, len(txs)+len(failedBundles))
-	next := uint64(0)
-	for _, failedBundle := range failedBundles {
-		if failedBundle.Pos > uint64(len(txs)) {
-			return nil, fmt.Errorf("position %d of failed bundle exceeds the number of transactions %d", failedBundle.Pos, len(txs))
-		}
-		res = append(res, txs[next:failedBundle.Pos]...)
-		res = append(res, failedBundle.Tx)
-		next = failedBundle.Pos
-	}
-	return append(res, txs[next:]...), nil
 }
 
 func applyCorrections(stateDB carmen.VmStateDB, corrections map[common.Address]Correction, block *types.Block, logger utils.Logger) {
