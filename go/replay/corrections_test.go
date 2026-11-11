@@ -19,13 +19,19 @@ package replay
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strings"
 	"testing"
 
+	"github.com/0xsoniclabs/bertha/utils"
 	cc "github.com/0xsoniclabs/carmen/go/common"
+	"github.com/0xsoniclabs/carmen/go/common/amount"
+	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 )
 
 var (
@@ -156,4 +162,85 @@ func TestCorrections_decodeFixed_ReturnsErrors(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestApplyCorrections_AppliesCorrectionsToStateDB(t *testing.T) {
+	blockNumber := uint64(17)
+	address := common.Address{1}
+	oldBalance := amount.New(0)
+	newBalance := uint256.NewInt(1000)
+	balanceDiff := amount.New(1000)
+	storageKey := cc.Key{1}
+	oldStorageValue := cc.Value{2}
+	newStorageValue := cc.Value{3}
+
+	corrections := Corrections{
+		blockNumber: map[common.Address]Correction{
+			address: {
+				Balance: newBalance,
+				Storage: map[cc.Key]cc.Value{
+					storageKey: newStorageValue,
+				},
+			},
+		},
+	}
+
+	ctrl := gomock.NewController(t)
+	stateDB := carmen.NewMockVmStateDB(ctrl)
+	logger := utils.NewMockLogger(ctrl)
+
+	stateDB.EXPECT().BeginTransaction().Times(1)
+	stateDB.EXPECT().GetBalance(cc.Address(address)).Return(oldBalance).Times(2)
+	stateDB.EXPECT().AddBalance(cc.Address(address), balanceDiff).Times(1)
+	stateDB.EXPECT().GetState(cc.Address(address), storageKey).Return(oldStorageValue).Times(1)
+	stateDB.EXPECT().SetState(cc.Address(address), storageKey, newStorageValue).Times(1)
+	stateDB.EXPECT().EndTransaction().Times(1)
+
+	logger.EXPECT().Info("Applying corrections", "block", blockNumber).Times(1)
+	logger.EXPECT().Info("Correcting balance",
+		"address", address.Hex(),
+		"old", oldBalance.ToBig().String(),
+		"new", newBalance.ToBig().String(),
+	).Times(1)
+	logger.EXPECT().Info("Correcting storage",
+		"address", address.Hex(),
+		"storage_keys", len(corrections[blockNumber][address].Storage),
+	).Times(1)
+	logger.EXPECT().Info("Correcting storage entry",
+		"address", address.Hex(),
+		"key", fmt.Sprintf("0x%x", storageKey[:]),
+		"old", fmt.Sprintf("0x%x", oldStorageValue[:]),
+		"new", fmt.Sprintf("0x%x", newStorageValue[:]),
+	).Times(1)
+
+	block := types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(blockNumber)})
+	applyCorrections(stateDB, corrections[blockNumber], block, logger)
+}
+
+func TestSetBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
+	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	require.NoError(t, err)
+	defer func() {
+		require.NoError(t, state.Close())
+	}()
+
+	addr := common.Address{1}
+	balance := big.NewInt(1000)
+	setBalance(state.db, addr, balance)
+
+	// Check initial balance
+	have := state.db.GetBalance(cc.Address(addr))
+	require.Equal(t, balance.Uint64(), have.Uint64())
+
+	// Increase balance
+	balance = big.NewInt(1500)
+	setBalance(state.db, addr, balance)
+	have = state.db.GetBalance(cc.Address(addr))
+	require.Equal(t, uint64(1500), have.Uint64())
+
+	// Decrease balance
+	balance = big.NewInt(750)
+	setBalance(state.db, addr, balance)
+	have = state.db.GetBalance(cc.Address(addr))
+	require.Equal(t, uint64(750), have.Uint64())
 }
