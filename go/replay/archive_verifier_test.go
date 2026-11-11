@@ -322,9 +322,8 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 
 			chain := &stateChainAdapter{
 				chainID:          123,
-				metadataStore:    &BlockDBMetadataStore{},
+				executor:         &sonicExecutor{chainID: 123, metadataStore: &BlockDBMetadataStore{}, interpreter: interpreter},
 				blockHashHistory: &blockHashHistory{},
-				interpreter:      interpreter,
 				state:            state,
 				schema:           5,
 				snapshotHandler:  NewSnapshotHandler(0, 0, math.MaxUint64, 1),
