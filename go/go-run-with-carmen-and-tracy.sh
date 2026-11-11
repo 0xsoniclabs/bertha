@@ -48,5 +48,8 @@ cd $BERTHA_GO_DIR
 git apply --reverse --check enable-carmen.patch 2> /dev/null || git apply enable-carmen.patch
 git apply --reverse --check enable-tracy.patch 2> /dev/null || git apply enable-tracy.patch
 
+echo "Bertha commit: $(git -C $BERTHA_GO_DIR rev-parse HEAD)"
+echo "Carmen commit: $(git -C $CARMEN_RUST_DIR rev-parse HEAD)"
+
 # Run go with tracy tag.
 go run --tags "carmen_rust enable_tracy" "$@"
