@@ -18,26 +18,99 @@ package replay
 
 import (
 	"fmt"
+	"log"
+	"log/slog"
 
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/evmcore/core_types"
+	"github.com/0xsoniclabs/sonic/gossip"
+	"github.com/0xsoniclabs/sonic/gossip/blockproc/evmmodule"
+	"github.com/0xsoniclabs/sonic/gossip/evmstore"
+	"github.com/0xsoniclabs/sonic/inter"
+	"github.com/0xsoniclabs/sonic/inter/state"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/sonic/opera/contracts/driver/drivercall"
+	"github.com/0xsoniclabs/tosca/go/geth_adapter"
 	"github.com/0xsoniclabs/tosca/go/tosca"
+	"github.com/Fantom-foundation/lachesis-base/hash"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/trie"
+	gethlog "github.com/ethereum/go-ethereum/log"
 )
 
-// sonicExecutor is the Sonic implementation of BlockExecutor.
+// sonicExecutor is the Sonic implementation of BlockExecutor. It executes
+// blocks with Sonic's block processing (gossip.Ledger) on the live state and
+// with State.ApplyBlock on the archive.
 type sonicExecutor struct {
 	chainID       uint64
 	metadataStore MetadataStore
 	interpreter   tosca.Interpreter
+	ledger        gossip.Ledger
+	store         *ledgerStore
+}
+
+// newSonicExecutor returns a sonicExecutor whose ledger's head is the block of
+// the given header. The live state it executes blocks on must hold the state
+// after that block.
+func newSonicExecutor(
+	chainID uint64,
+	metadataStore MetadataStore,
+	interpreter tosca.Interpreter,
+	head *types.Header,
+) (*sonicExecutor, error) {
+	store, err := newLedgerStore(head, metadataStore)
+	if err != nil {
+		return nil, err
+	}
+
+	// NewLedger logs every block with the geth root logger it is created with.
+	// Capture the current loggers.
+	gethlogDefault := gethlog.Root()
+	slogDefault := slog.Default()
+	logWriter, logFlags := log.Writer(), log.Flags()
+	// Discard geth logging temporarily.
+	gethlog.SetDefault(gethlog.NewLogger(gethlog.DiscardHandler()))
+
+	ledger := gossip.NewLedger(store, evmmodule.NewForReplay(geth_adapter.NewGethInterpreterFactory(interpreter)), nil, false)
+
+	// Restore the loggers. gethlog.SetDefault comes first since it also
+	// replaces slog's default and log's output.
+	gethlog.SetDefault(gethlogDefault)
+	slog.SetDefault(slogDefault)
+	log.SetOutput(logWriter)
+	log.SetFlags(logFlags)
+
+	return &sonicExecutor{
+		chainID:       chainID,
+		metadataStore: metadataStore,
+		interpreter:   interpreter,
+		ledger:        ledger,
+		store:         store,
+	}, nil
 }
 
 func (e *sonicExecutor) ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, *types.Header, error) {
 	number := block.NumberU64()
+
+	head, err := e.ledger.Head()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get the ledger's head for block %d: %w", number, err)
+	}
+	if headNumber := head.Block().Number; number != headNumber+1 {
+		return nil, nil, fmt.Errorf("block %d does not follow the ledger's head %d", number, headNumber)
+	}
+
+	nanos, _, err := inter.DecodeExtraData(block.Extra())
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to decode extra data of block %d: %w", number, err)
+	}
+
+	failedBundles := e.metadataStore.GetFailedBundlesAtBlock(number)
+	txs, err := insertFailedBundles(block.Transactions(), failedBundles)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to insert failed bundles into block %d: %w", number, err)
+	}
 
 	// Commit all pending rules updates if the block is an epoch sealing block.
 	if block.Transactions().Len() > 0 {
@@ -47,22 +120,39 @@ func (e *sonicExecutor) ExecuteBlock(state *State, block *types.Block, hashHisto
 			}
 		}
 	}
+	rules := e.metadataStore.GetRulesAtBlock(number)
 
+	e.store.stateDB = recordedRootStateDB{StateDB: evmstore.CreateCarmenStateDb(state.db, nil), root: block.Root()}
+	e.store.hashHistory = hashHistory
+
+	params := gossip.BlockParams{
+		Time:                     inter.Timestamp(block.Time()*1e9 + uint64(nanos)),
+		PrevRandao:               block.MixDigest(),
+		GasLimit:                 block.GasLimit(),
+		UserTransactionsGasLimit: block.GasLimit(),
+		Rules:                    rules,
+	}
 	onLog := func(l *core_types.Log) { onNewLog(e.metadataStore, number, l) }
 
-	receipts, usedGas, err := e.applyBlock(state, block, hashHistory, onLog, false)
+	executing, err := head.BeginBlock(params, onLog)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to begin block %d: %w", number, err)
+	}
+
+	summary := executing.Run(txs)
+	receipts, err := blockReceipts(summary, failedBundles)
 	if err != nil {
 		return nil, nil, err
 	}
+	applyCorrections(state.db, e.metadataStore.GetCorrectionsAtBlock(number), block, slog.Default())
 
-	// Reconstruct the complete header by filling in fields that are derived
-	// from processing the block, which are not stored in the block DB. The gas
-	// used includes failed bundles, which have no receipts.
-	completeHeader := block.Header()
-	completeHeader.GasUsed = usedGas
-	completeHeader.Bloom = types.MergeBloom(receipts)
-	completeHeader.ReceiptHash = types.DeriveSha(receipts, trie.NewStackTrie(nil))
-	return receipts, completeHeader, nil
+	finalized, err := executing.Finalize()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to finalize block %d: %w", number, err)
+	}
+	candidate := finalized.Candidate()
+	finalized.Commit().Publish()
+	return receipts, candidate.Block.GetEthereumHeader(), state.db.Check()
 }
 
 func (e *sonicExecutor) ExecuteBlockOnArchive(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
@@ -91,4 +181,103 @@ func (e *sonicExecutor) applyBlock(
 	return state.ApplyBlock(
 		block, e.interpreter, processor, rules, corrections, failedBundles, chainConfig, onLog, isArchive,
 	)
+}
+
+// ledgerStore is the store of a sonicExecutor's ledger. It stores nothing on
+// disk and keeps only the head block in memory, which the ledger replaces when
+// it commits a block. It opens the state of the block being applied and serves
+// the hashes of older blocks from the hash history of that block.
+//
+// The ledger accesses it only from within sonicExecutor.ExecuteBlock, which
+// sets the fields of the block being applied.
+type ledgerStore struct {
+	metadataStore MetadataStore
+	head          *inter.Block
+	stateDB       state.StateDB
+	hashHistory   *blockHashHistory
+}
+
+var _ gossip.LedgerStore = (*ledgerStore)(nil)
+
+// newLedgerStore returns a ledgerStore whose head is the block of the given
+// header.
+func newLedgerStore(header *types.Header, metadataStore MetadataStore) (*ledgerStore, error) {
+	nanos, duration, err := inter.DecodeExtraData(header.Extra)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode extra data of block %d: %w", header.Number, err)
+	}
+	head := &inter.Block{}
+	head.Number = header.Number.Uint64()
+	head.ParentHash = header.ParentHash
+	head.StateRoot = header.Root
+	head.Time = inter.Timestamp(header.Time*1e9 + uint64(nanos))
+	head.Difficulty = header.Difficulty.Uint64()
+	head.GasLimit = header.GasLimit
+	head.GasUsed = header.GasUsed
+	head.BaseFee = header.BaseFee
+	head.PrevRandao = header.MixDigest
+	head.TransactionsHashRoot = header.TxHash
+	head.ReceiptsHashRoot = header.ReceiptHash
+	head.LogBloom = header.Bloom
+	head.Duration = uint64(duration)
+	return &ledgerStore{metadataStore: metadataStore, head: head}, nil
+}
+
+func (s *ledgerStore) GetLatestBlockIndex() idx.Block {
+	return idx.Block(s.head.Number)
+}
+
+func (s *ledgerStore) GetLatestBlock() *inter.Block {
+	return s.head
+}
+
+func (s *ledgerStore) GetBlock(n idx.Block) *inter.Block {
+	if uint64(n) != s.head.Number {
+		return nil
+	}
+	return s.head
+}
+
+func (s *ledgerStore) SetBlock(_ idx.Block, block *inter.Block) {
+	s.head = block
+}
+
+// GetUpgradeHeights returns the upgrades of the block following the head,
+// which are the only ones the ledger reads.
+func (s *ledgerStore) GetUpgradeHeights() []opera.UpgradeHeight {
+	number := s.head.Number + 1
+	rules := s.metadataStore.GetRulesAtBlock(number)
+	return []opera.UpgradeHeight{{Upgrades: rules.Upgrades, Height: idx.Block(number)}}
+}
+
+func (s *ledgerStore) GetLiveStateDb(hash.Hash) (state.StateDB, error) {
+	return s.stateDB, nil
+}
+
+// Header returns the complete header of the head block and, for older blocks,
+// a header with just the hashes the EVM reads.
+func (s *ledgerStore) Header(hash common.Hash, number uint64) *evmcore.EvmHeader {
+	if number == s.head.Number {
+		return evmcore.ToEvmHeader(s.head, s.head.ParentHash, s.metadataStore.GetRulesAtBlock(number))
+	}
+	return s.hashHistory.Header(hash, number)
+}
+
+func (s *ledgerStore) SetBlockIndex(common.Hash, idx.Block)           {}
+func (s *ledgerStore) SetTx(common.Hash, *types.Transaction)          {}
+func (s *ledgerStore) SetTxPosition(common.Hash, evmstore.TxPosition) {}
+func (s *ledgerStore) SetReceipts(idx.Block, types.Receipts)          {}
+func (s *ledgerStore) IndexLogs(...*types.Log)                        {}
+func (s *ledgerStore) SetCachedEvmBlock(idx.Block, *evmcore.EvmBlock) {}
+
+// recordedRootStateDB reports the recorded state root as its hash, so the
+// ledger's blocks keep their recorded hashes without waiting for Carmen's
+// root, which checkBlockResults verifies.
+type recordedRootStateDB struct {
+	state.StateDB
+	root common.Hash
+}
+
+func (db recordedRootStateDB) GetStateHash() common.Hash {
+	return db.root
 }

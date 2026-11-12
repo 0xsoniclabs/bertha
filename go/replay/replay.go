@@ -161,7 +161,16 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		if err != nil {
 			return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
 		}
-		blockExecutor = &sonicExecutor{chainID: chainID, metadataStore: metadataStore, interpreter: interpreter}
+		firstReplayedBlock := max(args.StartBlock, 1) // block zero is not replayed
+		headBlock := firstReplayedBlock - 1           // the ledger starts with the head at the previous block
+		head, err := getRecordedHeader(blockDb, chainID, headBlock)
+		if err != nil {
+			return fmt.Errorf("failed to open ledger: %w", err)
+		}
+		blockExecutor, err = newSonicExecutor(chainID, metadataStore, interpreter, head)
+		if err != nil {
+			return fmt.Errorf("failed to open ledger: %w", err)
+		}
 	}
 
 	// Prepare the state database directory
@@ -401,6 +410,23 @@ func seedBlockHashHistory(
 		)
 	}
 	return nil
+}
+
+// getRecordedHeader returns the header of the recorded block of the given
+// number.
+func getRecordedHeader(blockDb blockdb.BlockDB, chainID, number uint64) (*types.Header, error) {
+	recorded, err := blockDb.Get(chainID, number)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read recorded block %d: %w", number, err)
+	}
+	if recorded == nil {
+		return nil, fmt.Errorf("block %d is not recorded", number)
+	}
+	block, err := convert.ConvertToGethBlock(recorded)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert recorded block %d: %w", number, err)
+	}
+	return block.Header(), nil
 }
 
 // runReplayLoop processes the blocks from the given iterator, applying them

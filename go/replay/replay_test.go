@@ -35,6 +35,7 @@ import (
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
+	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
@@ -148,6 +149,29 @@ func TestReplay_InvalidFlagCombinationsAreRejected(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			err := Replay(t.Context(), tc.args)
 			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
+func TestReplay_ReportsFailureToOpenLedger(t *testing.T) {
+	rules := opera.FakeNetRules(opera.GetSonicUpgrades())
+	blocks := createSonicBlocks(t, rules, newGenesisState(t, nil), 2)
+	blocks[1].ExtraData = nil
+	blockDbDir, genesisFile := writeBlockDb(t, rules, nil, blocks, nil)
+	tests := map[string]struct {
+		startBlock uint64
+		wantErr    string
+	}{
+		"preceding block not recorded":            {startBlock: 3, wantErr: "failed to open ledger: block 2 is not recorded"},
+		"preceding block with invalid extra data": {startBlock: 2, wantErr: "failed to open ledger: failed to decode extra data of block 1"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			args := defaultReplayArgs()
+			args.BlockDBDir, args.JSONGenesisFile = blockDbDir, genesisFile
+			args.StateDBDir = t.TempDir()
+			args.StartBlock = tt.startBlock
+			require.ErrorContains(t, Replay(t.Context(), args), tt.wantErr)
 		})
 	}
 }
@@ -1137,6 +1161,47 @@ func TestSeedBlockHashHistory_PropagatesBlockDBError(t *testing.T) {
 	history := &blockHashHistory{}
 	err := seedBlockHashHistory(db, 42, 100, history)
 	require.ErrorContains(t, err, "boom")
+}
+
+func TestGetRecordedHeader_ReturnsHeaderOfRecordedBlock(t *testing.T) {
+	block := &blockdb.Block{Number: 4}
+	converted, err := convert.ConvertToGethBlock(block)
+	require.NoError(t, err)
+	db := blockdb.NewMockBlockDB(gomock.NewController(t))
+	db.EXPECT().Get(uint64(42), uint64(4)).Return(block, nil)
+
+	header, err := getRecordedHeader(db, 42, 4)
+	require.NoError(t, err)
+	require.Equal(t, converted.Header(), header)
+}
+
+func TestGetRecordedHeader_ReportsFailures(t *testing.T) {
+	tests := map[string]struct {
+		recorded *blockdb.Block
+		err      error
+		wantErr  string
+	}{
+		"block DB error": {
+			err:     fmt.Errorf("boom"),
+			wantErr: "failed to read recorded block 4: boom",
+		},
+		"block not recorded": {
+			wantErr: "block 4 is not recorded",
+		},
+		"invalid block": {
+			recorded: &blockdb.Block{Number: 4, Transactions: []*blockdb.Transaction{nil}},
+			wantErr:  "failed to convert recorded block 4: failed to convert transaction 0: cannot convert nil transaction",
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			db := blockdb.NewMockBlockDB(gomock.NewController(t))
+			db.EXPECT().Get(uint64(42), uint64(4)).Return(tt.recorded, tt.err)
+
+			_, err := getRecordedHeader(db, 42, 4)
+			require.EqualError(t, err, tt.wantErr)
+		})
+	}
 }
 
 func Test_getExpectedStateRoot_ReturnsCorrectStateRoot(t *testing.T) {
