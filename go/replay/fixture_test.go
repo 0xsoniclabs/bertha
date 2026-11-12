@@ -62,7 +62,13 @@ func createSonicBlockDb(t *testing.T, corrections Corrections) (string, string) 
 	alloc := types.GenesisAlloc{
 		params.HistoryStorageAddress: {Nonce: 1, Code: params.HistoryStorageCode, Balance: common.Big0},
 	}
-	db := newGenesisState(t, alloc)
+	blocks := createSonicBlocks(t, rules, newGenesisState(t, alloc), 100)
+	return writeBlockDb(t, rules, alloc, blocks, corrections)
+}
+
+// createSonicBlocks returns the first num empty blocks of a Sonic network with
+// the given rules.
+func createSonicBlocks(t *testing.T, rules opera.Rules, db *state.StateDB, num int) []*blockdb.Block {
 	config := opera.CreateTransientEvmChainConfig(rules.NetworkID, []opera.UpgradeHeight{{Upgrades: rules.Upgrades}}, 0)
 
 	parent := inter.NewBlockBuilder().
@@ -72,7 +78,7 @@ func createSonicBlockDb(t *testing.T, corrections Corrections) (string, string) 
 		WithBaseFee(gasprice.GetInitialBaseFee(rules.Economy)).
 		Build()
 	blocks := []*blockdb.Block{toBlockDbBlock(t, parent.GetEthereumHeader())}
-	for i := 1; i < 100; i++ {
+	for i := 1; i < num; i++ {
 		timestamp, prevRandao := parent.Time+inter.Timestamp(time.Second), common.Hash{byte(i)}
 		core.ProcessParentBlockHash(parent.Hash(), vm.NewEVM(vm.BlockContext{
 			BlockNumber: big.NewInt(int64(i)),
@@ -96,7 +102,7 @@ func createSonicBlockDb(t *testing.T, corrections Corrections) (string, string) 
 		blocks = append(blocks, toBlockDbBlock(t, block.GetEthereumHeader()))
 		parent = block
 	}
-	return writeBlockDb(t, rules, alloc, blocks, corrections)
+	return blocks
 }
 
 // createEthereumBlockDb writes a genesis with the chain ID of Hoodi and the
@@ -115,11 +121,16 @@ func createEthereumBlockDb(t *testing.T) (string, string) {
 		params.WithdrawalQueueAddress:    {Nonce: 1, Code: params.WithdrawalQueueCode, Balance: common.Big0, Storage: inhibited},
 		params.ConsolidationQueueAddress: {Nonce: 1, Code: params.ConsolidationQueueCode, Balance: common.Big0, Storage: inhibited},
 	}
-	db := newGenesisState(t, alloc)
+	blocks := createEthereumBlocks(t, config, newGenesisState(t, alloc), 100)
+	return writeBlockDb(t, rules, alloc, blocks, nil)
+}
 
+// createEthereumBlocks returns the first num empty post-merge blocks of an
+// Ethereum network with the given chain config.
+func createEthereumBlocks(t *testing.T, config *params.ChainConfig, db *state.StateDB, num int) []*blockdb.Block {
 	var blocks []*blockdb.Block
 	var parent *types.Header
-	for i := range 100 {
+	for i := range num {
 		header := &types.Header{
 			UncleHash:        types.EmptyUncleHash,
 			TxHash:           types.EmptyTxsHash,
@@ -157,7 +168,7 @@ func createEthereumBlockDb(t *testing.T) (string, string) {
 		blocks = append(blocks, toBlockDbBlock(t, header))
 		parent = header
 	}
-	return writeBlockDb(t, rules, alloc, blocks, nil)
+	return blocks
 }
 
 // newGenesisState returns an in-memory state holding the given accounts.
