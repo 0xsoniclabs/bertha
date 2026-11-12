@@ -273,3 +273,88 @@ func TestSonicExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ApplyMetadata(t *t
 	_, err = executeArchiveBlock(executor, state, failedBundleBlock)
 	require.NoError(t, err, "failed bundles not applied on archive")
 }
+
+func TestSonicExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ServeBlockHashFromHashHistory(t *testing.T) {
+	executeBlock := func(e *sonicExecutor, state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
+		receipts, _, err := e.ExecuteBlock(state, block, hashHistory)
+		return receipts, err
+	}
+	executeBlockOnArchive := func(e *sonicExecutor, state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
+		return e.ExecuteBlockOnArchive(state, block, hashHistory)
+	}
+	tests := map[string]struct {
+		execute      func(*sonicExecutor, *State, *types.Block, *blockHashHistory) (types.Receipts, error)
+		hashOfBlock1 common.Hash
+		wantStatus   uint64
+	}{
+		"ExecuteBlock with hash":             {execute: executeBlock, hashOfBlock1: common.Hash{1}, wantStatus: types.ReceiptStatusSuccessful},
+		"ExecuteBlock without hash":          {execute: executeBlock, wantStatus: types.ReceiptStatusFailed},
+		"ExecuteBlockOnArchive with hash":    {execute: executeBlockOnArchive, hashOfBlock1: common.Hash{1}, wantStatus: types.ReceiptStatusSuccessful},
+		"ExecuteBlockOnArchive without hash": {execute: executeBlockOnArchive, wantStatus: types.ReceiptStatusFailed},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
+			require.NoError(t, err)
+			defer func() { require.NoError(t, state.Close()) }()
+
+			executor := &sonicExecutor{chainID: 146, metadataStore: &BlockDBMetadataStore{}, interpreter: testInterpreter(t)}
+			for number := range int64(2) {
+				_, _, err = executor.ExecuteBlock(state, types.NewBlockWithHeader(&types.Header{Number: big.NewInt(number + 1), Extra: make([]byte, 12)}), &blockHashHistory{})
+				require.NoError(t, err)
+			}
+			require.NoError(t, state.db.Flush())
+
+			key, err := crypto.GenerateKey()
+			require.NoError(t, err)
+			// Init code that reverts if BLOCKHASH(1) is zero. It runs in block 3,
+			// since the hash of the parent block comes from the block's ParentHash.
+			tx := types.MustSignNewTx(key, types.LatestSignerForChainID(big.NewInt(146)), &types.LegacyTx{
+				Gas:  100_000,
+				Data: common.FromHex("0x600140600a57600080fd5b00"),
+			})
+			block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(3), GasLimit: 100_000, Extra: make([]byte, 12)}).
+				WithBody(types.Body{Transactions: types.Transactions{tx}})
+			hashHistory := &blockHashHistory{}
+			hashHistory.SetBlockHash(1, tt.hashOfBlock1)
+
+			receipts, err := tt.execute(executor, state, block, hashHistory)
+			require.NoError(t, err)
+			require.Len(t, receipts, 1)
+			require.Equal(t, tt.wantStatus, receipts[0].Status)
+		})
+	}
+}
+
+func TestSonicExecutor_ExecuteBlock_ReturnsGasUsedOfFailedBundles(t *testing.T) {
+	upgrades := opera.GetBrioUpgrades()
+	upgrades.TransactionBundles = true
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	// A failed bundle uses gas without adding a receipt. INVALID uses all gas
+	// of the bundle's step.
+	signer := types.LatestSignerForChainID(big.NewInt(146))
+	envelope := bundle.NewBuilder().
+		WithSigner(signer).
+		With(bundle.Step(key, &types.AccessListTx{Gas: 100_000, GasPrice: big.NewInt(1), Data: []byte{byte(vm.INVALID)}})).
+		Build()
+	txBundle, err := bundle.OpenEnvelope(signer, envelope)
+	require.NoError(t, err)
+
+	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, state.Close()) }()
+	setBalance(state.db, crypto.PubkeyToAddress(key.PublicKey), big.NewInt(1e18))
+
+	executor := &sonicExecutor{chainID: 146, metadataStore: &BlockDBMetadataStore{metadata: Metadata{
+		RulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: opera.FakeNetRules(upgrades)}},
+		FailedBundles:      FailedBundles{1: {{Pos: 0, Tx: envelope}}},
+	}}, interpreter: testInterpreter(t)}
+
+	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 1_000_000, BaseFee: big.NewInt(1), Extra: make([]byte, 12)})
+	receipts, gasUsed, err := executor.ExecuteBlock(state, block, &blockHashHistory{})
+	require.NoError(t, err)
+	require.Empty(t, receipts)
+	require.Equal(t, txBundle.GetTransactionsInReferencedOrder()[0].Gas(), gasUsed)
+}
