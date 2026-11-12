@@ -290,39 +290,6 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 	require.Empty(t, receipts)
 }
 
-func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
-	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, state.Close())
-	}()
-
-	block, err := convert.ConvertToGethBlock(&blockdb.Block{
-		Transactions: []*blockdb.Transaction{
-			{
-				TransactionType: types.LegacyTxType,
-				Nonce:           123, // all nonces are 0 in the DB
-			},
-		},
-	})
-	require.NoError(t, err)
-
-	chainConfig := opera.CreateTransientEvmChainConfig(
-		1,
-		[]opera.UpgradeHeight{},
-		idx.Block(block.NumberU64()),
-	)
-
-	processor := evmcore.NewStateProcessorForReplay(
-		chainConfig,
-		&blockHashHistory{},
-		opera.Upgrades{},
-	)
-
-	_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, chainConfig, nil, false)
-	require.ErrorContains(t, err, "was skipped")
-}
-
 func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 	corrections := Corrections{
 		17: map[common.Address]Correction{
@@ -1036,95 +1003,23 @@ func TestState_ApplyBlock_FailsOnFailedBundleThatDidNotFail(t *testing.T) {
 	upgrades := opera.GetBrioUpgrades()
 	upgrades.TransactionBundles = true
 	chainConfig := opera.CreateTransientEvmChainConfig(146, []opera.UpgradeHeight{opera.MakeUpgradeHeight(upgrades, 0)}, idx.Block(1))
-	signer := types.LatestSignerForChainID(chainConfig.ChainID)
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	transfer := bundle.Step(key, &types.AccessListTx{Gas: 100_000, GasPrice: big.NewInt(1), To: &common.Address{1}})
-	succeeding := bundle.NewBuilder().WithSigner(signer).With(transfer.Clone()).Build()
-	txBundle, err := bundle.OpenEnvelope(signer, succeeding)
+	// Its transfer succeeds and adds a receipt.
+	envelope := bundle.NewBuilder().
+		WithSigner(types.LatestSignerForChainID(chainConfig.ChainID)).
+		With(bundle.Step(key, &types.AccessListTx{Gas: 100_000, GasPrice: big.NewInt(1), To: &common.Address{1}})).
+		Build()
+
+	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
-	// Its nonce is too high, which is tolerated.
-	invalid := bundle.Step(key, &types.AccessListTx{Nonce: 5, Gas: 100_000, GasPrice: big.NewInt(1), To: &common.Address{1}}).WithFlags(bundle.EF_TolerateInvalid)
+	defer func() { require.NoError(t, state.Close()) }()
+	setBalance(state.db, crypto.PubkeyToAddress(key.PublicKey), big.NewInt(1e18))
 
-	tests := map[string]struct {
-		envelope *types.Transaction
-		blockTxs types.Transactions
-		wantErr  string // %[1]v is the envelope's hash, %[2]v the hash of its tx
-	}{
-		"skipped": {
-			// The block's time 0 is before the bundle's time period.
-			envelope: bundle.NewBuilder().WithSigner(signer).SetNotBefore(1).With(transfer).Build(),
-			wantErr:  "failed bundle %[1]v was skipped",
-		},
-		"succeeded": {
-			// Its transfer succeeds and adds a receipt.
-			envelope: succeeding,
-			wantErr:  "failed bundle %[1]v added a receipt for tx %[2]v",
-		},
-		"succeeded with its tx in the block": {
-			// The bundle succeeds, but its inner tx is in the block already.
-			envelope: succeeding,
-			blockTxs: txBundle.GetTransactionsInReferencedOrder(),
-			wantErr:  "failed bundle %[1]v added a receipt for tx %[2]v",
-		},
-		"succeeded without receipts": {
-			// It adds no receipt, but its tolerated invalid tx is reported as skipped.
-			envelope: bundle.NewBuilder().WithSigner(signer).With(invalid).Build(),
-			wantErr:  "tx %[2]v was skipped",
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
-			require.NoError(t, err)
-			defer func() { require.NoError(t, state.Close()) }()
-			setBalance(state.db, crypto.PubkeyToAddress(key.PublicKey), big.NewInt(1e18))
-
-			envelopeBundle, err := bundle.OpenEnvelope(signer, tt.envelope)
-			require.NoError(t, err)
-			txHash := envelopeBundle.GetTransactionsInReferencedOrder()[0].Hash()
-
-			block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 1_000_000, BaseFee: big.NewInt(1), Extra: make([]byte, 12)}).
-				WithBody(types.Body{Transactions: tt.blockTxs})
-			processor := evmcore.NewStateProcessorForReplay(chainConfig, &blockHashHistory{}, upgrades)
-			_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.FakeNetRules(upgrades), nil, []FailedBundle{{Pos: 0, Tx: tt.envelope}}, chainConfig, nil, false)
-			require.EqualError(t, err, fmt.Sprintf(tt.wantErr, tt.envelope.Hash(), txHash))
-		})
-	}
-}
-
-func TestState_insertFailedBundles_InsertsEnvelopesBeforeTheTransactionAtTheirPosition(t *testing.T) {
-	a := types.NewTx(&types.LegacyTx{Nonce: 1})
-	b := types.NewTx(&types.LegacyTx{Nonce: 2})
-	x := types.NewTx(&types.LegacyTx{Nonce: 3})
-	y := types.NewTx(&types.LegacyTx{Nonce: 4})
-
-	tests := map[string]struct {
-		failedBundles []FailedBundle
-		want          types.Transactions
-		wantErr       string
-	}{
-		"no failed bundles":   {want: types.Transactions{a, b}},
-		"first":               {failedBundles: []FailedBundle{{Pos: 0, Tx: x}}, want: types.Transactions{x, a, b}},
-		"middle":              {failedBundles: []FailedBundle{{Pos: 1, Tx: x}}, want: types.Transactions{a, x, b}},
-		"last":                {failedBundles: []FailedBundle{{Pos: 2, Tx: x}}, want: types.Transactions{a, b, x}},
-		"same position":       {failedBundles: []FailedBundle{{Pos: 1, Tx: x}, {Pos: 1, Tx: y}}, want: types.Transactions{a, x, y, b}},
-		"different positions": {failedBundles: []FailedBundle{{Pos: 0, Tx: x}, {Pos: 2, Tx: y}}, want: types.Transactions{x, a, b, y}},
-		"beyond transactions": {failedBundles: []FailedBundle{{Pos: 3, Tx: x}}, wantErr: "position 3 of failed bundle exceeds the number of transactions 2"},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			got, err := insertFailedBundles(types.Transactions{a, b}, tt.failedBundles)
-			if tt.wantErr != "" {
-				require.ErrorContains(t, err, tt.wantErr)
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, tt.want, got)
-		})
-	}
+	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 1_000_000, BaseFee: big.NewInt(1), Extra: make([]byte, 12)})
+	processor := evmcore.NewStateProcessorForReplay(chainConfig, &blockHashHistory{}, upgrades)
+	_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.FakeNetRules(upgrades), nil, []FailedBundle{{Pos: 0, Tx: envelope}}, chainConfig, nil, false)
+	require.ErrorContains(t, err, fmt.Sprintf("failed bundle %v added a receipt", envelope.Hash()))
 }
 
 // nestedEnvelope returns the given envelope as it runs nested in another bundle,

@@ -19,7 +19,10 @@ package replay
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 
+	"github.com/0xsoniclabs/sonic/evmcore"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 )
@@ -72,4 +75,45 @@ func (f *FailedBundles) UnmarshalJSON(data []byte) error {
 	}
 	*f = failedBundles
 	return nil
+}
+
+// insertFailedBundles inserts the envelopes of the given failed bundles, sorted
+// by position, before the transaction at their position.
+func insertFailedBundles(txs types.Transactions, failedBundles []FailedBundle) (types.Transactions, error) {
+	res := make(types.Transactions, 0, len(txs)+len(failedBundles))
+	next := uint64(0)
+	for _, failedBundle := range failedBundles {
+		if failedBundle.Pos > uint64(len(txs)) {
+			return nil, fmt.Errorf("position %d of failed bundle exceeds the number of transactions %d", failedBundle.Pos, len(txs))
+		}
+		res = append(res, txs[next:failedBundle.Pos]...)
+		res = append(res, failedBundle.Tx)
+		next = failedBundle.Pos
+	}
+	return append(res, txs[next:]...), nil
+}
+
+// blockReceipts returns the receipts of the processed transactions and checks
+// that none of them were skipped and that none of the given failed bundles added
+// receipts. Transactions of failed bundles are not part of the block, and a
+// skipped bundle is returned as its envelope.
+func blockReceipts(processed evmcore.ProcessSummary, failedBundles []FailedBundle) (types.Receipts, error) {
+	receipts := make(types.Receipts, 0, len(processed.ProcessedTransactions))
+	isFailedBundle := func(hash common.Hash) bool {
+		return slices.ContainsFunc(failedBundles, func(b FailedBundle) bool { return b.Tx.Hash() == hash })
+	}
+	for _, proc := range processed.ProcessedTransactions {
+		hash := proc.Transaction.Hash()
+		if proc.Receipt == nil {
+			if isFailedBundle(hash) {
+				return nil, fmt.Errorf("failed bundle %v was skipped", hash)
+			}
+			return nil, fmt.Errorf("tx %v was skipped", hash)
+		}
+		if cause := processed.CausedBy[hash]; isFailedBundle(cause) {
+			return nil, fmt.Errorf("failed bundle %v added a receipt for tx %v", cause, hash)
+		}
+		receipts = append(receipts, proc.Receipt)
+	}
+	return receipts, nil
 }
