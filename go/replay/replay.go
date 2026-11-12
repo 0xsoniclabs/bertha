@@ -163,7 +163,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		}
 		firstReplayedBlock := max(args.StartBlock, 1) // block zero is not replayed
 		headBlock := firstReplayedBlock - 1           // the ledger starts with the head at the previous block
-		head, err := getRecordedHeader(blockDb, chainID, headBlock)
+		head, err := getLedgerHead(blockDb, metadataStore, chainID, headBlock)
 		if err != nil {
 			return fmt.Errorf("failed to open ledger: %w", err)
 		}
@@ -427,6 +427,36 @@ func getRecordedHeader(blockDb blockdb.BlockDB, chainID, number uint64) (*types.
 		return nil, fmt.Errorf("failed to convert recorded block %d: %w", number, err)
 	}
 	return block.Header(), nil
+}
+
+// getLedgerHead returns the header of the recorded block of the given number
+// with the gas used that gives it the hash the following block records as its
+// parent hash. The block DB derives the gas used from the receipts, which miss
+// the gas of failed bundles after the last transaction, so the gas used is
+// searched up to the gas limit of the block's failed bundles.
+func getLedgerHead(blockDb blockdb.BlockDB, metadataStore MetadataStore, chainID, number uint64) (*types.Header, error) {
+	head, err := getRecordedHeader(blockDb, chainID, number)
+	if err != nil {
+		return nil, err
+	}
+	next, err := getRecordedHeader(blockDb, chainID, number+1)
+	if err != nil {
+		return nil, err
+	}
+	if head.Hash() == next.ParentHash {
+		return head, nil
+	}
+	maxGasUsed := head.GasUsed
+	for _, failedBundle := range metadataStore.GetFailedBundlesAtBlock(number) {
+		maxGasUsed += failedBundle.Tx.Gas()
+	}
+	for gasUsed := head.GasUsed + 1; gasUsed <= maxGasUsed; gasUsed++ {
+		head.GasUsed = gasUsed
+		if head.Hash() == next.ParentHash {
+			return head, nil
+		}
+	}
+	return nil, fmt.Errorf("no gas used of block %d up to %d gives the hash %v recorded by block %d", number, maxGasUsed, next.ParentHash, number+1)
 }
 
 // runReplayLoop processes the blocks from the given iterator, applying them
