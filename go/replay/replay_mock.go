@@ -262,11 +262,11 @@ func (m *MockBlockExecutor) EXPECT() *MockBlockExecutorMockRecorder {
 }
 
 // ExecuteBlock mocks base method.
-func (m *MockBlockExecutor) ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, uint64, error) {
+func (m *MockBlockExecutor) ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, *types.Header, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ExecuteBlock", state, block, hashHistory)
 	ret0, _ := ret[0].(types.Receipts)
-	ret1, _ := ret[1].(uint64)
+	ret1, _ := ret[1].(*types.Header)
 	ret2, _ := ret[2].(error)
 	return ret0, ret1, ret2
 }

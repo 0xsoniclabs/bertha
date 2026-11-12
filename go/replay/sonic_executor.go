@@ -26,6 +26,7 @@ import (
 	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
 // sonicExecutor is the Sonic implementation of BlockExecutor.
@@ -35,21 +36,33 @@ type sonicExecutor struct {
 	interpreter   tosca.Interpreter
 }
 
-func (e *sonicExecutor) ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, uint64, error) {
+func (e *sonicExecutor) ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, *types.Header, error) {
 	number := block.NumberU64()
 
 	// Commit all pending rules updates if the block is an epoch sealing block.
 	if block.Transactions().Len() > 0 {
 		if _, err := drivercall.ParseSealEpochArgs(block.Transactions()[0]); err == nil {
 			if err := e.metadataStore.CommitRules(number); err != nil {
-				return nil, 0, fmt.Errorf("failed to commit rules at block %d: %w", number, err)
+				return nil, nil, fmt.Errorf("failed to commit rules at block %d: %w", number, err)
 			}
 		}
 	}
 
 	onLog := func(l *core_types.Log) { onNewLog(e.metadataStore, number, l) }
 
-	return e.applyBlock(state, block, hashHistory, onLog, false)
+	receipts, usedGas, err := e.applyBlock(state, block, hashHistory, onLog, false)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Reconstruct the complete header by filling in fields that are derived
+	// from processing the block, which are not stored in the block DB. The gas
+	// used includes failed bundles, which have no receipts.
+	completeHeader := block.Header()
+	completeHeader.GasUsed = usedGas
+	completeHeader.Bloom = types.MergeBloom(receipts)
+	completeHeader.ReceiptHash = types.DeriveSha(receipts, trie.NewStackTrie(nil))
+	return receipts, completeHeader, nil
 }
 
 func (e *sonicExecutor) ExecuteBlockOnArchive(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {

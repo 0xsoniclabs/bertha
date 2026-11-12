@@ -37,7 +37,6 @@ import (
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/trie"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -398,7 +397,10 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 		state:            state,
 		snapshotHandler:  NewSnapshotHandler(0, 0, math.MaxUint64, 1),
 	}
-	blockExecutor.EXPECT().ExecuteBlock(state, gomock.Any(), executor.blockHashHistory).Return(nil, uint64(0), nil).Times(2)
+	blockExecutor.EXPECT().ExecuteBlock(state, gomock.Any(), executor.blockHashHistory).
+		DoAndReturn(func(_ *State, block *types.Block, _ *blockHashHistory) (types.Receipts, *types.Header, error) {
+			return nil, block.Header(), nil
+		}).Times(2)
 
 	iter := utils.NewIter(blocks)
 	counter := 0
@@ -955,7 +957,7 @@ func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_ForwardToBlockExecut
 		"ApplyBlock": {
 			apply: applyBlock,
 			expect: func(blockExecutor *MockBlockExecutorMockRecorder, executor *historyExecutor, block *types.Block) {
-				blockExecutor.ExecuteBlock(executor.state, block, executor.blockHashHistory).Return(nil, uint64(0), injected)
+				blockExecutor.ExecuteBlock(executor.state, block, executor.blockHashHistory).Return(nil, nil, injected)
 			},
 		},
 		"ApplyBlockOnArchive": {
@@ -981,7 +983,7 @@ func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_ForwardToBlockExecut
 	}
 }
 
-func TestHistoryExecutor_ApplyBlock_CompletesHeaderAndRecordsItsHash(t *testing.T) {
+func TestHistoryExecutor_ApplyBlock_ReplacesHeaderAndRecordsItsHash(t *testing.T) {
 	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, state.Close()) }()
@@ -989,17 +991,15 @@ func TestHistoryExecutor_ApplyBlock_CompletesHeaderAndRecordsItsHash(t *testing.
 	blockExecutor := NewMockBlockExecutor(gomock.NewController(t))
 	executor := &historyExecutor{blockExecutor: blockExecutor, blockHashHistory: &blockHashHistory{}, state: state}
 	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1)})
-	want := types.Receipts{{CumulativeGasUsed: 21_000, Bloom: types.Bloom{1}}}
-	// The gas used includes failed bundles, which have no receipts.
-	blockExecutor.EXPECT().ExecuteBlock(state, block, executor.blockHashHistory).Return(want, uint64(50_000), nil)
+	header := &types.Header{Number: big.NewInt(1), GasUsed: 21_000}
+	want := types.Receipts{{}}
+	blockExecutor.EXPECT().ExecuteBlock(state, block, executor.blockHashHistory).Return(want, header, nil)
 
 	receipts, _, err := executor.ApplyBlock(block)
 	require.NoError(t, err)
 	require.Equal(t, want, receipts)
-	require.Equal(t, uint64(50_000), block.GasUsed())
-	require.Equal(t, types.MergeBloom(want), block.Bloom())
-	require.Equal(t, types.DeriveSha(want, trie.NewStackTrie(nil)), block.ReceiptHash())
-	require.Equal(t, block.Hash(), executor.blockHashHistory.GetBlockHash(1))
+	require.Equal(t, header.Hash(), block.Hash())
+	require.Equal(t, header.Hash(), executor.blockHashHistory.GetBlockHash(1))
 }
 
 // synthetic block hash for tests that encodes the block number in the last 8

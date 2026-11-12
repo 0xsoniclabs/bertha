@@ -22,9 +22,36 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/trie"
 	"github.com/stretchr/testify/require"
 )
+
+func TestEthereumExecutor_ExecuteBlock_CompletesHeader(t *testing.T) {
+	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	require.NoError(t, err)
+	defer func() { require.NoError(t, state.Close()) }()
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	// Init code that emits a log.
+	tx := types.MustSignNewTx(key, types.LatestSignerForChainID(big.NewInt(11155111)), &types.LegacyTx{
+		Gas:  100_000,
+		Data: []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0)},
+	})
+	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 100_000}).
+		WithBody(types.Body{Transactions: types.Transactions{tx}})
+
+	executor := &ethereumExecutor{chainID: 11155111, interpreter: testInterpreter(t)}
+	receipts, header, err := executor.ExecuteBlock(state, block, &blockHashHistory{})
+	require.NoError(t, err)
+	require.Len(t, receipts, 1)
+	require.Len(t, receipts[0].Logs, 1)
+	require.Equal(t, receipts[0].CumulativeGasUsed, header.GasUsed)
+	require.Equal(t, types.MergeBloom(receipts), header.Bloom)
+	require.Equal(t, types.DeriveSha(receipts, trie.NewStackTrie(nil)), header.ReceiptHash)
+}
 
 func TestEthereumExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ServeBlockHashFromHashHistory(t *testing.T) {
 	executeBlock := func(e *ethereumExecutor, state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
