@@ -38,7 +38,9 @@ import (
 // corrections and failed bundles.
 type MetadataStore interface {
 	// PatchRules patches the rules that will be committed by CommitRules with
-	// the provided json opera.Rules patch.
+	// the provided json opera.Rules patch. Before Allegro, Sonic applies the
+	// MinBaseFee of the patch from the next block on, so GetRulesAtBlock
+	// returns it from that block on.
 	PatchRules(blockNumber uint64, diff []byte) error
 
 	// CommitRules commits the rules that have been updated by PatchRules and
@@ -64,9 +66,12 @@ type MetadataStore interface {
 // BlockDBMetadataStore is a MetadataStore implementation backed by the block
 // database that is safe for concurrent use.
 type BlockDBMetadataStore struct {
-	db                      blockdb.BlockDB
-	metadata                Metadata
-	nextRules               *opera.Rules
+	db        blockdb.BlockDB
+	metadata  Metadata
+	nextRules *opera.Rules
+	// minBaseFeeUpdates holds the rules with a MinBaseFee patched before
+	// Allegro, effective from their block on. They are not persisted.
+	minBaseFeeUpdates       []RulesUpdateHeight
 	mutex                   sync.RWMutex
 	logger                  utils.Logger
 	writeRulesUpdateHeights bool
@@ -148,12 +153,10 @@ func (s *BlockDBMetadataStore) PatchRules(blockNumber uint64, diff []byte) error
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	last := s.metadata.RulesUpdateHeights[0].Rules
-	for _, rulesHeight := range s.metadata.RulesUpdateHeights {
-		if rulesHeight.Block <= blockNumber {
-			last = rulesHeight.Rules
-		}
-	}
+	// The rules of the next block include the rules committed by an epoch
+	// sealing tx of this block.
+	current := s.rulesAtBlock(blockNumber + 1)
+	last := current
 	if s.nextRules != nil {
 		last = *s.nextRules
 	}
@@ -168,6 +171,18 @@ func (s *BlockDBMetadataStore) PatchRules(blockNumber uint64, diff []byte) error
 	input := last
 	input.Economy.MinBaseFee = new(big.Int).Set(last.Economy.MinBaseFee)
 	updatedRules, err := opera.UpdateRules(input, diff)
+	// Before Allegro, Sonic's current and pending rules share a set MinBaseFee
+	// with the updated rules, so the copy holds the MinBaseFee Sonic applies
+	// from the next block on, even if the update is rejected.
+	if minBaseFee := input.Economy.MinBaseFee; minBaseFee.Cmp(last.Economy.MinBaseFee) != 0 {
+		if s.nextRules != nil {
+			s.nextRules.Economy.MinBaseFee = minBaseFee
+		}
+		if current.Economy.MinBaseFee != nil {
+			current.Economy.MinBaseFee = minBaseFee
+			s.minBaseFeeUpdates = append(s.minBaseFeeUpdates, RulesUpdateHeight{Block: blockNumber + 1, Rules: current})
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("failed to update rules: %w", err)
 	}
@@ -239,13 +254,21 @@ func (s *BlockDBMetadataStore) GetRulesAtBlock(blockNumber uint64) opera.Rules {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
-	rules := opera.Rules{}
-	for _, rulesHeight := range s.metadata.RulesUpdateHeights {
-		if idx.Block(rulesHeight.Block) <= idx.Block(blockNumber) {
-			rules = rulesHeight.Rules
+	return s.rulesAtBlock(blockNumber)
+}
+
+// rulesAtBlock returns the latest rules update at or before the given block,
+// preferring a MinBaseFee update over a rules update at the same block.
+func (s *BlockDBMetadataStore) rulesAtBlock(blockNumber uint64) opera.Rules {
+	var rules RulesUpdateHeight
+	for _, updates := range [][]RulesUpdateHeight{s.metadata.RulesUpdateHeights, s.minBaseFeeUpdates} {
+		for _, update := range updates {
+			if update.Block <= blockNumber && update.Block >= rules.Block {
+				rules = update
+			}
 		}
 	}
-	return rules
+	return rules.Rules
 }
 
 // GetCorrectionsAtBlock returns the account corrections for the given block number.
