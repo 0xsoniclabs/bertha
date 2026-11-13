@@ -199,23 +199,6 @@ func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
 	require.Zero(t, db.GetBalance(cc.Address{2}).Uint64())
 }
 
-func TestState_ApplyGenesis_ReturnsErrorIfEndBlockFails(t *testing.T) {
-	require := require.New(t)
-	ctrl := gomock.NewController(t)
-	db := carmen.NewMockStateDB(ctrl)
-
-	issue := fmt.Errorf("injected error")
-	gomock.InOrder(
-		db.EXPECT().BeginBlock(),
-		db.EXPECT().BeginTransaction(),
-		db.EXPECT().EndTransaction(),
-		db.EXPECT().EndBlock(uint64(0)).Return(nil, issue),
-	)
-
-	state := &State{db: db}
-	require.ErrorIs(state.ApplyGenesis(&makefakegenesis.GenesisJson{}), issue)
-}
-
 func TestState_ApplyBlock_ForwardsDifficultyToProcessor(t *testing.T) {
 	tests := map[string]struct {
 		difficulty *big.Int
@@ -508,9 +491,7 @@ func TestState_ApplyBlock_EthereumCancunBlock_AppliesEIP4788(t *testing.T) {
 	state.db.BeginTransaction()
 	state.db.SetCode(cc.Address(params.BeaconRootsAddress), params.BeaconRootsCode)
 	state.db.EndTransaction()
-	handle, err := endBlockAndCommit(state, 0)
-	require.NoError(t, err)
-	require.NoError(t, handle.Wait())
+	state.db.EndBlock(0)
 
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		// Use a large block number to ensure all forks including London are active.
@@ -565,9 +546,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7002(t *testing.T) {
 	state.db.SetCode(cc.Address(params.WithdrawalQueueAddress), params.WithdrawalQueueCode)
 	state.db.SetState(cc.Address(params.WithdrawalQueueAddress), countSlot, requestCount)
 	state.db.EndTransaction()
-	handle, err := endBlockAndCommit(state, 0)
-	require.NoError(t, err)
-	require.NoError(t, handle.Wait())
+	state.db.EndBlock(0)
 
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:        20_000_000,
@@ -621,9 +600,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7251(t *testing.T) {
 	state.db.SetCode(cc.Address(params.ConsolidationQueueAddress), params.ConsolidationQueueCode)
 	state.db.SetState(cc.Address(params.ConsolidationQueueAddress), countSlot, requestCount)
 	state.db.EndTransaction()
-	handle, err := endBlockAndCommit(state, 0)
-	require.NoError(t, err)
-	require.NoError(t, handle.Wait())
+	state.db.EndBlock(0)
 
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:        20_000_000,
@@ -904,35 +881,6 @@ func TestState_ApplyBlock_CommitsBlockToTheArchiveState(t *testing.T) {
 	require.Equal(uint64(1000), after.GetBalance(cc.Address{1}).Uint64())
 }
 
-func TestState_ApplyBlock_ReturnsErrorIfEndBlockFails(t *testing.T) {
-	require := require.New(t)
-	ctrl := gomock.NewController(t)
-	db := carmen.NewMockStateDB(ctrl)
-	processor := NewMockProcessor(ctrl)
-
-	issue := fmt.Errorf("injected error")
-	gomock.InOrder(
-		db.EXPECT().BeginBlock(),
-		processor.EXPECT().ProcessWithDifficulty(
-			gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
-			gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
-			gomock.Any(),
-		).Return(evmcore.ProcessSummary{}),
-		db.EXPECT().EndBlock(uint64(5)).Return(nil, issue),
-	)
-
-	block := types.NewBlockWithHeader(&types.Header{
-		Number:   big.NewInt(5),
-		GasLimit: 8_000_000,
-		Extra:    make([]byte, 12),
-	})
-	chainConfig := opera.CreateTransientEvmChainConfig(146, []opera.UpgradeHeight{}, idx.Block(1))
-
-	state := &State{db: db}
-	_, _, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, chainConfig, nil, false)
-	require.ErrorIs(err, issue)
-}
-
 func TestState_ApplyBlock_FailsOnInvalidExtraDataOfSonicBlock(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	db := carmen.NewMockStateDB(ctrl)
@@ -1062,64 +1010,6 @@ func TestState_setBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
 	setBalance(state.db, addr, balance)
 	have = state.db.GetBalance(cc.Address(addr))
 	require.Equal(t, uint64(750), have.Uint64())
-}
-
-func TestState_endBlockAndCommit_EndsAndCommitsBlock(t *testing.T) {
-	require := require.New(t)
-	ctrl := gomock.NewController(t)
-	db := carmen.NewMockStateDB(ctrl)
-	staged := carmen.NewMockStagedBlock(ctrl)
-
-	handle := carmen.NewWaitHandle(make(chan error))
-	gomock.InOrder(
-		db.EXPECT().EndBlock(uint64(42)).Return(staged, nil),
-		staged.EXPECT().Commit().Return(handle, nil),
-	)
-
-	got, err := endBlockAndCommit(&State{db: db}, 42)
-	require.NoError(err)
-	require.Same(handle, got)
-}
-
-func TestState_endBlockAndCommit_ReportsErrors(t *testing.T) {
-	issue := fmt.Errorf("injected error")
-	tests := map[string]struct {
-		setup   func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock)
-		wantErr string
-	}{
-		"end block fails": {
-			setup: func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock) {
-				db.EXPECT().EndBlock(uint64(42)).Return(nil, issue)
-			},
-			wantErr: "failed to end block 42",
-		},
-		"staged block is nil": {
-			setup: func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock) {
-				db.EXPECT().EndBlock(uint64(42)).Return(nil, nil)
-			},
-			wantErr: "staged state is nil",
-		},
-		"commit fails": {
-			setup: func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock) {
-				db.EXPECT().EndBlock(uint64(42)).Return(staged, nil)
-				staged.EXPECT().Commit().Return(nil, issue)
-			},
-			wantErr: "failed to commit block 42",
-		},
-	}
-
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			require := require.New(t)
-			ctrl := gomock.NewController(t)
-			db := carmen.NewMockStateDB(ctrl)
-			staged := carmen.NewMockStagedBlock(ctrl)
-			test.setup(db, staged)
-
-			_, err := endBlockAndCommit(&State{db: db}, 42)
-			require.ErrorContains(err, test.wantErr)
-		})
-	}
 }
 
 func testInterpreter(t *testing.T) tosca.Interpreter {
