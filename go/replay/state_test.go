@@ -51,6 +51,13 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
+func TestMain(m *testing.M) {
+	// Allocating and flushing the default caches dominates the run time of the
+	// tests, in particular with the race detector.
+	stateCacheSize = 1024 * 1024 // 1MB
+	os.Exit(m.Run())
+}
+
 func TestState_CanBeCreatedAndClosed(t *testing.T) {
 	for _, archive := range []bool{false, true} {
 		t.Run(fmt.Sprintf("withArchive=%t", archive), func(t *testing.T) {
