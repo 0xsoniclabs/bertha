@@ -88,6 +88,10 @@ type Processor interface {
 	) evmcore.ProcessSummary
 }
 
+// stateCacheSize is the size in bytes of the live and the archive cache of a
+// State.
+var stateCacheSize int64 = 10 * 1024 * 1024 * 1024 // 10GB
+
 // NewState creates a new State instance with the given parameters. The
 // resulting state database is empty.
 //
@@ -115,8 +119,8 @@ func NewState(params StateParameters) (*State, error) {
 		Variant:      params.Variant,
 		Schema:       params.Schema,
 		Archive:      archive,
-		LiveCache:    10 * 1024 * 1024 * 1024, // 10GB
-		ArchiveCache: 10 * 1024 * 1024 * 1024, // 10GB
+		LiveCache:    stateCacheSize,
+		ArchiveCache: stateCacheSize,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create state: %v", err)
