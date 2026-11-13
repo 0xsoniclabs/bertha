@@ -66,24 +66,29 @@ jobs:
     - name: verify blockdb (Go)
       working-directory: go
       run: go run . verify --database-dir ../.blockdb --chain-id 4003
-    - name: replay blocks [baseline]
+    - name: replay blocks [live]
       working-directory: go
       run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json --write-rules-update-heights=false
-    - name: replay blocks [snapshot]
+    - name: replay blocks [live + snapshot]
       working-directory: go
       run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json --write-rules-update-heights=false --snapshot-interval 10
     - name: replay blocks [archive]
       working-directory: go
       run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json --write-rules-update-heights=false --with-archive
-    - name: replay blocks [archive+snapshot]
+    - name: replay blocks [archive + snapshot]
       working-directory: go
       run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json --write-rules-update-heights=false --with-archive --snapshot-interval 10
-    - name: replay blocks [archive+load]
+    - name: replay blocks [archive + load]
       working-directory: go
       run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json --write-rules-update-heights=false --with-archive --archive-rate 10000
-    - name: replay blocks [archive+load+snapshot]
+    - name: replay blocks [archive + load + snapshot]
       working-directory: go
       run: go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json --write-rules-update-heights=false --with-archive --archive-rate 10000 --snapshot-interval 10
+    - name: replay blocks [live + replay with stored rules updates]
+      working-directory: go
+      run: |
+        go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json
+        go run . replay --database-dir ../.blockdb --json-genesis ../data/genesis/synthetic.json
 
   generate-test-data:
     name: generate-test-data

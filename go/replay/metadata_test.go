@@ -19,7 +19,9 @@ package replay
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
@@ -291,29 +293,142 @@ func TestBlockDBMetadataStore_PatchRules_DoesNotModifyStoredRules(t *testing.T) 
 	}
 }
 
-func TestBlockDBMetadataStore_PatchRules_UsesLatestRulesAtOrBeforeBlock(t *testing.T) {
+func TestBlockDBMetadataStore_PatchRules_UsesLatestRulesAtOrBeforeNextBlock(t *testing.T) {
 	rulesAt0 := opera.FakeNetRules(opera.Upgrades{Berlin: true, London: true, Sonic: true})
 	rulesAt10 := rulesAt0
 	rulesAt10.Upgrades = opera.Upgrades{Berlin: true, London: true, Sonic: true, Allegro: true}
 	rulesAt20 := rulesAt0
 	rulesAt20.Upgrades = opera.Upgrades{Berlin: true, London: true, Sonic: true, Allegro: true, Brio: true}
 
-	store := &BlockDBMetadataStore{
-		metadata: Metadata{
-			RulesUpdateHeights: []RulesUpdateHeight{
-				{Block: 0, Rules: rulesAt0},
-				{Block: 10, Rules: rulesAt10},
-				{Block: 20, Rules: rulesAt20},
-			},
+	tests := map[string]struct {
+		block    uint64
+		wantBrio bool
+	}{
+		"within epoch":        {block: 12},
+		"epoch sealing block": {block: 19, wantBrio: true},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			store := &BlockDBMetadataStore{
+				metadata: Metadata{
+					RulesUpdateHeights: []RulesUpdateHeight{
+						{Block: 0, Rules: rulesAt0},
+						{Block: 10, Rules: rulesAt10},
+						{Block: 20, Rules: rulesAt20},
+					},
+				},
+			}
+
+			err := store.PatchRules(tc.block, []byte(`{"Upgrades":{"GasSubsidies":true}}`))
+			require.NoError(t, err)
+			require.NotNil(t, store.nextRules)
+			require.True(t, store.nextRules.Upgrades.Allegro)
+			require.Equal(t, tc.wantBrio, store.nextRules.Upgrades.Brio)
+			require.True(t, store.nextRules.Upgrades.GasSubsidies)
+		})
+	}
+}
+
+func TestBlockDBMetadataStore_PatchRules_AppliesPatchedMinBaseFeeFromNextBlockBeforeAllegro(t *testing.T) {
+	sonic := opera.FakeNetRules(opera.GetSonicUpgrades())
+	sealed := opera.FakeNetRules(opera.GetSonicUpgrades())
+	sealed.Blocks.MaxBlockGas++
+	noMinBaseFee := opera.FakeNetRules(opera.GetSonicUpgrades())
+	noMinBaseFee.Economy.MinBaseFee = nil
+	allegro := opera.FakeNetRules(opera.GetAllegroUpgrades())
+	withMinBaseFee := func(rules opera.Rules) opera.Rules {
+		rules.Economy.MinBaseFee = big.NewInt(50_000_000_000)
+		return rules
+	}
+	diff := `{"Economy":{"MinBaseFee":50000000000}}`
+
+	tests := map[string]struct {
+		heights  []RulesUpdateHeight
+		block    uint64
+		diff     string
+		wantErr  bool
+		wantNext opera.Rules
+	}{
+		"before Allegro": {
+			heights:  []RulesUpdateHeight{{Block: 0, Rules: sonic}, {Block: 10, Rules: allegro}},
+			block:    5,
+			diff:     diff,
+			wantNext: withMinBaseFee(sonic),
+		},
+		"rejected update before Allegro": {
+			heights:  []RulesUpdateHeight{{Block: 0, Rules: sonic}, {Block: 10, Rules: allegro}},
+			block:    5,
+			diff:     `{"Economy":{"MinBaseFee":50000000000},"Blocks":{"MaxBlockGas":"x"}}`,
+			wantErr:  true,
+			wantNext: withMinBaseFee(sonic),
+		},
+		"epoch sealing block before Allegro": {
+			heights:  []RulesUpdateHeight{{Block: 0, Rules: sonic}, {Block: 6, Rules: sealed}, {Block: 10, Rules: allegro}},
+			block:    5,
+			diff:     diff,
+			wantNext: withMinBaseFee(sealed),
+		},
+		"no MinBaseFee before Allegro": {
+			heights:  []RulesUpdateHeight{{Block: 0, Rules: noMinBaseFee}, {Block: 10, Rules: allegro}},
+			block:    5,
+			diff:     diff,
+			wantNext: noMinBaseFee,
+		},
+		"from Allegro on": {
+			heights:  []RulesUpdateHeight{{Block: 0, Rules: sonic}, {Block: 10, Rules: allegro}},
+			block:    15,
+			diff:     diff,
+			wantNext: allegro,
 		},
 	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			store := &BlockDBMetadataStore{metadata: Metadata{RulesUpdateHeights: slices.Clone(tc.heights)}}
+			rules := store.GetRulesAtBlock(tc.block)
 
-	err := store.PatchRules(12, []byte(`{"Upgrades":{"GasSubsidies":true}}`))
-	require.NoError(t, err)
-	require.NotNil(t, store.nextRules)
-	require.True(t, store.nextRules.Upgrades.Allegro)
-	require.False(t, store.nextRules.Upgrades.Brio)
-	require.True(t, store.nextRules.Upgrades.GasSubsidies)
+			err := store.PatchRules(tc.block, []byte(tc.diff))
+			require.Equal(t, tc.wantErr, err != nil)
+			require.Equal(t, rules, store.GetRulesAtBlock(tc.block))
+			require.Equal(t, tc.wantNext, store.GetRulesAtBlock(tc.block+1))
+			require.Equal(t, tc.heights, store.metadata.RulesUpdateHeights)
+		})
+	}
+}
+
+func TestBlockDBMetadataStore_PatchRules_RejectedUpdateBeforeAllegroPatchesMinBaseFeeOfNextRules(t *testing.T) {
+	noMinBaseFee := opera.FakeNetRules(opera.GetSonicUpgrades())
+	noMinBaseFee.Economy.MinBaseFee = nil
+
+	tests := map[string]struct {
+		rules       opera.Rules
+		wantCurrent *big.Int
+	}{
+		"with MinBaseFee":    {rules: opera.FakeNetRules(opera.GetSonicUpgrades()), wantCurrent: big.NewInt(50_000_000_000)},
+		"without MinBaseFee": {rules: noMinBaseFee},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			store := &BlockDBMetadataStore{metadata: Metadata{RulesUpdateHeights: []RulesUpdateHeight{{Block: 0, Rules: tc.rules}}}}
+			require.NoError(t, store.PatchRules(1, []byte(`{"Economy":{"MinBaseFee":2000000000},"Blocks":{"MaxBlockGas":123456789}}`)))
+
+			err := store.PatchRules(2, []byte(`{"Economy":{"MinBaseFee":50000000000},"Blocks":{"MaxBlockGas":"x"}}`))
+			require.Error(t, err)
+			require.Equal(t, big.NewInt(50_000_000_000), store.nextRules.Economy.MinBaseFee)
+			require.Equal(t, uint64(123456789), store.nextRules.Blocks.MaxBlockGas)
+			require.Equal(t, tc.wantCurrent, store.GetRulesAtBlock(3).Economy.MinBaseFee)
+		})
+	}
+}
+
+func TestBlockDBMetadataStore_PatchRules_DoesNotModifyRulesCommittedInSameBlock(t *testing.T) {
+	heights := []RulesUpdateHeight{{Block: 0, Rules: opera.FakeNetRules(opera.GetSonicUpgrades())}}
+	for range 2 {
+		store := &BlockDBMetadataStore{metadata: Metadata{RulesUpdateHeights: heights}, logger: slog.New(slog.DiscardHandler)}
+		require.NoError(t, store.PatchRules(2, []byte(`{"Blocks":{"MaxBlockGas":123456789}}`)))
+		require.NoError(t, store.CommitRules(5))
+		require.NoError(t, store.PatchRules(5, []byte(`{"Economy":{"MinBaseFee":50000000000}}`)))
+		heights = store.metadata.RulesUpdateHeights
+	}
 }
 
 func TestBlockDBMetadataStore_CommitRules_NoNextRules_IsNoOp(t *testing.T) {
