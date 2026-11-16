@@ -297,7 +297,7 @@ mod tests {
         for data in generate_blocks_with_data() {
             let block = data.block;
             let hash = data.block_hash;
-            assert_eq!(block.to_header().compute_hash(), hash)
+            assert_eq!(block.to_header().compute_hash(), hash);
         }
     }
 

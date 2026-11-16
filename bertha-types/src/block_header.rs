@@ -109,7 +109,7 @@ impl Encodable for BlockHeader {
     }
 
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        RlpBlockHeader::from(self).encode(out)
+        RlpBlockHeader::from(self).encode(out);
     }
 }
 

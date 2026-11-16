@@ -680,7 +680,7 @@ mod tests {
     fn copy_fields(
         fields: Vec<&str>,
         dest: &mut serde_json::Map<String, serde_json::Value>,
-        source: serde_json::Value,
+        source: &serde_json::Value,
         include_to: bool,
     ) {
         for f in fields {
@@ -698,7 +698,7 @@ mod tests {
             "type", "nonce", "gasPrice", "gas", "to", "value", "input", "v", "r", "s",
         ];
 
-        copy_fields(fields.to_vec(), &mut legacy_tx_value, tx, include_to);
+        copy_fields(fields.to_vec(), &mut legacy_tx_value, &tx, include_to);
         legacy_tx_value.into()
     }
 
@@ -720,7 +720,7 @@ mod tests {
             "s",
         ];
 
-        copy_fields(fields.to_vec(), &mut access_list_tx_value, tx, include_to);
+        copy_fields(fields.to_vec(), &mut access_list_tx_value, &tx, include_to);
         access_list_tx_value.into()
     }
 
@@ -743,7 +743,7 @@ mod tests {
             "s",
         ];
 
-        copy_fields(fields.to_vec(), &mut dynamic_fee_tx_value, tx, include_to);
+        copy_fields(fields.to_vec(), &mut dynamic_fee_tx_value, &tx, include_to);
         dynamic_fee_tx_value.into()
     }
 
@@ -768,7 +768,7 @@ mod tests {
             "s",
         ];
 
-        copy_fields(fields.to_vec(), &mut blob_tx_value, tx, true);
+        copy_fields(fields.to_vec(), &mut blob_tx_value, &tx, true);
         blob_tx_value.into()
     }
 
@@ -792,7 +792,7 @@ mod tests {
             "s",
         ];
 
-        copy_fields(fields.to_vec(), &mut set_code_tx_value, tx, true);
+        copy_fields(fields.to_vec(), &mut set_code_tx_value, &tx, true);
         set_code_tx_value.into()
     }
 
