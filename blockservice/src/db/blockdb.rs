@@ -563,8 +563,10 @@ fn deserialize_chain_ids(data: impl AsRef<[u8]>) -> Result<Vec<u64>, Error> {
         )));
     }
     Ok(data
-        .chunks_exact(8)
-        .map(|chunk| u64::from_be_bytes(chunk.try_into().unwrap()))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|chunk| u64::from_be_bytes(*chunk))
         .collect())
 }
 
@@ -600,7 +602,9 @@ fn deserialize_block_ranges(data: impl AsRef<[u8]>) -> Result<Vec<BlockRange>, E
         )));
     }
     Ok(data
-        .chunks_exact(16)
+        .as_chunks::<16>()
+        .0
+        .iter()
         .map(|chunk| {
             let start = u64::from_be_bytes(chunk[0..8].try_into().unwrap());
             let end = u64::from_be_bytes(chunk[8..16].try_into().unwrap());

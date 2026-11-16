@@ -284,7 +284,7 @@ mod tests {
         #[case] toml_token_line: &str,
         #[case] expected_token: Option<MetadataValue<Ascii>>,
     ) {
-        let config_toml = format! {"port = 8080\nchains = []\n{toml_token_line}"};
+        let config_toml = format!("port = 8080\nchains = []\n{toml_token_line}");
         let config = toml::from_str::<Config>(&config_toml).unwrap();
         assert_eq!(config.auth_token, expected_token);
         let toml = toml::to_string(&config).unwrap();

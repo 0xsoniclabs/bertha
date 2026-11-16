@@ -59,7 +59,9 @@ pub fn compute_root_hash<T: Eip2718Marshallable>(data: &[T]) -> Hash {
         .map(|(i, r)| (Nibbles::unpack(encode_key(i)), r.marshal()))
         .collect();
     leaves.sort();
-    leaves.into_iter().for_each(|l| trie.add_leaf(l.0, &l.1));
+    for (key, value) in leaves {
+        trie.add_leaf(key, &value);
+    }
 
     trie.root().into()
 }
