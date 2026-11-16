@@ -45,7 +45,7 @@ func (e *ethereumExecutor) ExecuteBlock(state *State, block *types.Block, hashHi
 	return receipts, completeHeader, nil
 }
 
-func (e *ethereumExecutor) ExecuteBlockOnArchive(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
+func (e *ethereumExecutor) ExecuteBlockOnArchive(state *State, block *types.Block, _ *types.Header, hashHistory *blockHashHistory) (types.Receipts, error) {
 	receipts, _, err := e.applyBlock(state, block, hashHistory, true)
 	return receipts, err
 }

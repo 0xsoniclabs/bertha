@@ -59,7 +59,7 @@ func TestEthereumExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ServeBlockHashF
 		return receipts, err
 	}
 	executeBlockOnArchive := func(e *ethereumExecutor, state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
-		return e.ExecuteBlockOnArchive(state, block, hashHistory)
+		return e.ExecuteBlockOnArchive(state, block, nil, hashHistory)
 	}
 	tests := map[string]struct {
 		execute      func(*ethereumExecutor, *State, *types.Block, *blockHashHistory) (types.Receipts, error)

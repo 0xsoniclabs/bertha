@@ -153,7 +153,7 @@ func TestReplay_InvalidFlagCombinationsAreRejected(t *testing.T) {
 	}
 }
 
-func TestReplay_ReportsFailureToOpenLedger(t *testing.T) {
+func TestReplay_ReportsUnusableSonicHead(t *testing.T) {
 	rules := opera.FakeNetRules(opera.GetSonicUpgrades())
 	blocks := createSonicBlocks(t, rules, newGenesisState(t, nil), 3)
 	blocks[1].ExtraData = nil
@@ -165,8 +165,8 @@ func TestReplay_ReportsFailureToOpenLedger(t *testing.T) {
 		startBlock uint64
 		wantErr    string
 	}{
-		"preceding block not recorded":            {startBlock: 5, wantErr: "failed to open ledger: block 4 is not recorded"},
-		"start block not recorded":                {startBlock: 3, wantErr: "failed to open ledger: block 3 is not recorded"},
+		"preceding block not recorded":            {startBlock: 5, wantErr: "failed to get head header: block 4 is not recorded"},
+		"start block not recorded":                {startBlock: 3, wantErr: "failed to get head header: block 3 is not recorded"},
 		"preceding block with invalid extra data": {startBlock: 2, wantErr: "failed to open ledger: failed to decode extra data of block 1"},
 	}
 	for name, tt := range tests {
@@ -178,6 +178,14 @@ func TestReplay_ReportsFailureToOpenLedger(t *testing.T) {
 			require.ErrorContains(t, Replay(t.Context(), args), tt.wantErr)
 		})
 	}
+}
+
+func TestReplay_ReportsUnrecordedEthereumHead(t *testing.T) {
+	args := defaultReplayArgs()
+	args.BlockDBDir, args.JSONGenesisFile = createEthereumBlockDb(t)
+	args.StateDBDir = t.TempDir()
+	args.StartBlock = 101
+	require.ErrorContains(t, Replay(t.Context(), args), "failed to get head header: block 100 is not recorded")
 }
 
 func TestReplay_InvalidArchiveRateIsReportedAsCreationFailure(t *testing.T) {
@@ -367,6 +375,7 @@ func TestReplayLoop(t *testing.T) {
 			"SkipStateRootCheckIfNoStateRootCheckFlagIsSet": skipStateRootCheckIfNoStateRootCheckFlagIsSet,
 			"SkipReceiptsCheckIfNoReceiptsCheckFlagIsSet":   skipReceiptsCheckIfNoReceiptsCheckFlagIsSet,
 			"StopsOnArchiveVerifierFailure":                 stopsOnArchiveVerifierFailure,
+			"SubmitsBlocksWithParentHeaderAndHashHistory":   submitsBlocksWithParentHeaderAndHashHistory,
 		}
 		for name, test := range tests {
 			t.Run(name, func(t *testing.T) {
@@ -781,6 +790,7 @@ func stopsOnArchiveVerifierFailure(t *testing.T, run replayer) {
 	executor.EXPECT().IsMptConformant().Return(true).MinTimes(1)
 	executor.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).MinTimes(1)
 	executor.EXPECT().CloneBlockHashHistory().Return(nil).MinTimes(1)
+	executor.EXPECT().GetHeadHeader().Return(nil).MinTimes(1)
 
 	// Create a cancellable context, as the Replay function does.
 	ctx, cancel := context.WithCancelCause(t.Context())
@@ -829,6 +839,34 @@ func stopsOnArchiveVerifierFailure(t *testing.T, run replayer) {
 	// additional blocks in its stages; allow a generous upper bound below
 	// totalBlocks to keep the test robust.
 	require.Less(t, blocksApplied.Load(), int64(1000))
+}
+
+func submitsBlocksWithParentHeaderAndHashHistory(t *testing.T, run replayer) {
+	ctrl := gomock.NewController(t)
+	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
+	// ChainID is only called by the pipeline (for signer creation), not by
+	// the linear loop, so the exact count varies with the runner.
+	executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+	executor.EXPECT().IsMptConformant().Return(true)
+	executor.EXPECT().GetBlockHash(uint64(0)).Return(common.Hash{})
+
+	// Both are captured before the block is applied.
+	parentHeader := &types.Header{}
+	hashHistory := &blockHashHistory{}
+	executor.EXPECT().ApplyBlock(gomock.Any()).
+		After(executor.EXPECT().GetHeadHeader().Return(parentHeader)).
+		After(executor.EXPECT().CloneBlockHashHistory().Return(hashHistory)).
+		Return(nil, future.Immediate(result.Ok(common.Hash{})), nil)
+
+	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
+	require.NoError(t, err)
+	blocks := utils.NewIter([]*blockdb.Block{{Number: 1, StateRoot: common.Hash{}.Bytes()}})
+	require.NoError(t, run(t.Context(), blocks, executor, nil, ReplayLoopContext{}, nil, &archiveVerifier{pool: pool}))
+
+	item, ok := pool.GetRandom()
+	require.True(t, ok)
+	require.Same(t, parentHeader, item.parentHeader)
+	require.Same(t, hashHistory, item.hashHistory)
 }
 
 func overwriteStateRootHash(t *testing.T, run replayer) {
@@ -936,9 +974,10 @@ func applyBlock(executor *historyExecutor, block *types.Block) (types.Receipts, 
 	return receipts, err
 }
 
-// applyBlockOnArchive applies the block with ApplyBlockOnArchive and an empty hash history.
+// applyBlockOnArchive applies the block with ApplyBlockOnArchive, an empty
+// parent header and an empty hash history.
 func applyBlockOnArchive(executor *historyExecutor, block *types.Block) (types.Receipts, error) {
-	return executor.ApplyBlockOnArchive(block, &blockHashHistory{})
+	return executor.ApplyBlockOnArchive(block, &types.Header{}, &blockHashHistory{})
 }
 
 func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_SkipBlockZero(t *testing.T) {
@@ -991,7 +1030,7 @@ func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_ForwardToBlockExecut
 		"ApplyBlockOnArchive": {
 			apply: applyBlockOnArchive,
 			expect: func(blockExecutor *MockBlockExecutorMockRecorder, executor *historyExecutor, block *types.Block) {
-				blockExecutor.ExecuteBlockOnArchive(executor.state, block, &blockHashHistory{}).Return(nil, injected)
+				blockExecutor.ExecuteBlockOnArchive(executor.state, block, &types.Header{}, &blockHashHistory{}).Return(nil, injected)
 			},
 		},
 	}
@@ -999,8 +1038,8 @@ func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_ForwardToBlockExecut
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			blockExecutor := NewMockBlockExecutor(gomock.NewController(t))
-			executor := &historyExecutor{blockExecutor: blockExecutor, blockHashHistory: &blockHashHistory{}, state: &State{}}
-			// Distinguishes the executor's hash history from the empty one of applyBlockOnArchive.
+			// The executor's head header and hash history differ from the empty ones of applyBlockOnArchive.
+			executor := &historyExecutor{blockExecutor: blockExecutor, blockHashHistory: &blockHashHistory{}, headHeader: &types.Header{GasUsed: 1}, state: &State{}}
 			executor.blockHashHistory.SetBlockHash(0, common.Hash{1})
 			block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1)})
 			tt.expect(blockExecutor.EXPECT(), executor, block)
@@ -1011,7 +1050,7 @@ func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_ForwardToBlockExecut
 	}
 }
 
-func TestHistoryExecutor_ApplyBlock_ReplacesHeaderAndRecordsItsHash(t *testing.T) {
+func TestHistoryExecutor_ApplyBlock_ReplacesHeaderAndRecordsItAsHead(t *testing.T) {
 	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, state.Close()) }()
@@ -1027,6 +1066,7 @@ func TestHistoryExecutor_ApplyBlock_ReplacesHeaderAndRecordsItsHash(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, want, receipts)
 	require.Equal(t, header.Hash(), block.Hash())
+	require.Equal(t, header, executor.GetHeadHeader())
 	require.Equal(t, header.Hash(), executor.blockHashHistory.GetBlockHash(1))
 }
 

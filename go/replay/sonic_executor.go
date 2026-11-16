@@ -155,7 +155,7 @@ func (e *sonicExecutor) ExecuteBlock(state *State, block *types.Block, hashHisto
 	return receipts, candidate.Block.GetEthereumHeader(), state.db.Check()
 }
 
-func (e *sonicExecutor) ExecuteBlockOnArchive(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
+func (e *sonicExecutor) ExecuteBlockOnArchive(state *State, block *types.Block, _ *types.Header, hashHistory *blockHashHistory) (types.Receipts, error) {
 	receipts, _, err := e.applyBlock(state, block, hashHistory, nil, true)
 	return receipts, err
 }

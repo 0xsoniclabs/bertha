@@ -60,10 +60,10 @@ func executeLiveBlock(e *sonicExecutor, state *State, block *types.Block) (types
 	return receipts, err
 }
 
-// executeArchiveBlock executes the block with ExecuteBlockOnArchive and an
-// empty hash history.
+// executeArchiveBlock executes the block with ExecuteBlockOnArchive, no parent
+// header and an empty hash history.
 func executeArchiveBlock(e *sonicExecutor, state *State, block *types.Block) (types.Receipts, error) {
-	return e.ExecuteBlockOnArchive(state, block, &blockHashHistory{})
+	return e.ExecuteBlockOnArchive(state, block, nil, &blockHashHistory{})
 }
 
 func TestNewSonicExecutor_KeepsDefaultLoggersAndSilencesLedger(t *testing.T) {
@@ -391,7 +391,7 @@ func TestSonicExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ServeBlockHashFrom
 		return receipts, err
 	}
 	executeBlockOnArchive := func(e *sonicExecutor, state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
-		return e.ExecuteBlockOnArchive(state, block, hashHistory)
+		return e.ExecuteBlockOnArchive(state, block, nil, hashHistory)
 	}
 	tests := map[string]struct {
 		execute      func(*sonicExecutor, *State, *types.Block, *blockHashHistory) (types.Receipts, error)
