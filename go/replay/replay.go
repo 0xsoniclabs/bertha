@@ -151,9 +151,16 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	}
 
 	// Create the block executor
+	firstReplayedBlock := max(args.StartBlock, 1) // block zero is not replayed
+	headBlock := firstReplayedBlock - 1           // the live state starts with the head at the previous block
 	var blockExecutor BlockExecutor
+	var headHeader *types.Header
 	if isEthereum(chainID) {
 		blockExecutor = &ethereumExecutor{chainID: chainID, interpreter: interpreter}
+		headHeader, err = getRecordedHeader(blockDb, chainID, headBlock)
+		if err != nil {
+			return fmt.Errorf("failed to get head header: %w", err)
+		}
 	} else {
 		// Create the metadata store
 		slog.Info("Initializing metadata store")
@@ -161,13 +168,11 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		if err != nil {
 			return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
 		}
-		firstReplayedBlock := max(args.StartBlock, 1) // block zero is not replayed
-		headBlock := firstReplayedBlock - 1           // the ledger starts with the head at the previous block
-		head, err := getLedgerHead(blockDb, metadataStore, chainID, headBlock)
+		headHeader, err = getLedgerHead(blockDb, metadataStore, chainID, headBlock)
 		if err != nil {
-			return fmt.Errorf("failed to open ledger: %w", err)
+			return fmt.Errorf("failed to get head header: %w", err)
 		}
-		blockExecutor, err = newSonicExecutor(chainID, metadataStore, interpreter, head)
+		blockExecutor, err = newSonicExecutor(chainID, metadataStore, interpreter, headHeader)
 		if err != nil {
 			return fmt.Errorf("failed to open ledger: %w", err)
 		}
@@ -201,6 +206,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		chainID:          chainID,
 		blockExecutor:    blockExecutor,
 		blockHashHistory: &blockHashHistory{},
+		headHeader:       headHeader,
 		state:            state,
 		schema:           args.DBSchema,
 		snapshotHandler:  snapshotHandler,
@@ -490,10 +496,13 @@ func runReplayLoop(
 			hashOfParentBlock = executor.GetBlockHash(gethBlock.NumberU64() - 1)
 		}
 
-		// If the archive verifier is enabled, capture the current state of the block hash history.
+		// If the archive verifier is enabled, capture the current state of the
+		// block hash history and the header of the parent.
 		var hashHistoryClone *blockHashHistory
+		var parentHeader *types.Header
 		if verifier != nil {
 			hashHistoryClone = executor.CloneBlockHashHistory()
+			parentHeader = executor.GetHeadHeader()
 		}
 
 		// Run the transactions in the block against the state database.
@@ -522,7 +531,7 @@ func runReplayLoop(
 
 		// Submit block for archive verification if enabled.
 		if verifier != nil {
-			verifier.submit(block, hashHistoryClone)
+			verifier.submit(block, parentHeader, hashHistoryClone)
 		}
 	}
 	return nil
@@ -560,6 +569,7 @@ func runReplayPipeline(
 		receipts          types.Receipts
 		stateRoot         future.Future[result.Result[common.Hash]]
 		hashOfParentBlock common.Hash
+		parentHeader      *types.Header
 		// This needs to be deep-copied, it is just a pointer to avoid copying
 		// the whole struct every time it is passed through the channels.
 		hashHistory *blockHashHistory
@@ -631,10 +641,13 @@ func runReplayPipeline(
 			if gethBlock.NumberU64() > 0 {
 				hashOfParentBlock = executor.GetBlockHash(gethBlock.NumberU64() - 1)
 			}
-			// If the archive verifier is enabled, capture the current state of the block hash history.
+			// If the archive verifier is enabled, capture the current state of
+			// the block hash history and the header of the parent.
 			var hashHistoryClone *blockHashHistory
+			var parentHeader *types.Header
 			if verifier != nil {
 				hashHistoryClone = executor.CloneBlockHashHistory()
+				parentHeader = executor.GetHeadHeader()
 			}
 			receipts, stateRootFuture, err := executor.ApplyBlock(gethBlock)
 			if err != nil {
@@ -652,6 +665,7 @@ func runReplayPipeline(
 				receipts:          receipts,
 				stateRoot:         stateRootFuture,
 				hashOfParentBlock: hashOfParentBlock,
+				parentHeader:      parentHeader,
 				hashHistory:       hashHistoryClone,
 			}
 			select {
@@ -684,7 +698,7 @@ func runReplayPipeline(
 
 			// Submit block for archive verification if enabled.
 			if verifier != nil {
-				verifier.submit(block, result.hashHistory)
+				verifier.submit(block, result.parentHeader, result.hashHistory)
 			}
 		}
 	})
@@ -718,6 +732,9 @@ type HistoryExecutor interface {
 	) (future.Future[result.Result[common.Hash]], error)
 	GetBlockHash(blockNumber uint64) common.Hash
 	CloneBlockHashHistory() *blockHashHistory
+	// GetHeadHeader returns the header of the block whose state the live state
+	// holds.
+	GetHeadHeader() *types.Header
 }
 
 // ArchiveExecutor exposes the operations required by the archive
@@ -725,7 +742,10 @@ type HistoryExecutor interface {
 // application on the same underlying state.
 type ArchiveExecutor interface {
 	GetArchiveBlockHeight() (height uint64, empty bool, err error)
-	ApplyBlockOnArchive(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error)
+	// ApplyBlockOnArchive re-executes the given block on the archived state of
+	// its parent, whose header is parentHeader, serving BLOCKHASH from
+	// hashHistory, and returns the receipts.
+	ApplyBlockOnArchive(block *types.Block, parentHeader *types.Header, hashHistory *blockHashHistory) (types.Receipts, error)
 }
 
 // StateFlusher exposes the state-flush operation required by the progress
@@ -741,8 +761,9 @@ type BlockExecutor interface {
 	// from hashHistory, and returns its receipts and complete header.
 	ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, *types.Header, error)
 	// ExecuteBlockOnArchive executes the given block on the archived state of its
-	// parent, serving BLOCKHASH from hashHistory, and returns its receipts.
-	ExecuteBlockOnArchive(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error)
+	// parent, whose header is parentHeader, serving BLOCKHASH from hashHistory,
+	// and returns its receipts.
+	ExecuteBlockOnArchive(state *State, block *types.Block, parentHeader *types.Header, hashHistory *blockHashHistory) (types.Receipts, error)
 }
 
 // historyExecutor implements HistoryExecutor, ArchiveExecutor and StateFlusher
@@ -760,7 +781,7 @@ type BlockExecutor interface {
 //   - stateModifyMutex serializes live block application. It ensures that at
 //     most one goroutine executes ApplyBlock at a time and protects
 //     mutations to its fields performed during block application
-//     (notably blockHashHistory writes).
+//     (notably blockHashHistory and headHeader writes).
 //
 // Together they allow live block application and concurrent archive
 // verification / flushes to proceed in parallel while ensuring the state
@@ -771,6 +792,8 @@ type historyExecutor struct {
 	chainID          uint64
 	blockExecutor    BlockExecutor
 	blockHashHistory *blockHashHistory
+	// headHeader is the header of the block whose state the live state holds.
+	headHeader       *types.Header
 	state            *State
 	stateSwitchMutex sync.RWMutex
 	stateModifyMutex sync.Mutex
@@ -806,10 +829,18 @@ func (e *historyExecutor) CloneBlockHashHistory() *blockHashHistory {
 	return e.blockHashHistory.Clone()
 }
 
+func (e *historyExecutor) GetHeadHeader() *types.Header {
+	e.stateSwitchMutex.RLock()
+	defer e.stateSwitchMutex.RUnlock()
+	e.stateModifyMutex.Lock()
+	defer e.stateModifyMutex.Unlock()
+	return e.headHeader
+}
+
 // ApplyBlock applies the given block to the state database with the block
 // executor, replaces the header of block by the complete header the block
-// executor returns and records its hash. It returns the receipts and state-root
-// future.
+// executor returns and records it as the head header and its hash in the block
+// hash history. It returns the receipts and state-root future.
 func (e *historyExecutor) ApplyBlock(block *types.Block) (
 	types.Receipts,
 	future.Future[result.Result[common.Hash]],
@@ -837,6 +868,7 @@ func (e *historyExecutor) ApplyBlock(block *types.Block) (
 	}
 	*block = *block.WithSeal(header)
 
+	e.headHeader = header
 	e.blockHashHistory.SetBlockHash(block.NumberU64(), header.Hash())
 
 	return receipts, e.state.GetStateRoot(), nil
@@ -890,18 +922,18 @@ func (e *historyExecutor) GetArchiveBlockHeight() (height uint64, empty bool, er
 	return e.state.GetArchiveBlockHeight()
 }
 
-// ApplyBlockOnArchive re-executes the given block against the archive state for
-// its parent block, using the given hash history of the block, and returns the
-// resulting receipts. Block 0 is skipped since it is equivalent with the
-// genesis data import. The live state is not modified. It is safe to call
-// concurrently with block application.
-func (e *historyExecutor) ApplyBlockOnArchive(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
+// ApplyBlockOnArchive re-executes the given block with the block executor on
+// the archived state of its parent, whose header is parentHeader, serving
+// BLOCKHASH from hashHistory, and returns the receipts. Block 0 is skipped since
+// it is equivalent with the genesis data import. The live state is not
+// modified. It is safe to call concurrently with block application.
+func (e *historyExecutor) ApplyBlockOnArchive(block *types.Block, parentHeader *types.Header, hashHistory *blockHashHistory) (types.Receipts, error) {
 	if block.NumberU64() == 0 {
 		return nil, nil
 	}
 	e.stateSwitchMutex.RLock()
 	defer e.stateSwitchMutex.RUnlock()
-	return e.blockExecutor.ExecuteBlockOnArchive(e.state, block, hashHistory)
+	return e.blockExecutor.ExecuteBlockOnArchive(e.state, block, parentHeader, hashHistory)
 }
 
 // getExpectedStateRoot returns the expected state root for the given block, based on the DB schema.

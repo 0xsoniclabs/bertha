@@ -27,6 +27,7 @@ import (
 	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/tracy"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 const (
@@ -43,10 +44,12 @@ const (
 	dropLogInterval = time.Minute
 )
 
-// blockWithHashHistory holds a block and the block hash history for that block.
+// blockWithHashHistory holds a block, the header of its parent and the block
+// hash history for that block.
 type blockWithHashHistory struct {
-	block       *blockdb.Block
-	hashHistory *blockHashHistory
+	block        *blockdb.Block
+	parentHeader *types.Header
+	hashHistory  *blockHashHistory
 }
 
 // archiveVerifier re-executes old blocks against archive states to verify that
@@ -106,11 +109,12 @@ func newArchiveVerifier(
 	return v, nil
 }
 
-// submit adds a block to the archive verifier's pool for later verification.
-func (v *archiveVerifier) submit(block *blockdb.Block, blockHashHistory *blockHashHistory) {
+// submit adds a block with the header of its parent to the archive verifier's
+// pool for later verification.
+func (v *archiveVerifier) submit(block *blockdb.Block, parentHeader *types.Header, blockHashHistory *blockHashHistory) {
 	// Block 0 is skipped since it is equivalent with the genesis data import.
 	if block.Number > 0 {
-		v.pool.Add(blockWithHashHistory{block, blockHashHistory})
+		v.pool.Add(blockWithHashHistory{block, parentHeader, blockHashHistory})
 	}
 }
 
@@ -209,7 +213,7 @@ func (v *archiveVerifier) verifyBlock() {
 		return
 	}
 
-	receipts, err := v.executor.ApplyBlockOnArchive(gethBlock, item.hashHistory)
+	receipts, err := v.executor.ApplyBlockOnArchive(gethBlock, item.parentHeader, item.hashHistory)
 	if err != nil {
 		handleError(fmt.Errorf("failed to apply block %d: %w", block.Number, err))
 		return

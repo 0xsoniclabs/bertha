@@ -101,6 +101,20 @@ func (mr *MockHistoryExecutorMockRecorder) GetBlockHash(blockNumber any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetBlockHash", reflect.TypeOf((*MockHistoryExecutor)(nil).GetBlockHash), blockNumber)
 }
 
+// GetHeadHeader mocks base method.
+func (m *MockHistoryExecutor) GetHeadHeader() *types.Header {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetHeadHeader")
+	ret0, _ := ret[0].(*types.Header)
+	return ret0
+}
+
+// GetHeadHeader indicates an expected call of GetHeadHeader.
+func (mr *MockHistoryExecutorMockRecorder) GetHeadHeader() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHeadHeader", reflect.TypeOf((*MockHistoryExecutor)(nil).GetHeadHeader))
+}
+
 // IsMptConformant mocks base method.
 func (m *MockHistoryExecutor) IsMptConformant() bool {
 	m.ctrl.T.Helper()
@@ -169,18 +183,18 @@ func (m *MockArchiveExecutor) EXPECT() *MockArchiveExecutorMockRecorder {
 }
 
 // ApplyBlockOnArchive mocks base method.
-func (m *MockArchiveExecutor) ApplyBlockOnArchive(block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
+func (m *MockArchiveExecutor) ApplyBlockOnArchive(block *types.Block, parentHeader *types.Header, hashHistory *blockHashHistory) (types.Receipts, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ApplyBlockOnArchive", block, hashHistory)
+	ret := m.ctrl.Call(m, "ApplyBlockOnArchive", block, parentHeader, hashHistory)
 	ret0, _ := ret[0].(types.Receipts)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ApplyBlockOnArchive indicates an expected call of ApplyBlockOnArchive.
-func (mr *MockArchiveExecutorMockRecorder) ApplyBlockOnArchive(block, hashHistory any) *gomock.Call {
+func (mr *MockArchiveExecutorMockRecorder) ApplyBlockOnArchive(block, parentHeader, hashHistory any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyBlockOnArchive", reflect.TypeOf((*MockArchiveExecutor)(nil).ApplyBlockOnArchive), block, hashHistory)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ApplyBlockOnArchive", reflect.TypeOf((*MockArchiveExecutor)(nil).ApplyBlockOnArchive), block, parentHeader, hashHistory)
 }
 
 // GetArchiveBlockHeight mocks base method.
@@ -278,16 +292,16 @@ func (mr *MockBlockExecutorMockRecorder) ExecuteBlock(state, block, hashHistory 
 }
 
 // ExecuteBlockOnArchive mocks base method.
-func (m *MockBlockExecutor) ExecuteBlockOnArchive(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
+func (m *MockBlockExecutor) ExecuteBlockOnArchive(state *State, block *types.Block, parentHeader *types.Header, hashHistory *blockHashHistory) (types.Receipts, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ExecuteBlockOnArchive", state, block, hashHistory)
+	ret := m.ctrl.Call(m, "ExecuteBlockOnArchive", state, block, parentHeader, hashHistory)
 	ret0, _ := ret[0].(types.Receipts)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ExecuteBlockOnArchive indicates an expected call of ExecuteBlockOnArchive.
-func (mr *MockBlockExecutorMockRecorder) ExecuteBlockOnArchive(state, block, hashHistory any) *gomock.Call {
+func (mr *MockBlockExecutorMockRecorder) ExecuteBlockOnArchive(state, block, parentHeader, hashHistory any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteBlockOnArchive", reflect.TypeOf((*MockBlockExecutor)(nil).ExecuteBlockOnArchive), state, block, hashHistory)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ExecuteBlockOnArchive", reflect.TypeOf((*MockBlockExecutor)(nil).ExecuteBlockOnArchive), state, block, parentHeader, hashHistory)
 }

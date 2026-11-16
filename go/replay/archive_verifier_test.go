@@ -80,27 +80,32 @@ func TestArchiveVerifier_NewArchiveVerifier_ChecksArchiveRate(t *testing.T) {
 	}
 }
 
-func TestArchiveVerifier_Submit_SkipsBlockZero(t *testing.T) {
-	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
-	require.NoError(t, err)
+func TestArchiveVerifier_Submit_AddsBlockWithParentHeaderAndHashHistoryIfNonZero(t *testing.T) {
+	tests := map[string]struct {
+		number    uint64
+		wantAdded bool
+	}{
+		"block zero":     {number: 0},
+		"non-zero block": {number: 1, wantAdded: true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
+			require.NoError(t, err)
+			block, parentHeader, hashHistory := &blockdb.Block{Number: tt.number}, &types.Header{}, &blockHashHistory{}
 
-	v := &archiveVerifier{pool: pool}
-	v.submit(&blockdb.Block{Number: 0}, &blockHashHistory{})
+			v := &archiveVerifier{pool: pool}
+			v.submit(block, parentHeader, hashHistory)
 
-	_, ok := pool.GetRandom()
-	require.False(t, ok)
-}
-
-func TestArchiveVerifier_Submit_AddsNonZeroBlocks(t *testing.T) {
-	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
-	require.NoError(t, err)
-
-	v := &archiveVerifier{pool: pool}
-	v.submit(&blockdb.Block{Number: 1}, &blockHashHistory{})
-
-	item, ok := pool.GetRandom()
-	require.True(t, ok)
-	require.Equal(t, uint64(1), item.block.Number)
+			item, ok := pool.GetRandom()
+			require.Equal(t, tt.wantAdded, ok)
+			if tt.wantAdded {
+				require.Same(t, block, item.block)
+				require.Same(t, parentHeader, item.parentHeader)
+				require.Same(t, hashHistory, item.hashHistory)
+			}
+		})
+	}
 }
 
 func TestArchiveVerifier_dispatcher_LimitsConcurrency(t *testing.T) {
@@ -268,7 +273,7 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 			executor := NewMockArchiveExecutor(gomock.NewController(t))
 			executor.EXPECT().GetArchiveBlockHeight().Return(uint64(1), tc.archiveEmpty, nil)
 			if tc.wantApply {
-				executor.EXPECT().ApplyBlockOnArchive(gomock.Any(), gomock.Any()).Return(types.Receipts{{CumulativeGasUsed: matchingGasUsed}}, nil)
+				executor.EXPECT().ApplyBlockOnArchive(gomock.Any(), gomock.Any(), gomock.Any()).Return(types.Receipts{{CumulativeGasUsed: matchingGasUsed}}, nil)
 			}
 
 			ctx, cancel := context.WithCancelCause(t.Context())
@@ -295,17 +300,18 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 	}
 }
 
-func TestArchiveVerifier_verifyBlock_AppliesBlockWithItsHashHistory(t *testing.T) {
+func TestArchiveVerifier_verifyBlock_AppliesBlockWithItsParentHeaderAndHashHistory(t *testing.T) {
 	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
 	require.NoError(t, err)
+	parentHeader := &types.Header{GasUsed: 1}
 	hashHistory := &blockHashHistory{}
 	hashHistory.SetBlockHash(1, common.Hash{1})
-	pool.Add(blockWithHashHistory{block: &blockdb.Block{Number: 2}, hashHistory: hashHistory})
+	pool.Add(blockWithHashHistory{block: &blockdb.Block{Number: 2}, parentHeader: parentHeader, hashHistory: hashHistory})
 
 	ctrl := gomock.NewController(t)
 	executor := NewMockArchiveExecutor(ctrl)
 	executor.EXPECT().GetArchiveBlockHeight().Return(uint64(1), false, nil)
-	executor.EXPECT().ApplyBlockOnArchive(gomock.Any(), hashHistory)
+	executor.EXPECT().ApplyBlockOnArchive(gomock.Any(), parentHeader, hashHistory)
 
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
@@ -347,7 +353,7 @@ func TestArchiveVerifier_verifyBlock_CancelsContextOnFailure(t *testing.T) {
 	// Submit blocks so the pool is non-empty.
 	protoBlocks := utils.CreateValidBlocks(t, 10)
 	for _, block := range protoBlocks[1:] {
-		verifier.submit(block, &blockHashHistory{})
+		verifier.submit(block, nil, &blockHashHistory{})
 	}
 
 	// Call verifyBlock directly to deterministically trigger cancellation.
