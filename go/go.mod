@@ -19,9 +19,9 @@ module github.com/0xsoniclabs/bertha
 go 1.27.3
 
 require (
-	github.com/0xsoniclabs/carmen/go v0.0.0-20260930140317-c18d5fe77790
-	github.com/0xsoniclabs/sonic v0.0.0-20261113093319-bc1e4bcaa1d9
-	github.com/0xsoniclabs/tosca v0.0.0-20261006082751-39dec245cca5
+	github.com/0xsoniclabs/carmen/go v0.0.0-20260916125055-46335f35fa44
+	github.com/0xsoniclabs/sonic v0.0.0-20261113143238-5a4408cc8072
+	github.com/0xsoniclabs/tosca v0.0.0-20261008114401-2922efb78c3d
 	github.com/0xsoniclabs/tracy v0.0.0-20251027125423-00a5ab7968fb
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
 	github.com/ethereum/go-ethereum v1.17.2
@@ -75,6 +75,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
+	github.com/mattn/go-sqlite3 v1.14.44 // indirect
 	github.com/minio/sha256-simd v1.0.1 // indirect
 	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
