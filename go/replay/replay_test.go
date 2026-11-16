@@ -155,14 +155,18 @@ func TestReplay_InvalidFlagCombinationsAreRejected(t *testing.T) {
 
 func TestReplay_ReportsFailureToOpenLedger(t *testing.T) {
 	rules := opera.FakeNetRules(opera.GetSonicUpgrades())
-	blocks := createSonicBlocks(t, rules, newGenesisState(t, nil), 2)
+	blocks := createSonicBlocks(t, rules, newGenesisState(t, nil), 3)
 	blocks[1].ExtraData = nil
+	invalid, err := convert.ConvertToGethBlock(blocks[1])
+	require.NoError(t, err)
+	blocks[2].ParentHash = invalid.Hash().Bytes()
 	blockDbDir, genesisFile := writeBlockDb(t, rules, nil, blocks, nil)
 	tests := map[string]struct {
 		startBlock uint64
 		wantErr    string
 	}{
-		"preceding block not recorded":            {startBlock: 3, wantErr: "failed to open ledger: block 2 is not recorded"},
+		"preceding block not recorded":            {startBlock: 5, wantErr: "failed to open ledger: block 4 is not recorded"},
+		"start block not recorded":                {startBlock: 3, wantErr: "failed to open ledger: block 3 is not recorded"},
 		"preceding block with invalid extra data": {startBlock: 2, wantErr: "failed to open ledger: failed to decode extra data of block 1"},
 	}
 	for name, tt := range tests {
@@ -1200,6 +1204,46 @@ func TestGetRecordedHeader_ReportsFailures(t *testing.T) {
 
 			_, err := getRecordedHeader(db, 42, 4)
 			require.EqualError(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestGetLedgerHead_SearchesGasUsedOfRecordedHashUpToGasLimitOfFailedBundles(t *testing.T) {
+	recorded := &blockdb.Block{Number: 4}
+	converted, err := convert.ConvertToGethBlock(recorded)
+	require.NoError(t, err)
+	failedBundles := []FailedBundle{{Tx: types.NewTx(&types.LegacyTx{Gas: 400})}, {Tx: types.NewTx(&types.LegacyTx{Gas: 600})}}
+	tests := map[string]struct {
+		gasUsed       uint64
+		failedBundles []FailedBundle
+		wantErr       bool
+	}{
+		"gas used of receipts":                      {},
+		"gas used within failed bundles' gas limit": {gasUsed: 700, failedBundles: failedBundles},
+		"gas used up to failed bundles' gas limit":  {gasUsed: 1000, failedBundles: failedBundles},
+		"gas used beyond failed bundles' gas limit": {gasUsed: 1001, failedBundles: failedBundles, wantErr: true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			header := converted.Header()
+			header.GasUsed = tt.gasUsed
+
+			ctrl := gomock.NewController(t)
+			db := blockdb.NewMockBlockDB(ctrl)
+			db.EXPECT().Get(uint64(42), uint64(4)).Return(recorded, nil)
+			db.EXPECT().Get(uint64(42), uint64(5)).Return(&blockdb.Block{Number: 5, ParentHash: header.Hash().Bytes()}, nil)
+			metadataStore := NewMockMetadataStore(ctrl)
+			if tt.failedBundles != nil {
+				metadataStore.EXPECT().GetFailedBundlesAtBlock(uint64(4)).Return(tt.failedBundles)
+			}
+
+			head, err := getLedgerHead(db, metadataStore, 42, 4)
+			if tt.wantErr {
+				require.EqualError(t, err, fmt.Sprintf("no gas used of block 4 up to 1000 gives the hash %v recorded by block 5", header.Hash()))
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, header, head)
 		})
 	}
 }
