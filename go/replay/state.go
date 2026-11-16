@@ -18,14 +18,11 @@ package replay
 
 import (
 	"fmt"
-	"log/slog"
 	"math"
 	"math/big"
 	"os"
 	"strings"
 
-	"github.com/0xsoniclabs/bertha/convert"
-	"github.com/0xsoniclabs/bertha/utils"
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/amount"
 	"github.com/0xsoniclabs/carmen/go/common/future"
@@ -36,7 +33,6 @@ import (
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"
 	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
 	"github.com/0xsoniclabs/sonic/inter/state"
-	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/tosca/go/geth_adapter"
 	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/0xsoniclabs/tracy"
@@ -192,11 +188,10 @@ func (s *State) ApplyGenesis(genesis *makefakegenesis.GenesisJson) error {
 	return s.db.Check()
 }
 
-// ApplyBlock applies the given block to this state, processing all transactions
-// and updating the state accordingly. The envelopes of failed bundles are
-// processed at their positions between the block's transactions. It returns the
-// receipts of the transactions in the block and the gas used by all processed
-// transactions, or an error if the block could not be processed.
+// ApplyBlock applies the given block of an Ethereum chain to this state,
+// processing all transactions and updating the state accordingly. It returns
+// the receipts of the transactions in the block and the gas used by all
+// processed transactions, or an error if the block could not be processed.
 //
 // When isArchive is true, the block is re-executed against the archive state
 // for the parent block. In this mode, BeginBlock/EndBlock are not called and
@@ -205,22 +200,9 @@ func (s *State) ApplyBlock(
 	block *types.Block,
 	interpreter tosca.Interpreter,
 	processor Processor,
-	rules opera.Rules,
-	corrections map[common.Address]Correction,
-	failedBundles []FailedBundle,
 	chainConfig *params.ChainConfig,
-	onLog func(*core_types.Log),
 	isArchive bool,
 ) (types.Receipts, uint64, error) {
-	transactions := block.Transactions()
-	if len(failedBundles) > 0 {
-		var err error
-		transactions, err = insertFailedBundles(transactions, failedBundles)
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to insert failed bundles into block %d: %w", block.NumberU64(), err)
-		}
-	}
-
 	var stateDB *evmstore.CarmenStateDB
 	var vmStateDB carmen.VmStateDB
 
@@ -245,22 +227,14 @@ func (s *State) ApplyBlock(
 	zone := tracy.ZoneBegin("TransactionProcessing")
 	defer zone.End()
 
-	evmBlock, err := convert.ToEvmBlock(block, transactions, chainConfig, isEthereum(chainConfig.ChainID.Uint64()))
-	if err != nil {
-		return nil, 0, err
-	}
+	evmBlock := toEvmBlock(block, chainConfig)
 
-	var vmConfig vm.Config
-	if !isEthereum(chainConfig.ChainID.Uint64()) {
-		// Apply Sonic-specific VM settings that are not applicable to Ethereum chains.
-		vmConfig = opera.GetVmConfig(rules)
-	}
-	vmConfig.Interpreter = geth_adapter.NewGethInterpreterFactory(interpreter)
+	vmConfig := vm.Config{Interpreter: geth_adapter.NewGethInterpreterFactory(interpreter)}
 
 	// EVM for the system calls; the chain is not needed for the current system calls.
 	evm := vm.NewEVM(evmcore.NewEVMBlockContextWithDifficulty(&evmBlock.EvmHeader, nil, nil, big.NewInt(0)), stateDB, chainConfig, vmConfig)
 
-	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsCancun(block.Number(), block.Time()) {
+	if chainConfig.IsCancun(block.Number(), block.Time()) {
 		// EIP-4788: store the parent beacon block root in the beacon roots contract.
 		if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
 			core.ProcessBeaconBlockRoot(*beaconRoot, evm)
@@ -276,17 +250,22 @@ func (s *State) ApplyBlock(
 		block.GasLimit(),
 		&usedGas,
 		0, // Tx index offset
-		onLog,
+		nil,
 		block.Difficulty(),
 		math.MaxUint64,
 	)
 
-	receipts, err := blockReceipts(processed, failedBundles)
-	if err != nil {
-		return nil, 0, err
+	// Retrieve the receipts from the processed transactions and check that none
+	// of them were skipped.
+	receipts := make(types.Receipts, 0, len(processed.ProcessedTransactions))
+	for _, proc := range processed.ProcessedTransactions {
+		if proc.Receipt == nil {
+			return nil, 0, fmt.Errorf("tx %v was skipped", proc.Transaction.Hash())
+		}
+		receipts = append(receipts, proc.Receipt)
 	}
 
-	if isEthereum(chainConfig.ChainID.Uint64()) && chainConfig.IsPrague(block.Number(), block.Time()) {
+	if chainConfig.IsPrague(block.Number(), block.Time()) {
 		// EIP-7002: call the withdrawal request contract as a system call. The
 		// requests are not needed for replay.
 		err := core.ProcessWithdrawalQueue(&[][]byte{}, evm)
@@ -304,13 +283,8 @@ func (s *State) ApplyBlock(
 		}
 	}
 
-	// Apply corrections if any are provided.
-	applyCorrections(vmStateDB, corrections, block, slog.Default())
-
-	if isEthereum(chainConfig.ChainID.Uint64()) {
-		// Credit the block and uncle rewards pre-merge and the withdrawals post-merge.
-		beacon.New(ethash.NewFaker()).Finalize(chainConfigReader{config: chainConfig}, block.Header(), stateDB, block.Body())
-	}
+	// Credit the block and uncle rewards pre-merge and the withdrawals post-merge.
+	beacon.New(ethash.NewFaker()).Finalize(chainConfigReader{config: chainConfig}, block.Header(), stateDB, block.Body())
 
 	if !isArchive {
 		endBlockZone := tracy.ZoneBegin("EndBlock")
@@ -323,54 +297,6 @@ func (s *State) ApplyBlock(
 	}
 
 	return receipts, usedGas, vmStateDB.Check()
-}
-
-func applyCorrections(stateDB carmen.VmStateDB, corrections map[common.Address]Correction, block *types.Block, logger utils.Logger) {
-	if len(corrections) == 0 {
-		return
-	}
-	stateDB.BeginTransaction()
-	logger.Info("Applying corrections", "block", block.NumberU64())
-	for addr, acc := range corrections {
-		if acc.Balance != nil {
-			logger.Info("Correcting balance",
-				"address", addr.Hex(),
-				"old", stateDB.GetBalance(cc.Address(addr)).ToBig().String(),
-				"new", acc.Balance.ToBig().String(),
-			)
-			setBalance(stateDB, addr, acc.Balance.ToBig())
-		}
-		if len(acc.Storage) > 0 {
-			logger.Info("Correcting storage",
-				"address", addr.Hex(),
-				"storage_keys", len(acc.Storage),
-			)
-			for key, value := range acc.Storage {
-				logger.Info("Correcting storage entry",
-					"address", addr.Hex(),
-					"key", fmt.Sprintf("0x%x", key[:]),
-					"old", fmt.Sprintf("0x%x", stateDB.GetState(cc.Address(addr), key)),
-					"new", fmt.Sprintf("0x%x", value[:]),
-				)
-				stateDB.SetState(cc.Address(addr), key, value)
-			}
-		}
-	}
-	stateDB.EndTransaction()
-
-}
-
-func setBalance(stateDB carmen.VmStateDB, address common.Address, balance *big.Int) {
-	addr := cc.Address(address)
-	cur := stateDB.GetBalance(addr).ToBig()
-	switch cur.Cmp(balance) {
-	case -1:
-		diff, _ := amount.NewFromBigInt(new(big.Int).Sub(balance, cur))
-		stateDB.AddBalance(addr, diff)
-	case 1:
-		diff, _ := amount.NewFromBigInt(new(big.Int).Sub(cur, balance))
-		stateDB.SubBalance(addr, diff)
-	}
 }
 
 // chainConfigReader provides the Config method of consensus.ChainHeaderReader;

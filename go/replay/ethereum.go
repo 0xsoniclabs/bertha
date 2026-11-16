@@ -17,7 +17,13 @@
 package replay
 
 import (
+	"math/big"
+
+	"github.com/0xsoniclabs/sonic/evmcore"
+	"github.com/0xsoniclabs/sonic/inter"
 	"github.com/0xsoniclabs/sonic/opera"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -36,12 +42,12 @@ func isEthereum(chainID uint64) bool {
 	return exists
 }
 
-// getEthereumChainConfigAndRules returns the config of the given Ethereum chain
-// and the rules holding the upgrades in effect at the given block.
-func getEthereumChainConfigAndRules(block *types.Block, chainID uint64) (*params.ChainConfig, opera.Rules) {
+// getEthereumChainConfigAndUpgrades returns the config of the given Ethereum
+// chain and the upgrades in effect at the given block.
+func getEthereumChainConfigAndUpgrades(block *types.Block, chainID uint64) (*params.ChainConfig, opera.Upgrades) {
 	cfg := ethereumChainConfigMap[chainID]
 	rules := cfg.Rules(block.Number(), true, block.Time())
-	return cfg, opera.Rules{Upgrades: opera.Upgrades{
+	return cfg, opera.Upgrades{
 		Berlin: rules.IsBerlin,
 		London: rules.IsLondon,
 		Llr:    false,
@@ -53,5 +59,33 @@ func getEthereumChainConfigAndRules(block *types.Block, chainID uint64) (*params
 		SingleProposerBlockFormation: false,
 		GasSubsidies:                 false,
 		TransactionBundles:           false,
-	}}
+	}
+}
+
+// toEvmBlock converts the given block of an Ethereum chain to an EVM block that
+// runs the block's transactions.
+func toEvmBlock(block *types.Block, chainConfig *params.ChainConfig) *evmcore.EvmBlock {
+	blobBaseFee := big.NewInt(1)
+	if chainConfig.IsCancun(block.Number(), block.Time()) && block.ExcessBlobGas() != nil {
+		blobBaseFee = eip4844.CalcBlobFee(chainConfig, block.Header())
+	}
+	prevRandao := block.MixDigest()
+	if block.Difficulty().Sign() != 0 {
+		// Before the Merge, PrevRandao is unused and set to zero, which tells the EVM
+		// to use the difficulty instead.
+		prevRandao = common.Hash{}
+	}
+	return &evmcore.EvmBlock{
+		EvmHeader: evmcore.EvmHeader{
+			Number:      block.Number(),
+			ParentHash:  block.ParentHash(),
+			Time:        inter.Timestamp(block.Time() * 1e9),
+			GasLimit:    block.GasLimit(),
+			PrevRandao:  prevRandao,
+			BaseFee:     block.BaseFee(),
+			BlobBaseFee: blobBaseFee,
+			Coinbase:    block.Coinbase(),
+		},
+		Transactions: block.Transactions(),
+	}
 }

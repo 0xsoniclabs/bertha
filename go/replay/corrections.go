@@ -20,10 +20,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"strings"
 
+	"github.com/0xsoniclabs/bertha/utils"
 	cc "github.com/0xsoniclabs/carmen/go/common"
+	"github.com/0xsoniclabs/carmen/go/common/amount"
+	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/holiman/uint256"
 )
 
@@ -98,4 +103,53 @@ func decodeHexTo32Bytes(s string) ([32]byte, error) {
 	var out [32]byte
 	copy(out[32-len(b):], b)
 	return out, nil
+}
+
+// applyCorrections overwrites the balances and storage slots of the given
+// accounts with the corrected values and logs each change.
+func applyCorrections(stateDB carmen.VmStateDB, corrections map[common.Address]Correction, block *types.Block, logger utils.Logger) {
+	if len(corrections) == 0 {
+		return
+	}
+	stateDB.BeginTransaction()
+	logger.Info("Applying corrections", "block", block.NumberU64())
+	for addr, acc := range corrections {
+		if acc.Balance != nil {
+			logger.Info("Correcting balance",
+				"address", addr.Hex(),
+				"old", stateDB.GetBalance(cc.Address(addr)).ToBig().String(),
+				"new", acc.Balance.ToBig().String(),
+			)
+			setBalance(stateDB, addr, acc.Balance.ToBig())
+		}
+		if len(acc.Storage) > 0 {
+			logger.Info("Correcting storage",
+				"address", addr.Hex(),
+				"storage_keys", len(acc.Storage),
+			)
+			for key, value := range acc.Storage {
+				logger.Info("Correcting storage entry",
+					"address", addr.Hex(),
+					"key", fmt.Sprintf("0x%x", key[:]),
+					"old", fmt.Sprintf("0x%x", stateDB.GetState(cc.Address(addr), key)),
+					"new", fmt.Sprintf("0x%x", value[:]),
+				)
+				stateDB.SetState(cc.Address(addr), key, value)
+			}
+		}
+	}
+	stateDB.EndTransaction()
+}
+
+func setBalance(stateDB carmen.VmStateDB, address common.Address, balance *big.Int) {
+	addr := cc.Address(address)
+	cur := stateDB.GetBalance(addr).ToBig()
+	switch cur.Cmp(balance) {
+	case -1:
+		diff, _ := amount.NewFromBigInt(new(big.Int).Sub(balance, cur))
+		stateDB.AddBalance(addr, diff)
+	case 1:
+		diff, _ := amount.NewFromBigInt(new(big.Int).Sub(cur, balance))
+		stateDB.SubBalance(addr, diff)
+	}
 }

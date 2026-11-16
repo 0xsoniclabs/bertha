@@ -20,13 +20,17 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/0xsoniclabs/sonic/evmcore"
+	"github.com/0xsoniclabs/sonic/inter"
 	"github.com/0xsoniclabs/sonic/opera"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetEthereumChainConfigAndRules_MapsUpgradesInEffectAtBlock(t *testing.T) {
+func TestGetEthereumChainConfigAndUpgrades_MapsUpgradesInEffectAtBlock(t *testing.T) {
 	cfg := params.MainnetChainConfig
 	tests := map[string]struct {
 		number   uint64
@@ -44,9 +48,82 @@ func TestGetEthereumChainConfigAndRules_MapsUpgradesInEffectAtBlock(t *testing.T
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			block := types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(tt.number), Time: tt.time})
-			gotCfg, rules := getEthereumChainConfigAndRules(block, cfg.ChainID.Uint64())
+			gotCfg, upgrades := getEthereumChainConfigAndUpgrades(block, cfg.ChainID.Uint64())
 			require.Same(t, cfg, gotCfg)
-			require.Equal(t, opera.Rules{Upgrades: tt.upgrades}, rules)
+			require.Equal(t, tt.upgrades, upgrades)
+		})
+	}
+}
+
+func TestToEvmBlock_ConvertsBlockToEvmBlock(t *testing.T) {
+	excessBlobGas := uint64(10_000_000)
+	chainConfig := params.MainnetChainConfig
+	cancun := *chainConfig.CancunTime
+	cancunTime := inter.Timestamp(cancun * 1e9)
+	blobBaseFee := eip4844.CalcBlobFee(chainConfig, &types.Header{ExcessBlobGas: &excessBlobGas, Time: cancun})
+	cases := map[string]struct {
+		difficulty      int64
+		excessBlobGas   *uint64
+		time            uint64
+		wantTime        inter.Timestamp
+		wantPrevRandao  common.Hash
+		wantBlobBaseFee *big.Int
+	}{
+		"without excess blob gas": {
+			time:            cancun,
+			wantTime:        cancunTime,
+			wantPrevRandao:  common.Hash{6},
+			wantBlobBaseFee: big.NewInt(1),
+		},
+		"with excess blob gas": {
+			excessBlobGas:   &excessBlobGas,
+			time:            cancun,
+			wantTime:        cancunTime,
+			wantPrevRandao:  common.Hash{6},
+			wantBlobBaseFee: blobBaseFee,
+		},
+		"with excess blob gas before cancun": {
+			excessBlobGas:   &excessBlobGas,
+			time:            cancun - 1,
+			wantTime:        cancunTime - 1e9,
+			wantPrevRandao:  common.Hash{6},
+			wantBlobBaseFee: big.NewInt(1),
+		},
+		"before merge": {
+			difficulty:      1,
+			time:            5,
+			wantTime:        5e9,
+			wantBlobBaseFee: big.NewInt(1),
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			txs := types.Transactions{types.NewTx(&types.LegacyTx{Nonce: 8})}
+			block := types.NewBlockWithHeader(&types.Header{
+				ParentHash:    common.Hash{1},
+				Coinbase:      common.Address{2},
+				Difficulty:    big.NewInt(c.difficulty),
+				Number:        big.NewInt(20_000_000),
+				GasLimit:      4,
+				Time:          c.time,
+				MixDigest:     common.Hash{6},
+				BaseFee:       big.NewInt(7),
+				ExcessBlobGas: c.excessBlobGas,
+			}).WithBody(types.Body{Transactions: txs})
+
+			require.Equal(t, &evmcore.EvmBlock{
+				EvmHeader: evmcore.EvmHeader{
+					Number:      big.NewInt(20_000_000),
+					ParentHash:  common.Hash{1},
+					Time:        c.wantTime,
+					GasLimit:    4,
+					PrevRandao:  c.wantPrevRandao,
+					BaseFee:     big.NewInt(7),
+					BlobBaseFee: c.wantBlobBaseFee,
+					Coinbase:    common.Address{2},
+				},
+				Transactions: txs,
+			}, toEvmBlock(block, chainConfig))
 		})
 	}
 }

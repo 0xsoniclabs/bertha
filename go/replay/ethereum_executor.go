@@ -57,9 +57,9 @@ func (e *ethereumExecutor) applyBlock(
 	hashHistory *blockHashHistory,
 	isArchive bool,
 ) (types.Receipts, uint64, error) {
-	chainConfig, rules := getEthereumChainConfigAndRules(block, e.chainID)
+	chainConfig, upgrades := getEthereumChainConfigAndUpgrades(block, e.chainID)
 
-	processor := evmcore.NewStateProcessorForReplay(chainConfig, hashHistory, rules.Upgrades)
+	processor := evmcore.NewStateProcessorForReplay(chainConfig, hashHistory, upgrades)
 
-	return state.ApplyBlock(block, e.interpreter, processor, rules, nil, nil, chainConfig, nil, isArchive)
+	return state.ApplyBlock(block, e.interpreter, processor, chainConfig, isArchive)
 }

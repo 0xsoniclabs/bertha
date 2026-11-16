@@ -1,8 +1,8 @@
 diff --git a/go/replay/state.go b/go/replay/state.go
-index f3a5985..3803aa5 100644
+index a1a8fa2..b5a2848 100644
 --- a/go/replay/state.go
 +++ b/go/replay/state.go
-@@ -49,7 +49,8 @@ import (
+@@ -45,7 +45,8 @@ import (
  	"github.com/ethereum/go-ethereum/core/vm"
  	"github.com/ethereum/go-ethereum/params"
  	// Uncomment to enable experimental Carmen features.

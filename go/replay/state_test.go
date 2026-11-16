@@ -21,25 +21,18 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"slices"
 	"testing"
-	"time"
 
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
-	"github.com/0xsoniclabs/bertha/utils"
 	cc "github.com/0xsoniclabs/carmen/go/common"
-	"github.com/0xsoniclabs/carmen/go/common/amount"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/evmcore"
-	"github.com/0xsoniclabs/sonic/gossip/blockproc/bundle"
 	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
-	"github.com/0xsoniclabs/sonic/inter"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/tosca/go/tosca"
-	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -245,11 +238,7 @@ func TestState_ApplyBlock_ForwardsDifficultyToProcessor(t *testing.T) {
 				GasLimit:   8_000_000,
 			})
 
-			chainConfig := opera.CreateTransientEvmChainConfig(
-				1,
-				[]opera.UpgradeHeight{},
-				idx.Block(block.NumberU64()),
-			)
+			chainConfig := params.MainnetChainConfig
 
 			processor.EXPECT().ProcessWithDifficulty(
 				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
@@ -264,7 +253,7 @@ func TestState_ApplyBlock_ForwardsDifficultyToProcessor(t *testing.T) {
 				return evmcore.ProcessSummary{}
 			})
 
-			_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, chainConfig, nil, false)
+			_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, chainConfig, false)
 			require.NoError(t, err)
 		})
 	}
@@ -280,11 +269,7 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{})
 	require.NoError(t, err)
 
-	chainConfig := opera.CreateTransientEvmChainConfig(
-		1,
-		[]opera.UpgradeHeight{},
-		idx.Block(block.NumberU64()),
-	)
+	chainConfig := params.MainnetChainConfig
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
@@ -292,37 +277,31 @@ func TestState_ApplyBlock_CanApplyAnEmptyBlock(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	receipts, _, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, chainConfig, nil, false)
+	receipts, _, err := state.ApplyBlock(block, testInterpreter(t), processor, chainConfig, false)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 }
 
-func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
-	corrections := Corrections{
-		17: map[common.Address]Correction{
-			{1}: {
-				Balance: uint256.NewInt(1000),
-				Storage: map[cc.Key]cc.Value{
-					{3}: {4},
-				},
-			},
-		},
-	}
-
+func TestState_ApplyBlock_FailsOnSkippedTransaction(t *testing.T) {
 	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, state.Close())
 	}()
 
-	block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: 17})
-	require.NoError(t, err)
+	chainConfig := params.MainnetChainConfig
 
-	chainConfig := opera.CreateTransientEvmChainConfig(
-		1,
-		[]opera.UpgradeHeight{},
-		idx.Block(block.NumberU64()),
-	)
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	setBalance(state.db, crypto.PubkeyToAddress(key.PublicKey), big.NewInt(1e18))
+	tx := types.MustSignNewTx(key, types.LatestSignerForChainID(chainConfig.ChainID), &types.LegacyTx{
+		Nonce:    1, // the sender's nonce is 0
+		Gas:      21_000,
+		GasPrice: big.NewInt(1),
+		To:       &common.Address{1},
+	})
+	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 1_000_000}).
+		WithBody(types.Body{Transactions: types.Transactions{tx}})
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
@@ -330,176 +309,11 @@ func TestState_ApplyBlock_AppliesCorrections(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	receipts, _, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, corrections[17], nil, chainConfig, nil, false)
-	require.NoError(t, err)
-	require.Empty(t, receipts)
-
-	require.Equal(t, uint64(1000), state.db.GetBalance(cc.Address{1}).Uint64())
-	require.Equal(t, cc.Value{4}, state.db.GetState(cc.Address{1}, cc.Key{3}))
+	_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, chainConfig, false)
+	require.ErrorContains(t, err, "was skipped")
 }
 
-func TestState_applyCorrections_AppliesCorrectionsToStateDB(t *testing.T) {
-	blockNumber := uint64(17)
-	address := common.Address{1}
-	oldBalance := amount.New(0)
-	newBalance := uint256.NewInt(1000)
-	balanceDiff := amount.New(1000)
-	storageKey := cc.Key{1}
-	oldStorageValue := cc.Value{2}
-	newStorageValue := cc.Value{3}
-
-	corrections := Corrections{
-		blockNumber: map[common.Address]Correction{
-			address: {
-				Balance: newBalance,
-				Storage: map[cc.Key]cc.Value{
-					storageKey: newStorageValue,
-				},
-			},
-		},
-	}
-
-	ctrl := gomock.NewController(t)
-	stateDB := carmen.NewMockVmStateDB(ctrl)
-	logger := utils.NewMockLogger(ctrl)
-
-	stateDB.EXPECT().BeginTransaction().Times(1)
-	stateDB.EXPECT().GetBalance(cc.Address(address)).Return(oldBalance).Times(2)
-	stateDB.EXPECT().AddBalance(cc.Address(address), balanceDiff).Times(1)
-	stateDB.EXPECT().GetState(cc.Address(address), storageKey).Return(oldStorageValue).Times(1)
-	stateDB.EXPECT().SetState(cc.Address(address), storageKey, newStorageValue).Times(1)
-	stateDB.EXPECT().EndTransaction().Times(1)
-
-	logger.EXPECT().Info("Applying corrections", "block", blockNumber).Times(1)
-	logger.EXPECT().Info("Correcting balance",
-		"address", address.Hex(),
-		"old", oldBalance.ToBig().String(),
-		"new", newBalance.ToBig().String(),
-	).Times(1)
-	logger.EXPECT().Info("Correcting storage",
-		"address", address.Hex(),
-		"storage_keys", len(corrections[blockNumber][address].Storage),
-	).Times(1)
-	logger.EXPECT().Info("Correcting storage entry",
-		"address", address.Hex(),
-		"key", fmt.Sprintf("0x%x", storageKey[:]),
-		"old", fmt.Sprintf("0x%x", oldStorageValue[:]),
-		"new", fmt.Sprintf("0x%x", newStorageValue[:]),
-	).Times(1)
-
-	block := types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(blockNumber)})
-	applyCorrections(stateDB, corrections[blockNumber], block, logger)
-}
-
-func TestState_ApplyBlock_ApplySonicVmConfigIfNotEthereumChain(t *testing.T) {
-	tests := map[string]struct {
-		chainConfig                     *params.ChainConfig
-		wantChargeExcessGas             bool
-		wantIgnoreGasFeeCap             bool
-		wantInsufficientBalanceIsNotErr bool
-		wantSkipTipPaymentToCoinbase    bool
-	}{
-		"Ethereum": {
-			chainConfig: params.MainnetChainConfig,
-		},
-		"Sonic": {
-			chainConfig:                     opera.CreateTransientEvmChainConfig(146, []opera.UpgradeHeight{}, idx.Block(1)),
-			wantChargeExcessGas:             true,
-			wantIgnoreGasFeeCap:             true,
-			wantInsufficientBalanceIsNotErr: true,
-			wantSkipTipPaymentToCoinbase:    true,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			processor := NewMockProcessor(ctrl)
-
-			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
-			require.NoError(t, err)
-			defer func() { require.NoError(t, state.Close()) }()
-
-			block := types.NewBlockWithHeader(&types.Header{
-				GasLimit: 8_000_000,
-				Extra:    make([]byte, 12),
-			})
-
-			processor.EXPECT().ProcessWithDifficulty(
-				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
-				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
-				gomock.Any(),
-			).DoAndReturn(func(
-				_ *evmcore.EvmBlock, _ interface{}, cfg vm.Config,
-				_ uint64, _ *uint64, _ int, _ interface{},
-				_ *big.Int, _ uint64,
-			) evmcore.ProcessSummary {
-				require.Equal(t, tt.wantChargeExcessGas, cfg.ChargeExcessGas)
-				require.Equal(t, tt.wantIgnoreGasFeeCap, cfg.IgnoreGasFeeCap)
-				require.Equal(t, tt.wantInsufficientBalanceIsNotErr, cfg.InsufficientBalanceIsNotAnError)
-				require.Equal(t, tt.wantSkipTipPaymentToCoinbase, cfg.SkipTipPaymentToCoinbase)
-				return evmcore.ProcessSummary{}
-			})
-
-			_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, tt.chainConfig, nil, false)
-			require.NoError(t, err)
-		})
-	}
-}
-
-func TestState_ApplyBlock_ForwardsRulesToVmConfig(t *testing.T) {
-	// Sonic derives the transaction gas cap from MaxEventGas starting with Brio.
-	rules := opera.Rules{Upgrades: opera.GetBrioUpgrades()}
-	rules.Economy.Gas.MaxEventGas = 50_000
-	chainConfig := opera.CreateTransientEvmChainConfig(
-		146,
-		[]opera.UpgradeHeight{opera.MakeUpgradeHeight(rules.Upgrades, 0)},
-		idx.Block(1),
-	)
-
-	tests := map[string]struct {
-		gas     uint64
-		wantErr string
-	}{
-		"at limit":    {gas: 50_000},
-		"above limit": {gas: 50_001, wantErr: "was skipped"},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
-			require.NoError(t, err)
-			defer func() { require.NoError(t, state.Close()) }()
-
-			key, err := crypto.GenerateKey()
-			require.NoError(t, err)
-			setBalance(state.db, crypto.PubkeyToAddress(key.PublicKey), big.NewInt(1e18))
-
-			tx := types.MustSignNewTx(key, types.LatestSignerForChainID(chainConfig.ChainID), &types.LegacyTx{
-				Gas:      tt.gas,
-				GasPrice: big.NewInt(1),
-				To:       &common.Address{1},
-			})
-			block := types.NewBlockWithHeader(&types.Header{
-				Number:   big.NewInt(1),
-				GasLimit: 1_000_000,
-				BaseFee:  big.NewInt(1),
-				Extra:    make([]byte, 12),
-			}).WithBody(types.Body{Transactions: types.Transactions{tx}})
-
-			processor := evmcore.NewStateProcessorForReplay(chainConfig, &blockHashHistory{}, rules.Upgrades)
-
-			_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, rules, nil, nil, chainConfig, nil, false)
-			if tt.wantErr != "" {
-				require.ErrorContains(t, err, tt.wantErr)
-			} else {
-				require.NoError(t, err)
-			}
-		})
-	}
-}
-
-func TestState_ApplyBlock_EthereumCancunBlock_AppliesEIP4788(t *testing.T) {
+func TestState_ApplyBlock_CancunBlock_AppliesEIP4788(t *testing.T) {
 	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, state.Close()) }()
@@ -539,7 +353,7 @@ func TestState_ApplyBlock_EthereumCancunBlock_AppliesEIP4788(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, chainConfig, nil, false)
+	_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, chainConfig, false)
 	require.NoError(t, err)
 
 	// EIP-4788 stores the beacon root at storage slot (timestamp % 8191) + 8191.
@@ -552,7 +366,7 @@ func TestState_ApplyBlock_EthereumCancunBlock_AppliesEIP4788(t *testing.T) {
 	require.Equal(t, cc.Value(beaconRoot), gotRoot)
 }
 
-func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7002(t *testing.T) {
+func TestState_ApplyBlock_PragueBlock_AppliesEIP7002(t *testing.T) {
 	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, state.Close()) }()
@@ -594,7 +408,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7002(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, chainConfig, nil, false)
+	_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, chainConfig, false)
 	require.NoError(t, err)
 
 	// Verify the main side effects of the system calls:
@@ -608,7 +422,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7002(t *testing.T) {
 		"EIP-7002: request count should be reset to 0")
 }
 
-func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7251(t *testing.T) {
+func TestState_ApplyBlock_PragueBlock_AppliesEIP7251(t *testing.T) {
 	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, state.Close()) }()
@@ -650,7 +464,7 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7251(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, chainConfig, nil, false)
+	_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, chainConfig, false)
 	require.NoError(t, err)
 
 	// Verify the main side effects of the system calls:
@@ -664,40 +478,20 @@ func TestState_ApplyBlock_EthereumPragueBlock_AppliesEIP7251(t *testing.T) {
 		"EIP-7251: request count should be reset to 0")
 }
 
-func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChainsPostMerge(t *testing.T) {
-	const sonicChainID = uint64(146)
-	sonicUpgrades := opera.GetSonicUpgrades()
-	sonicChainConfig := opera.CreateTransientEvmChainConfig(
-		sonicChainID,
-		[]opera.UpgradeHeight{},
-		idx.Block(1),
-	)
-
+func TestState_ApplyBlock_CreditsWithdrawalsOnlyPostMerge(t *testing.T) {
 	const amountGwei = uint64(1000)
 	withdrawalAddr := common.Address{0xAB}
 
 	tests := map[string]struct {
-		chainConfig    *params.ChainConfig
-		upgrades       opera.Upgrades
 		difficulty     uint64
 		wantBalanceWei uint64
 	}{
-		"ethereum post-merge": {
-			chainConfig:    params.MainnetChainConfig,
-			upgrades:       opera.Upgrades{},
+		"post-merge": {
 			difficulty:     0,
 			wantBalanceWei: amountGwei * params.GWei,
 		},
-		"ethereum pre-merge": {
-			chainConfig:    params.MainnetChainConfig,
-			upgrades:       opera.Upgrades{},
+		"pre-merge": {
 			difficulty:     1,
-			wantBalanceWei: 0,
-		},
-		"non-ethereum": {
-			chainConfig:    sonicChainConfig,
-			upgrades:       sonicUpgrades,
-			difficulty:     0,
 			wantBalanceWei: 0,
 		},
 	}
@@ -711,7 +505,6 @@ func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChainsPostMerge(t *tes
 			block, err := convert.ConvertToGethBlock(&blockdb.Block{
 				GasLimit:   8_000_000,
 				Difficulty: tt.difficulty,
-				ExtraData:  make([]byte, 12),
 				Withdrawals: []*blockdb.Withdrawal{
 					{Address: withdrawalAddr.Bytes(), Amount: amountGwei},
 				},
@@ -719,12 +512,12 @@ func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChainsPostMerge(t *tes
 			require.NoError(t, err)
 
 			processor := evmcore.NewStateProcessorForReplay(
-				tt.chainConfig,
+				params.MainnetChainConfig,
 				&blockHashHistory{},
-				tt.upgrades,
+				opera.Upgrades{},
 			)
 
-			_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{Upgrades: tt.upgrades}, nil, nil, tt.chainConfig, nil, false)
+			_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, params.MainnetChainConfig, false)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.wantBalanceWei, state.db.GetBalance(cc.Address(withdrawalAddr)).Uint64())
@@ -732,15 +525,7 @@ func TestState_ApplyBlock_WithdrawalsAreCreditedInEthereumChainsPostMerge(t *tes
 	}
 }
 
-func TestState_ApplyBlock_RewardsAreAccumulatedInEthereumChainsPreMerge(t *testing.T) {
-	const sonicChainID = uint64(146)
-	sonicUpgrades := opera.GetSonicUpgrades()
-	sonicChainConfig := opera.CreateTransientEvmChainConfig(
-		sonicChainID,
-		[]opera.UpgradeHeight{},
-		idx.Block(1),
-	)
-
+func TestState_ApplyBlock_AccumulatesRewardsOnlyPreMerge(t *testing.T) {
 	coinbase := common.Address{0x01}
 	uncleCoinbase := common.Address{0x02}
 	blockNumber := uint64(10_000_000) // post-Constantinople
@@ -758,30 +543,17 @@ func TestState_ApplyBlock_RewardsAreAccumulatedInEthereumChainsPreMerge(t *testi
 	minerReward.Add(minerReward, new(uint256.Int).Div(blockReward, uint256.NewInt(32)))
 
 	tests := map[string]struct {
-		chainConfig      *params.ChainConfig
-		upgrades         opera.Upgrades
 		difficulty       uint64
 		wantMinerBalance *uint256.Int
 		wantUncleBalance *uint256.Int
 	}{
-		"ethereum pre-merge": {
-			chainConfig:      params.MainnetChainConfig,
-			upgrades:         opera.Upgrades{},
+		"pre-merge": {
 			difficulty:       1,
 			wantMinerBalance: minerReward,
 			wantUncleBalance: uncleReward,
 		},
-		"ethereum post-merge": {
-			chainConfig:      params.MainnetChainConfig,
-			upgrades:         opera.Upgrades{},
+		"post-merge": {
 			difficulty:       0,
-			wantMinerBalance: uint256.NewInt(0),
-			wantUncleBalance: uint256.NewInt(0),
-		},
-		"non-ethereum": {
-			chainConfig:      sonicChainConfig,
-			upgrades:         sonicUpgrades,
-			difficulty:       1,
 			wantMinerBalance: uint256.NewInt(0),
 			wantUncleBalance: uint256.NewInt(0),
 		},
@@ -798,7 +570,6 @@ func TestState_ApplyBlock_RewardsAreAccumulatedInEthereumChainsPreMerge(t *testi
 				GasLimit:    8_000_000,
 				Difficulty:  tt.difficulty,
 				Beneficiary: coinbase.Bytes(),
-				ExtraData:   make([]byte, 12),
 				OmmerHeaders: []*blockdb.OmmerHeader{
 					{Beneficiary: uncleCoinbase.Bytes(), Number: uncleNumber},
 				},
@@ -806,12 +577,12 @@ func TestState_ApplyBlock_RewardsAreAccumulatedInEthereumChainsPreMerge(t *testi
 			require.NoError(t, err)
 
 			processor := evmcore.NewStateProcessorForReplay(
-				tt.chainConfig,
+				params.MainnetChainConfig,
 				&blockHashHistory{},
-				tt.upgrades,
+				opera.Upgrades{},
 			)
 
-			_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{Upgrades: tt.upgrades}, nil, nil, tt.chainConfig, nil, false)
+			_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, params.MainnetChainConfig, false)
 			require.NoError(t, err)
 
 			require.Equal(t, tt.wantMinerBalance.ToBig(), state.db.GetBalance(cc.Address(coinbase)).ToBig())
@@ -829,11 +600,7 @@ func TestState_ApplyBlock_CanApplyBlockToArchiveState(t *testing.T) {
 	require.NoError(t, err)
 	defer func() { require.NoError(t, state.Close()) }()
 
-	chainConfig := opera.CreateTransientEvmChainConfig(
-		1,
-		[]opera.UpgradeHeight{},
-		idx.Block(2),
-	)
+	chainConfig := params.MainnetChainConfig
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
@@ -845,7 +612,7 @@ func TestState_ApplyBlock_CanApplyBlockToArchiveState(t *testing.T) {
 	for i := range 3 {
 		block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: uint64(i)})
 		require.NoError(t, err)
-		_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, chainConfig, nil, false)
+		_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, chainConfig, false)
 		require.NoError(t, err)
 	}
 	require.NoError(t, state.db.Flush())
@@ -854,7 +621,7 @@ func TestState_ApplyBlock_CanApplyBlockToArchiveState(t *testing.T) {
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: 1})
 	require.NoError(t, err)
 
-	receipts, _, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, chainConfig, nil, true)
+	receipts, _, err := state.ApplyBlock(block, testInterpreter(t), processor, chainConfig, true)
 	require.NoError(t, err)
 	require.Empty(t, receipts)
 }
@@ -869,11 +636,7 @@ func TestState_ApplyBlock_CommitsBlockToTheArchiveState(t *testing.T) {
 	require.NoError(err)
 	defer func() { require.NoError(state.Close()) }()
 
-	chainConfig := opera.CreateTransientEvmChainConfig(
-		1,
-		[]opera.UpgradeHeight{},
-		idx.Block(2),
-	)
+	chainConfig := params.MainnetChainConfig
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
@@ -881,16 +644,14 @@ func TestState_ApplyBlock_CommitsBlockToTheArchiveState(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	corrections := Corrections{
-		1: map[common.Address]Correction{
-			{1}: {Balance: uint256.NewInt(1000)},
-		},
+	withdrawals := map[uint64][]*blockdb.Withdrawal{
+		1: {{Address: common.Address{1}.Bytes(), Amount: 1000}},
 	}
 
 	for i := range 3 {
-		block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: uint64(i)})
+		block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: uint64(i), Withdrawals: withdrawals[uint64(i)]})
 		require.NoError(err)
-		_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, corrections[uint64(i)], nil, chainConfig, nil, false)
+		_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, chainConfig, false)
 		require.NoError(err)
 	}
 	require.NoError(state.db.Flush())
@@ -908,7 +669,7 @@ func TestState_ApplyBlock_CommitsBlockToTheArchiveState(t *testing.T) {
 	after, err := state.db.GetArchiveStateDB(1)
 	require.NoError(err)
 	defer after.Release()
-	require.Equal(uint64(1000), after.GetBalance(cc.Address{1}).Uint64())
+	require.Equal(uint64(1000*params.GWei), after.GetBalance(cc.Address{1}).Uint64())
 }
 
 func TestState_ApplyBlock_ReturnsErrorIfEndBlockFails(t *testing.T) {
@@ -931,144 +692,12 @@ func TestState_ApplyBlock_ReturnsErrorIfEndBlockFails(t *testing.T) {
 	block := types.NewBlockWithHeader(&types.Header{
 		Number:   big.NewInt(5),
 		GasLimit: 8_000_000,
-		Extra:    make([]byte, 12),
 	})
-	chainConfig := opera.CreateTransientEvmChainConfig(146, []opera.UpgradeHeight{}, idx.Block(1))
+	chainConfig := params.MainnetChainConfig
 
 	state := &State{db: db}
-	_, _, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.Rules{}, nil, nil, chainConfig, nil, false)
+	_, _, err := state.ApplyBlock(block, testInterpreter(t), processor, chainConfig, false)
 	require.ErrorIs(err, issue)
-}
-
-func TestState_ApplyBlock_FailsOnInvalidExtraDataOfSonicBlock(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	db := carmen.NewMockStateDB(ctrl)
-	db.EXPECT().BeginBlock()
-
-	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(5), Extra: make([]byte, 11)})
-	chainConfig := opera.CreateTransientEvmChainConfig(146, []opera.UpgradeHeight{}, idx.Block(1))
-
-	state := &State{db: db}
-	_, _, err := state.ApplyBlock(block, testInterpreter(t), NewMockProcessor(ctrl), opera.Rules{}, nil, nil, chainConfig, nil, false)
-	require.ErrorContains(t, err, "failed to decode extra data of block 5")
-}
-
-func TestState_ApplyBlock_ProcessesFailedBundles(t *testing.T) {
-	upgrades := opera.GetBrioUpgrades()
-	upgrades.TransactionBundles = true
-	chainConfig := opera.CreateTransientEvmChainConfig(146, []opera.UpgradeHeight{opera.MakeUpgradeHeight(upgrades, 0)}, idx.Block(1))
-	signer := types.LatestSignerForChainID(chainConfig.ChainID)
-	bundleKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	txKey, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	bundleSender := crypto.PubkeyToAddress(bundleKey.PublicKey)
-
-	// The bundle's single root step runs init code that reverts, so the bundle
-	// fails without being reverted before Canto.
-	reverting := bundle.Step(bundleKey, &types.AccessListTx{Gas: 100_000, GasPrice: big.NewInt(1), Data: []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.REVERT)}})
-	envelope := bundle.NewBuilder().WithSigner(signer).With(reverting).Build()
-	// The block's time is 100s and 500ns, so this bundle's time period has begun.
-	envelopeInPeriod := bundle.NewBuilder().WithSigner(signer).SetNotBefore(100*1e9 + 1).With(reverting.Clone()).Build()
-	tx := types.MustSignNewTx(txKey, signer, &types.LegacyTx{Gas: 21_000, GasPrice: big.NewInt(1), To: &common.Address{1}})
-	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), Time: 100, Extra: inter.EncodeExtraData(time.Unix(100, 500), 0), GasLimit: 1_000_000, BaseFee: big.NewInt(1)}).
-		WithBody(types.Body{Transactions: types.Transactions{tx}})
-
-	tests := map[string]struct {
-		failedBundles []FailedBundle
-		gasBeforeTx   bool
-		gasAfterTx    bool
-	}{
-		"no failed bundle":                {},
-		"failed bundle before tx":         {failedBundles: []FailedBundle{{Pos: 0, Tx: envelope}}, gasBeforeTx: true},
-		"failed bundle after tx":          {failedBundles: []FailedBundle{{Pos: 1, Tx: envelope}}, gasAfterTx: true},
-		"failed nested bundle":            {failedBundles: []FailedBundle{{Pos: 0, Tx: nestedEnvelope(t, signer, envelope)}}, gasBeforeTx: true},
-		"failed bundle in its sub-second": {failedBundles: []FailedBundle{{Pos: 0, Tx: envelopeInPeriod}}, gasBeforeTx: true},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
-			require.NoError(t, err)
-			defer func() { require.NoError(t, state.Close()) }()
-			setBalance(state.db, bundleSender, big.NewInt(1e18))
-			setBalance(state.db, crypto.PubkeyToAddress(txKey.PublicKey), big.NewInt(1e18))
-
-			processor := evmcore.NewStateProcessorForReplay(chainConfig, &blockHashHistory{}, upgrades)
-			receipts, usedGas, err := state.ApplyBlock(block, testInterpreter(t), processor, opera.FakeNetRules(upgrades), nil, tt.failedBundles, chainConfig, nil, false)
-			require.NoError(t, err)
-			require.Len(t, receipts, 1)
-			require.Equal(t, tt.gasBeforeTx, receipts[0].CumulativeGasUsed > receipts[0].GasUsed)
-			require.Equal(t, tt.gasAfterTx, usedGas > receipts[0].CumulativeGasUsed)
-			// Each failed bundle keeps its tx's nonce increment.
-			require.Equal(t, uint64(len(tt.failedBundles)), state.db.GetNonce(cc.Address(bundleSender)))
-		})
-	}
-}
-
-func TestState_ApplyBlock_FailsOnFailedBundleThatDidNotFail(t *testing.T) {
-	upgrades := opera.GetBrioUpgrades()
-	upgrades.TransactionBundles = true
-	chainConfig := opera.CreateTransientEvmChainConfig(146, []opera.UpgradeHeight{opera.MakeUpgradeHeight(upgrades, 0)}, idx.Block(1))
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	// Its transfer succeeds and adds a receipt.
-	envelope := bundle.NewBuilder().
-		WithSigner(types.LatestSignerForChainID(chainConfig.ChainID)).
-		With(bundle.Step(key, &types.AccessListTx{Gas: 100_000, GasPrice: big.NewInt(1), To: &common.Address{1}})).
-		Build()
-
-	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
-	require.NoError(t, err)
-	defer func() { require.NoError(t, state.Close()) }()
-	setBalance(state.db, crypto.PubkeyToAddress(key.PublicKey), big.NewInt(1e18))
-
-	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 1_000_000, BaseFee: big.NewInt(1), Extra: make([]byte, 12)})
-	processor := evmcore.NewStateProcessorForReplay(chainConfig, &blockHashHistory{}, upgrades)
-	_, _, err = state.ApplyBlock(block, testInterpreter(t), processor, opera.FakeNetRules(upgrades), nil, []FailedBundle{{Pos: 0, Tx: envelope}}, chainConfig, nil, false)
-	require.ErrorContains(t, err, fmt.Sprintf("failed bundle %v added a receipt", envelope.Hash()))
-}
-
-// nestedEnvelope returns the given envelope as it runs nested in another bundle,
-// which is the form in which failed nested bundles are stored.
-func nestedEnvelope(t *testing.T, signer types.Signer, envelope *types.Transaction) *types.Transaction {
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	outer := bundle.NewBuilder().WithSigner(signer).With(bundle.Step(key, envelope)).Build()
-	txBundle, err := bundle.OpenEnvelope(signer, outer)
-	require.NoError(t, err)
-	txs := txBundle.GetTransactionsInReferencedOrder()
-	nested := txs[slices.IndexFunc(txs, bundle.IsEnvelope)]
-	require.True(t, bundle.IsBundleOnly(nested))
-	return nested
-}
-
-func TestState_setBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
-	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, state.Close())
-	}()
-
-	addr := common.Address{1}
-	balance := big.NewInt(1000)
-	setBalance(state.db, addr, balance)
-
-	// Check initial balance
-	have := state.db.GetBalance(cc.Address(addr))
-	require.Equal(t, balance.Uint64(), have.Uint64())
-
-	// Increase balance
-	balance = big.NewInt(1500)
-	setBalance(state.db, addr, balance)
-	have = state.db.GetBalance(cc.Address(addr))
-	require.Equal(t, uint64(1500), have.Uint64())
-
-	// Decrease balance
-	balance = big.NewInt(750)
-	setBalance(state.db, addr, balance)
-	have = state.db.GetBalance(cc.Address(addr))
-	require.Equal(t, uint64(750), have.Uint64())
 }
 
 func TestState_endBlockAndCommit_EndsAndCommitsBlock(t *testing.T) {
