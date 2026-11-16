@@ -58,11 +58,11 @@ jobs:
     - name: import g-file
       run: cargo run -- import-gfile data/genesis/synthetic.g
     - name: import corrections
-      run: cargo run -- import-corrections 4003 data/corrections/synthetic.json
+      run: cargo run -- import-corrections synthetic data/corrections/synthetic.json
     - name: import failed bundles
-      run: cargo run -- import-failed-bundles 4003 data/failed_bundles/synthetic.json
+      run: cargo run -- import-failed-bundles synthetic data/failed_bundles/synthetic.json
     - name: verify blockdb (Rust)
-      run: cargo run -- verify 4003
+      run: cargo run -- verify synthetic
     - name: verify blockdb (Go)
       working-directory: go
       run: go run . verify --database-dir ../.blockdb --chain-id 4003
