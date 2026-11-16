@@ -134,6 +134,7 @@ pub enum Chain {
     SonicTestnet,
     Sepolia,
     Hoodi,
+    Synthetic,
 }
 
 impl Chain {
@@ -145,6 +146,7 @@ impl Chain {
             Chain::SonicTestnet => 14601,
             Chain::Sepolia => 11155111,
             Chain::Hoodi => 560048,
+            Chain::Synthetic => 4003,
         }
     }
 }
@@ -158,10 +160,11 @@ impl FromStr for Chain {
             "sonic-testnet" => Ok(Chain::SonicTestnet),
             "sepolia" => Ok(Chain::Sepolia),
             "hoodi" => Ok(Chain::Hoodi),
+            "synthetic" => Ok(Chain::Synthetic),
             s => s
                 .parse::<u64>()
                 .map(Chain::Id)
-                .map_err(|_| "chain must be a chain ID or a chain name (sonic, sonic-testnet, sepolia, hoodi)".to_string()),
+                .map_err(|_| "chain must be a chain ID or a chain name (sonic, sonic-testnet, sepolia, hoodi, synthetic)".to_string()),
         }
     }
 }
@@ -323,6 +326,7 @@ Options:
     #[case("sonic-testnet", Chain::SonicTestnet)]
     #[case("sepolia", Chain::Sepolia)]
     #[case("hoodi", Chain::Hoodi)]
+    #[case("synthetic", Chain::Synthetic)]
     #[case("146", Chain::Id(146))]
     fn from_str_parses_known_chains(#[case] input: &str, #[case] expected: Chain) {
         assert_eq!(expected, input.parse::<Chain>().unwrap());
@@ -333,6 +337,7 @@ Options:
     #[case(Chain::SonicTestnet, 14601)]
     #[case(Chain::Sepolia, 11155111)]
     #[case(Chain::Hoodi, 560048)]
+    #[case(Chain::Synthetic, 4003)]
     #[case(Chain::Id(99), 99)]
     fn to_chain_id_returns_correct_id(#[case] chain: Chain, #[case] expected: u64) {
         assert_eq!(chain.to_chain_id(), expected);
