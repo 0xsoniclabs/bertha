@@ -40,12 +40,10 @@ import (
 )
 
 // sonicExecutor is the Sonic implementation of BlockExecutor. It executes
-// blocks with Sonic's block processing (gossip.Ledger) on the live state and
-// with State.ApplyBlock on the archive.
+// blocks with Sonic's block processing (gossip.Ledger).
 type sonicExecutor struct {
-	chainID       uint64
 	metadataStore MetadataStore
-	interpreter   tosca.Interpreter
+	evm           *evmmodule.EVMModule
 	ledger        gossip.Ledger
 	store         *ledgerStore
 }
@@ -54,7 +52,6 @@ type sonicExecutor struct {
 // the given header. The live state it executes blocks on must hold the state
 // after that block.
 func newSonicExecutor(
-	chainID uint64,
 	metadataStore MetadataStore,
 	interpreter tosca.Interpreter,
 	head *types.Header,
@@ -72,7 +69,8 @@ func newSonicExecutor(
 	// Discard geth logging temporarily.
 	gethlog.SetDefault(gethlog.NewLogger(gethlog.DiscardHandler()))
 
-	ledger := gossip.NewLedger(store, evmmodule.NewForReplay(geth_adapter.NewGethInterpreterFactory(interpreter)), nil, false)
+	evm := evmmodule.NewForReplay(geth_adapter.NewGethInterpreterFactory(interpreter))
+	ledger := gossip.NewLedger(store, evm, nil, false)
 
 	// Restore the loggers. gethlog.SetDefault comes first since it also
 	// replaces slog's default and log's output.
@@ -82,9 +80,8 @@ func newSonicExecutor(
 	log.SetFlags(logFlags)
 
 	return &sonicExecutor{
-		chainID:       chainID,
 		metadataStore: metadataStore,
-		interpreter:   interpreter,
+		evm:           evm,
 		ledger:        ledger,
 		store:         store,
 	}, nil
@@ -92,25 +89,6 @@ func newSonicExecutor(
 
 func (e *sonicExecutor) ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, *types.Header, error) {
 	number := block.NumberU64()
-
-	head, err := e.ledger.Head()
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get the ledger's head for block %d: %w", number, err)
-	}
-	if headNumber := head.Block().Number; number != headNumber+1 {
-		return nil, nil, fmt.Errorf("block %d does not follow the ledger's head %d", number, headNumber)
-	}
-
-	nanos, _, err := inter.DecodeExtraData(block.Extra())
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to decode extra data of block %d: %w", number, err)
-	}
-
-	failedBundles := e.metadataStore.GetFailedBundlesAtBlock(number)
-	txs, err := insertFailedBundles(block.Transactions(), failedBundles)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to insert failed bundles into block %d: %w", number, err)
-	}
 
 	// Commit all pending rules updates if the block is an epoch sealing block.
 	if block.Transactions().Len() > 0 {
@@ -120,27 +98,12 @@ func (e *sonicExecutor) ExecuteBlock(state *State, block *types.Block, hashHisto
 			}
 		}
 	}
-	rules := e.metadataStore.GetRulesAtBlock(number)
 
 	e.store.stateDB = recordedRootStateDB{StateDB: evmstore.CreateCarmenStateDb(state.db, nil), root: block.Root()}
 	e.store.hashHistory = hashHistory
 
-	params := gossip.BlockParams{
-		Time:                     inter.Timestamp(block.Time()*1e9 + uint64(nanos)),
-		PrevRandao:               block.MixDigest(),
-		GasLimit:                 block.GasLimit(),
-		UserTransactionsGasLimit: block.GasLimit(),
-		Rules:                    rules,
-	}
 	onLog := func(l *core_types.Log) { onNewLog(e.metadataStore, number, l) }
-
-	executing, err := head.BeginBlock(params, onLog)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to begin block %d: %w", number, err)
-	}
-
-	summary := executing.Run(txs)
-	receipts, err := blockReceipts(summary, failedBundles)
+	executing, receipts, err := executeBlock(e.ledger, e.metadataStore, block, onLog)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -155,32 +118,74 @@ func (e *sonicExecutor) ExecuteBlock(state *State, block *types.Block, hashHisto
 	return receipts, candidate.Block.GetEthereumHeader(), state.db.Check()
 }
 
-func (e *sonicExecutor) ExecuteBlockOnArchive(state *State, block *types.Block, _ *types.Header, hashHistory *blockHashHistory) (types.Receipts, error) {
-	receipts, _, err := e.applyBlock(state, block, hashHistory, nil, true)
-	return receipts, err
-}
-
-// applyBlock applies the given block with the metadata of the block to state,
-// see State.ApplyBlock.
-func (e *sonicExecutor) applyBlock(
+func (e *sonicExecutor) ExecuteBlockOnArchive(
 	state *State,
 	block *types.Block,
+	parentHeader *types.Header,
 	hashHistory *blockHashHistory,
-	onLog func(*core_types.Log),
-	isArchive bool,
-) (types.Receipts, uint64, error) {
+) (types.Receipts, error) {
 	number := block.NumberU64()
-	chainConfig := opera.CreateTransientEvmChainConfig(e.chainID, e.metadataStore.GetUpgradeHeights(), idx.Block(number))
-	rules := e.metadataStore.GetRulesAtBlock(number)
+	archive, err := state.db.GetArchiveStateDB(number - 1)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get archive state for block %d: %w", number-1, err)
+	}
+	defer archive.Release()
 
-	processor := evmcore.NewStateProcessorForReplay(chainConfig, hashHistory, rules.Upgrades)
+	store, err := newLedgerStore(parentHeader, e.metadataStore)
+	if err != nil {
+		return nil, err
+	}
+	store.stateDB = evmstore.CreateNonCommittableCarmenStateDb(archive, nil)
+	store.hashHistory = hashHistory
+	throwawayLedger := gossip.NewLedger(store, e.evm, nil, false)
+	_, receipts, err := executeBlock(throwawayLedger, e.metadataStore, block, nil)
+	if err != nil {
+		return nil, err
+	}
+	return receipts, archive.Check()
+}
 
-	corrections := e.metadataStore.GetCorrectionsAtBlock(number)
-	failedBundles := e.metadataStore.GetFailedBundlesAtBlock(number)
-
-	return state.ApplyBlock(
-		block, e.interpreter, processor, rules, corrections, failedBundles, chainConfig, onLog, isArchive,
-	)
+// executeBlock runs the given block with the envelopes of its failed bundles
+// on the head of the ledger, and returns the executing block and the receipts
+// of the block's txs.
+func executeBlock(
+	ledger gossip.Ledger,
+	metadataStore MetadataStore,
+	block *types.Block,
+	onNewLog func(*core_types.Log),
+) (gossip.ExecutingBlock, types.Receipts, error) {
+	number := block.NumberU64()
+	failedBundles := metadataStore.GetFailedBundlesAtBlock(number)
+	txs, err := insertFailedBundles(block.Transactions(), failedBundles)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to insert failed bundles into block %d: %w", number, err)
+	}
+	head, err := ledger.Head()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get the ledger's head for block %d: %w", number, err)
+	}
+	if headNumber := head.Block().Number; number != headNumber+1 {
+		return nil, nil, fmt.Errorf("block %d does not follow the ledger's head %d", number, headNumber)
+	}
+	nanos, _, err := inter.DecodeExtraData(block.Extra())
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to decode extra data of block %d: %w", number, err)
+	}
+	executing, err := head.BeginBlock(gossip.BlockParams{
+		Time:                     inter.Timestamp(block.Time()*1e9 + uint64(nanos)),
+		PrevRandao:               block.MixDigest(),
+		GasLimit:                 block.GasLimit(),
+		UserTransactionsGasLimit: block.GasLimit(),
+		Rules:                    metadataStore.GetRulesAtBlock(number),
+	}, onNewLog)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to begin block %d: %w", number, err)
+	}
+	receipts, err := blockReceipts(executing.Run(txs), failedBundles)
+	if err != nil {
+		return nil, nil, err
+	}
+	return executing, receipts, nil
 }
 
 // ledgerStore is the store of a sonicExecutor's ledger. It stores nothing on
@@ -188,8 +193,8 @@ func (e *sonicExecutor) applyBlock(
 // it commits a block. It opens the state of the block being applied and serves
 // the hashes of older blocks from the hash history of that block.
 //
-// The ledger accesses it only from within sonicExecutor.ExecuteBlock, which
-// sets the fields of the block being applied.
+// The ledger accesses it only from within the sonicExecutor's methods, which
+// set the fields of the block being applied.
 type ledgerStore struct {
 	metadataStore MetadataStore
 	head          *inter.Block
