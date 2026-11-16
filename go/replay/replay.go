@@ -172,7 +172,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		if err != nil {
 			return fmt.Errorf("failed to get head header: %w", err)
 		}
-		blockExecutor, err = newSonicExecutor(chainID, metadataStore, interpreter, headHeader)
+		blockExecutor, err = newSonicExecutor(metadataStore, interpreter, headHeader)
 		if err != nil {
 			return fmt.Errorf("failed to open ledger: %w", err)
 		}

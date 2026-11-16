@@ -60,10 +60,10 @@ func executeLiveBlock(e *sonicExecutor, state *State, block *types.Block) (types
 	return receipts, err
 }
 
-// executeArchiveBlock executes the block with ExecuteBlockOnArchive, no parent
-// header and an empty hash history.
+// executeArchiveBlock executes the block with ExecuteBlockOnArchive, the header
+// of the ledger's head as parent header and an empty hash history.
 func executeArchiveBlock(e *sonicExecutor, state *State, block *types.Block) (types.Receipts, error) {
-	return e.ExecuteBlockOnArchive(state, block, nil, &blockHashHistory{})
+	return e.ExecuteBlockOnArchive(state, block, e.store.head.GetEthereumHeader(), &blockHashHistory{})
 }
 
 func TestNewSonicExecutor_KeepsDefaultLoggersAndSilencesLedger(t *testing.T) {
@@ -95,7 +95,7 @@ func TestNewSonicExecutor_KeepsDefaultLoggersAndSilencesLedger(t *testing.T) {
 	require.Empty(t, out.String())
 }
 
-func TestSonicExecutor_ExecuteBlock_AppliesUpgrades(t *testing.T) {
+func TestSonicExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ApplyUpgrades(t *testing.T) {
 	// The upgrades change the gas used by a transaction with excess gas: with
 	// the single proposer block formation enabled, no excess gas is charged,
 	// with it disabled, 10% of the excess gas is charged.
@@ -104,29 +104,48 @@ func TestSonicExecutor_ExecuteBlock_AppliesUpgrades(t *testing.T) {
 	withExcessGasCharges := opera.GetAllegroUpgrades()
 	withExcessGasCharges.SingleProposerBlockFormation = false
 
-	metadataStore := &BlockDBMetadataStore{
-		metadata: Metadata{
-			RulesUpdateHeights: []RulesUpdateHeight{
-				{Block: 0, Rules: opera.FakeNetRules(withExcessGasCharges)},
-				{Block: 5, Rules: opera.FakeNetRules(noExcessGasCharges)},
-				{Block: 10, Rules: opera.FakeNetRules(withExcessGasCharges)},
-				{Block: 15, Rules: opera.FakeNetRules(noExcessGasCharges)},
-			},
-		},
+	tests := map[string]struct {
+		withArchive bool
+	}{
+		"ExecuteBlock":          {},
+		"ExecuteBlockOnArchive": {withArchive: true},
 	}
-	executor, state, blocks := newTestSonicExecutor(t, metadataStore)
 
-	for number := uint64(1); number < uint64(len(blocks)); number++ {
-		receipts, err := executeLiveBlock(executor, state, withTransactions(t, blocks[number], sign(&types.LegacyTx{Nonce: number - 1, Gas: 50_000, GasPrice: big.NewInt(1e11), To: &common.Address{1}})))
-		require.NoError(t, err)
-		require.Len(t, receipts, 1)
-		require.Equal(t, types.ReceiptStatusSuccessful, receipts[0].Status)
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			metadataStore := &BlockDBMetadataStore{
+				metadata: Metadata{
+					RulesUpdateHeights: []RulesUpdateHeight{
+						{Block: 0, Rules: opera.FakeNetRules(withExcessGasCharges)},
+						{Block: 5, Rules: opera.FakeNetRules(noExcessGasCharges)},
+						{Block: 10, Rules: opera.FakeNetRules(withExcessGasCharges)},
+						{Block: 15, Rules: opera.FakeNetRules(noExcessGasCharges)},
+					},
+				},
+			}
+			executor, state, blocks := newTestSonicExecutor(t, metadataStore)
 
-		if metadataStore.GetRulesAtBlock(number).Upgrades.SingleProposerBlockFormation {
-			require.Equal(t, uint64(21_000), receipts[0].GasUsed)
-		} else {
-			require.Greater(t, receipts[0].GasUsed, uint64(21_000))
-		}
+			for number := uint64(1); number < uint64(len(blocks)); number++ {
+				block := withTransactions(t, blocks[number], sign(&types.LegacyTx{Nonce: number - 1, Gas: 50_000, GasPrice: big.NewInt(1e11), To: &common.Address{1}}))
+				parentHeader := executor.store.head.GetEthereumHeader()
+				receipts, err := executeLiveBlock(executor, state, block)
+				require.NoError(t, err)
+				if tt.withArchive {
+					// The live run puts the parent's state into the archive.
+					require.NoError(t, state.db.Flush())
+					receipts, err = executor.ExecuteBlockOnArchive(state, block, parentHeader, &blockHashHistory{})
+					require.NoError(t, err)
+				}
+				require.Len(t, receipts, 1)
+				require.Equal(t, types.ReceiptStatusSuccessful, receipts[0].Status)
+
+				if metadataStore.GetRulesAtBlock(number).Upgrades.SingleProposerBlockFormation {
+					require.Equal(t, uint64(21_000), receipts[0].GasUsed)
+				} else {
+					require.Greater(t, receipts[0].GasUsed, uint64(21_000))
+				}
+			}
+		})
 	}
 }
 
@@ -175,15 +194,12 @@ func TestSonicExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_CommitRulesUpdateO
 		t.Run(name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			metadataStore := NewMockMetadataStore(ctrl)
-			rules := metadataStore.EXPECT().GetRulesAtBlock(uint64(1)).Return(fakeNetRules)
+			// The ledger reads the upgrades of block 1 and the rules of its head, block 0.
+			rules := metadataStore.EXPECT().GetRulesAtBlock(uint64(1)).Return(fakeNetRules).Times(2)
+			metadataStore.EXPECT().GetRulesAtBlock(uint64(0)).Return(fakeNetRules)
 			if tc.isLive {
-				// The ledger reads the upgrades of block 1 and the rules of its head, block 0.
-				rules.Times(2)
-				metadataStore.EXPECT().GetRulesAtBlock(uint64(0)).Return(fakeNetRules)
-			} else {
-				metadataStore.EXPECT().GetUpgradeHeights().Return([]opera.UpgradeHeight{{Upgrades: fakeNetRules.Upgrades}})
+				metadataStore.EXPECT().GetCorrectionsAtBlock(uint64(1))
 			}
-			metadataStore.EXPECT().GetCorrectionsAtBlock(uint64(1))
 			metadataStore.EXPECT().GetFailedBundlesAtBlock(uint64(1))
 			if tc.expectCommitRules {
 				// The epoch sealing block runs with the committed rules.
@@ -227,16 +243,13 @@ func TestSonicExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_OnlyLiveStatePatch
 		t.Run(name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			metadataStore := NewMockMetadataStore(ctrl)
-			metadataStore.EXPECT().GetCorrectionsAtBlock(uint64(1))
 			metadataStore.EXPECT().GetFailedBundlesAtBlock(uint64(1))
+			// The ledger reads the upgrades of block 1 and the rules of its head, block 0.
+			metadataStore.EXPECT().GetRulesAtBlock(uint64(1)).Return(fakeNetRules).Times(2)
+			metadataStore.EXPECT().GetRulesAtBlock(uint64(0)).Return(fakeNetRules)
 			if tt.isLive {
-				// The ledger reads the upgrades of block 1 and the rules of its head, block 0.
-				metadataStore.EXPECT().GetRulesAtBlock(uint64(1)).Return(fakeNetRules).Times(2)
-				metadataStore.EXPECT().GetRulesAtBlock(uint64(0)).Return(fakeNetRules)
+				metadataStore.EXPECT().GetCorrectionsAtBlock(uint64(1))
 				metadataStore.EXPECT().PatchRules(uint64(1), diff)
-			} else {
-				metadataStore.EXPECT().GetRulesAtBlock(uint64(1)).Return(fakeNetRules)
-				metadataStore.EXPECT().GetUpgradeHeights().Return([]opera.UpgradeHeight{{Upgrades: fakeNetRules.Upgrades}})
 			}
 
 			executor, state, blocks := newTestSonicExecutor(t, metadataStore, makefakegenesis.Account{Address: driver.ContractAddress, Code: driverCode})
@@ -290,14 +303,59 @@ func TestSonicExecutor_ExecuteBlock_ReturnsHeaderOfExecutedBlockWithRecordedStat
 	require.Equal(t, block.Root(), header.Root)
 }
 
-func TestSonicExecutor_ExecuteBlock_ReportsFailures(t *testing.T) {
+func TestSonicExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ReportFailures(t *testing.T) {
 	epochSealingTx := convert.ToBerthaTransaction(types.NewTx(&types.LegacyTx{To: &driver.ContractAddress, Data: drivercall.SealEpoch(nil), V: big.NewInt(0), R: big.NewInt(0)}))
+	type executors = map[string]func(*sonicExecutor, *State, *types.Block) (types.Receipts, error)
+	live := executors{"ExecuteBlock": executeLiveBlock}
+	archive := executors{"ExecuteBlockOnArchive": executeArchiveBlock}
+	both := executors{"ExecuteBlock": executeLiveBlock, "ExecuteBlockOnArchive": executeArchiveBlock}
+	archiveWithParent := func(modify func(*types.Header)) executors {
+		return executors{"ExecuteBlockOnArchive": func(e *sonicExecutor, state *State, block *types.Block) (types.Receipts, error) {
+			parentHeader := e.store.head.GetEthereumHeader()
+			modify(parentHeader)
+			return e.ExecuteBlockOnArchive(state, block, parentHeader, &blockHashHistory{})
+		}}
+	}
 	tests := map[string]struct {
+		execute     executors
 		setup       func(*testing.T, *sonicExecutor, *State)
 		modifyBlock func(*blockdb.Block)
 		wantErr     string
 	}{
-		"ledger head fails": {
+		"failing rules commit": {
+			execute: live,
+			setup: func(t *testing.T, e *sonicExecutor, _ *State) {
+				metadataStore := NewMockMetadataStore(gomock.NewController(t))
+				metadataStore.EXPECT().CommitRules(uint64(1)).Return(fmt.Errorf("injected"))
+				e.metadataStore = metadataStore
+			},
+			modifyBlock: func(b *blockdb.Block) { b.Transactions = []*blockdb.Transaction{epochSealingTx} },
+			wantErr:     "failed to commit rules at block 1",
+		},
+		"failing archive state": {
+			execute: archive,
+			setup: func(t *testing.T, _ *sonicExecutor, s *State) {
+				db := carmen.NewMockStateDB(gomock.NewController(t))
+				db.EXPECT().GetArchiveStateDB(uint64(0)).Return(nil, fmt.Errorf("injected"))
+				live := s.db
+				t.Cleanup(func() { s.db = live })
+				s.db = db
+			},
+			wantErr: "failed to get archive state for block 0",
+		},
+		"invalid extra data of parent": {
+			execute: archiveWithParent(func(h *types.Header) { h.Extra = nil }),
+			wantErr: "failed to decode extra data of block 0",
+		},
+		"misplaced failed bundle": {
+			execute: both,
+			setup: func(_ *testing.T, e *sonicExecutor, _ *State) {
+				e.metadataStore.(*BlockDBMetadataStore).metadata.FailedBundles = FailedBundles{1: {{Pos: 1, Tx: types.NewTx(&types.LegacyTx{})}}}
+			},
+			wantErr: "failed to insert failed bundles into block 1",
+		},
+		"failing ledger head": {
+			execute: live,
 			setup: func(t *testing.T, e *sonicExecutor, _ *State) {
 				ledger := gossip.NewMockLedger(gomock.NewController(t))
 				ledger.EXPECT().Head().Return(nil, fmt.Errorf("injected"))
@@ -306,40 +364,33 @@ func TestSonicExecutor_ExecuteBlock_ReportsFailures(t *testing.T) {
 			wantErr: "failed to get the ledger's head for block 1",
 		},
 		"block not following head": {
+			execute:     live,
 			modifyBlock: func(b *blockdb.Block) { b.Number = 2 },
 			wantErr:     "block 2 does not follow the ledger's head 0",
 		},
+		"block not following parent": {
+			execute: archiveWithParent(func(h *types.Header) { h.Number = big.NewInt(1) }),
+			wantErr: "block 1 does not follow the ledger's head 1",
+		},
 		"invalid extra data": {
+			execute:     both,
 			modifyBlock: func(b *blockdb.Block) { b.ExtraData = nil },
 			wantErr:     "failed to decode extra data of block 1",
 		},
-		"bundle insertion fails": {
-			setup: func(_ *testing.T, e *sonicExecutor, _ *State) {
-				e.metadataStore.(*BlockDBMetadataStore).metadata.FailedBundles = FailedBundles{1: {{Pos: 1, Tx: types.NewTx(&types.LegacyTx{})}}}
-			},
-			wantErr: "failed to insert failed bundles into block 1",
-		},
-		"commit rules fails": {
-			setup: func(t *testing.T, e *sonicExecutor, _ *State) {
-				metadataStore := NewMockMetadataStore(gomock.NewController(t))
-				metadataStore.EXPECT().GetFailedBundlesAtBlock(uint64(1))
-				metadataStore.EXPECT().CommitRules(uint64(1)).Return(fmt.Errorf("injected"))
-				e.metadataStore = metadataStore
-			},
-			modifyBlock: func(b *blockdb.Block) { b.Transactions = []*blockdb.Transaction{epochSealingTx} },
-			wantErr:     "failed to commit rules at block 1",
-		},
 		"block time not after head": {
+			execute:     both,
 			modifyBlock: func(b *blockdb.Block) { b.Timestamp-- },
 			wantErr:     "failed to begin block 1",
 		},
 		"skipped transaction": {
+			execute: both,
 			modifyBlock: func(b *blockdb.Block) {
 				b.Transactions = []*blockdb.Transaction{sign(&types.LegacyTx{Nonce: 123, Gas: 21_000, GasPrice: big.NewInt(1e11), To: &common.Address{1}})}
 			},
 			wantErr: "was skipped",
 		},
-		"end block fails": {
+		"failing end block": {
+			execute: live,
 			setup: func(t *testing.T, _ *sonicExecutor, s *State) {
 				db := carmen.NewMockStateDB(gomock.NewController(t))
 				db.EXPECT().BeginBlock()
@@ -350,7 +401,8 @@ func TestSonicExecutor_ExecuteBlock_ReportsFailures(t *testing.T) {
 			},
 			wantErr: "failed to finalize block 1",
 		},
-		"check fails": {
+		"failing live check": {
+			execute: live,
 			setup: func(t *testing.T, _ *sonicExecutor, s *State) {
 				ctrl := gomock.NewController(t)
 				staged := carmen.NewMockStagedBlock(ctrl)
@@ -365,23 +417,41 @@ func TestSonicExecutor_ExecuteBlock_ReportsFailures(t *testing.T) {
 			},
 			wantErr: "injected",
 		},
+		"failing archive check": {
+			execute: archive,
+			setup: func(t *testing.T, _ *sonicExecutor, s *State) {
+				ctrl := gomock.NewController(t)
+				archive := carmen.NewMockNonCommittableStateDB(ctrl)
+				archive.EXPECT().Check().Return(fmt.Errorf("injected"))
+				archive.EXPECT().Release()
+				db := carmen.NewMockStateDB(ctrl)
+				db.EXPECT().GetArchiveStateDB(uint64(0)).Return(archive, nil)
+				live := s.db
+				t.Cleanup(func() { s.db = live })
+				s.db = db
+			},
+			wantErr: "injected",
+		},
 	}
 	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			executor, state, blocks := newTestSonicExecutor(t, sonicMetadataStore())
-			if tt.setup != nil {
-				tt.setup(t, executor, state)
-			}
-			block := proto.Clone(blocks[1]).(*blockdb.Block)
-			if tt.modifyBlock != nil {
-				tt.modifyBlock(block)
-			}
-			converted, err := convert.ConvertToGethBlock(block)
-			require.NoError(t, err)
+		for executeName, execute := range tt.execute {
+			t.Run(name+"/"+executeName, func(t *testing.T) {
+				executor, state, blocks := newTestSonicExecutor(t, sonicMetadataStore())
+				require.NoError(t, state.db.Flush())
+				if tt.setup != nil {
+					tt.setup(t, executor, state)
+				}
+				block := proto.Clone(blocks[1]).(*blockdb.Block)
+				if tt.modifyBlock != nil {
+					tt.modifyBlock(block)
+				}
+				converted, err := convert.ConvertToGethBlock(block)
+				require.NoError(t, err)
 
-			_, err = executeLiveBlock(executor, state, converted)
-			require.ErrorContains(t, err, tt.wantErr)
-		})
+				_, err = execute(executor, state, converted)
+				require.ErrorContains(t, err, tt.wantErr)
+			})
+		}
 	}
 }
 
@@ -391,7 +461,7 @@ func TestSonicExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ServeBlockHashFrom
 		return receipts, err
 	}
 	executeBlockOnArchive := func(e *sonicExecutor, state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
-		return e.ExecuteBlockOnArchive(state, block, nil, hashHistory)
+		return e.ExecuteBlockOnArchive(state, block, e.store.head.GetEthereumHeader(), hashHistory)
 	}
 	tests := map[string]struct {
 		execute      func(*sonicExecutor, *State, *types.Block, *blockHashHistory) (types.Receipts, error)
@@ -446,6 +516,7 @@ func TestSonicExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ProcessFailedBundl
 	}})
 	block := withTransactions(t, blocks[1], sign(&types.LegacyTx{Nonce: 1, Gas: 21_000, GasPrice: big.NewInt(1e11), To: &common.Address{1}}))
 
+	parentHeader := executor.store.head.GetEthereumHeader()
 	receipts, header, err := executor.ExecuteBlock(state, block, &blockHashHistory{})
 	require.NoError(t, err)
 	require.Len(t, receipts, 1)
@@ -456,7 +527,7 @@ func TestSonicExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ProcessFailedBundl
 	require.Equal(t, types.MergeBloom(receipts), header.Bloom)
 
 	require.NoError(t, state.db.Flush())
-	archived, err := executeArchiveBlock(executor, state, block)
+	archived, err := executor.ExecuteBlockOnArchive(state, block, parentHeader, &blockHashHistory{})
 	require.NoError(t, err)
 	require.Len(t, archived, 1)
 	require.Equal(t, receipts[0].CumulativeGasUsed, archived[0].CumulativeGasUsed)
@@ -493,11 +564,12 @@ func TestSonicExecutor_ExecuteBlockOnArchive_ReproducesReceiptsOfExecuteBlock(t 
 	// excess gas, so the receipts reveal whether Sonic's VM config is used.
 	executor, state, blocks := newTestSonicExecutor(t, sonicMetadataStore())
 	tx := sign(&types.LegacyTx{Gas: 50_000, GasPrice: big.NewInt(1e11), To: &common.Address{1}})
+	parentHeader := executor.store.head.GetEthereumHeader()
 	receipts, err := executeLiveBlock(executor, state, withTransactions(t, blocks[1], tx))
 	require.NoError(t, err)
 	require.NoError(t, state.db.Flush())
 
-	archived, err := executeArchiveBlock(executor, state, withTransactions(t, blocks[1], tx))
+	archived, err := executor.ExecuteBlockOnArchive(state, withTransactions(t, blocks[1], tx), parentHeader, &blockHashHistory{})
 	require.NoError(t, err)
 	require.Len(t, archived, 1)
 	require.Greater(t, receipts[0].GasUsed, uint64(21_000))
@@ -604,7 +676,7 @@ func newTestSonicExecutor(t *testing.T, metadataStore MetadataStore, accounts ..
 
 	head, err := convert.ConvertToGethBlock(blocks[0])
 	require.NoError(t, err)
-	executor, err := newSonicExecutor(opera.FakeNetworkID, metadataStore, testInterpreter(t), head.Header())
+	executor, err := newSonicExecutor(metadataStore, testInterpreter(t), head.Header())
 	require.NoError(t, err)
 	return executor, state, blocks
 }

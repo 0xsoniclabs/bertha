@@ -28,7 +28,6 @@ import (
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/sonic/opera"
-	"github.com/Fantom-foundation/lachesis-base/inter/idx"
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -46,9 +45,6 @@ type MetadataStore interface {
 	// CommitRules commits the rules that have been updated by PatchRules and
 	// will become effective at the next block.
 	CommitRules(blockNumber uint64) error
-
-	// GetUpgradeHeights returns all stored upgrade heights.
-	GetUpgradeHeights() []opera.UpgradeHeight
 
 	// GetRulesAtBlock returns the effective rules at the given block number,
 	// based on all stored rules updates up to and including that block.
@@ -232,21 +228,6 @@ func (s *BlockDBMetadataStore) CommitRules(blockNumber uint64) error {
 	}
 	s.logger.Info("New rules update detected and stored in the block db", "block", rulesUpdateHeight.Block)
 	return nil
-}
-
-// GetUpgradeHeights returns all stored upgrade heights.
-func (s *BlockDBMetadataStore) GetUpgradeHeights() []opera.UpgradeHeight {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-
-	upgradeHeights := make([]opera.UpgradeHeight, len(s.metadata.RulesUpdateHeights))
-	for i, rulesHeight := range s.metadata.RulesUpdateHeights {
-		upgradeHeights[i] = opera.UpgradeHeight{
-			Height:   idx.Block(rulesHeight.Block),
-			Upgrades: rulesHeight.Rules.Upgrades,
-		}
-	}
-	return upgradeHeights
 }
 
 // GetRulesAtBlock returns the effective rules at the given block number.
