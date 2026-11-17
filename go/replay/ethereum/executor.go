@@ -26,13 +26,16 @@ import (
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/evmcore/core_types"
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"
+	"github.com/0xsoniclabs/sonic/inter"
 	sonicstate "github.com/0xsoniclabs/sonic/inter/state"
 	"github.com/0xsoniclabs/tosca/go/geth_adapter"
 	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/0xsoniclabs/tracy"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/beacon"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip4844"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
@@ -208,6 +211,34 @@ func applyBlockWithProcessor(
 	}
 
 	return receipts, usedGas, vmStateDB.Check()
+}
+
+// toEvmBlock converts the given block of an Ethereum chain to an EVM block that
+// runs the block's transactions.
+func toEvmBlock(block *types.Block, chainConfig *params.ChainConfig) *evmcore.EvmBlock {
+	blobBaseFee := big.NewInt(1)
+	if chainConfig.IsCancun(block.Number(), block.Time()) && block.ExcessBlobGas() != nil {
+		blobBaseFee = eip4844.CalcBlobFee(chainConfig, block.Header())
+	}
+	prevRandao := block.MixDigest()
+	if block.Difficulty().Sign() != 0 {
+		// Before the Merge, PrevRandao is unused and set to zero, which tells the EVM
+		// to use the difficulty instead.
+		prevRandao = common.Hash{}
+	}
+	return &evmcore.EvmBlock{
+		EvmHeader: evmcore.EvmHeader{
+			Number:      block.Number(),
+			ParentHash:  block.ParentHash(),
+			Time:        inter.Timestamp(block.Time() * 1e9),
+			GasLimit:    block.GasLimit(),
+			PrevRandao:  prevRandao,
+			BaseFee:     block.BaseFee(),
+			BlobBaseFee: blobBaseFee,
+			Coinbase:    block.Coinbase(),
+		},
+		Transactions: block.Transactions(),
+	}
 }
 
 // chainConfigReader provides the Config method of consensus.ChainHeaderReader;

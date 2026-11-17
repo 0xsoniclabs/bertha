@@ -29,8 +29,8 @@ import (
 type OpenRocksDBFunc func(path string) (RocksDB, error)
 
 var dbOpeners = map[string]OpenRocksDBFunc{
-	"OpenRocksDBForReading": OpenRocksDBForReading,
 	"OpenRocksDBForWriting": OpenRocksDBForWriting,
+	"OpenRocksDBForReading": OpenRocksDBForReading,
 }
 
 func TestOpenRocksDB_FailsIfDBDoesNotExist(t *testing.T) {
@@ -127,10 +127,10 @@ func TestRocksDB_Get_DecodesStoredBlock(t *testing.T) {
 				wantBlock            bool
 				wantErr              string
 			}{
-				"existing block":            {chainID: chainID, blockNumber: 2, wantBlock: true},
 				"non-existing chain ID":     {chainID: 0, blockNumber: 1},
 				"non-existing block number": {chainID: chainID, blockNumber: 0},
 				"invalid block":             {chainID: chainID, blockNumber: 4, wantErr: "cannot parse invalid wire-format data"},
+				"existing block":            {chainID: chainID, blockNumber: 2, wantBlock: true},
 			}
 
 			for name, test := range tests {
@@ -149,6 +149,40 @@ func TestRocksDB_Get_DecodesStoredBlock(t *testing.T) {
 					}
 				})
 			}
+		})
+	}
+}
+
+func TestRocksDB_Update_StoresBlock(t *testing.T) {
+	tests := map[string]struct {
+		stored *Block
+	}{
+		"new block":      {},
+		"existing block": {stored: &Block{Number: 1, StateRoot: []byte{0x1, 0x2}}},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := t.TempDir()
+			writeDB, err := createDB(path)
+			require.NoError(t, err)
+			writeDB.close()
+
+			db, err := OpenRocksDBForWriting(path)
+			require.NoError(t, err)
+			defer func() { require.NoError(t, db.Close()) }()
+			if tt.stored != nil {
+				require.NoError(t, db.Update(1, tt.stored))
+			}
+			before, err := db.Get(1, 1)
+			require.NoError(t, err)
+			require.True(t, proto.Equal(tt.stored, before))
+
+			block := &Block{Number: 1, StateRoot: []byte{0x3, 0x4}}
+			require.NoError(t, db.Update(1, block))
+			got, err := db.Get(1, 1)
+			require.NoError(t, err)
+			require.Equal(t, block.Number, got.Number)
+			require.Equal(t, block.StateRoot, got.StateRoot)
 		})
 	}
 }
@@ -392,40 +426,6 @@ func TestRocksDB_GetRangeRev_ReturnsErrorIfBlockIsInvalid(t *testing.T) {
 			require.Equal(t, 1, count, "expected %d blocks for chainID %d from %d to %d, got %d",
 				1, chainID, blockNumber, blockNumber, count)
 
-		})
-	}
-}
-
-func TestRocksDB_Update_StoresBlock(t *testing.T) {
-	tests := map[string]struct {
-		stored *Block
-	}{
-		"new block":      {},
-		"existing block": {stored: &Block{Number: 1, StateRoot: []byte{0x1, 0x2}}},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			path := t.TempDir()
-			writeDB, err := createDB(path)
-			require.NoError(t, err)
-			writeDB.close()
-
-			db, err := OpenRocksDBForWriting(path)
-			require.NoError(t, err)
-			defer func() { require.NoError(t, db.Close()) }()
-			if tt.stored != nil {
-				require.NoError(t, db.Update(1, tt.stored))
-			}
-			before, err := db.Get(1, 1)
-			require.NoError(t, err)
-			require.True(t, proto.Equal(tt.stored, before))
-
-			block := &Block{Number: 1, StateRoot: []byte{0x3, 0x4}}
-			require.NoError(t, db.Update(1, block))
-			got, err := db.Get(1, 1)
-			require.NoError(t, err)
-			require.Equal(t, block.Number, got.Number)
-			require.Equal(t, block.StateRoot, got.StateRoot)
 		})
 	}
 }

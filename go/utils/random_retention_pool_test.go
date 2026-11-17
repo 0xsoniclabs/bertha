@@ -27,9 +27,9 @@ func TestRandomRetentionPool_NewRandomRetentionPool_CreatesPoolWithPositiveCapac
 		capacity int
 		wantErr  string
 	}{
-		"positive capacity": {capacity: 5},
 		"zero capacity":     {capacity: 0, wantErr: "pool capacity must be larger than 0"},
 		"negative capacity": {capacity: -1, wantErr: "pool capacity must be larger than 0"},
+		"positive capacity": {capacity: 5},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {

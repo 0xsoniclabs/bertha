@@ -39,16 +39,16 @@ func TestNewState_CreatesEmptyDatabaseOrReportsUnusableDirectory(t *testing.T) {
 		withArchive bool
 		wantErr     string
 	}{
+		"invalid directory": {
+			directory: func(*testing.T) string { return "/invalid/directory/that/does/not/exist" },
+			wantErr:   "failed to create state dir",
+		},
 		"without archive": {
 			directory: func(t *testing.T) string { return t.TempDir() },
 		},
 		"with archive": {
 			directory:   func(t *testing.T) string { return t.TempDir() },
 			withArchive: true,
-		},
-		"invalid directory": {
-			directory: func(*testing.T) string { return "/invalid/directory/that/does/not/exist" },
-			wantErr:   "failed to create state dir",
 		},
 		"read-only directory": {
 			directory: func(t *testing.T) string {
@@ -98,8 +98,8 @@ func TestState_GetStateRoot_ForwardsCommitmentOfDatabase(t *testing.T) {
 		want       common.Hash
 		wantErr    error
 	}{
-		"commitment": {commitment: result.Ok(cc.Hash{1, 2, 3}), want: common.Hash{1, 2, 3}},
 		"error":      {commitment: result.Err[cc.Hash](issue), wantErr: issue},
+		"commitment": {commitment: result.Ok(cc.Hash{1, 2, 3}), want: common.Hash{1, 2, 3}},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -182,14 +182,6 @@ func TestState_EndBlockAndCommit_EndsAndCommitsBlock(t *testing.T) {
 		setup   func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock)
 		wantErr string
 	}{
-		"block is committed": {
-			setup: func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock) {
-				gomock.InOrder(
-					db.EXPECT().EndBlock(uint64(42)).Return(staged, nil),
-					staged.EXPECT().Commit().Return(handle, nil),
-				)
-			},
-		},
 		"end block fails": {
 			setup: func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock) {
 				db.EXPECT().EndBlock(uint64(42)).Return(nil, issue)
@@ -208,6 +200,14 @@ func TestState_EndBlockAndCommit_EndsAndCommitsBlock(t *testing.T) {
 				staged.EXPECT().Commit().Return(nil, issue)
 			},
 			wantErr: "failed to commit block 42",
+		},
+		"block is committed": {
+			setup: func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock) {
+				gomock.InOrder(
+					db.EXPECT().EndBlock(uint64(42)).Return(staged, nil),
+					staged.EXPECT().Commit().Return(handle, nil),
+				)
+			},
 		},
 	}
 

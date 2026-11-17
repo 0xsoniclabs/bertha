@@ -143,6 +143,11 @@ func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
 			expectCorrections:        corrections,
 			expectFailedBundles:      failedBundles,
 		},
+		"invalid rules update heights": {
+			rulesUpdateHeightsData: []byte("not-json"),
+			correctionsData:        correctionsData,
+			expectErr:              "failed to parse stored rules update heights",
+		},
 		"genesis rules mismatch": {
 			rulesUpdateHeightsData: func() []byte {
 				data, _ := json.Marshal([]RulesUpdateHeight{
@@ -154,11 +159,6 @@ func TestNewBlockDBMetadataStore_LoadsMetadataFromDB(t *testing.T) {
 			expectLog: func(logger *utils.MockLogger) {
 				logger.EXPECT().Info("Loaded rules update heights from block db", "num_rules_update_heights", 1)
 			},
-		},
-		"invalid rules update heights": {
-			rulesUpdateHeightsData: []byte("not-json"),
-			correctionsData:        correctionsData,
-			expectErr:              "failed to parse stored rules update heights",
 		},
 		"invalid corrections": {
 			correctionsData: []byte("not-json"),
