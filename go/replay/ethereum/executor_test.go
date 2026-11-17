@@ -26,7 +26,6 @@ import (
 	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/0xsoniclabs/bertha/replay/state"
 	cc "github.com/0xsoniclabs/carmen/go/common"
-	"github.com/0xsoniclabs/carmen/go/common/amount"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/opera"
@@ -186,200 +185,130 @@ func TestApplyBlockWithProcessor_CanApplyAnEmptyBlock(t *testing.T) {
 	require.Empty(t, receipts)
 }
 
-func TestApplyBlockWithProcessor_FailsOnSkippedTransaction(t *testing.T) {
-	state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, state.Close())
-	}()
-
+func TestApplyBlockWithProcessor_RunsSystemCallsOfActiveUpgradesAndReportsTheirFailures(t *testing.T) {
 	chainConfig := params.MainnetChainConfig
-
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	state.DB.AddBalance(cc.Address(crypto.PubkeyToAddress(key.PublicKey)), amount.New(1e18))
-	tx := types.MustSignNewTx(key, types.LatestSignerForChainID(chainConfig.ChainID), &types.LegacyTx{
-		Nonce:    1, // the sender's nonce is 0
-		Gas:      21_000,
-		GasPrice: big.NewInt(1),
-		To:       &common.Address{1},
-	})
-	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 1_000_000}).
-		WithBody(types.Body{Transactions: types.Transactions{tx}})
-
-	processor := evmcore.NewStateProcessorForReplay(
-		chainConfig,
-		blockHashes{},
-		opera.Upgrades{},
-	)
-
-	_, _, err = applyBlockWithProcessor(state, block, testInterpreter(t), processor, chainConfig, false)
-	require.ErrorContains(t, err, "was skipped")
-}
-
-func TestApplyBlockWithProcessor_CancunBlock_AppliesEIP4788(t *testing.T) {
-	st, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
-	require.NoError(t, err)
-	defer func() { require.NoError(t, st.Close()) }()
-
-	chainConfig := params.MainnetChainConfig
-	cancunTime := *chainConfig.CancunTime
 	beaconRoot := common.Hash{1, 2, 3}
-	excessBlobGas := uint64(0)
-	blobGasUsed := uint64(0)
+	revert := []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.REVERT)}
+	// EIP-4788 stores the beacon root at slot timestamp % 8191 + 8191.
+	rootSlot := func(time uint64) (slot cc.Key) {
+		binary.BigEndian.PutUint64(slot[24:], time%8191+8191)
+		return slot
+	}
+	// The request contracts of EIP-7002 and EIP-7251 keep the excess of the
+	// requests over their target in slot 0 and the number of queued requests in
+	// slot 1.
+	excessSlot, countSlot := cc.Key{}, cc.Key{31: 1}
+	tests := map[string]struct {
+		time       uint64
+		beaconRoot []byte
+		address    common.Address
+		code       []byte
+		storage    map[cc.Key]cc.Value
+		want       map[cc.Key]cc.Value
+		wantErr    string
+	}{
+		"EIP-4788 stores the beacon root in Cancun": {
+			time:       *chainConfig.CancunTime,
+			beaconRoot: beaconRoot.Bytes(),
+			address:    params.BeaconRootsAddress,
+			code:       params.BeaconRootsCode,
+			want:       map[cc.Key]cc.Value{rootSlot(*chainConfig.CancunTime): cc.Value(beaconRoot)},
+		},
+		"EIP-4788 does not store the beacon root before Cancun": {
+			time:       *chainConfig.CancunTime - 1,
+			beaconRoot: beaconRoot.Bytes(),
+			address:    params.BeaconRootsAddress,
+			code:       params.BeaconRootsCode,
+			want:       map[cc.Key]cc.Value{rootSlot(*chainConfig.CancunTime - 1): {}},
+		},
+		"EIP-7002 dequeues withdrawal requests in Prague": {
+			time:    *chainConfig.PragueTime,
+			address: params.WithdrawalQueueAddress,
+			code:    params.WithdrawalQueueCode,
+			storage: map[cc.Key]cc.Value{countSlot: {31: 3}},
+			// The target is 2 requests per block.
+			want: map[cc.Key]cc.Value{excessSlot: {31: 1}, countSlot: {}},
+		},
+		"EIP-7002 does not dequeue withdrawal requests before Prague": {
+			time:    *chainConfig.PragueTime - 1,
+			address: params.WithdrawalQueueAddress,
+			code:    params.WithdrawalQueueCode,
+			storage: map[cc.Key]cc.Value{countSlot: {31: 3}},
+			want:    map[cc.Key]cc.Value{excessSlot: {}, countSlot: {31: 3}},
+		},
+		"EIP-7002 reports a failing withdrawal request contract": {
+			time:    *chainConfig.PragueTime,
+			address: params.WithdrawalQueueAddress,
+			code:    revert,
+			wantErr: "failed to process EIP-7002 system call",
+		},
+		"EIP-7251 dequeues consolidation requests in Prague": {
+			time:    *chainConfig.PragueTime,
+			address: params.ConsolidationQueueAddress,
+			code:    params.ConsolidationQueueCode,
+			storage: map[cc.Key]cc.Value{countSlot: {31: 3}},
+			// The target is 1 request per block.
+			want: map[cc.Key]cc.Value{excessSlot: {31: 2}, countSlot: {}},
+		},
+		"EIP-7251 does not dequeue consolidation requests before Prague": {
+			time:    *chainConfig.PragueTime - 1,
+			address: params.ConsolidationQueueAddress,
+			code:    params.ConsolidationQueueCode,
+			storage: map[cc.Key]cc.Value{countSlot: {31: 3}},
+			want:    map[cc.Key]cc.Value{excessSlot: {}, countSlot: {31: 3}},
+		},
+		"EIP-7251 reports a failing consolidation request contract": {
+			time:    *chainConfig.PragueTime,
+			address: params.ConsolidationQueueAddress,
+			code:    revert,
+			wantErr: "failed to process EIP-7251 system call",
+		},
+	}
 
-	// Deploy the EIP-4788 beacon roots contract so the system call has an effect.
-	st.DB.BeginBlock()
-	st.DB.BeginTransaction()
-	st.DB.SetCode(cc.Address(params.BeaconRootsAddress), params.BeaconRootsCode)
-	st.DB.EndTransaction()
-	handle, err := state.EndBlockAndCommit(st, 0)
-	require.NoError(t, err)
-	require.NoError(t, handle.Wait())
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			st, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
+			require.NoError(t, err)
+			defer func() { require.NoError(t, st.Close()) }()
 
-	block, err := convert.ConvertToGethBlock(&blockdb.Block{
-		// Use a large block number to ensure all forks including London are active.
-		Number:                20_000_000,
-		Timestamp:             cancunTime,
-		GasLimit:              30_000_000,
-		ExcessBlobGas:         &excessBlobGas,
-		BlobGasUsed:           &blobGasUsed,
-		ParentBeaconBlockRoot: beaconRoot.Bytes(),
-		// A non-zero PrevRandao activates post-merge EVM rules (Random != nil),
-		// which enables Shanghai opcodes like PUSH0 used by the beacon roots contract.
-		PrevRandao: []byte{1},
-	})
-	require.NoError(t, err)
+			st.DB.BeginBlock()
+			st.DB.BeginTransaction()
+			st.DB.SetCode(cc.Address(tt.address), tt.code)
+			for key, value := range tt.storage {
+				st.DB.SetState(cc.Address(tt.address), key, value)
+			}
+			st.DB.EndTransaction()
+			handle, err := state.EndBlockAndCommit(st, 0)
+			require.NoError(t, err)
+			require.NoError(t, handle.Wait())
 
-	processor := evmcore.NewStateProcessorForReplay(
-		chainConfig,
-		blockHashes{},
-		opera.Upgrades{},
-	)
+			zero := uint64(0)
+			block, err := convert.ConvertToGethBlock(&blockdb.Block{
+				// All forks up to London are active at this block.
+				Number:                20_000_000,
+				Timestamp:             tt.time,
+				GasLimit:              30_000_000,
+				ExcessBlobGas:         &zero,
+				BlobGasUsed:           &zero,
+				ParentBeaconBlockRoot: tt.beaconRoot,
+				// A non-zero PrevRandao activates the post-merge EVM rules, which
+				// enable PUSH0 of Shanghai the system contracts use.
+				PrevRandao: []byte{1},
+			})
+			require.NoError(t, err)
+			processor := evmcore.NewStateProcessorForReplay(chainConfig, blockHashes{}, opera.Upgrades{})
 
-	_, _, err = applyBlockWithProcessor(st, block, testInterpreter(t), processor, chainConfig, false)
-	require.NoError(t, err)
-
-	// EIP-4788 stores the beacon root at storage slot (timestamp % 8191) + 8191.
-	// Verify the root was written to the contract's storage.
-	const historyBufferLen = uint64(8191)
-	rootSlot := cancunTime%historyBufferLen + historyBufferLen
-	var rootKey cc.Key
-	binary.BigEndian.PutUint64(rootKey[24:], rootSlot)
-	gotRoot := st.DB.GetState(cc.Address(params.BeaconRootsAddress), rootKey)
-	require.Equal(t, cc.Value(beaconRoot), gotRoot)
-}
-
-func TestApplyBlockWithProcessor_PragueBlock_AppliesEIP7002(t *testing.T) {
-	st, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
-	require.NoError(t, err)
-	defer func() { require.NoError(t, st.Close()) }()
-
-	chainConfig := params.MainnetChainConfig
-	pragueTime := *chainConfig.PragueTime
-	excessBlobGas := uint64(0)
-	blobGasUsed := uint64(0)
-
-	// Deploy the EIP-7002 contract and pre-populate the
-	// WITHDRAWAL_REQUEST_COUNT slot (slot 1) to simulate requests queued during
-	// a prior block. The system call will compute new excess from this count.
-	requestCount := cc.Value{31: 3} // 3 requests queued
-	countSlot := cc.Key{31: 1}      // WITHDRAWAL_REQUEST_COUNT_SLOT = 1
-	st.DB.BeginBlock()
-	st.DB.BeginTransaction()
-	st.DB.SetCode(cc.Address(params.WithdrawalQueueAddress), params.WithdrawalQueueCode)
-	st.DB.SetState(cc.Address(params.WithdrawalQueueAddress), countSlot, requestCount)
-	st.DB.EndTransaction()
-	handle, err := state.EndBlockAndCommit(st, 0)
-	require.NoError(t, err)
-	require.NoError(t, handle.Wait())
-
-	block, err := convert.ConvertToGethBlock(&blockdb.Block{
-		Number:        20_000_000,
-		Timestamp:     pragueTime,
-		GasLimit:      30_000_000,
-		ExcessBlobGas: &excessBlobGas,
-		BlobGasUsed:   &blobGasUsed,
-		// A non-zero PrevRandao activates post-merge EVM rules (Random != nil),
-		// which enables Shanghai opcodes like PUSH0 used by the system contracts.
-		PrevRandao: []byte{1},
-	})
-	require.NoError(t, err)
-
-	processor := evmcore.NewStateProcessorForReplay(
-		chainConfig,
-		blockHashes{},
-		opera.Upgrades{},
-	)
-
-	_, _, err = applyBlockWithProcessor(st, block, testInterpreter(t), processor, chainConfig, false)
-	require.NoError(t, err)
-
-	// Verify the main side effects of the system calls:
-	// - EXCESS_REQUESTS (slot 0) = max(0, old_excess + count - TARGET)
-	//   EIP-7002: TARGET=2 → 0 + 3 - 2 = 1
-	// - WITHDRAWAL_REQUEST_COUNT (slot 1) reset to 0
-	excessSlot := cc.Key{} // EXCESS_WITHDRAWAL_REQUESTS_SLOT = 0
-	require.Equal(t, cc.Value{31: 1}, st.DB.GetState(cc.Address(params.WithdrawalQueueAddress), excessSlot),
-		"EIP-7002: excess should be count - TARGET_2 = 3 - 2 = 1")
-	require.Equal(t, cc.Value{}, st.DB.GetState(cc.Address(params.WithdrawalQueueAddress), countSlot),
-		"EIP-7002: request count should be reset to 0")
-}
-
-func TestApplyBlockWithProcessor_PragueBlock_AppliesEIP7251(t *testing.T) {
-	st, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
-	require.NoError(t, err)
-	defer func() { require.NoError(t, st.Close()) }()
-
-	chainConfig := params.MainnetChainConfig
-	pragueTime := *chainConfig.PragueTime
-	excessBlobGas := uint64(0)
-	blobGasUsed := uint64(0)
-
-	// Deploy the EIP-7251 contract and pre-populate the
-	// CONSOLIDATION_REQUEST_COUNT slot (slot 1) to simulate requests queued during
-	// a prior block. The system call will compute new excess from this count.
-	requestCount := cc.Value{31: 3} // 3 requests queued
-	countSlot := cc.Key{31: 1}      // CONSOLIDATION_REQUEST_COUNT_SLOT = 1
-	st.DB.BeginBlock()
-	st.DB.BeginTransaction()
-	st.DB.SetCode(cc.Address(params.ConsolidationQueueAddress), params.ConsolidationQueueCode)
-	st.DB.SetState(cc.Address(params.ConsolidationQueueAddress), countSlot, requestCount)
-	st.DB.EndTransaction()
-	handle, err := state.EndBlockAndCommit(st, 0)
-	require.NoError(t, err)
-	require.NoError(t, handle.Wait())
-
-	block, err := convert.ConvertToGethBlock(&blockdb.Block{
-		Number:        20_000_000,
-		Timestamp:     pragueTime,
-		GasLimit:      30_000_000,
-		ExcessBlobGas: &excessBlobGas,
-		BlobGasUsed:   &blobGasUsed,
-		// A non-zero PrevRandao activates post-merge EVM rules (Random != nil),
-		// which enables Shanghai opcodes like PUSH0 used by the system contracts.
-		PrevRandao: []byte{1},
-	})
-	require.NoError(t, err)
-
-	processor := evmcore.NewStateProcessorForReplay(
-		chainConfig,
-		blockHashes{},
-		opera.Upgrades{},
-	)
-
-	_, _, err = applyBlockWithProcessor(st, block, testInterpreter(t), processor, chainConfig, false)
-	require.NoError(t, err)
-
-	// Verify the main side effects of the system calls:
-	// - EXCESS_REQUESTS (slot 0) = max(0, old_excess + count - TARGET)
-	//   EIP-7251: TARGET=1 → 0 + 3 - 1 = 2
-	// - CONSOLIDATION_REQUEST_COUNT (slot 1) reset to 0
-	excessSlot := cc.Key{} // EXCESS_CONSOLIDATION_REQUESTS_SLOT = 0
-	require.Equal(t, cc.Value{31: 2}, st.DB.GetState(cc.Address(params.ConsolidationQueueAddress), excessSlot),
-		"EIP-7251: excess should be count - TARGET_1 = 3 - 1 = 2")
-	require.Equal(t, cc.Value{}, st.DB.GetState(cc.Address(params.ConsolidationQueueAddress), countSlot),
-		"EIP-7251: request count should be reset to 0")
+			_, _, err = applyBlockWithProcessor(st, block, testInterpreter(t), processor, chainConfig, false)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			for key, value := range tt.want {
+				require.Equal(t, value, st.DB.GetState(cc.Address(tt.address), key))
+			}
+		})
+	}
 }
 
 func TestApplyBlockWithProcessor_CreditsWithdrawalsOnlyPostMerge(t *testing.T) {
@@ -576,32 +505,76 @@ func TestApplyBlockWithProcessor_CommitsBlockToTheArchiveState(t *testing.T) {
 	require.Equal(uint64(1000*params.GWei), after.GetBalance(cc.Address{1}).Uint64())
 }
 
-func TestApplyBlockWithProcessor_ReturnsErrorIfEndBlockFails(t *testing.T) {
-	require := require.New(t)
-	ctrl := gomock.NewController(t)
-	db := carmen.NewMockStateDB(ctrl)
-	processor := NewMockProcessor(ctrl)
+func TestApplyBlockWithProcessor_ReportsFailures(t *testing.T) {
+	injected := fmt.Errorf("injected")
+	skipped := types.NewTx(&types.LegacyTx{})
+	anyArg := gomock.Any()
+	tests := map[string]struct {
+		number    int64
+		isArchive bool
+		expect    func(*carmen.MockStateDB, *MockProcessor)
+		wantErr   string
+		cause     error
+	}{
+		"genesis block on archive": {
+			number:    0,
+			isArchive: true,
+			wantErr:   "cannot apply genesis block in archive mode",
+		},
+		"failing archive state": {
+			number:    5,
+			isArchive: true,
+			expect: func(db *carmen.MockStateDB, _ *MockProcessor) {
+				db.EXPECT().GetArchiveStateDB(uint64(4)).Return(nil, injected)
+			},
+			wantErr: "failed to get archive state for block 4",
+			cause:   injected,
+		},
+		"skipped transaction": {
+			number: 5,
+			expect: func(db *carmen.MockStateDB, processor *MockProcessor) {
+				gomock.InOrder(
+					db.EXPECT().BeginBlock(),
+					processor.EXPECT().
+						ProcessWithDifficulty(anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg).
+						Return(evmcore.ProcessSummary{ProcessedTransactions: []evmcore.ProcessedTransaction{{Transaction: skipped}}}),
+				)
+			},
+			wantErr: fmt.Sprintf("tx %v was skipped", skipped.Hash()),
+		},
+		"failing end block": {
+			number: 5,
+			expect: func(db *carmen.MockStateDB, processor *MockProcessor) {
+				gomock.InOrder(
+					db.EXPECT().BeginBlock(),
+					processor.EXPECT().
+						ProcessWithDifficulty(anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg).
+						Return(evmcore.ProcessSummary{}),
+					db.EXPECT().EndBlock(uint64(5)).Return(nil, injected),
+				)
+			},
+			wantErr: "failed to end block 5",
+			cause:   injected,
+		},
+	}
 
-	issue := fmt.Errorf("injected error")
-	gomock.InOrder(
-		db.EXPECT().BeginBlock(),
-		processor.EXPECT().ProcessWithDifficulty(
-			gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
-			gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
-			gomock.Any(),
-		).Return(evmcore.ProcessSummary{}),
-		db.EXPECT().EndBlock(uint64(5)).Return(nil, issue),
-	)
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			db := carmen.NewMockStateDB(ctrl)
+			processor := NewMockProcessor(ctrl)
+			if tt.expect != nil {
+				tt.expect(db, processor)
+			}
+			block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(tt.number), GasLimit: 8_000_000})
 
-	block := types.NewBlockWithHeader(&types.Header{
-		Number:   big.NewInt(5),
-		GasLimit: 8_000_000,
-	})
-	chainConfig := params.MainnetChainConfig
-
-	state := &state.State{DB: db}
-	_, _, err := applyBlockWithProcessor(state, block, testInterpreter(t), processor, chainConfig, false)
-	require.ErrorIs(err, issue)
+			_, _, err := applyBlockWithProcessor(&state.State{DB: db}, block, testInterpreter(t), processor, params.MainnetChainConfig, tt.isArchive)
+			require.ErrorContains(t, err, tt.wantErr)
+			if tt.cause != nil {
+				require.ErrorIs(t, err, tt.cause)
+			}
+		})
+	}
 }
 
 func testInterpreter(t *testing.T) tosca.Interpreter {
