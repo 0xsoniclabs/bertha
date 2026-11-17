@@ -34,8 +34,7 @@ import (
 
 // checkBlockResults checks the results of applying a block against the
 // expected values in the block, including receipt fields and the resulting
-// state root. It is factored out to allow its use in both the simple replay
-// loop and the pipeline version.
+// state root.
 func checkBlockResults(
 	executor HistoryExecutor,
 	block *blockdb.Block,

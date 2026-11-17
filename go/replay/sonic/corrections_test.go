@@ -23,7 +23,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/0xsoniclabs/bertha/replay/state"
 	"github.com/0xsoniclabs/bertha/utils"
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/amount"
@@ -219,29 +218,27 @@ func TestApplyCorrections_AppliesCorrectionsToStateDB(t *testing.T) {
 }
 
 func TestSetBalance_CanIncreaseAndDecreaseBalance(t *testing.T) {
-	state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, state.Close())
-	}()
+	address := common.Address{1}
+	tests := map[string]struct {
+		balance           int64
+		added, subtracted uint64
+	}{
+		"increase":  {balance: 1500, added: 500},
+		"decrease":  {balance: 750, subtracted: 250},
+		"unchanged": {balance: 1000},
+	}
 
-	addr := common.Address{1}
-	balance := big.NewInt(1000)
-	setBalance(state.DB, addr, balance)
-
-	// Check initial balance
-	have := state.DB.GetBalance(cc.Address(addr))
-	require.Equal(t, balance.Uint64(), have.Uint64())
-
-	// Increase balance
-	balance = big.NewInt(1500)
-	setBalance(state.DB, addr, balance)
-	have = state.DB.GetBalance(cc.Address(addr))
-	require.Equal(t, uint64(1500), have.Uint64())
-
-	// Decrease balance
-	balance = big.NewInt(750)
-	setBalance(state.DB, addr, balance)
-	have = state.DB.GetBalance(cc.Address(addr))
-	require.Equal(t, uint64(750), have.Uint64())
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			stateDB := carmen.NewMockVmStateDB(gomock.NewController(t))
+			stateDB.EXPECT().GetBalance(cc.Address(address)).Return(amount.New(1000))
+			if tt.added > 0 {
+				stateDB.EXPECT().AddBalance(cc.Address(address), amount.New(tt.added))
+			}
+			if tt.subtracted > 0 {
+				stateDB.EXPECT().SubBalance(cc.Address(address), amount.New(tt.subtracted))
+			}
+			setBalance(stateDB, address, big.NewInt(tt.balance))
+		})
+	}
 }
