@@ -30,257 +30,48 @@ import (
 	gomock "go.uber.org/mock/gomock"
 )
 
-func Test_checkBlockResults_FailsIfComputedValuesMismatchStoredOnes(t *testing.T) {
-	logAddress := common.Address{0x01}
-	otherLogAddress := common.Address{0x02}
-	topic1 := common.Hash{0x03}
-	topic2 := common.Hash{0x04}
-	logData := []byte{0x05, 0x06}
-	otherLogData := []byte{0x07, 0x08}
-
+func Test_checkBlockResults_ForwardsErrorsOfChecks(t *testing.T) {
 	stateRoot := common.Hash{0x12}
 	otherStateRoot := common.Hash{0x34}
 	parentHash := common.Hash{0xAB}
 	otherParentHash := common.Hash{0xCD}
 
+	// The stored block holds no receipts and the stateRoot and parentHash
+	// variables; the case fields are checked against it.
 	cases := map[string]struct {
-		block              *blockdb.Block
-		receipts           types.Receipts
-		stateRootFuture    future.Future[result.Result[common.Hash]]
-		hashOfParent       common.Hash
-		skipStateRootCheck bool
-		skipReceiptsCheck  bool
-		expectedError      string
+		receipts          types.Receipts
+		stateRoot         common.Hash
+		hashOfParent      common.Hash
+		skipReceiptsCheck bool
+		failsOnReceipts   bool
+		expectedError     string
 	}{
-		"receipt count mismatch with disabled receipts check": {
-			block: &blockdb.Block{
-				Number:     2,
-				Receipts:   []*blockdb.TransactionReceipt{},
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			receipts:          types.Receipts{{Status: types.ReceiptStatusSuccessful}},
-			stateRootFuture:   future.Immediate(result.Ok(stateRoot)),
-			hashOfParent:      parentHash,
-			skipReceiptsCheck: true,
-			expectedError:     "",
-		},
-		"receipt count mismatch": {
-			block: &blockdb.Block{
-				Number:     2,
-				Receipts:   []*blockdb.TransactionReceipt{},
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
+		"receipts mismatch": {
 			receipts:        types.Receipts{{Status: types.ReceiptStatusSuccessful}},
-			stateRootFuture: future.Immediate(result.Ok(stateRoot)),
+			stateRoot:       stateRoot,
 			hashOfParent:    parentHash,
+			failsOnReceipts: true,
 			expectedError:   "number of receipts mismatch",
 		},
-		"receipt status mismatch": {
-			block: &blockdb.Block{
-				Number: 2,
-				Receipts: []*blockdb.TransactionReceipt{{
-					PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
-				}},
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			receipts:        types.Receipts{{Status: types.ReceiptStatusFailed}},
-			stateRootFuture: future.Immediate(result.Ok(stateRoot)),
-			hashOfParent:    parentHash,
-			expectedError:   "receipt status mismatch",
-		},
-		"receipt cumulative gas used mismatch": {
-			block: &blockdb.Block{
-				Number: 2,
-				Receipts: []*blockdb.TransactionReceipt{{
-					PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
-					CumulativeGasUsed: 100,
-				}},
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			receipts:        types.Receipts{{Status: types.ReceiptStatusSuccessful, CumulativeGasUsed: 200}},
-			stateRootFuture: future.Immediate(result.Ok(stateRoot)),
-			hashOfParent:    parentHash,
-			expectedError:   "receipt cumulative gas used mismatch",
-		},
-		"log count mismatch": {
-			block: &blockdb.Block{
-				Number: 2,
-				Receipts: []*blockdb.TransactionReceipt{{
-					PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
-					Logs:              []*blockdb.Log{{Address: logAddress.Bytes()}},
-				}},
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			receipts: types.Receipts{{
-				Status: types.ReceiptStatusSuccessful,
-				Logs:   []*types.Log{{Address: logAddress}, {Address: logAddress}},
-			}},
-			stateRootFuture: future.Immediate(result.Ok(stateRoot)),
-			hashOfParent:    parentHash,
-			expectedError:   "receipt logs length mismatch",
-		},
-		"log address mismatch": {
-			block: &blockdb.Block{
-				Number: 2,
-				Receipts: []*blockdb.TransactionReceipt{{
-					PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
-					Logs:              []*blockdb.Log{{Address: logAddress.Bytes()}},
-				}},
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			receipts: types.Receipts{{
-				Status: types.ReceiptStatusSuccessful,
-				Logs:   []*types.Log{{Address: otherLogAddress}},
-			}},
-			stateRootFuture: future.Immediate(result.Ok(stateRoot)),
-			hashOfParent:    parentHash,
-			expectedError:   "receipt log address mismatch",
-		},
-		"log topics length mismatch": {
-			block: &blockdb.Block{
-				Number: 2,
-				Receipts: []*blockdb.TransactionReceipt{{
-					PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
-					Logs:              []*blockdb.Log{{Address: logAddress.Bytes(), Topics: [][]byte{topic1.Bytes()}}},
-				}},
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			receipts: types.Receipts{{
-				Status: types.ReceiptStatusSuccessful,
-				Logs:   []*types.Log{{Address: logAddress, Topics: []common.Hash{topic1, topic2}}},
-			}},
-			stateRootFuture: future.Immediate(result.Ok(stateRoot)),
-			hashOfParent:    parentHash,
-			expectedError:   "receipt log topics length mismatch",
-		},
-		"log topic mismatch": {
-			block: &blockdb.Block{
-				Number: 2,
-				Receipts: []*blockdb.TransactionReceipt{{
-					PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
-					Logs:              []*blockdb.Log{{Address: logAddress.Bytes(), Topics: [][]byte{topic1.Bytes()}}},
-				}},
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			receipts: types.Receipts{{
-				Status: types.ReceiptStatusSuccessful,
-				Logs:   []*types.Log{{Address: logAddress, Topics: []common.Hash{topic2}}},
-			}},
-			stateRootFuture: future.Immediate(result.Ok(stateRoot)),
-			hashOfParent:    parentHash,
-			expectedError:   "receipt log topic mismatch",
-		},
-		"log data mismatch": {
-			block: &blockdb.Block{
-				Number: 2,
-				Receipts: []*blockdb.TransactionReceipt{{
-					PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
-					Logs:              []*blockdb.Log{{Address: logAddress.Bytes(), Data: logData}},
-				}},
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			receipts: types.Receipts{{
-				Status: types.ReceiptStatusSuccessful,
-				Logs:   []*types.Log{{Address: logAddress, Data: otherLogData}},
-			}},
-			stateRootFuture: future.Immediate(result.Ok(stateRoot)),
-			hashOfParent:    parentHash,
-			expectedError:   "receipt log data mismatch",
-		},
-		"receipt bloom mismatch": {
-			block: &blockdb.Block{
-				Number: 2,
-				Receipts: []*blockdb.TransactionReceipt{{
-					PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
-					Logs:              []*blockdb.Log{{Address: logAddress.Bytes()}},
-				}},
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			receipts: types.Receipts{{
-				Status: types.ReceiptStatusSuccessful,
-				Logs:   []*types.Log{{Address: logAddress}},
-				Bloom:  types.Bloom{0xFF}, // incorrect bloom that doesn't match logs
-			}},
-			stateRootFuture: future.Immediate(result.Ok(stateRoot)),
-			hashOfParent:    parentHash,
-			expectedError:   "receipt bloom mismatch",
-		},
-		"state root future error": {
-			block: &blockdb.Block{
-				Number:     2,
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			stateRootFuture: future.Immediate(result.Err[common.Hash](fmt.Errorf("state root computation failed"))),
-			hashOfParent:    parentHash,
-			expectedError:   "failed to get state root",
+		"receipts mismatch with disabled receipts check": {
+			receipts:          types.Receipts{{Status: types.ReceiptStatusSuccessful}},
+			stateRoot:         stateRoot,
+			hashOfParent:      parentHash,
+			skipReceiptsCheck: true,
 		},
 		"state root mismatch": {
-			block: &blockdb.Block{
-				Number:     2,
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			stateRootFuture: future.Immediate(result.Ok(otherStateRoot)),
-			hashOfParent:    parentHash,
-			expectedError:   "state root mismatch",
-		},
-		"state root mismatch with disabled state root check": {
-			block: &blockdb.Block{
-				Number:     2,
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			stateRootFuture:    future.Immediate(result.Ok(otherStateRoot)),
-			hashOfParent:       parentHash,
-			skipStateRootCheck: true,
-			expectedError:      "",
+			stateRoot:     otherStateRoot,
+			hashOfParent:  parentHash,
+			expectedError: "state root mismatch",
 		},
 		"parent hash mismatch": {
-			block: &blockdb.Block{
-				Number:     2,
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			stateRootFuture: future.Immediate(result.Ok(stateRoot)),
-			hashOfParent:    otherParentHash,
-			expectedError:   "parent hash mismatch",
+			stateRoot:     stateRoot,
+			hashOfParent:  otherParentHash,
+			expectedError: "parent hash mismatch",
 		},
 		"all matching": {
-			block: &blockdb.Block{
-				Number: 2,
-				Receipts: []*blockdb.TransactionReceipt{{
-					PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful},
-					Logs: []*blockdb.Log{{
-						Address: logAddress.Bytes(),
-						Topics:  [][]byte{topic1.Bytes()},
-						Data:    logData,
-					}},
-				}},
-				StateRoot:  stateRoot.Bytes(),
-				ParentHash: parentHash.Bytes(),
-			},
-			receipts: func() types.Receipts {
-				r := &types.Receipt{
-					Status: types.ReceiptStatusSuccessful,
-					Logs:   []*types.Log{{Address: logAddress, Topics: []common.Hash{topic1}, Data: logData}},
-				}
-				r.Bloom = types.CreateBloom(r)
-				return types.Receipts{r}
-			}(),
-			stateRootFuture: future.Immediate(result.Ok(stateRoot)),
-			hashOfParent:    parentHash,
-			expectedError:   "",
+			stateRoot:    stateRoot,
+			hashOfParent: parentHash,
 		},
 	}
 
@@ -289,26 +80,108 @@ func Test_checkBlockResults_FailsIfComputedValuesMismatchStoredOnes(t *testing.T
 			ctrl := gomock.NewController(t)
 
 			executor := NewMockHistoryExecutor(ctrl)
-			// IsMptConformant is only reached if checkReceipts succeeds, so
-			// receipt-error cases will not call it at all.
-			executor.EXPECT().IsMptConformant().Return(true).AnyTimes()
+			if !tc.failsOnReceipts {
+				executor.EXPECT().IsMptConformant().Return(true)
+			}
 
-			logger := utils.NewMockLogger(ctrl)
-			// Warn is only emitted for specific cases (e.g. missing state root),
-			// so most subtests do not call it.
-			logger.EXPECT().Warn(gomock.Any(), gomock.Any()).AnyTimes()
-
+			block := &blockdb.Block{
+				Number:     2,
+				StateRoot:  stateRoot.Bytes(),
+				ParentHash: parentHash.Bytes(),
+			}
 			err := checkBlockResults(
 				executor,
-				tc.block,
+				block,
 				tc.receipts,
-				tc.stateRootFuture,
+				future.Immediate(result.Ok(tc.stateRoot)),
 				tc.hashOfParent,
 				nil, // the blockDB is only needed for state root overwriting which is not exercised in this test
-				&ReplayLoopContext{skipStateRootCheck: tc.skipStateRootCheck, skipReceiptsCheck: tc.skipReceiptsCheck},
-				logger,
+				&ReplayLoopContext{skipReceiptsCheck: tc.skipReceiptsCheck},
+				utils.NewMockLogger(ctrl), // no root or hash is missing, so nothing is logged
 			)
 
+			if tc.expectedError == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tc.expectedError)
+			}
+		})
+	}
+}
+
+func Test_checkReceipts_FailsIfComputedReceiptsMismatchStoredOnes(t *testing.T) {
+	logAddress := common.Address{0x01}
+	otherLogAddress := common.Address{0x02}
+	topic1 := common.Hash{0x03}
+	topic2 := common.Hash{0x04}
+	logData := []byte{0x05, 0x06}
+	otherLogData := []byte{0x07, 0x08}
+	successful := &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful}
+	matching := &types.Receipt{
+		Status: types.ReceiptStatusSuccessful,
+		Logs:   []*types.Log{{Address: logAddress, Topics: []common.Hash{topic1}, Data: logData}},
+	}
+	matching.Bloom = types.CreateBloom(matching)
+
+	cases := map[string]struct {
+		stored        []*blockdb.TransactionReceipt
+		receipts      types.Receipts
+		expectedError string
+	}{
+		"receipt count mismatch": {
+			stored:        []*blockdb.TransactionReceipt{},
+			receipts:      types.Receipts{{Status: types.ReceiptStatusSuccessful}},
+			expectedError: "number of receipts mismatch",
+		},
+		"receipt status mismatch": {
+			stored:        []*blockdb.TransactionReceipt{{PostStateOrStatus: successful}},
+			receipts:      types.Receipts{{Status: types.ReceiptStatusFailed}},
+			expectedError: "receipt status mismatch",
+		},
+		"receipt cumulative gas used mismatch": {
+			stored:        []*blockdb.TransactionReceipt{{PostStateOrStatus: successful, CumulativeGasUsed: 100}},
+			receipts:      types.Receipts{{Status: types.ReceiptStatusSuccessful, CumulativeGasUsed: 200}},
+			expectedError: "receipt cumulative gas used mismatch",
+		},
+		"log count mismatch": {
+			stored:        []*blockdb.TransactionReceipt{{PostStateOrStatus: successful, Logs: []*blockdb.Log{{Address: logAddress.Bytes()}}}},
+			receipts:      types.Receipts{{Status: types.ReceiptStatusSuccessful, Logs: []*types.Log{{Address: logAddress}, {Address: logAddress}}}},
+			expectedError: "receipt logs length mismatch",
+		},
+		"log address mismatch": {
+			stored:        []*blockdb.TransactionReceipt{{PostStateOrStatus: successful, Logs: []*blockdb.Log{{Address: logAddress.Bytes()}}}},
+			receipts:      types.Receipts{{Status: types.ReceiptStatusSuccessful, Logs: []*types.Log{{Address: otherLogAddress}}}},
+			expectedError: "receipt log address mismatch",
+		},
+		"log topics length mismatch": {
+			stored:        []*blockdb.TransactionReceipt{{PostStateOrStatus: successful, Logs: []*blockdb.Log{{Address: logAddress.Bytes(), Topics: [][]byte{topic1.Bytes()}}}}},
+			receipts:      types.Receipts{{Status: types.ReceiptStatusSuccessful, Logs: []*types.Log{{Address: logAddress, Topics: []common.Hash{topic1, topic2}}}}},
+			expectedError: "receipt log topics length mismatch",
+		},
+		"log topic mismatch": {
+			stored:        []*blockdb.TransactionReceipt{{PostStateOrStatus: successful, Logs: []*blockdb.Log{{Address: logAddress.Bytes(), Topics: [][]byte{topic1.Bytes()}}}}},
+			receipts:      types.Receipts{{Status: types.ReceiptStatusSuccessful, Logs: []*types.Log{{Address: logAddress, Topics: []common.Hash{topic2}}}}},
+			expectedError: "receipt log topic mismatch",
+		},
+		"log data mismatch": {
+			stored:        []*blockdb.TransactionReceipt{{PostStateOrStatus: successful, Logs: []*blockdb.Log{{Address: logAddress.Bytes(), Data: logData}}}},
+			receipts:      types.Receipts{{Status: types.ReceiptStatusSuccessful, Logs: []*types.Log{{Address: logAddress, Data: otherLogData}}}},
+			expectedError: "receipt log data mismatch",
+		},
+		"receipt bloom mismatch": {
+			stored:        []*blockdb.TransactionReceipt{{PostStateOrStatus: successful, Logs: []*blockdb.Log{{Address: logAddress.Bytes()}}}},
+			receipts:      types.Receipts{{Status: types.ReceiptStatusSuccessful, Logs: []*types.Log{{Address: logAddress}}, Bloom: types.Bloom{0xFF}}},
+			expectedError: "receipt bloom mismatch",
+		},
+		"all matching": {
+			stored:   []*blockdb.TransactionReceipt{{PostStateOrStatus: successful, Logs: []*blockdb.Log{{Address: logAddress.Bytes(), Topics: [][]byte{topic1.Bytes()}, Data: logData}}}},
+			receipts: types.Receipts{matching},
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := checkReceipts(&blockdb.Block{Number: 2, Receipts: tc.stored}, tc.receipts)
 			if tc.expectedError == "" {
 				require.NoError(t, err)
 			} else {
@@ -329,6 +202,7 @@ func Test_checkStateRoot(t *testing.T) {
 		storedStateRoot             common.Hash
 		stateRootNotSetSeen         bool
 		skipStateRootCheck          bool
+		stateRootErr                error
 		expectUpdate                bool
 		expectWarning               bool
 		expectedError               string
@@ -395,6 +269,12 @@ func Test_checkStateRoot(t *testing.T) {
 			storedStateRoot: otherStateRoot,
 			expectedError:   "state root mismatch",
 		},
+		"Off errors on failed state root": {
+			policy:          OverwriteStateRootPolicyOff,
+			storedStateRoot: computedStateRoot,
+			stateRootErr:    fmt.Errorf("injected"),
+			expectedError:   "failed to get state root after applying block 5",
+		},
 		"Off with skipStateRootCheck ignores zero stored root without warning": {
 			policy:             OverwriteStateRootPolicyOff,
 			storedStateRoot:    zeroStateRoot,
@@ -443,10 +323,14 @@ func Test_checkStateRoot(t *testing.T) {
 				skipStateRootCheck:  tc.skipStateRootCheck,
 			}
 
+			stateRoot := result.Ok(computedStateRoot)
+			if tc.stateRootErr != nil {
+				stateRoot = result.Err[common.Hash](tc.stateRootErr)
+			}
 			err := checkStateRoot(
 				executor,
 				block,
-				future.Immediate(result.Ok(computedStateRoot)),
+				future.Immediate(stateRoot),
 				blockDB,
 				&replayLoopContext,
 				logger,

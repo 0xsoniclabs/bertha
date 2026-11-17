@@ -35,9 +35,10 @@ import (
 	"github.com/0xsoniclabs/bertha/replay/sonic"
 	"github.com/0xsoniclabs/bertha/replay/state"
 	"github.com/0xsoniclabs/bertha/utils"
+	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
-	"github.com/0xsoniclabs/sonic/evmcore"
+	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -79,6 +80,9 @@ func TestReplay_ReproducesChain(t *testing.T) {
 		"GoFileFlat": func(args *ReplayArgs) {
 			args.DBVariant = "go-file-flat"
 		},
+		"Schema4SkipsStateRootCheck": func(args *ReplayArgs) {
+			args.DBSchema = 4
+		},
 	}
 	for network, createDb := range blockDbsByNetwork {
 		for mode, configure := range modes {
@@ -107,17 +111,6 @@ func TestReplay_ResumesOnKeptState(t *testing.T) {
 			args.EndBlock = math.MaxUint64
 			args.StartBlock = 26
 			require.NoError(Replay(t.Context(), args))
-		})
-	}
-}
-
-func TestReplay_Schema4SkipsStateRootCheck(t *testing.T) {
-	for network, createDb := range blockDbsByNetwork {
-		t.Run(network, func(t *testing.T) {
-			args := defaultReplayArgs()
-			args.BlockDBDir, args.JSONGenesisFile = createDb(t)
-			args.DBSchema = 4
-			require.NoError(t, Replay(t.Context(), args))
 		})
 	}
 }
@@ -361,41 +354,6 @@ func TestReplay_BlockDBAccessMode(t *testing.T) {
 	}
 }
 
-func TestReplayLoop(t *testing.T) {
-	runTests := func(t *testing.T, run replayer) {
-		tests := map[string]func(*testing.T, replayer){
-			"CanProcessEmptyBlocks":                         canProcessEmptyBlocks,
-			"CanProcessNonEmptyBlocks":                      canProcessNonEmptyBlocks,
-			"FailsOnFailedBlockRetrieval":                   failsOnFailedBlockRetrieval,
-			"FailsOnCancelledContext":                       failsOnCancelledContext,
-			"FailsOnBlockConversionError":                   failsOnBlockConversionError,
-			"FailsOnBlockApplicationError":                  failsOnBlockApplicationError,
-			"FailsOnCommitmentComputationError":             failsOnCommitmentComputationError,
-			"FailsOnDifferentReceipts":                      failsOnDifferentReceipts,
-			"FailsOnIncorrectStateRootHash":                 failsOnIncorrectStateRootHash,
-			"FailsOnParentHashMismatch":                     failsOnParentHashMismatch,
-			"OverwriteStateRootHash":                        overwriteStateRootHash,
-			"SkipStateRootCheckIfNoStateRootCheckFlagIsSet": skipStateRootCheckIfNoStateRootCheckFlagIsSet,
-			"SkipReceiptsCheckIfNoReceiptsCheckFlagIsSet":   skipReceiptsCheckIfNoReceiptsCheckFlagIsSet,
-			"StopsOnArchiveVerifierFailure":                 stopsOnArchiveVerifierFailure,
-			"SubmitsBlocksWithParentHeaderAndHashHistory":   submitsBlocksWithParentHeaderAndHashHistory,
-		}
-		for name, test := range tests {
-			t.Run(name, func(t *testing.T) {
-				test(t, run)
-			})
-		}
-	}
-
-	t.Run("Loop", func(t *testing.T) {
-		runTests(t, runReplayLoop)
-	})
-
-	t.Run("Pipeline", func(t *testing.T) {
-		runTests(t, runReplayPipeline)
-	})
-}
-
 type replayer func(
 	ctx context.Context,
 	blocks iter.Seq2[*blockdb.Block, error],
@@ -406,511 +364,402 @@ type replayer func(
 	verifier *archiveVerifier,
 ) error
 
-func canProcessEmptyBlocks(t *testing.T, run replayer) {
-	chainID := uint64(1)
-	st, err := state.NewState(
-		state.StateParameters{Directory: t.TempDir(), Schema: 5},
-	)
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, st.Close())
-	}()
-
-	stateRoot, err := st.GetStateRoot().Await().Get()
-	require.NoError(t, err)
-
-	// A block history where nothing ever is happening.
-	block1 := &blockdb.Block{Number: 0, StateRoot: stateRoot[:]}
-	block1geth, err := convert.ConvertToGethBlock(block1)
-	require.NoError(t, err)
-	block2 := &blockdb.Block{Number: 1, StateRoot: stateRoot[:], ParentHash: block1geth.Hash().Bytes()}
-	block2geth, err := convert.ConvertToGethBlock(block2)
-	require.NoError(t, err)
-	block3 := &blockdb.Block{Number: 2, StateRoot: stateRoot[:], ParentHash: block2geth.Hash().Bytes()}
-	blocks := []*blockdb.Block{block1, block2, block3}
-
-	blockExecutor := NewMockBlockExecutor(gomock.NewController(t))
-	executor := &historyExecutor{
-		chainID:          chainID,
-		blockExecutor:    blockExecutor,
-		blockHashHistory: &blockHashHistory{},
-		state:            st,
-		snapshotHandler:  NewSnapshotHandler(0, 0, math.MaxUint64, 1),
-	}
-	blockExecutor.EXPECT().ExecuteBlock(st, gomock.Any(), executor.blockHashHistory).
-		DoAndReturn(func(_ *state.State, block *types.Block, _ evmcore.DummyChain) (types.Receipts, *types.Header, error) {
-			return nil, block.Header(), nil
-		}).Times(2)
-
-	iter := utils.NewIter(blocks)
-	counter := 0
-	require.NoError(t, run(t.Context(), iter, executor, nil, ReplayLoopContext{}, func(block *types.Block) error {
-		counter++
-		return nil
-	}, nil))
-	require.Equal(t, len(blocks), counter)
+var replayers = map[string]replayer{
+	"Loop":     runReplayLoop,
+	"Pipeline": runReplayPipeline,
 }
 
-func canProcessNonEmptyBlocks(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-	// ChainID is only called by the pipeline (for signer creation), not by
-	// the linear loop, so the exact count varies with the runner.
-	executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	executor.EXPECT().IsMptConformant().Return(true).Times(3)
-	executor.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).Times(2)
-
-	// A block history with a few transactions.
-	blocks := []*blockdb.Block{
-		{
-			Number:    0,
-			StateRoot: []byte{0x1},
-			Transactions: []*blockdb.Transaction{
-				{TransactionType: types.LegacyTxType, Nonce: 0},
-				{TransactionType: types.LegacyTxType, Nonce: 1},
-			},
-		},
-		{
-			Number:    1,
-			StateRoot: []byte{0x2},
-			Transactions: []*blockdb.Transaction{
-				{TransactionType: types.LegacyTxType, Nonce: 3},
-			},
-		},
-		{
-			Number:    2,
-			StateRoot: []byte{0x3},
-			Transactions: []*blockdb.Transaction{
-				{TransactionType: types.LegacyTxType, Nonce: 4},
-				{TransactionType: types.LegacyTxType, Nonce: 5},
-				{TransactionType: types.LegacyTxType, Nonce: 6},
-				{TransactionType: types.LegacyTxType, Nonce: 7},
-			},
-		},
-	}
-
-	// Check that the blocks are processed in order and correctly forwarded.
-	var last *gomock.Call
-	for _, block := range blocks {
-		ethBlock, err := convert.ConvertToGethBlock(block)
-		require.NoError(t, err, "failed to convert block %d", block.Number)
-
-		call := executor.EXPECT().
-			ApplyBlock(gomock.Any()).
-			DoAndReturn(func(b *types.Block) (
-				[]*types.Receipt, future.Future[result.Result[common.Hash]], error,
-			) {
-				require.Equal(t, ethBlock.NumberU64(), b.NumberU64())
-				// No need to check the full block conversion, since this is
-				// covered by the Converter's unit tests. However, we check
-				// enough to make sure that the correct block is passed.
-				require.Equal(t, len(ethBlock.Transactions()), len(b.Transactions()))
-				for i, tx := range ethBlock.Transactions() {
-					require.Equal(t, tx.Nonce(), b.Transactions()[i].Nonce())
-				}
-				return nil, future.Immediate(result.Ok(common.BytesToHash(block.StateRoot))), nil
-			})
-
-		if last != nil {
-			call.After(last)
-		}
-		last = call
-	}
-
-	iter := utils.NewIter(blocks)
-	require.NoError(t, run(t.Context(), iter, executor, nil, ReplayLoopContext{}, nil, nil))
-}
-
-func failsOnFailedBlockRetrieval(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-	// ChainID is only called by the pipeline (for signer creation), not by
-	// the linear loop, so the exact count varies with the runner.
-	executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-
-	injectedError := fmt.Errorf("injected error")
-	blocks := func(yield func(*blockdb.Block, error) bool) {
-		yield(nil, injectedError)
-	}
-	require.ErrorIs(t, run(t.Context(), blocks, executor, nil, ReplayLoopContext{}, nil, nil), injectedError)
-}
-
-func failsOnCancelledContext(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-	// ChainID is only called by the pipeline (for signer creation), not by
-	// the linear loop, so the exact count varies with the runner.
-	executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-
-	ctxt, cancel := context.WithCancel(t.Context())
-	cancel()
-
-	blocks := utils.NewIter([]*blockdb.Block{
-		{Number: 0, StateRoot: types.EmptyRootHash[:]},
-	})
-
-	require.ErrorIs(t, run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil), context.Canceled)
-}
-
-func failsOnBlockConversionError(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-	// ChainID is only called by the pipeline (for signer creation), not by
-	// the linear loop, so the exact count varies with the runner.
-	executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-
-	ctxt := t.Context()
-	blocks := utils.NewIter([]*blockdb.Block{{
-		Transactions: []*blockdb.Transaction{{
-			TransactionType: 99_999, // invalid transaction type
-		}},
-	}})
-	require.ErrorContains(t,
-		run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil),
-		"failed to convert block 0",
-	)
-}
-
-func failsOnBlockApplicationError(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-	// ChainID is only called by the pipeline (for signer creation), not by
-	// the linear loop, so the exact count varies with the runner.
-	executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	// The single block has Number=0, so GetBlockHash is never called.
-
-	injectedError := fmt.Errorf("injected error")
-	executor.EXPECT().
-		ApplyBlock(gomock.Any()).
-		Return(nil, future.Immediate(result.Ok(common.Hash{})), injectedError)
-
-	ctxt := t.Context()
-	blocks := utils.NewIter([]*blockdb.Block{{}})
-	require.ErrorIs(t,
-		run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil),
-		injectedError,
-	)
-}
-
-func failsOnCommitmentComputationError(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-	// ChainID is only called by the pipeline (for signer creation), not by
-	// the linear loop, so the exact count varies with the runner.
-	executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	// The single block has Number=0, so GetBlockHash is never called.
-
-	injectedError := fmt.Errorf("injected error")
-	executor.EXPECT().
-		ApplyBlock(gomock.Any()).
-		Return(nil, future.Immediate(result.Err[common.Hash](injectedError)), nil)
-
-	ctxt := t.Context()
-	blocks := utils.NewIter([]*blockdb.Block{{}})
-	require.ErrorIs(t,
-		run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil),
-		injectedError,
-	)
-}
-
-func failsOnDifferentReceipts(t *testing.T, run replayer) {
-	cases := map[string]struct {
-		computedReceipts types.Receipts
-		blockReceipts    []*blockdb.TransactionReceipt
-		expectedError    string
-	}{
-		"count mismatch": {
-			computedReceipts: types.Receipts{{Status: types.ReceiptStatusFailed}},
-			blockReceipts:    []*blockdb.TransactionReceipt{},
-			expectedError:    "number of receipts mismatch",
-		},
-		"status mismatch": {
-			computedReceipts: types.Receipts{{Status: types.ReceiptStatusFailed}},
-			blockReceipts: []*blockdb.TransactionReceipt{
-				{PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful}},
-			},
-			expectedError: "receipt status mismatch",
-		},
-		"cumulative gas mismatch": {
-			computedReceipts: types.Receipts{
-				{Status: types.ReceiptStatusSuccessful, CumulativeGasUsed: 100},
-			},
-			blockReceipts: []*blockdb.TransactionReceipt{
-				{PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful}},
-			},
-			expectedError: "receipt cumulative gas used mismatch",
-		},
-	}
-
-	for name, tc := range cases {
+func TestReplayLoop_CanProcessBlocks(t *testing.T) {
+	for name, run := range replayers {
 		t.Run(name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-			// ChainID is only called by the pipeline (for signer creation),
-			// not by the linear loop, so the exact count varies with the runner.
+			// ChainID is only called by the pipeline (for signer creation), not by
+			// the linear loop, so the exact count varies with the runner.
 			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-			// The single block has Number=0, so GetBlockHash is never called.
+			executor.EXPECT().IsMptConformant().Return(true).Times(3)
+			executor.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).Times(2)
 
-			executor.EXPECT().
-				ApplyBlock(gomock.Any()).
-				Return(
-					tc.computedReceipts,
-					future.Immediate(result.Ok(common.Hash{})),
-					nil,
-				)
+			// A block history with a few transactions.
+			blocks := []*blockdb.Block{
+				{
+					Number:    0,
+					StateRoot: []byte{0x1},
+					Transactions: []*blockdb.Transaction{
+						{TransactionType: types.LegacyTxType, Nonce: 0},
+						{TransactionType: types.LegacyTxType, Nonce: 1},
+					},
+				},
+				{
+					Number:    1,
+					StateRoot: []byte{0x2},
+					Transactions: []*blockdb.Transaction{
+						{TransactionType: types.LegacyTxType, Nonce: 3},
+					},
+				},
+				{
+					Number:    2,
+					StateRoot: []byte{0x3},
+					Transactions: []*blockdb.Transaction{
+						{TransactionType: types.LegacyTxType, Nonce: 4},
+						{TransactionType: types.LegacyTxType, Nonce: 5},
+						{TransactionType: types.LegacyTxType, Nonce: 6},
+						{TransactionType: types.LegacyTxType, Nonce: 7},
+					},
+				},
+			}
+
+			// Check that the blocks are processed in order and correctly forwarded.
+			var last *gomock.Call
+			for _, block := range blocks {
+				ethBlock, err := convert.ConvertToGethBlock(block)
+				require.NoError(t, err)
+
+				call := executor.EXPECT().
+					ApplyBlock(gomock.Any()).
+					DoAndReturn(func(b *types.Block) (
+						[]*types.Receipt, future.Future[result.Result[common.Hash]], error,
+					) {
+						require.Equal(t, ethBlock.NumberU64(), b.NumberU64())
+						// No need to check the full block conversion, since this is
+						// covered by the Converter's unit tests. However, we check
+						// enough to make sure that the correct block is passed.
+						require.Equal(t, len(ethBlock.Transactions()), len(b.Transactions()))
+						for i, tx := range ethBlock.Transactions() {
+							require.Equal(t, tx.Nonce(), b.Transactions()[i].Nonce())
+						}
+						return nil, future.Immediate(result.Ok(common.BytesToHash(block.StateRoot))), nil
+					})
+
+				if last != nil {
+					call.After(last)
+				}
+				last = call
+			}
+
+			var done []uint64
+			require.NoError(t, run(t.Context(), utils.NewIter(blocks), executor, nil, ReplayLoopContext{}, func(block *types.Block) error {
+				done = append(done, block.NumberU64())
+				return nil
+			}, nil))
+			require.Equal(t, []uint64{0, 1, 2}, done)
+		})
+	}
+}
+
+func TestReplayLoop_FailsOnFailedBlockRetrieval(t *testing.T) {
+	for name, run := range replayers {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
+			// ChainID is only called by the pipeline (for signer creation), not by
+			// the linear loop, so the exact count varies with the runner.
+			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+
+			injectedError := fmt.Errorf("injected error")
+			blocks := func(yield func(*blockdb.Block, error) bool) {
+				yield(nil, injectedError)
+			}
+			require.ErrorIs(t, run(t.Context(), blocks, executor, nil, ReplayLoopContext{}, nil, nil), injectedError)
+		})
+	}
+}
+
+func TestReplayLoop_FailsOnCancelledContext(t *testing.T) {
+	for name, run := range replayers {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
+			// ChainID is only called by the pipeline (for signer creation), not by
+			// the linear loop, so the exact count varies with the runner.
+			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+
+			ctxt, cancel := context.WithCancel(t.Context())
+			cancel()
+
+			blocks := utils.NewIter([]*blockdb.Block{
+				{Number: 0, StateRoot: types.EmptyRootHash[:]},
+			})
+
+			require.ErrorIs(t, run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil), context.Canceled)
+		})
+	}
+}
+
+func TestReplayLoop_FailsOnBlockConversionError(t *testing.T) {
+	for name, run := range replayers {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
+			// ChainID is only called by the pipeline (for signer creation), not by
+			// the linear loop, so the exact count varies with the runner.
+			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
 
 			ctxt := t.Context()
-			blocks := utils.NewIter([]*blockdb.Block{{Receipts: tc.blockReceipts}})
+			blocks := utils.NewIter([]*blockdb.Block{{
+				Transactions: []*blockdb.Transaction{{
+					TransactionType: 99_999, // invalid transaction type
+				}},
+			}})
 			require.ErrorContains(t,
 				run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil),
-				tc.expectedError,
+				"failed to convert block 0",
 			)
 		})
 	}
 }
 
-func failsOnParentHashMismatch(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-	// ChainID is only called by the pipeline (for signer creation), not by
-	// the linear loop, so the exact count varies with the runner.
-	executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	executor.EXPECT().IsMptConformant().Return(true)
+func TestReplayLoop_FailsOnBlockApplicationError(t *testing.T) {
+	for name, run := range replayers {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
+			// ChainID is only called by the pipeline (for signer creation), not by
+			// the linear loop, so the exact count varies with the runner.
+			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+			// The single block has Number=0, so GetBlockHash is never called.
 
-	hashOfParentBlock := common.Hash{0xAB}
-	executor.EXPECT().GetBlockHash(uint64(0)).Return(hashOfParentBlock)
+			injectedError := fmt.Errorf("injected error")
+			executor.EXPECT().
+				ApplyBlock(gomock.Any()).
+				Return(nil, future.Immediate(result.Ok(common.Hash{})), injectedError)
 
-	executor.EXPECT().
-		ApplyBlock(gomock.Any()).
-		Return(
-			nil,
-			future.Immediate(result.Ok(common.Hash{0x1})),
-			nil,
-		)
-
-	ctxt := t.Context()
-	blocks := utils.NewIter([]*blockdb.Block{{
-		Number:     uint64(1),
-		ParentHash: common.Hash{0xCD}.Bytes(), // does not match hashOfParentBlock
-	}})
-	require.ErrorContains(t,
-		run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil),
-		"parent hash mismatch",
-	)
+			ctxt := t.Context()
+			blocks := utils.NewIter([]*blockdb.Block{{}})
+			require.ErrorIs(t,
+				run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil),
+				injectedError,
+			)
+		})
+	}
 }
 
-func failsOnIncorrectStateRootHash(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-	// ChainID is only called by the pipeline (for signer creation), not by
-	// the linear loop, so the exact count varies with the runner.
-	executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	executor.EXPECT().IsMptConformant().Return(true)
-	// The single block has Number=0, so GetBlockHash is never called.
+func TestReplayLoop_FailsOnDifferentReceipts(t *testing.T) {
+	for name, run := range replayers {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
+			// ChainID is only called by the pipeline (for signer creation), not by
+			// the linear loop, so the exact count varies with the runner.
+			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+			// The single block has Number=0, so GetBlockHash is never called.
 
-	executor.EXPECT().
-		ApplyBlock(gomock.Any()).
-		Return(
-			nil,
-			future.Immediate(result.Ok(common.Hash{0x1})),
-			nil,
-		)
+			executor.EXPECT().
+				ApplyBlock(gomock.Any()).
+				Return(types.Receipts{{}}, future.Immediate(result.Ok(common.Hash{})), nil)
 
-	ctxt := t.Context()
-	blocks := utils.NewIter([]*blockdb.Block{{
-		StateRoot: common.Hash{0x2}.Bytes(),
-	}})
-	require.ErrorContains(t,
-		run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil),
-		"state root mismatch",
-	)
+			blocks := utils.NewIter([]*blockdb.Block{{}})
+			require.ErrorContains(t,
+				run(t.Context(), blocks, executor, nil, ReplayLoopContext{}, nil, nil),
+				"number of receipts mismatch",
+			)
+		})
+	}
 }
 
-func skipStateRootCheckIfNoStateRootCheckFlagIsSet(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-	// ChainID is only called by the pipeline (for signer creation), not by
-	// the linear loop, so the exact count varies with the runner.
-	executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	executor.EXPECT().IsMptConformant().Return(true)
-	executor.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
+func TestReplayLoop_FailsOnParentHashMismatch(t *testing.T) {
+	for name, run := range replayers {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
+			// ChainID is only called by the pipeline (for signer creation), not by
+			// the linear loop, so the exact count varies with the runner.
+			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+			executor.EXPECT().IsMptConformant().Return(true)
 
-	executor.EXPECT().
-		ApplyBlock(gomock.Any()).
-		Return(
-			nil,
-			future.Immediate(result.Ok(common.Hash{0x1})),
-			nil,
-		)
+			hashOfParentBlock := common.Hash{0xAB}
+			executor.EXPECT().GetBlockHash(uint64(0)).Return(hashOfParentBlock)
 
-	ctxt := t.Context()
-	blocks := utils.NewIter([]*blockdb.Block{{
-		Number:    1,
-		StateRoot: common.Hash{0x2}.Bytes(), // different state root
-	}})
-	require.NoError(t,
-		run(ctxt, blocks, executor, nil, ReplayLoopContext{
-			skipStateRootCheck: true,
-		}, nil, nil),
-		"state root mismatch",
-	)
+			executor.EXPECT().
+				ApplyBlock(gomock.Any()).
+				Return(
+					nil,
+					future.Immediate(result.Ok(common.Hash{0x1})),
+					nil,
+				)
+
+			ctxt := t.Context()
+			blocks := utils.NewIter([]*blockdb.Block{{
+				Number:     uint64(1),
+				ParentHash: common.Hash{0xCD}.Bytes(), // does not match hashOfParentBlock
+			}})
+			require.ErrorContains(t,
+				run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil),
+				"parent hash mismatch",
+			)
+		})
+	}
 }
 
-func skipReceiptsCheckIfNoReceiptsCheckFlagIsSet(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-	// ChainID is only called by the pipeline (for signer creation), not by
-	// the linear loop, so the exact count varies with the runner.
-	executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	executor.EXPECT().IsMptConformant().Return(true)
-	executor.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
+func TestReplayLoop_FailsOnIncorrectStateRootHash(t *testing.T) {
+	for name, run := range replayers {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
+			// ChainID is only called by the pipeline (for signer creation), not by
+			// the linear loop, so the exact count varies with the runner.
+			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+			executor.EXPECT().IsMptConformant().Return(true)
+			// The single block has Number=0, so GetBlockHash is never called.
 
-	executor.EXPECT().
-		ApplyBlock(gomock.Any()).
-		Return(
-			types.Receipts{{Status: types.ReceiptStatusFailed}},
-			future.Immediate(result.Ok(common.Hash{})),
-			nil,
-		)
+			executor.EXPECT().
+				ApplyBlock(gomock.Any()).
+				Return(
+					nil,
+					future.Immediate(result.Ok(common.Hash{0x1})),
+					nil,
+				)
 
-	ctxt := t.Context()
-	blocks := utils.NewIter([]*blockdb.Block{{
-		Number: 1,
-		Receipts: []*blockdb.TransactionReceipt{{
-			PostStateOrStatus: &blockdb.TransactionReceipt_Status{Status: types.ReceiptStatusSuccessful}, // different receipt
-		}},
-	}})
-	err := run(ctxt, blocks, executor, nil, ReplayLoopContext{skipReceiptsCheck: true}, nil, nil)
-	require.NoError(t, err)
+			ctxt := t.Context()
+			blocks := utils.NewIter([]*blockdb.Block{{
+				StateRoot: common.Hash{0x2}.Bytes(),
+			}})
+			require.ErrorContains(t,
+				run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil),
+				"state root mismatch",
+			)
+		})
+	}
 }
 
-func stopsOnArchiveVerifierFailure(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-	// ChainID is only called by the pipeline (for signer creation), not by
-	// the linear loop, so the exact count varies with the runner.
-	executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	executor.EXPECT().IsMptConformant().Return(true).MinTimes(1)
-	executor.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).MinTimes(1)
-	executor.EXPECT().CloneBlockHashHistory().Return(nil).MinTimes(1)
-	executor.EXPECT().GetHeadHeader().Return(nil).MinTimes(1)
+func TestReplayLoop_StopsOnArchiveVerifierFailure(t *testing.T) {
+	for name, run := range replayers {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
+			// ChainID is only called by the pipeline (for signer creation), not by
+			// the linear loop, so the exact count varies with the runner.
+			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+			executor.EXPECT().IsMptConformant().Return(true).MinTimes(1)
+			executor.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).MinTimes(1)
+			executor.EXPECT().CloneBlockHashHistory().Return(nil).MinTimes(1)
+			executor.EXPECT().GetHeadHeader().Return(nil).MinTimes(1)
 
-	// Create a cancellable context, as the Replay function does.
-	ctx, cancel := context.WithCancelCause(t.Context())
-	defer cancel(nil)
+			// Create a cancellable context, as the Replay function does.
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(nil)
 
-	injectedErr := fmt.Errorf("injected archive error")
-	const cancelAfter = int64(5)
+			injectedErr := fmt.Errorf("injected archive error")
+			const cancelAfter = int64(5)
 
-	// Simulate a verifier failure deterministically: after applying a few
-	// blocks, cancel the shared context with the injected error, mimicking
-	// what the archive verifier does on a real failure.
-	var blocksApplied atomic.Int64
-	executor.EXPECT().
-		ApplyBlock(gomock.Any()).
-		DoAndReturn(func(*types.Block) (types.Receipts, future.Future[result.Result[common.Hash]], error) {
-			if blocksApplied.Add(1) == cancelAfter {
-				cancel(injectedErr)
+			// Simulate a verifier failure deterministically: after applying a few
+			// blocks, cancel the shared context with the injected error, mimicking
+			// what the archive verifier does on a real failure.
+			var blocksApplied atomic.Int64
+			executor.EXPECT().
+				ApplyBlock(gomock.Any()).
+				DoAndReturn(func(*types.Block) (types.Receipts, future.Future[result.Result[common.Hash]], error) {
+					if blocksApplied.Add(1) == cancelAfter {
+						cancel(injectedErr)
+					}
+					return nil, future.Immediate(result.Ok(common.Hash{})), nil
+				}).MinTimes(int(cancelAfter))
+
+			// Bare verifier without a dispatcher: the cancellation is driven by the
+			// mock above, so we only need submit and close to be no-ops.
+			pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
+			require.NoError(t, err)
+			verifier := &archiveVerifier{
+				pool:         pool,
+				cancelParent: cancel,
+				ctx:          ctx,
+				done:         make(chan struct{}),
 			}
-			return nil, future.Immediate(result.Ok(common.Hash{})), nil
-		}).MinTimes(int(cancelAfter))
+			defer func() { require.NoError(t, verifier.close()) }()
 
-	// Bare verifier without a dispatcher: the cancellation is driven by the
-	// mock above, so we only need submit and close to be no-ops.
-	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
-	require.NoError(t, err)
-	verifier := &archiveVerifier{
-		pool:         pool,
-		cancelParent: cancel,
-		ctx:          ctx,
-		done:         make(chan struct{}),
+			// Provide many more blocks than we expect to process before cancellation.
+			const totalBlocks = 10_000
+			blocks := make([]*blockdb.Block, totalBlocks)
+			for i := range blocks {
+				blocks[i] = &blockdb.Block{Number: uint64(i), StateRoot: common.Hash{}.Bytes()}
+			}
+
+			err = run(ctx, utils.NewIter(blocks), executor, nil, ReplayLoopContext{}, nil, verifier)
+			require.ErrorIs(t, err, context.Canceled)
+			require.ErrorIs(t, context.Cause(ctx), injectedErr)
+			// Only a small number of blocks should have been applied before the
+			// cancellation propagates. The pipeline may buffer up to a few hundred
+			// additional blocks in its stages; allow a generous upper bound below
+			// totalBlocks to keep the test robust.
+			require.Less(t, blocksApplied.Load(), int64(1000))
+		})
 	}
-	defer func() { require.NoError(t, verifier.close()) }()
-
-	// Provide many more blocks than we expect to process before cancellation.
-	const totalBlocks = 10_000
-	blocks := make([]*blockdb.Block, totalBlocks)
-	for i := range blocks {
-		blocks[i] = &blockdb.Block{Number: uint64(i), StateRoot: common.Hash{}.Bytes()}
-	}
-
-	err = run(ctx, utils.NewIter(blocks), executor, nil, ReplayLoopContext{}, nil, verifier)
-	require.ErrorIs(t, err, context.Canceled)
-	require.ErrorIs(t, context.Cause(ctx), injectedErr)
-	// Only a small number of blocks should have been applied before the
-	// cancellation propagates. The pipeline may buffer up to a few hundred
-	// additional blocks in its stages; allow a generous upper bound below
-	// totalBlocks to keep the test robust.
-	require.Less(t, blocksApplied.Load(), int64(1000))
 }
 
-func submitsBlocksWithParentHeaderAndHashHistory(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-	// ChainID is only called by the pipeline (for signer creation), not by
-	// the linear loop, so the exact count varies with the runner.
-	executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-	executor.EXPECT().IsMptConformant().Return(true)
-	executor.EXPECT().GetBlockHash(uint64(0)).Return(common.Hash{})
+func TestReplayLoop_SubmitsBlocksWithParentHeaderAndHashHistory(t *testing.T) {
+	for name, run := range replayers {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
+			// ChainID is only called by the pipeline (for signer creation), not by
+			// the linear loop, so the exact count varies with the runner.
+			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+			executor.EXPECT().IsMptConformant().Return(true)
+			executor.EXPECT().GetBlockHash(uint64(0)).Return(common.Hash{})
 
-	// Both are captured before the block is applied.
-	parentHeader := &types.Header{}
-	hashHistory := &blockHashHistory{}
-	executor.EXPECT().ApplyBlock(gomock.Any()).
-		After(executor.EXPECT().GetHeadHeader().Return(parentHeader)).
-		After(executor.EXPECT().CloneBlockHashHistory().Return(hashHistory)).
-		Return(nil, future.Immediate(result.Ok(common.Hash{})), nil)
+			// Both are captured before the block is applied.
+			parentHeader := &types.Header{}
+			hashHistory := &blockHashHistory{}
+			executor.EXPECT().ApplyBlock(gomock.Any()).
+				After(executor.EXPECT().GetHeadHeader().Return(parentHeader)).
+				After(executor.EXPECT().CloneBlockHashHistory().Return(hashHistory)).
+				Return(nil, future.Immediate(result.Ok(common.Hash{})), nil)
 
-	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
-	require.NoError(t, err)
-	blocks := utils.NewIter([]*blockdb.Block{{Number: 1, StateRoot: common.Hash{}.Bytes()}})
-	require.NoError(t, run(t.Context(), blocks, executor, nil, ReplayLoopContext{}, nil, &archiveVerifier{pool: pool}))
+			pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
+			require.NoError(t, err)
+			blocks := utils.NewIter([]*blockdb.Block{{Number: 1, StateRoot: common.Hash{}.Bytes()}})
+			require.NoError(t, run(t.Context(), blocks, executor, nil, ReplayLoopContext{}, nil, &archiveVerifier{pool: pool}))
 
-	item, ok := pool.GetRandom()
-	require.True(t, ok)
-	require.Same(t, parentHeader, item.parentHeader)
-	require.Same(t, hashHistory, item.hashHistory)
+			item, ok := pool.GetRandom()
+			require.True(t, ok)
+			require.Same(t, parentHeader, item.parentHeader)
+			require.Same(t, hashHistory, item.hashHistory)
+		})
+	}
 }
 
-func overwriteStateRootHash(t *testing.T, run replayer) {
-	ctrl := gomock.NewController(t)
-	executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-	// ChainID is called by checkStateRoot via blockDB.Update. The pipeline runner
-	// additionally calls it in stage 1 for signer creation, so the exact count
-	// depends on the runner.
-	executor.EXPECT().ChainID().Return(uint64(12)).MinTimes(1)
-	// IsMptConformant is called twice per block: once in getExpectedStateRoot
-	// and once in updateStateRoot when overwriting is enabled.
-	executor.EXPECT().IsMptConformant().Return(true).Times(2)
-	executor.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
+func TestReplayLoop_OverwriteStateRootHash(t *testing.T) {
+	for name, run := range replayers {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
+			// ChainID is called by checkStateRoot via blockDB.Update. The pipeline runner
+			// additionally calls it in stage 1 for signer creation, so the exact count
+			// depends on the runner.
+			executor.EXPECT().ChainID().Return(uint64(12)).MinTimes(1)
+			// IsMptConformant is called twice per block: once in getExpectedStateRoot
+			// and once in updateStateRoot when overwriting is enabled.
+			executor.EXPECT().IsMptConformant().Return(true).Times(2)
+			executor.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
 
-	executor.EXPECT().
-		ApplyBlock(gomock.Any()).
-		Return(
-			nil,
-			future.Immediate(result.Ok(common.Hash{0x1})),
-			nil,
-		)
+			executor.EXPECT().
+				ApplyBlock(gomock.Any()).
+				Return(
+					nil,
+					future.Immediate(result.Ok(common.Hash{0x1})),
+					nil,
+				)
 
-	blockDB := blockdb.NewMockBlockDB(ctrl)
-	blockDB.EXPECT().Update(gomock.Any(),
-		&blockdb.Block{
-			Number:    1,
-			StateRoot: common.Hash{0x1}.Bytes(),
-		},
-	).Times(1)
+			blockDB := blockdb.NewMockBlockDB(ctrl)
+			blockDB.EXPECT().Update(gomock.Any(),
+				&blockdb.Block{
+					Number:    1,
+					StateRoot: common.Hash{0x1}.Bytes(),
+				},
+			).Times(1)
 
-	ctxt := t.Context()
-	blocks := utils.NewIter([]*blockdb.Block{{
-		Number:    1,
-		StateRoot: common.Hash{0x2}.Bytes(),
-	}})
-	require.NoError(t,
-		run(ctxt, blocks, executor, blockDB, ReplayLoopContext{
-			overwriteStateRoot: OverwriteStateRootPolicyOn,
-		}, nil, nil),
-		"state root mismatch",
-	)
+			ctxt := t.Context()
+			blocks := utils.NewIter([]*blockdb.Block{{
+				Number:    1,
+				StateRoot: common.Hash{0x2}.Bytes(),
+			}})
+			require.NoError(t,
+				run(ctxt, blocks, executor, blockDB, ReplayLoopContext{
+					overwriteStateRoot: OverwriteStateRootPolicyOn,
+				}, nil, nil),
+			)
+		})
+	}
 }
 
 func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
@@ -985,24 +834,26 @@ func applyBlockOnArchive(executor *historyExecutor, block *types.Block) (types.R
 
 func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_SkipBlockZero(t *testing.T) {
 	tests := map[string]struct {
-		apply       func(executor *historyExecutor, block *types.Block) (types.Receipts, error)
-		recordsHash bool
+		apply          func(executor *historyExecutor, block *types.Block) (types.Receipts, error)
+		readsStateRoot bool
+		recordsHash    bool
 	}{
-		"ApplyBlock":          {apply: applyBlock, recordsHash: true},
+		"ApplyBlock":          {apply: applyBlock, readsStateRoot: true, recordsHash: true},
 		"ApplyBlockOnArchive": {apply: applyBlockOnArchive},
 	}
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
-			require.NoError(t, err)
-			defer func() { require.NoError(t, state.Close()) }()
-
+			ctrl := gomock.NewController(t)
+			db := carmen.NewMockStateDB(ctrl)
+			if tt.readsStateRoot {
+				db.EXPECT().GetCommitment().Return(future.Immediate(result.Ok(cc.Hash{})))
+			}
 			// The block executor expects no calls.
 			executor := &historyExecutor{
-				blockExecutor:    NewMockBlockExecutor(gomock.NewController(t)),
+				blockExecutor:    NewMockBlockExecutor(ctrl),
 				blockHashHistory: &blockHashHistory{},
-				state:            state,
+				state:            &state.State{DB: db},
 			}
 
 			block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(0)})
@@ -1054,11 +905,11 @@ func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_ForwardToBlockExecut
 }
 
 func TestHistoryExecutor_ApplyBlock_ReplacesHeaderAndRecordsItAsHead(t *testing.T) {
-	state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
-	require.NoError(t, err)
-	defer func() { require.NoError(t, state.Close()) }()
-
-	blockExecutor := NewMockBlockExecutor(gomock.NewController(t))
+	ctrl := gomock.NewController(t)
+	db := carmen.NewMockStateDB(ctrl)
+	db.EXPECT().GetCommitment().Return(future.Immediate(result.Ok(cc.Hash{})))
+	state := &state.State{DB: db}
+	blockExecutor := NewMockBlockExecutor(ctrl)
 	executor := &historyExecutor{blockExecutor: blockExecutor, blockHashHistory: &blockHashHistory{}, state: state}
 	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1)})
 	header := &types.Header{Number: big.NewInt(1), GasUsed: 21_000}
@@ -1291,82 +1142,42 @@ func TestGetLedgerHead_SearchesGasUsedOfRecordedHashUpToGasLimitOfFailedBundles(
 	}
 }
 
-func Test_getExpectedStateRoot_ReturnsCorrectStateRoot(t *testing.T) {
-	require := require.New(t)
-
-	chainID := uint64(123)
-
-	dir := t.TempDir()
-	state, err := state.NewState(state.StateParameters{
-		Directory: dir,
-		Schema:    5,
-	})
-	require.NoError(err)
-	defer func() {
-		require.NoError(state.Close())
-	}()
-
-	block := &blockdb.Block{
-		Number:          0,
-		StateRoot:       common.HexToHash("0xdeadbeef").Bytes(),
-		VerkleStateRoot: common.HexToHash("0xabad1dea").Bytes(),
+func Test_getExpectedStateRoot_ReturnsStateRootOfSchema(t *testing.T) {
+	block := &blockdb.Block{StateRoot: common.Hash{1}.Bytes(), VerkleStateRoot: common.Hash{2}.Bytes()}
+	tests := map[string]struct {
+		schema carmen.Schema
+		want   common.Hash
+	}{
+		"MPT":    {schema: 5, want: common.Hash{1}},
+		"Verkle": {schema: 6, want: common.Hash{2}},
+		"other":  {schema: 4},
 	}
-
-	expectedStateRoot := getExpectedStateRoot(&historyExecutor{
-		chainID: chainID,
-		state:   state,
-		schema:  5,
-	}, block)
-	require.Equal(common.HexToHash("0xdeadbeef"), expectedStateRoot)
-
-	expectedStateRoot = getExpectedStateRoot(&historyExecutor{
-		chainID: chainID,
-		state:   state,
-		schema:  6,
-	}, block)
-	require.Equal(common.HexToHash("0xabad1dea"), expectedStateRoot)
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, tt.want, getExpectedStateRoot(&historyExecutor{schema: tt.schema}, block))
+		})
+	}
 }
 
-func Test_updateStateRoot_UpdatesCorrectStateRoot(t *testing.T) {
-	require := require.New(t)
-
-	chainID := uint64(123)
-
-	dir := t.TempDir()
-	state, err := state.NewState(state.StateParameters{
-		Directory: dir,
-		Schema:    5,
-	})
-	require.NoError(err)
-	defer func() {
-		require.NoError(state.Close())
-	}()
-
-	block := &blockdb.Block{
-		Number:    0,
-		StateRoot: common.HexToHash("0xdeadbeef").Bytes(),
+func Test_updateStateRoot_UpdatesStateRootOfSchema(t *testing.T) {
+	root := common.Hash{1}.Bytes()
+	tests := map[string]struct {
+		schema              carmen.Schema
+		wantStateRoot       []byte
+		wantVerkleStateRoot []byte
+	}{
+		"MPT":    {schema: 5, wantStateRoot: root},
+		"Verkle": {schema: 6, wantVerkleStateRoot: root},
+		"other":  {schema: 4},
 	}
-
-	updateStateRoot(&historyExecutor{
-		chainID: chainID,
-		state:   state,
-		schema:  5,
-	}, block, common.HexToHash("0xfeedface"))
-
-	require.Equal(common.HexToHash("0xfeedface").Bytes(), block.StateRoot)
-
-	block = &blockdb.Block{
-		Number:          0,
-		VerkleStateRoot: common.HexToHash("0xabad1dea").Bytes(),
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			block := &blockdb.Block{}
+			updateStateRoot(&historyExecutor{schema: tt.schema}, block, common.Hash{1})
+			require.Equal(t, tt.wantStateRoot, block.StateRoot)
+			require.Equal(t, tt.wantVerkleStateRoot, block.VerkleStateRoot)
+		})
 	}
-
-	updateStateRoot(&historyExecutor{
-		chainID: chainID,
-		state:   state,
-		schema:  6,
-	}, block, common.HexToHash("0xfacefeed"))
-
-	require.Equal(common.HexToHash("0xfacefeed").Bytes(), block.VerkleStateRoot)
 }
 
 func TestBlockHashHistory_Clone_ReturnsNilForNilReceiver(t *testing.T) {

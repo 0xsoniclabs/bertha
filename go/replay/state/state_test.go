@@ -90,19 +90,13 @@ func TestNewState_FailsIfDirectoryIsReadOnly(t *testing.T) {
 	require.Contains(t, err.Error(), "permission denied")
 }
 
-func TestState_Close_CanBeCalledOnClosedDb(t *testing.T) {
-	state, err := NewState(StateParameters{
-		Directory: t.TempDir(),
-		Schema:    5,
-	})
-	require.NoError(t, err)
+func TestState_Close_ClosesDatabaseOnlyOnce(t *testing.T) {
+	db := carmen.NewMockStateDB(gomock.NewController(t))
+	db.EXPECT().Close()
+	state := &State{DB: db}
 
-	err = state.Close()
-	require.NoError(t, err)
-
-	// Calling Close again should not cause an error
-	err = state.Close()
-	require.NoError(t, err)
+	require.NoError(t, state.Close())
+	require.NoError(t, state.Close())
 }
 
 func TestState_GetStateRoot_ForwardsCallToDatabase(t *testing.T) {
