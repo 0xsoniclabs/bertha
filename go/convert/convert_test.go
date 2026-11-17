@@ -28,18 +28,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestConvertToGethBlock_NilBlock_ReturnsAnError(t *testing.T) {
-	_, err := ConvertToGethBlock(nil)
-	require.ErrorContains(t, err, "cannot convert nil block")
-}
-
-func TestConvertToGethBlock_InvalidTransactionType_ReturnsAnError(t *testing.T) {
-	_, err := ConvertToGethBlock(&blockdb.Block{
-		Transactions: []*blockdb.Transaction{
-			{TransactionType: 999},
+func TestConvertToGethBlock_ReportsInvalidBlocks(t *testing.T) {
+	tests := map[string]struct {
+		block   *blockdb.Block
+		wantErr string
+	}{
+		"nil block": {
+			wantErr: "cannot convert nil block",
 		},
-	})
-	require.ErrorContains(t, err, "failed to convert transaction")
+		"invalid transaction type": {
+			block:   &blockdb.Block{Transactions: []*blockdb.Transaction{{TransactionType: 999}}},
+			wantErr: "failed to convert transaction",
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := ConvertToGethBlock(tt.block)
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
 }
 
 func TestConvertToGethBlock_ConvertsBlockToGethBlock(t *testing.T) {
@@ -202,16 +209,25 @@ func TestToBerthaTransaction_ConvertsGethTransactionToBerthaTransaction(t *testi
 	}
 }
 
-func TestToGethTransaction_NilTransaction_ReturnsError(t *testing.T) {
-	_, err := toGethTransaction(nil)
-	require.ErrorContains(t, err, "cannot convert nil transaction")
-}
-
-func TestToGethTransaction_UnsupportedType_ReturnsError(t *testing.T) {
-	_, err := toGethTransaction(&blockdb.Transaction{
-		TransactionType: 999, // Unsupported type
-	})
-	require.ErrorContains(t, err, "unsupported transaction type: 999")
+func TestToGethTransaction_ReportsInvalidTransactions(t *testing.T) {
+	tests := map[string]struct {
+		tx      *blockdb.Transaction
+		wantErr string
+	}{
+		"nil transaction": {
+			wantErr: "cannot convert nil transaction",
+		},
+		"unsupported type": {
+			tx:      &blockdb.Transaction{TransactionType: 999},
+			wantErr: "unsupported transaction type: 999",
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			_, err := toGethTransaction(tt.tx)
+			require.ErrorContains(t, err, tt.wantErr)
+		})
+	}
 }
 
 func TestToGethTransaction_ConvertsTransactionToGethTransaction(t *testing.T) {
@@ -704,49 +720,43 @@ func TestToOptionalHash_ConvertsBytesToHashesIfNotEmpty(t *testing.T) {
 }
 
 func TestToGethOmmerHeader_ConvertsOmmerHeaderToGethHeader(t *testing.T) {
-	input := &blockdb.OmmerHeader{
-		Beneficiary: []byte{0x01, 0x02, 0x03},
-		Number:      42,
+	tests := map[string]struct {
+		input *blockdb.OmmerHeader
+		want  *types.Header
+	}{
+		"nil": {
+			input: nil,
+			want:  nil,
+		},
+		"ommer header": {
+			input: &blockdb.OmmerHeader{Beneficiary: []byte{0x01, 0x02, 0x03}, Number: 42},
+			want:  &types.Header{Coinbase: common.BytesToAddress([]byte{0x01, 0x02, 0x03}), Number: big.NewInt(42)},
+		},
 	}
-
-	want := &types.Header{
-		Coinbase: common.BytesToAddress([]byte{0x01, 0x02, 0x03}),
-		Number:   new(big.Int).SetUint64(42),
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, tt.want, toGethOmmerHeader(tt.input))
+		})
 	}
-
-	got := toGethOmmerHeader(input)
-	require.Equal(t, want.Coinbase, got.Coinbase)
-	require.Equal(t, want.Number, got.Number)
-}
-
-func TestToGethOmmerHeader_NilOmmerHeader_ReturnsNil(t *testing.T) {
-	got := toGethOmmerHeader(nil)
-	require.Nil(t, got)
 }
 
 func TestToGethWithdrawal_ConvertsWithdrawal(t *testing.T) {
-	input := &blockdb.Withdrawal{
-		Index:          1,
-		ValidatorIndex: 2,
-		Address:        []byte{0x03, 0x04},
-		Amount:         5,
+	tests := map[string]struct {
+		input *blockdb.Withdrawal
+		want  *types.Withdrawal
+	}{
+		"nil": {
+			input: nil,
+			want:  nil,
+		},
+		"withdrawal": {
+			input: &blockdb.Withdrawal{Index: 1, ValidatorIndex: 2, Address: []byte{0x03, 0x04}, Amount: 5},
+			want:  &types.Withdrawal{Index: 1, Validator: 2, Address: common.BytesToAddress([]byte{0x03, 0x04}), Amount: 5},
+		},
 	}
-
-	want := &types.Withdrawal{
-		Index:     1,
-		Validator: 2,
-		Address:   common.BytesToAddress([]byte{0x03, 0x04}),
-		Amount:    5,
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, tt.want, toGethWithdrawal(tt.input))
+		})
 	}
-
-	got := toGethWithdrawal(input)
-	require.Equal(t, want.Index, got.Index)
-	require.Equal(t, want.Validator, got.Validator)
-	require.Equal(t, want.Address, got.Address)
-	require.Equal(t, want.Amount, got.Amount)
-}
-
-func TestToGethWithdrawal_NilWithdrawal_ReturnsNil(t *testing.T) {
-	got := toGethWithdrawal(nil)
-	require.Nil(t, got)
 }

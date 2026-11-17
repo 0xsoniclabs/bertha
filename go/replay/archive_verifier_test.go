@@ -246,8 +246,12 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 	// The archive holds blocks up to 1, so block 2 is the first it can re-execute.
 	const matchingGasUsed = 21_000
 	const differingGasUsed = 999
+	parentHeader := &types.Header{GasUsed: 1}
+	hashHistory := &blockHashHistory{}
+	hashHistory.SetBlockHash(1, common.Hash{1})
 	tests := map[string]struct {
 		archiveEmpty    bool
+		archiveErr      error
 		blockNumber     uint64
 		storedGasUsed   uint64
 		noReceiptsCheck bool
@@ -259,21 +263,26 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 		"differing receipts are accepted without receipts check": {blockNumber: 2, storedGasUsed: differingGasUsed, noReceiptsCheck: true, wantApply: true},
 		"block above archive height is skipped":                  {blockNumber: 3},
 		"block is skipped while archive is empty":                {archiveEmpty: true, blockNumber: 2},
+		"failing archive height is reported":                     {archiveErr: fmt.Errorf("injected"), wantErr: "failed to get archive height"},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
 			require.NoError(t, err)
-			pool.Add(blockWithHashHistory{block: &blockdb.Block{
-				Number:   tc.blockNumber,
-				Receipts: []*blockdb.TransactionReceipt{{CumulativeGasUsed: tc.storedGasUsed}},
-			}})
+			pool.Add(blockWithHashHistory{
+				block: &blockdb.Block{
+					Number:   tc.blockNumber,
+					Receipts: []*blockdb.TransactionReceipt{{CumulativeGasUsed: tc.storedGasUsed}},
+				},
+				parentHeader: parentHeader,
+				hashHistory:  hashHistory,
+			})
 
 			executor := NewMockArchiveExecutor(gomock.NewController(t))
-			executor.EXPECT().GetArchiveBlockHeight().Return(uint64(1), tc.archiveEmpty, nil)
+			executor.EXPECT().GetArchiveBlockHeight().Return(uint64(1), tc.archiveEmpty, tc.archiveErr)
 			if tc.wantApply {
-				executor.EXPECT().ApplyBlockOnArchive(gomock.Any(), gomock.Any(), gomock.Any()).Return(types.Receipts{{CumulativeGasUsed: matchingGasUsed}}, nil)
+				executor.EXPECT().ApplyBlockOnArchive(gomock.Any(), parentHeader, hashHistory).Return(types.Receipts{{CumulativeGasUsed: matchingGasUsed}}, nil)
 			}
 
 			ctx, cancel := context.WithCancelCause(t.Context())
@@ -293,77 +302,16 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 			err = verifier.close()
 			if tc.wantErr != "" {
 				require.ErrorContains(t, err, tc.wantErr)
+				require.ErrorIs(t, context.Cause(ctx), err)
+				if tc.archiveErr != nil {
+					require.ErrorIs(t, err, tc.archiveErr)
+				}
 			} else {
 				require.NoError(t, err)
+				require.NoError(t, ctx.Err())
 			}
 		})
 	}
-}
-
-func TestArchiveVerifier_verifyBlock_AppliesBlockWithItsParentHeaderAndHashHistory(t *testing.T) {
-	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
-	require.NoError(t, err)
-	parentHeader := &types.Header{GasUsed: 1}
-	hashHistory := &blockHashHistory{}
-	hashHistory.SetBlockHash(1, common.Hash{1})
-	pool.Add(blockWithHashHistory{block: &blockdb.Block{Number: 2}, parentHeader: parentHeader, hashHistory: hashHistory})
-
-	ctrl := gomock.NewController(t)
-	executor := NewMockArchiveExecutor(ctrl)
-	executor.EXPECT().GetArchiveBlockHeight().Return(uint64(1), false, nil)
-	executor.EXPECT().ApplyBlockOnArchive(gomock.Any(), parentHeader, hashHistory)
-
-	ctx, cancel := context.WithCancelCause(t.Context())
-	defer cancel(nil)
-	verifier := &archiveVerifier{
-		pool:         pool,
-		executor:     executor,
-		ctx:          ctx,
-		cancelParent: cancel,
-		done:         make(chan struct{}),
-		logger:       slog.Default(),
-	}
-
-	verifier.verifyBlock()
-
-	require.NoError(t, verifier.close())
-}
-
-func TestArchiveVerifier_verifyBlock_CancelsContextOnFailure(t *testing.T) {
-	ctx, cancel := context.WithCancelCause(t.Context())
-	defer cancel(nil)
-
-	pool, err := utils.NewRandomRetentionPool[blockWithHashHistory](poolCapacity)
-	require.NoError(t, err)
-
-	injectedErr := fmt.Errorf("injected archive error")
-	ctrl := gomock.NewController(t)
-	executor := NewMockArchiveExecutor(ctrl)
-	// Use an archive that always fails to trigger verifier error.
-	executor.EXPECT().GetArchiveBlockHeight().Return(uint64(0), false, injectedErr)
-	verifier := &archiveVerifier{
-		pool:         pool,
-		executor:     executor,
-		ctx:          ctx,
-		cancelParent: cancel,
-		done:         make(chan struct{}),
-		logger:       slog.Default(),
-	}
-
-	// Submit blocks so the pool is non-empty.
-	protoBlocks := utils.CreateValidBlocks(t, 10)
-	for _, block := range protoBlocks[1:] {
-		verifier.submit(block, nil, &blockHashHistory{})
-	}
-
-	// Call verifyBlock directly to deterministically trigger cancellation.
-	verifier.verifyBlock()
-
-	require.ErrorIs(t, ctx.Err(), context.Canceled)
-	require.ErrorIs(t, context.Cause(ctx), injectedErr)
-
-	verifierErr := verifier.close()
-	require.ErrorIs(t, verifierErr, injectedErr)
 }
 
 func TestArchiveVerifier_close_WaitsForInFlightVerifications(t *testing.T) {

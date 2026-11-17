@@ -134,71 +134,56 @@ func TestProgressLogger_AnchorsBlockTimesAtFirstProcessedBlock(t *testing.T) {
 }
 
 func TestProgressLogger_PrintsDirSizeIfEnabled(t *testing.T) {
-	require := require.New(t)
-	ctrl := gomock.NewController(t)
-	flusher := NewMockStateFlusher(ctrl)
-	flusher.EXPECT().FlushState().Return(nil).Times(2)
-
-	dir := t.TempDir()
-	liveDir := filepath.Join(dir, "live")
-	require.NoError(os.Mkdir(liveDir, 0700))
-
-	filePath := filepath.Join(liveDir, "file1.txt")
-	data := make([]byte, 124*1024*1024)
-	err := os.WriteFile(filePath, data, 0644)
-	require.NoError(err)
-
 	anchor, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:    0,
 		Timestamp: 1000,
 	})
-	require.NoError(err)
+	require.NoError(t, err)
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{
 		Number:       10000,
 		Timestamp:    1000,
 		Transactions: []*blockdb.Transaction{},
 	})
-	require.NoError(err)
+	require.NoError(t, err)
 
-	mockLogger := utils.NewMockLogger(ctrl)
-	logger := startProgressLogger(mockLogger, flusher, dir, true)
-	require.NoError(logger.LogProgress(anchor))
-	mockLogger.EXPECT().Info(
-		"Processing block",
-		"block", uint64(10000),
-		"block_time", gomock.Any(),
-		"elapsed", gomock.Any(),
-		"txs/s", 0,
-		"MGas/s", 0,
-		"realtime", gomock.Any(),
-		"LiveDB size", "0.121GiB",
-	)
-	err = logger.LogProgress(block)
-	require.NoError(err)
+	tests := map[string]struct {
+		mebibytes map[string]int
+		sizes     []any
+	}{
+		"live database": {
+			mebibytes: map[string]int{"live": 124},
+			sizes:     []any{"LiveDB size", "0.121GiB"},
+		},
+		"live and archive database": {
+			mebibytes: map[string]int{"live": 124, "archive": 156},
+			sizes:     []any{"LiveDB size", "0.121GiB", "ArchiveDB size", "0.152GiB"},
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			for subdir, size := range tt.mebibytes {
+				require.NoError(t, os.Mkdir(filepath.Join(dir, subdir), 0700))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, subdir, "file"), make([]byte, size*1024*1024), 0644))
+			}
 
-	archiveDir := filepath.Join(dir, "archive")
-	require.NoError(os.Mkdir(archiveDir, 0700))
-	filePath = filepath.Join(archiveDir, "file2.txt")
-	data = make([]byte, 156*1024*1024)
-	err = os.WriteFile(filePath, data, 0644)
-	require.NoError(err)
-
-	mockLogger2 := utils.NewMockLogger(ctrl)
-	logger = startProgressLogger(mockLogger2, flusher, dir, true)
-	require.NoError(logger.LogProgress(anchor))
-	mockLogger2.EXPECT().Info(
-		"Processing block",
-		"block", uint64(10000),
-		"block_time", gomock.Any(),
-		"elapsed", gomock.Any(),
-		"txs/s", 0,
-		"MGas/s", 0,
-		"realtime", gomock.Any(),
-		"LiveDB size", "0.121GiB",
-		"ArchiveDB size", "0.152GiB",
-	)
-	err = logger.LogProgress(block)
-	require.NoError(err)
+			ctrl := gomock.NewController(t)
+			flusher := NewMockStateFlusher(ctrl)
+			flusher.EXPECT().FlushState().Return(nil)
+			mockLogger := utils.NewMockLogger(ctrl)
+			logger := startProgressLogger(mockLogger, flusher, dir, true)
+			require.NoError(t, logger.LogProgress(anchor))
+			mockLogger.EXPECT().Info("Processing block", append([]any{
+				"block", uint64(10000),
+				"block_time", gomock.Any(),
+				"elapsed", gomock.Any(),
+				"txs/s", 0,
+				"MGas/s", 0,
+				"realtime", gomock.Any(),
+			}, tt.sizes...)...)
+			require.NoError(t, logger.LogProgress(block))
+		})
+	}
 }
 
 func TestProgressLogger_ProducesASummary(t *testing.T) {

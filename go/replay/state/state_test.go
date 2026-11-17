@@ -33,61 +33,53 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
-func TestState_CanBeCreatedAndClosed(t *testing.T) {
-	for _, archive := range []bool{false, true} {
-		t.Run(fmt.Sprintf("withArchive=%t", archive), func(t *testing.T) {
+func TestNewState_CreatesEmptyDatabaseOrReportsUnusableDirectory(t *testing.T) {
+	tests := map[string]struct {
+		directory   func(*testing.T) string
+		withArchive bool
+		wantErr     string
+	}{
+		"without archive": {
+			directory: func(t *testing.T) string { return t.TempDir() },
+		},
+		"with archive": {
+			directory:   func(t *testing.T) string { return t.TempDir() },
+			withArchive: true,
+		},
+		"invalid directory": {
+			directory: func(*testing.T) string { return "/invalid/directory/that/does/not/exist" },
+			wantErr:   "failed to create state dir",
+		},
+		"read-only directory": {
+			directory: func(t *testing.T) string {
+				dir := t.TempDir()
+				require.NoError(t, os.Chmod(dir, 0555))
+				t.Cleanup(func() { require.NoError(t, os.Chmod(dir, 0755)) })
+				return dir
+			},
+			wantErr: "permission denied",
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
 			state, err := NewState(StateParameters{
-				Directory:   t.TempDir(),
-				WithArchive: archive,
+				Directory:   tt.directory(t),
+				WithArchive: tt.withArchive,
 				Schema:      5,
+				Variant:     "go-file",
 			})
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
 			require.NoError(t, err)
-			require.NotNil(t, state)
+			defer func() { require.NoError(t, state.Close()) }()
 
-			err = state.Close()
+			root, err := state.GetStateRoot().Await().Get()
 			require.NoError(t, err)
+			require.Equal(t, types.EmptyRootHash, root)
 		})
 	}
-}
-
-func TestNewState_CreatesEmptyDatabase(t *testing.T) {
-	state, err := NewState(StateParameters{
-		Directory: t.TempDir(),
-		Schema:    5,
-		Variant:   "go-file",
-	})
-	require.NoError(t, err)
-	defer func() {
-		require.NoError(t, state.Close())
-	}()
-
-	root, err := state.GetStateRoot().Await().Get()
-	require.NoError(t, err)
-	require.Equal(t, types.EmptyRootHash, root)
-}
-
-func TestNewState_FailsWithInvalidDirectory(t *testing.T) {
-	_, err := NewState(StateParameters{
-		Directory: "/invalid/directory/that/does/not/exist",
-		Schema:    5,
-	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "failed to create state dir")
-}
-
-func TestNewState_FailsIfDirectoryIsReadOnly(t *testing.T) {
-	// Create a temporary directory and make it read-only
-	tempDir := t.TempDir()
-	err := os.Chmod(tempDir, 0555) // Read-only permissions
-	require.NoError(t, err)
-	defer func() { require.NoError(t, os.Chmod(tempDir, 0755)) }()
-
-	_, err = NewState(StateParameters{
-		Directory: tempDir,
-		Schema:    5,
-	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "permission denied")
 }
 
 func TestState_Close_ClosesDatabaseOnlyOnce(t *testing.T) {
@@ -99,35 +91,26 @@ func TestState_Close_ClosesDatabaseOnlyOnce(t *testing.T) {
 	require.NoError(t, state.Close())
 }
 
-func TestState_GetStateRoot_ForwardsCallToDatabase(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	db := carmen.NewMockStateDB(ctrl)
-
-	hash := cc.Hash{1, 2, 3}
-	db.EXPECT().GetCommitment().Return(
-		future.Immediate(result.Ok(hash)),
-	)
-
-	state := &State{DB: db}
-
-	got, err := state.GetStateRoot().Await().Get()
-	require.NoError(t, err)
-	require.Equal(t, common.Hash(hash), got)
-}
-
-func TestState_GetStateRoot_ForwardsErrorFromDatabase(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	db := carmen.NewMockStateDB(ctrl)
-
+func TestState_GetStateRoot_ForwardsCommitmentOfDatabase(t *testing.T) {
 	issue := fmt.Errorf("database error")
-	db.EXPECT().GetCommitment().Return(
-		future.Immediate(result.Err[cc.Hash](issue)),
-	)
+	tests := map[string]struct {
+		commitment result.Result[cc.Hash]
+		want       common.Hash
+		wantErr    error
+	}{
+		"commitment": {commitment: result.Ok(cc.Hash{1, 2, 3}), want: common.Hash{1, 2, 3}},
+		"error":      {commitment: result.Err[cc.Hash](issue), wantErr: issue},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			db := carmen.NewMockStateDB(gomock.NewController(t))
+			db.EXPECT().GetCommitment().Return(future.Immediate(tt.commitment))
 
-	state := &State{DB: db}
-
-	_, err := state.GetStateRoot().Await().Get()
-	require.ErrorIs(t, err, issue)
+			got, err := (&State{DB: db}).GetStateRoot().Await().Get()
+			require.ErrorIs(t, err, tt.wantErr)
+			require.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestState_ApplyGenesis_CanApplyGenesis(t *testing.T) {
@@ -193,28 +176,20 @@ func TestState_ApplyGenesis_ReturnsErrorIfEndBlockFails(t *testing.T) {
 }
 
 func TestState_EndBlockAndCommit_EndsAndCommitsBlock(t *testing.T) {
-	require := require.New(t)
-	ctrl := gomock.NewController(t)
-	db := carmen.NewMockStateDB(ctrl)
-	staged := carmen.NewMockStagedBlock(ctrl)
-
-	handle := carmen.NewWaitHandle(make(chan error))
-	gomock.InOrder(
-		db.EXPECT().EndBlock(uint64(42)).Return(staged, nil),
-		staged.EXPECT().Commit().Return(handle, nil),
-	)
-
-	got, err := EndBlockAndCommit(&State{DB: db}, 42)
-	require.NoError(err)
-	require.Same(handle, got)
-}
-
-func TestState_EndBlockAndCommit_ReportsErrors(t *testing.T) {
 	issue := fmt.Errorf("injected error")
+	handle := carmen.NewWaitHandle(make(chan error))
 	tests := map[string]struct {
 		setup   func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock)
 		wantErr string
 	}{
+		"block is committed": {
+			setup: func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock) {
+				gomock.InOrder(
+					db.EXPECT().EndBlock(uint64(42)).Return(staged, nil),
+					staged.EXPECT().Commit().Return(handle, nil),
+				)
+			},
+		},
 		"end block fails": {
 			setup: func(db *carmen.MockStateDB, staged *carmen.MockStagedBlock) {
 				db.EXPECT().EndBlock(uint64(42)).Return(nil, issue)
@@ -244,8 +219,13 @@ func TestState_EndBlockAndCommit_ReportsErrors(t *testing.T) {
 			staged := carmen.NewMockStagedBlock(ctrl)
 			test.setup(db, staged)
 
-			_, err := EndBlockAndCommit(&State{DB: db}, 42)
-			require.ErrorContains(err, test.wantErr)
+			got, err := EndBlockAndCommit(&State{DB: db}, 42)
+			if test.wantErr != "" {
+				require.ErrorContains(err, test.wantErr)
+				return
+			}
+			require.NoError(err)
+			require.Same(handle, got)
 		})
 	}
 }

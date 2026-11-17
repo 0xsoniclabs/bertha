@@ -24,28 +24,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestStartProfiling_ValidPath_CreatesNewFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "cpu.prof")
-	require.False(t, exists(path))
+func TestStartProfiling_CreatesFileIfPathIsValid(t *testing.T) {
+	tests := map[string]struct {
+		path    string
+		wantErr string
+	}{
+		"valid path":   {path: "cpu.prof"},
+		"invalid path": {path: filepath.Join("nonexistent", "cpu.prof"), wantErr: "no such file or directory"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), tt.path)
+			require.False(t, exists(path))
 
-	profiler, err := StartCPUProfile(path)
-	require.NoError(t, err)
-	require.True(t, exists(path))
-
-	err = profiler.Stop()
-	require.NoError(t, err)
-	require.True(t, exists(path))
-}
-
-func TestStartProfiling_InvalidPath_ReturnsAnError(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "nonexistent", "cpu.prof")
-	require.False(t, exists(path))
-
-	_, err := StartCPUProfile(path)
-	require.Error(t, err)
-	require.False(t, exists(path))
+			profiler, err := StartCPUProfile(path)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				require.False(t, exists(path))
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, exists(path))
+			require.NoError(t, profiler.Stop())
+			require.True(t, exists(path))
+		})
+	}
 }
 
 func TestStartProfiling_StartingASecondProfilerFails(t *testing.T) {

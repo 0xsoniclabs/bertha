@@ -348,6 +348,11 @@ func TestExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ReportFailures(t *testi
 			return e.ExecuteBlockOnArchive(state, block, parentHeader, blockHashes{})
 		}}
 	}
+	bundleUpgrades := opera.GetBrioUpgrades()
+	bundleUpgrades.TransactionBundles = true
+	signer := types.LatestSignerForChainID(new(big.Int).SetUint64(opera.FakeNetworkID))
+	// Its transfer succeeds and adds a receipt.
+	succeedingBundle := bundle.NewBuilder().WithSigner(signer).With(bundle.Step(sender, &types.AccessListTx{Gas: 100_000, GasPrice: big.NewInt(1e11), To: &common.Address{1}})).Build()
 	tests := map[string]struct {
 		execute     executors
 		setup       func(*testing.T, *Executor, *state.State)
@@ -385,6 +390,17 @@ func TestExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ReportFailures(t *testi
 				e.metadataStore.(*BlockDBMetadataStore).metadata.FailedBundles = FailedBundles{1: {{Pos: 1, Tx: types.NewTx(&types.LegacyTx{})}}}
 			},
 			wantErr: "failed to insert failed bundles into block 1",
+		},
+		"failed bundle that did not fail": {
+			execute: both,
+			setup: func(_ *testing.T, e *Executor, _ *state.State) {
+				e.metadataStore.(*BlockDBMetadataStore).metadata = Metadata{
+					RulesUpdateHeights: []RulesUpdateHeight{{Rules: opera.FakeNetRules(bundleUpgrades)}},
+					FailedBundles:      FailedBundles{1: {{Pos: 0, Tx: succeedingBundle}}},
+				}
+			},
+			modifyBlock: func(b *blockdb.Block) { b.Transactions = nil },
+			wantErr:     fmt.Sprintf("failed bundle %v added a receipt", succeedingBundle.Hash()),
 		},
 		"failing ledger head": {
 			execute: live,
@@ -564,32 +580,6 @@ func TestExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ProcessFailedBundles(t 
 	require.Equal(t, receipts[0].CumulativeGasUsed, archived[0].CumulativeGasUsed)
 }
 
-func TestExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_FailOnFailedBundleThatDidNotFail(t *testing.T) {
-	upgrades := opera.GetBrioUpgrades()
-	upgrades.TransactionBundles = true
-	signer := types.LatestSignerForChainID(new(big.Int).SetUint64(opera.FakeNetworkID))
-	// Its transfer succeeds and adds a receipt.
-	envelope := bundle.NewBuilder().WithSigner(signer).With(bundle.Step(sender, &types.AccessListTx{Gas: 100_000, GasPrice: big.NewInt(1e11), To: &common.Address{1}})).Build()
-
-	tests := map[string]func(*Executor, *state.State, *types.Block) (types.Receipts, error){
-		"ExecuteBlock":          executeLiveBlock,
-		"ExecuteBlockOnArchive": executeArchiveBlock,
-	}
-
-	for name, execute := range tests {
-		t.Run(name, func(t *testing.T) {
-			executor, state, blocks := newTestExecutor(t, &BlockDBMetadataStore{metadata: Metadata{
-				RulesUpdateHeights: []RulesUpdateHeight{{Rules: opera.FakeNetRules(upgrades)}},
-				FailedBundles:      FailedBundles{1: {{Pos: 0, Tx: envelope}}},
-			}})
-			require.NoError(t, state.DB.Flush())
-
-			_, err := execute(executor, state, withTransactions(t, blocks[1]))
-			require.ErrorContains(t, err, fmt.Sprintf("failed bundle %v added a receipt", envelope.Hash()))
-		})
-	}
-}
-
 func TestExecutor_ExecuteBlockOnArchive_ReproducesReceiptsOfExecuteBlock(t *testing.T) {
 	// Without the single proposer block formation, Sonic charges 10% of the
 	// excess gas, so the receipts reveal whether Sonic's VM config is used.
@@ -615,15 +605,25 @@ func TestNewLedgerStore_RebuildsRecordedHead(t *testing.T) {
 	recorded.Receipts = []*blockdb.TransactionReceipt{{CumulativeGasUsed: 21_000, Logs: []*blockdb.Log{{Address: common.Address{1}.Bytes()}}}}
 	head, err := convert.ConvertToGethBlock(recorded)
 	require.NoError(t, err)
+	tests := map[string]struct {
+		header  *types.Header
+		wantErr string
+	}{
+		"recorded head":      {header: head.Header()},
+		"invalid extra data": {header: &types.Header{Number: big.NewInt(4)}, wantErr: "failed to decode extra data of block 4"},
+	}
 
-	ledgerStore, err := newLedgerStore(head.Header(), nil)
-	require.NoError(t, err)
-	require.Equal(t, head.Hash(), ledgerStore.head.Hash())
-}
-
-func TestNewLedgerStore_ReportsInvalidExtraData(t *testing.T) {
-	_, err := newLedgerStore(&types.Header{Number: big.NewInt(4)}, nil)
-	require.ErrorContains(t, err, "failed to decode extra data of block 4")
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			ledgerStore, err := newLedgerStore(tt.header, nil)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.header.Hash(), ledgerStore.head.Hash())
+		})
+	}
 }
 
 func TestLedgerStore_GetLatestBlockIndex_ReturnsNumberOfHead(t *testing.T) {

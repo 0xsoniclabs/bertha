@@ -30,53 +30,62 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFailedBundles_UnmarshalJSON_GroupsByBlockInInputOrder(t *testing.T) {
+func TestFailedBundles_UnmarshalJSON_GroupsSortedEntriesByBlock(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	envelopes := make([]*types.Transaction, 4)
-	for i := range envelopes {
-		envelopes[i] = bundle.NewBuilder().
+	txs := make([]string, 4)
+	hashes := make([]common.Hash, 4)
+	for i := range txs {
+		envelope := bundle.NewBuilder().
 			SetEnvelopeNonce(uint64(i)).
 			With(bundle.Step(key, &types.AccessListTx{})).
 			Build()
+		txs[i], hashes[i] = encodeTx(t, envelope), envelope.Hash()
 	}
-
-	data := fmt.Appendf(nil, `[
-		{"block": 7, "pos": 0, "tx": "%s"},
-		{"block": 7, "pos": 2, "tx": "%s"},
-		{"block": 7, "pos": 2, "tx": "%s"},
-		{"block": 9, "pos": 1, "tx": "%s"}
-	]`, encodeTx(t, envelopes[0]), encodeTx(t, envelopes[1]), encodeTx(t, envelopes[2]), encodeTx(t, envelopes[3]))
-
-	var failedBundles FailedBundles
-	require.NoError(t, json.Unmarshal(data, &failedBundles))
-
-	require.Equal(t, map[uint64][]failedBundleHash{
-		7: {{0, envelopes[0].Hash()}, {2, envelopes[1].Hash()}, {2, envelopes[2].Hash()}},
-		9: {{1, envelopes[3].Hash()}},
-	}, failedBundleHashes(failedBundles))
-}
-
-func TestFailedBundles_UnmarshalJSON_ReportsIssues(t *testing.T) {
-	key, err := crypto.GenerateKey()
-	require.NoError(t, err)
-	tx := encodeTx(t, bundle.NewBuilder().With(bundle.Step(key, &types.AccessListTx{})).Build())
 
 	tests := map[string]struct {
 		content string
+		want    map[uint64][]failedBundleHash
 		wantErr string
 	}{
-		"invalid entry":       {content: `[{"block": "1"}]`, wantErr: "cannot unmarshal string"},
-		"null entry":          {content: `[null]`, wantErr: "failed bundle 0 has no block"},
-		"missing block":       {content: fmt.Sprintf(`[{"pos": 0, "tx": "%s"}]`, tx), wantErr: "failed bundle 0 has no block"},
-		"missing position":    {content: fmt.Sprintf(`[{"block": 1, "tx": "%s"}]`, tx), wantErr: "failed bundle 0 has no position"},
-		"invalid transaction": {content: fmt.Sprintf(`[{"block": 1, "pos": 0, "tx": "%s"}, {"block": 1, "pos": 2, "tx": "0x01"}]`, tx), wantErr: "invalid transaction of failed bundle 1 at block 1, position 2"},
+		"sorted entries": {
+			content: fmt.Sprintf(`[
+				{"block": 7, "pos": 0, "tx": "%s"},
+				{"block": 7, "pos": 2, "tx": "%s"},
+				{"block": 7, "pos": 2, "tx": "%s"},
+				{"block": 9, "pos": 1, "tx": "%s"}
+			]`, txs[0], txs[1], txs[2], txs[3]),
+			want: map[uint64][]failedBundleHash{
+				7: {{0, hashes[0]}, {2, hashes[1]}, {2, hashes[2]}},
+				9: {{1, hashes[3]}},
+			},
+		},
+		"invalid entry": {
+			content: `[{"block": "1"}]`,
+			wantErr: "cannot unmarshal string",
+		},
+		"null entry": {
+			content: `[null]`,
+			wantErr: "failed bundle 0 has no block",
+		},
+		"missing block": {
+			content: fmt.Sprintf(`[{"pos": 0, "tx": "%s"}]`, txs[0]),
+			wantErr: "failed bundle 0 has no block",
+		},
+		"missing position": {
+			content: fmt.Sprintf(`[{"block": 1, "tx": "%s"}]`, txs[0]),
+			wantErr: "failed bundle 0 has no position",
+		},
+		"invalid transaction": {
+			content: fmt.Sprintf(`[{"block": 1, "pos": 0, "tx": "%s"}, {"block": 1, "pos": 2, "tx": "0x01"}]`, txs[0]),
+			wantErr: "invalid transaction of failed bundle 1 at block 1, position 2",
+		},
 		"unsorted blocks": {
-			content: fmt.Sprintf(`[{"block": 2, "pos": 0, "tx": "%s"}, {"block": 1, "pos": 1, "tx": "%s"}]`, tx, tx),
+			content: fmt.Sprintf(`[{"block": 2, "pos": 0, "tx": "%s"}, {"block": 1, "pos": 1, "tx": "%s"}]`, txs[0], txs[1]),
 			wantErr: "failed bundle 1 at block 1, position 1 is not sorted by block and position",
 		},
 		"unsorted positions": {
-			content: fmt.Sprintf(`[{"block": 1, "pos": 2, "tx": "%s"}, {"block": 1, "pos": 1, "tx": "%s"}]`, tx, tx),
+			content: fmt.Sprintf(`[{"block": 1, "pos": 2, "tx": "%s"}, {"block": 1, "pos": 1, "tx": "%s"}]`, txs[0], txs[1]),
 			wantErr: "failed bundle 1 at block 1, position 1 is not sorted by block and position",
 		},
 	}
@@ -84,7 +93,13 @@ func TestFailedBundles_UnmarshalJSON_ReportsIssues(t *testing.T) {
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			var failedBundles FailedBundles
-			require.ErrorContains(t, json.Unmarshal([]byte(tt.content), &failedBundles), tt.wantErr)
+			err := json.Unmarshal([]byte(tt.content), &failedBundles)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, failedBundleHashes(failedBundles))
 		})
 	}
 }

@@ -447,178 +447,89 @@ func TestReplayLoop_CanProcessBlocks(t *testing.T) {
 	}
 }
 
-func TestReplayLoop_FailsOnFailedBlockRetrieval(t *testing.T) {
-	for name, run := range replayers {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-			// ChainID is only called by the pipeline (for signer creation), not by
-			// the linear loop, so the exact count varies with the runner.
-			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-
-			injectedError := fmt.Errorf("injected error")
-			blocks := func(yield func(*blockdb.Block, error) bool) {
-				yield(nil, injectedError)
-			}
-			require.ErrorIs(t, run(t.Context(), blocks, executor, nil, ReplayLoopContext{}, nil, nil), injectedError)
-		})
+func TestReplayLoop_ReportsFailures(t *testing.T) {
+	injectedError := fmt.Errorf("injected error")
+	applyBlock := func(receipts types.Receipts, stateRoot common.Hash, err error) func(*MockHistoryExecutor) {
+		return func(executor *MockHistoryExecutor) {
+			executor.EXPECT().ApplyBlock(gomock.Any()).Return(receipts, future.Immediate(result.Ok(stateRoot)), err)
+		}
 	}
-}
+	tests := map[string]struct {
+		blocks    iter.Seq2[*blockdb.Block, error]
+		cancelled bool
+		expect    func(*MockHistoryExecutor)
+		wantErr   string
+		cause     error
+	}{
+		"failed block retrieval": {
+			blocks:  func(yield func(*blockdb.Block, error) bool) { yield(nil, injectedError) },
+			wantErr: "failed to get next block",
+			cause:   injectedError,
+		},
+		"cancelled context": {
+			blocks:    utils.NewIter([]*blockdb.Block{{Number: 0, StateRoot: types.EmptyRootHash[:]}}),
+			cancelled: true,
+			wantErr:   "context canceled",
+			cause:     context.Canceled,
+		},
+		"block conversion error": {
+			blocks:  utils.NewIter([]*blockdb.Block{{Transactions: []*blockdb.Transaction{{TransactionType: 99_999}}}}),
+			wantErr: "failed to convert block 0",
+		},
+		// The blocks of the following cases have number 0, so GetBlockHash is
+		// never called.
+		"block application error": {
+			blocks:  utils.NewIter([]*blockdb.Block{{}}),
+			expect:  applyBlock(nil, common.Hash{}, injectedError),
+			wantErr: "failed to apply block 0",
+			cause:   injectedError,
+		},
+		"different receipts": {
+			blocks:  utils.NewIter([]*blockdb.Block{{}}),
+			expect:  applyBlock(types.Receipts{{}}, common.Hash{}, nil),
+			wantErr: "number of receipts mismatch",
+		},
+		"incorrect state root": {
+			blocks: utils.NewIter([]*blockdb.Block{{StateRoot: common.Hash{0x2}.Bytes()}}),
+			expect: func(executor *MockHistoryExecutor) {
+				executor.EXPECT().IsMptConformant().Return(true)
+				applyBlock(nil, common.Hash{0x1}, nil)(executor)
+			},
+			wantErr: "state root mismatch",
+		},
+		"parent hash mismatch": {
+			blocks: utils.NewIter([]*blockdb.Block{{Number: 1, ParentHash: common.Hash{0xCD}.Bytes()}}),
+			expect: func(executor *MockHistoryExecutor) {
+				executor.EXPECT().IsMptConformant().Return(true)
+				executor.EXPECT().GetBlockHash(uint64(0)).Return(common.Hash{0xAB})
+				applyBlock(nil, common.Hash{0x1}, nil)(executor)
+			},
+			wantErr: "parent hash mismatch",
+		},
+	}
+	for name, tt := range tests {
+		for runName, run := range replayers {
+			t.Run(name+"/"+runName, func(t *testing.T) {
+				executor := newMockHistoryExecutorWithMaybeSnapshot(gomock.NewController(t))
+				// ChainID is only called by the pipeline (for signer creation), not by
+				// the linear loop, so the exact count varies with the runner.
+				executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
+				if tt.expect != nil {
+					tt.expect(executor)
+				}
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				if tt.cancelled {
+					cancel()
+				}
 
-func TestReplayLoop_FailsOnCancelledContext(t *testing.T) {
-	for name, run := range replayers {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-			// ChainID is only called by the pipeline (for signer creation), not by
-			// the linear loop, so the exact count varies with the runner.
-			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-
-			ctxt, cancel := context.WithCancel(t.Context())
-			cancel()
-
-			blocks := utils.NewIter([]*blockdb.Block{
-				{Number: 0, StateRoot: types.EmptyRootHash[:]},
+				err := run(ctx, tt.blocks, executor, nil, ReplayLoopContext{}, nil, nil)
+				require.ErrorContains(t, err, tt.wantErr)
+				if tt.cause != nil {
+					require.ErrorIs(t, err, tt.cause)
+				}
 			})
-
-			require.ErrorIs(t, run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil), context.Canceled)
-		})
-	}
-}
-
-func TestReplayLoop_FailsOnBlockConversionError(t *testing.T) {
-	for name, run := range replayers {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-			// ChainID is only called by the pipeline (for signer creation), not by
-			// the linear loop, so the exact count varies with the runner.
-			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-
-			ctxt := t.Context()
-			blocks := utils.NewIter([]*blockdb.Block{{
-				Transactions: []*blockdb.Transaction{{
-					TransactionType: 99_999, // invalid transaction type
-				}},
-			}})
-			require.ErrorContains(t,
-				run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil),
-				"failed to convert block 0",
-			)
-		})
-	}
-}
-
-func TestReplayLoop_FailsOnBlockApplicationError(t *testing.T) {
-	for name, run := range replayers {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-			// ChainID is only called by the pipeline (for signer creation), not by
-			// the linear loop, so the exact count varies with the runner.
-			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-			// The single block has Number=0, so GetBlockHash is never called.
-
-			injectedError := fmt.Errorf("injected error")
-			executor.EXPECT().
-				ApplyBlock(gomock.Any()).
-				Return(nil, future.Immediate(result.Ok(common.Hash{})), injectedError)
-
-			ctxt := t.Context()
-			blocks := utils.NewIter([]*blockdb.Block{{}})
-			require.ErrorIs(t,
-				run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil),
-				injectedError,
-			)
-		})
-	}
-}
-
-func TestReplayLoop_FailsOnDifferentReceipts(t *testing.T) {
-	for name, run := range replayers {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-			// ChainID is only called by the pipeline (for signer creation), not by
-			// the linear loop, so the exact count varies with the runner.
-			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-			// The single block has Number=0, so GetBlockHash is never called.
-
-			executor.EXPECT().
-				ApplyBlock(gomock.Any()).
-				Return(types.Receipts{{}}, future.Immediate(result.Ok(common.Hash{})), nil)
-
-			blocks := utils.NewIter([]*blockdb.Block{{}})
-			require.ErrorContains(t,
-				run(t.Context(), blocks, executor, nil, ReplayLoopContext{}, nil, nil),
-				"number of receipts mismatch",
-			)
-		})
-	}
-}
-
-func TestReplayLoop_FailsOnParentHashMismatch(t *testing.T) {
-	for name, run := range replayers {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-			// ChainID is only called by the pipeline (for signer creation), not by
-			// the linear loop, so the exact count varies with the runner.
-			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-			executor.EXPECT().IsMptConformant().Return(true)
-
-			hashOfParentBlock := common.Hash{0xAB}
-			executor.EXPECT().GetBlockHash(uint64(0)).Return(hashOfParentBlock)
-
-			executor.EXPECT().
-				ApplyBlock(gomock.Any()).
-				Return(
-					nil,
-					future.Immediate(result.Ok(common.Hash{0x1})),
-					nil,
-				)
-
-			ctxt := t.Context()
-			blocks := utils.NewIter([]*blockdb.Block{{
-				Number:     uint64(1),
-				ParentHash: common.Hash{0xCD}.Bytes(), // does not match hashOfParentBlock
-			}})
-			require.ErrorContains(t,
-				run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil),
-				"parent hash mismatch",
-			)
-		})
-	}
-}
-
-func TestReplayLoop_FailsOnIncorrectStateRootHash(t *testing.T) {
-	for name, run := range replayers {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
-			// ChainID is only called by the pipeline (for signer creation), not by
-			// the linear loop, so the exact count varies with the runner.
-			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-			executor.EXPECT().IsMptConformant().Return(true)
-			// The single block has Number=0, so GetBlockHash is never called.
-
-			executor.EXPECT().
-				ApplyBlock(gomock.Any()).
-				Return(
-					nil,
-					future.Immediate(result.Ok(common.Hash{0x1})),
-					nil,
-				)
-
-			ctxt := t.Context()
-			blocks := utils.NewIter([]*blockdb.Block{{
-				StateRoot: common.Hash{0x2}.Bytes(),
-			}})
-			require.ErrorContains(t,
-				run(ctxt, blocks, executor, nil, ReplayLoopContext{}, nil, nil),
-				"state root mismatch",
-			)
-		})
+		}
 	}
 }
 
@@ -746,7 +657,7 @@ func TestReplayLoop_OverwriteStateRootHash(t *testing.T) {
 					Number:    1,
 					StateRoot: common.Hash{0x1}.Bytes(),
 				},
-			).Times(1)
+			)
 
 			ctxt := t.Context()
 			blocks := utils.NewIter([]*blockdb.Block{{
@@ -961,11 +872,12 @@ func TestSeedBlockHashHistory(t *testing.T) {
 
 	cases := map[string]struct {
 		firstBlockToApply uint64
-		dbBlocks          []*blockdb.Block // nil → GetRange must not be called
+		dbBlocks          []*blockdb.Block // nil without dbErr → GetRange must not be called
+		dbErr             error
 		wantStart         uint64
 		wantEnd           uint64
 		wantHashes        map[uint64]common.Hash
-		wantErr           bool
+		wantErr           string
 	}{
 		"NoSeedingWhenStartBlockIsZero": {
 			firstBlockToApply: 0,
@@ -1012,29 +924,40 @@ func TestSeedBlockHashHistory(t *testing.T) {
 			dbBlocks:          []*blockdb.Block{},
 			wantStart:         1,
 			wantEnd:           100,
-			wantErr:           true,
+			wantErr:           "expected 100 blocks in [1, 100] for chain 42, got 0",
 		},
 		"ErrorsWhenFewerBlocksThanExpected": {
 			firstBlockToApply: 1000,
 			dbBlocks:          makeParents(745, 100),
 			wantStart:         745,
 			wantEnd:           1000,
-			wantErr:           true,
+			wantErr:           "expected 256 blocks in [745, 1000] for chain 42, got 100",
+		},
+		"PropagatesBlockDBError": {
+			firstBlockToApply: 100,
+			dbErr:             fmt.Errorf("boom"),
+			wantStart:         1,
+			wantEnd:           100,
+			wantErr:           "failed to read block for hash history seeding: boom",
 		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			db := blockdb.NewMockBlockDB(ctrl)
-			if tc.dbBlocks != nil {
-				db.EXPECT().
-					GetRange(chainID, tc.wantStart, tc.wantEnd).
-					Return(utils.NewIter(tc.dbBlocks))
+			if tc.dbBlocks != nil || tc.dbErr != nil {
+				var blocks iter.Seq2[*blockdb.Block, error]
+				if tc.dbErr != nil {
+					blocks = func(yield func(*blockdb.Block, error) bool) { yield(nil, tc.dbErr) }
+				} else {
+					blocks = utils.NewIter(tc.dbBlocks)
+				}
+				db.EXPECT().GetRange(chainID, tc.wantStart, tc.wantEnd).Return(blocks)
 			}
 			history := &blockHashHistory{}
 			err := seedBlockHashHistory(db, chainID, tc.firstBlockToApply, history)
-			if tc.wantErr {
-				require.Error(t, err)
+			if tc.wantErr != "" {
+				require.EqualError(t, err, tc.wantErr)
 				return
 			}
 			require.NoError(t, err)
@@ -1045,40 +968,20 @@ func TestSeedBlockHashHistory(t *testing.T) {
 	}
 }
 
-func TestSeedBlockHashHistory_PropagatesBlockDBError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	db := blockdb.NewMockBlockDB(ctrl)
-
-	var errIter iter.Seq2[*blockdb.Block, error] = func(yield func(*blockdb.Block, error) bool) {
-		yield(nil, fmt.Errorf("boom"))
-	}
-	db.EXPECT().
-		GetRange(uint64(42), uint64(1), uint64(100)).
-		Return(errIter)
-
-	history := &blockHashHistory{}
-	err := seedBlockHashHistory(db, 42, 100, history)
-	require.ErrorContains(t, err, "boom")
-}
-
-func TestGetRecordedHeader_ReturnsHeaderOfRecordedBlock(t *testing.T) {
+func TestGetRecordedHeader_ReturnsHeaderOfRecordedBlockOrReportsFailure(t *testing.T) {
 	block := &blockdb.Block{Number: 4}
 	converted, err := convert.ConvertToGethBlock(block)
 	require.NoError(t, err)
-	db := blockdb.NewMockBlockDB(gomock.NewController(t))
-	db.EXPECT().Get(uint64(42), uint64(4)).Return(block, nil)
-
-	header, err := getRecordedHeader(db, 42, 4)
-	require.NoError(t, err)
-	require.Equal(t, converted.Header(), header)
-}
-
-func TestGetRecordedHeader_ReportsFailures(t *testing.T) {
 	tests := map[string]struct {
 		recorded *blockdb.Block
 		err      error
+		want     *types.Header
 		wantErr  string
 	}{
+		"recorded block": {
+			recorded: block,
+			want:     converted.Header(),
+		},
 		"block DB error": {
 			err:     fmt.Errorf("boom"),
 			wantErr: "failed to read recorded block 4: boom",
@@ -1096,8 +999,13 @@ func TestGetRecordedHeader_ReportsFailures(t *testing.T) {
 			db := blockdb.NewMockBlockDB(gomock.NewController(t))
 			db.EXPECT().Get(uint64(42), uint64(4)).Return(tt.recorded, tt.err)
 
-			_, err := getRecordedHeader(db, 42, 4)
-			require.EqualError(t, err, tt.wantErr)
+			header, err := getRecordedHeader(db, 42, 4)
+			if tt.wantErr != "" {
+				require.EqualError(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, header)
 		})
 	}
 }
@@ -1219,25 +1127,26 @@ func TestBlockHashHistory_CanSetAndRetrieveHistoricHashes(t *testing.T) {
 
 func TestBlockHashHistory_ProducesHeaderWithCorrectHashes(t *testing.T) {
 	history := &blockHashHistory{}
+	history.SetBlockHash(12, common.Hash{1, 2, 3})
+	history.SetBlockHash(11, common.Hash{4, 5, 6})
+	history.SetBlockHash(10, common.Hash{7, 8, 9})
 
-	blockNum := uint64(12)
-	current := common.Hash{1, 2, 3}
-	parent := common.Hash{4, 5, 6}
-	grandParent := common.Hash{7, 8, 9}
-
-	history.SetBlockHash(blockNum, current)
-	history.SetBlockHash(blockNum-1, parent)
-	history.SetBlockHash(blockNum-2, grandParent)
-
-	header := history.Header(common.Hash{}, blockNum)
-	require.Equal(t, blockNum, header.Number.Uint64())
-	require.Equal(t, current, header.Hash)
-	require.Equal(t, parent, header.ParentHash)
-
-	header = history.Header(common.Hash{}, blockNum-1)
-	require.Equal(t, blockNum-1, header.Number.Uint64())
-	require.Equal(t, parent, header.Hash)
-	require.Equal(t, grandParent, header.ParentHash)
+	tests := map[string]struct {
+		number     uint64
+		hash       common.Hash
+		parentHash common.Hash
+	}{
+		"block 12": {number: 12, hash: common.Hash{1, 2, 3}, parentHash: common.Hash{4, 5, 6}},
+		"block 11": {number: 11, hash: common.Hash{4, 5, 6}, parentHash: common.Hash{7, 8, 9}},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			header := history.Header(common.Hash{}, tt.number)
+			require.Equal(t, tt.number, header.Number.Uint64())
+			require.Equal(t, tt.hash, header.Hash)
+			require.Equal(t, tt.parentHash, header.ParentHash)
+		})
+	}
 }
 
 func newMockHistoryExecutorWithMaybeSnapshot(ctrl *gomock.Controller) *MockHistoryExecutor {
