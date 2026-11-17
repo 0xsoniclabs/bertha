@@ -41,7 +41,7 @@ func TestStartDiagnostics_PortZero_PicksFreePortAndLogsAddressAndUserInfo(t *tes
 		require.True(t, strings.HasSuffix(address, "/debug/pprof"))
 		address = strings.TrimPrefix(address, "http://")
 		address = strings.TrimSuffix(address, "/debug/pprof")
-	}).Times(1)
+	})
 
 	server, err := StartDiagnostics(logger, 0)
 	require.NoError(t, err)

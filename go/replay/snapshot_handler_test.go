@@ -25,20 +25,26 @@ import (
 )
 
 func Test_SnapshotHandler_ShouldCreateSnapshot(t *testing.T) {
-	require := require.New(t)
-
 	handler := &SnapshotHandler{
 		blockInterval: 1000,
-		startBlock:    100,
+		startBlock:    1100,
 		endBlock:      3000,
 	}
-
-	require.True(handler.ShouldCreateSnapshot(1000))
-	require.True(handler.ShouldCreateSnapshot(2000))
-	require.False(handler.ShouldCreateSnapshot(1500))
-	require.False(handler.ShouldCreateSnapshot(0))
-	require.False(handler.ShouldCreateSnapshot(50))
-	require.False(handler.ShouldCreateSnapshot(4000))
+	tests := map[string]struct {
+		block uint64
+		want  bool
+	}{
+		"first interval":     {block: 2000, want: true},
+		"second interval":    {block: 3000, want: true},
+		"between intervals":  {block: 1500},
+		"before start block": {block: 1000},
+		"after end block":    {block: 4000},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, tt.want, handler.ShouldCreateSnapshot(tt.block))
+		})
+	}
 }
 
 func Test_NewSnapshotHandler_InitializeSnapshotHandlerCorrectly(t *testing.T) {
@@ -48,7 +54,7 @@ func Test_NewSnapshotHandler_InitializeSnapshotHandlerCorrectly(t *testing.T) {
 	require.Equal(uint64(1000), handler.blockInterval)
 	require.Equal(uint64(100), handler.startBlock)
 	require.Equal(uint64(3000), handler.endBlock)
-	require.Equal(len(handler.pastSnapshotList), 3)
+	require.Len(handler.pastSnapshotList, 3)
 	for _, blockNumber := range handler.pastSnapshotList {
 		require.Nil(blockNumber)
 	}

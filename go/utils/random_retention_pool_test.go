@@ -22,72 +22,68 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRandomRetentionPool_NewRandomRetentionPool_CreatesPoolWithSpecifiedCapacity(t *testing.T) {
-	capacity := 5
-	pool, err := NewRandomRetentionPool[int](capacity)
-	require.NoError(t, err)
-	require.Equal(t, capacity, cap(pool.items))
-}
-
-func TestRandomRetentionPool_NewRandomRetentionPool_ReturnsErrorForNonPositiveCapacity(t *testing.T) {
-	_, err := NewRandomRetentionPool[int](0)
-	require.Error(t, err)
-
-	_, err = NewRandomRetentionPool[int](-1)
-	require.Error(t, err)
-}
-
-func TestRandomRetentionPool_Add_AddsItemsUntilCapacity(t *testing.T) {
-	capacity := 3
-	pool := RandomRetentionPool[int]{items: make([]int, 0, capacity)}
-
-	for i := 0; i < capacity; i++ {
-		pool.Add(i)
+func TestRandomRetentionPool_NewRandomRetentionPool_CreatesPoolWithPositiveCapacity(t *testing.T) {
+	tests := map[string]struct {
+		capacity int
+		wantErr  string
+	}{
+		"positive capacity": {capacity: 5},
+		"zero capacity":     {capacity: 0, wantErr: "pool capacity must be larger than 0"},
+		"negative capacity": {capacity: -1, wantErr: "pool capacity must be larger than 0"},
 	}
-
-	require.Equal(t, capacity, len(pool.items))
-	for i := 0; i < capacity; i++ {
-		require.Contains(t, pool.items, i)
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			pool, err := NewRandomRetentionPool[int](tt.capacity)
+			if tt.wantErr != "" {
+				require.EqualError(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.capacity, cap(pool.items))
+		})
 	}
 }
 
-func TestRandomRetentionPool_Add_ReplacesItemsWhenAtCapacity(t *testing.T) {
-	capacity := 3
-	pool := RandomRetentionPool[int]{items: make([]int, 0, capacity)}
-
-	for i := 0; i < capacity; i++ {
-		pool.Add(i)
+func TestRandomRetentionPool_Add_KeepsItemsUpToCapacity(t *testing.T) {
+	tests := map[string]struct {
+		adds         int
+		wantContains []int
+	}{
+		"up to capacity":  {adds: 3, wantContains: []int{0, 1, 2}},
+		"beyond capacity": {adds: 8, wantContains: []int{7}},
 	}
-
-	// Submit additional items to trigger replacement
-	for i := capacity; i < capacity+5; i++ {
-		pool.Add(i)
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			pool := RandomRetentionPool[int]{items: make([]int, 0, 3)}
+			for i := range tt.adds {
+				pool.Add(i)
+			}
+			require.Len(t, pool.items, 3)
+			require.Subset(t, pool.items, tt.wantContains)
+		})
 	}
-
-	require.Equal(t, capacity, len(pool.items)) // The pool should still have the same capacity
-	require.Contains(t, pool.items, capacity+4) // The last submitted item should be in the pool
 }
 
-func TestRandomRetentionPool_GetRandom_ReturnsItemFromPool(t *testing.T) {
-	capacity := 3
-	pool := RandomRetentionPool[int]{items: []int{0, 1, 2}}
-
-	for i := 0; i < capacity; i++ {
-		pool.Add(i)
+func TestRandomRetentionPool_GetRandom_ReturnsItemFromPoolIfNotEmpty(t *testing.T) {
+	tests := map[string]struct {
+		items  []int
+		wantOK bool
+	}{
+		"empty pool":     {items: []int{}},
+		"non-empty pool": {items: []int{0, 1, 2}, wantOK: true},
 	}
-
-	item, ok := pool.GetRandom()
-	require.True(t, ok)
-	require.Contains(t, pool.items, item)
-}
-
-func TestRandomRetentionPool_GetRandom_ReturnsFalseWhenEmpty(t *testing.T) {
-	capacity := 3
-	pool := RandomRetentionPool[int]{items: make([]int, 0, capacity)}
-
-	item, ok := pool.GetRandom()
-	require.False(t, ok)
-	require.Equal(t, 0, item) // zero value for int
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			pool := RandomRetentionPool[int]{items: tt.items}
+			item, ok := pool.GetRandom()
+			require.Equal(t, tt.wantOK, ok)
+			if tt.wantOK {
+				require.Contains(t, tt.items, item)
+			} else {
+				require.Zero(t, item)
+			}
+		})
+	}
 }
 
 func TestRandomRetentionPool_RecentItemsAreMoreLikely(t *testing.T) {

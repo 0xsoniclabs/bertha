@@ -311,54 +311,9 @@ func TestApplyBlockWithProcessor_RunsSystemCallsOfActiveUpgradesAndReportsTheirF
 	}
 }
 
-func TestApplyBlockWithProcessor_CreditsWithdrawalsOnlyPostMerge(t *testing.T) {
+func TestApplyBlockWithProcessor_CreditsWithdrawalsPostMergeAndRewardsPreMerge(t *testing.T) {
 	const amountGwei = uint64(1000)
 	withdrawalAddr := common.Address{0xAB}
-
-	tests := map[string]struct {
-		difficulty     uint64
-		wantBalanceWei uint64
-	}{
-		"post-merge": {
-			difficulty:     0,
-			wantBalanceWei: amountGwei * params.GWei,
-		},
-		"pre-merge": {
-			difficulty:     1,
-			wantBalanceWei: 0,
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
-			require.NoError(t, err)
-			defer func() { require.NoError(t, state.Close()) }()
-
-			block, err := convert.ConvertToGethBlock(&blockdb.Block{
-				GasLimit:   8_000_000,
-				Difficulty: tt.difficulty,
-				Withdrawals: []*blockdb.Withdrawal{
-					{Address: withdrawalAddr.Bytes(), Amount: amountGwei},
-				},
-			})
-			require.NoError(t, err)
-
-			processor := evmcore.NewStateProcessorForReplay(
-				params.MainnetChainConfig,
-				blockHashes{},
-				opera.Upgrades{},
-			)
-
-			_, _, err = applyBlockWithProcessor(state, block, testInterpreter(t), processor, params.MainnetChainConfig, false)
-			require.NoError(t, err)
-
-			require.Equal(t, tt.wantBalanceWei, state.DB.GetBalance(cc.Address(withdrawalAddr)).Uint64())
-		})
-	}
-}
-
-func TestApplyBlockWithProcessor_AccumulatesRewardsOnlyPreMerge(t *testing.T) {
 	coinbase := common.Address{0x01}
 	uncleCoinbase := common.Address{0x02}
 	blockNumber := uint64(10_000_000) // post-Constantinople
@@ -375,20 +330,42 @@ func TestApplyBlockWithProcessor_AccumulatesRewardsOnlyPreMerge(t *testing.T) {
 	minerReward := new(uint256.Int).Set(blockReward)
 	minerReward.Add(minerReward, new(uint256.Int).Div(blockReward, uint256.NewInt(32)))
 
+	withdrawalBlock := func(difficulty uint64) *blockdb.Block {
+		return &blockdb.Block{
+			GasLimit:    8_000_000,
+			Difficulty:  difficulty,
+			Withdrawals: []*blockdb.Withdrawal{{Address: withdrawalAddr.Bytes(), Amount: amountGwei}},
+		}
+	}
+	rewardedBlock := func(difficulty uint64) *blockdb.Block {
+		return &blockdb.Block{
+			Number:       blockNumber,
+			GasLimit:     8_000_000,
+			Difficulty:   difficulty,
+			Beneficiary:  coinbase.Bytes(),
+			OmmerHeaders: []*blockdb.OmmerHeader{{Beneficiary: uncleCoinbase.Bytes(), Number: uncleNumber}},
+		}
+	}
+
 	tests := map[string]struct {
-		difficulty       uint64
-		wantMinerBalance *uint256.Int
-		wantUncleBalance *uint256.Int
+		block        *blockdb.Block
+		wantBalances map[common.Address]*uint256.Int
 	}{
-		"pre-merge": {
-			difficulty:       1,
-			wantMinerBalance: minerReward,
-			wantUncleBalance: uncleReward,
+		"withdrawals post-merge": {
+			block:        withdrawalBlock(0),
+			wantBalances: map[common.Address]*uint256.Int{withdrawalAddr: uint256.NewInt(amountGwei * params.GWei)},
 		},
-		"post-merge": {
-			difficulty:       0,
-			wantMinerBalance: uint256.NewInt(0),
-			wantUncleBalance: uint256.NewInt(0),
+		"withdrawals pre-merge": {
+			block:        withdrawalBlock(1),
+			wantBalances: map[common.Address]*uint256.Int{withdrawalAddr: uint256.NewInt(0)},
+		},
+		"rewards pre-merge": {
+			block:        rewardedBlock(1),
+			wantBalances: map[common.Address]*uint256.Int{coinbase: minerReward, uncleCoinbase: uncleReward},
+		},
+		"rewards post-merge": {
+			block:        rewardedBlock(0),
+			wantBalances: map[common.Address]*uint256.Int{coinbase: uint256.NewInt(0), uncleCoinbase: uint256.NewInt(0)},
 		},
 	}
 
@@ -398,15 +375,7 @@ func TestApplyBlockWithProcessor_AccumulatesRewardsOnlyPreMerge(t *testing.T) {
 			require.NoError(t, err)
 			defer func() { require.NoError(t, state.Close()) }()
 
-			block, err := convert.ConvertToGethBlock(&blockdb.Block{
-				Number:      blockNumber,
-				GasLimit:    8_000_000,
-				Difficulty:  tt.difficulty,
-				Beneficiary: coinbase.Bytes(),
-				OmmerHeaders: []*blockdb.OmmerHeader{
-					{Beneficiary: uncleCoinbase.Bytes(), Number: uncleNumber},
-				},
-			})
+			block, err := convert.ConvertToGethBlock(tt.block)
 			require.NoError(t, err)
 
 			processor := evmcore.NewStateProcessorForReplay(
@@ -418,8 +387,9 @@ func TestApplyBlockWithProcessor_AccumulatesRewardsOnlyPreMerge(t *testing.T) {
 			_, _, err = applyBlockWithProcessor(state, block, testInterpreter(t), processor, params.MainnetChainConfig, false)
 			require.NoError(t, err)
 
-			require.Equal(t, tt.wantMinerBalance.ToBig(), state.DB.GetBalance(cc.Address(coinbase)).ToBig())
-			require.Equal(t, tt.wantUncleBalance.ToBig(), state.DB.GetBalance(cc.Address(uncleCoinbase)).ToBig())
+			for address, want := range tt.wantBalances {
+				require.Equal(t, want.ToBig(), state.DB.GetBalance(cc.Address(address)).ToBig())
+			}
 		})
 	}
 }

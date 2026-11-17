@@ -100,7 +100,7 @@ func TestCorrections_JSONRoundTrip_WorksWithMapValues(t *testing.T) {
 	require.Equal(t, original, decoded)
 }
 
-func TestCorrections_decodeFixed_DecodesStringCorrectly(t *testing.T) {
+func TestDecodeHexTo32Bytes_DecodesHexOfAtMost32Bytes(t *testing.T) {
 	input := "0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
 	expected := [32]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
 		0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
@@ -109,6 +109,7 @@ func TestCorrections_decodeFixed_DecodesStringCorrectly(t *testing.T) {
 	tests := map[string]struct {
 		input    string
 		expected [32]byte
+		wantErr  string
 	}{
 		"lowercase": {
 			input:    input,
@@ -130,36 +131,29 @@ func TestCorrections_decodeFixed_DecodesStringCorrectly(t *testing.T) {
 			input:    "0x1234",
 			expected: [32]byte{30: 0x12, 31: 0x34},
 		},
+		"odd length": {
+			input:   "0x123",
+			wantErr: "odd-length hex string",
+		},
+		"too big": {
+			input:   "0x" + strings.Repeat("01", 33),
+			wantErr: "value exceeds 32 bytes (33)",
+		},
+		"invalid hex": {
+			input:   "0x" + strings.Repeat("zz", 32),
+			wantErr: "invalid byte",
+		},
 	}
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			got, err := decodeHexTo32Bytes(tc.input)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, tc.expected, got)
-		})
-	}
-}
-
-func TestCorrections_decodeFixed_ReturnsErrors(t *testing.T) {
-	tests := map[string]struct {
-		input string
-	}{
-		"odd length": {
-			input: "0x123",
-		},
-		"too big": {
-			input: "0x" + strings.Repeat("01", 33),
-		},
-		"invalid hex": {
-			input: "0x" + strings.Repeat("zz", 32),
-		},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			_, err := decodeHexTo32Bytes(tc.input)
-			require.Error(t, err)
 		})
 	}
 }
@@ -189,29 +183,29 @@ func TestApplyCorrections_AppliesCorrectionsToStateDB(t *testing.T) {
 	stateDB := carmen.NewMockVmStateDB(ctrl)
 	logger := utils.NewMockLogger(ctrl)
 
-	stateDB.EXPECT().BeginTransaction().Times(1)
+	stateDB.EXPECT().BeginTransaction()
 	stateDB.EXPECT().GetBalance(cc.Address(address)).Return(oldBalance).Times(2)
-	stateDB.EXPECT().AddBalance(cc.Address(address), balanceDiff).Times(1)
-	stateDB.EXPECT().GetState(cc.Address(address), storageKey).Return(oldStorageValue).Times(1)
-	stateDB.EXPECT().SetState(cc.Address(address), storageKey, newStorageValue).Times(1)
-	stateDB.EXPECT().EndTransaction().Times(1)
+	stateDB.EXPECT().AddBalance(cc.Address(address), balanceDiff)
+	stateDB.EXPECT().GetState(cc.Address(address), storageKey).Return(oldStorageValue)
+	stateDB.EXPECT().SetState(cc.Address(address), storageKey, newStorageValue)
+	stateDB.EXPECT().EndTransaction()
 
-	logger.EXPECT().Info("Applying corrections", "block", blockNumber).Times(1)
+	logger.EXPECT().Info("Applying corrections", "block", blockNumber)
 	logger.EXPECT().Info("Correcting balance",
 		"address", address.Hex(),
 		"old", oldBalance.ToBig().String(),
 		"new", newBalance.ToBig().String(),
-	).Times(1)
+	)
 	logger.EXPECT().Info("Correcting storage",
 		"address", address.Hex(),
 		"storage_keys", len(corrections[blockNumber][address].Storage),
-	).Times(1)
+	)
 	logger.EXPECT().Info("Correcting storage entry",
 		"address", address.Hex(),
 		"key", fmt.Sprintf("0x%x", storageKey[:]),
 		"old", fmt.Sprintf("0x%x", oldStorageValue[:]),
 		"new", fmt.Sprintf("0x%x", newStorageValue[:]),
-	).Times(1)
+	)
 
 	block := types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(blockNumber)})
 	applyCorrections(stateDB, corrections[blockNumber], block, logger)

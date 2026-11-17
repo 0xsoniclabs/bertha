@@ -345,17 +345,31 @@ func Test_checkStateRoot(t *testing.T) {
 	}
 }
 
-func Test_checkParentHash_LogsMessageIfPreviousBlockHashNotSet(t *testing.T) {
-	ctrl := gomock.NewController(t)
-
-	block := &blockdb.Block{
-		Number:     3,
-		ParentHash: common.Hash{0xAB}.Bytes(),
+func Test_checkParentHash_FailsIfHashOfPreviousBlockMismatchesParentHash(t *testing.T) {
+	cases := map[string]struct {
+		hashOfParent  common.Hash
+		expectWarning bool
+		expectedError string
+	}{
+		"matching":       {hashOfParent: common.Hash{0xAB}},
+		"mismatching":    {hashOfParent: common.Hash{0xCD}, expectedError: "parent hash mismatch: hash of block 2 is cd"},
+		"previous unset": {expectWarning: true},
 	}
 
-	logger := utils.NewMockLogger(ctrl)
-	logger.EXPECT().Warn("No block hash set. Parent hash verification skipped", "block_number", block.Number)
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			block := &blockdb.Block{Number: 3, ParentHash: common.Hash{0xAB}.Bytes()}
+			logger := utils.NewMockLogger(gomock.NewController(t))
+			if tc.expectWarning {
+				logger.EXPECT().Warn("No block hash set. Parent hash verification skipped", "block_number", block.Number)
+			}
 
-	err := checkParentHash(block, common.Hash{}, logger)
-	require.NoError(t, err)
+			err := checkParentHash(block, tc.hashOfParent, logger)
+			if tc.expectedError == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tc.expectedError)
+			}
+		})
+	}
 }

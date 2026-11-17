@@ -25,45 +25,55 @@ import (
 )
 
 func TestIsEmptyOrMissingDir_DetectsMissingAndEmptyDirs(t *testing.T) {
-	missingDir := filepath.Join(t.TempDir(), "missing")
-	emptyDir := t.TempDir()
-	nonEmptyDir := t.TempDir()
-
-	filePath := filepath.Join(nonEmptyDir, "file.txt")
-	err := os.WriteFile(filePath, []byte("data"), 0644)
-	require.NoError(t, err)
-
-	isEmpty, err := IsEmptyOrMissingDir(missingDir)
-	require.NoError(t, err)
-	require.True(t, isEmpty, "Expected missing directory to be considered empty")
-
-	isEmpty, err = IsEmptyOrMissingDir(emptyDir)
-	require.NoError(t, err)
-	require.True(t, isEmpty, "Expected empty directory to be considered empty")
-
-	isEmpty, err = IsEmptyOrMissingDir(nonEmptyDir)
-	require.NoError(t, err)
-	require.False(t, isEmpty, "Expected non-empty directory to not be considered empty")
+	tests := map[string]struct {
+		dir  func(*testing.T) string
+		want bool
+	}{
+		"missing directory": {
+			dir:  func(t *testing.T) string { return filepath.Join(t.TempDir(), "missing") },
+			want: true,
+		},
+		"empty directory": {
+			dir:  func(t *testing.T) string { return t.TempDir() },
+			want: true,
+		},
+		"non-empty directory": {
+			dir: func(t *testing.T) string {
+				dir := t.TempDir()
+				require.NoError(t, os.WriteFile(filepath.Join(dir, "file.txt"), []byte("data"), 0644))
+				return dir
+			},
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			isEmpty, err := IsEmptyOrMissingDir(tt.dir(t))
+			require.NoError(t, err)
+			require.Equal(t, tt.want, isEmpty)
+		})
+	}
 }
 
 func TestDirSize_ComputesSizeRecursively(t *testing.T) {
-	dir := t.TempDir()
+	tests := map[string]struct {
+		files []string
+		want  int64
+	}{
+		"empty directory": {want: 0},
+		"nested files":    {files: []string{"file1.txt", filepath.Join("subdir", "file2.txt")}, want: 2 * 13},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			for _, file := range tt.files {
+				path := filepath.Join(dir, file)
+				require.NoError(t, os.MkdirAll(filepath.Dir(path), 0755))
+				require.NoError(t, os.WriteFile(path, []byte("Hello, World!"), 0644))
+			}
 
-	size, err := DirSize(dir)
-	require.NoError(t, err)
-	require.Equal(t, int64(0), size)
-
-	file1Path := filepath.Join(dir, "file1.txt")
-	err = os.WriteFile(file1Path, []byte("Hello, World!"), 0644)
-	require.NoError(t, err)
-	subDir := filepath.Join(dir, "subdir")
-	err = os.Mkdir(subDir, 0755)
-	require.NoError(t, err)
-	file2Path := filepath.Join(subDir, "file2.txt")
-	err = os.WriteFile(file2Path, []byte("Hello, World!"), 0644)
-	require.NoError(t, err)
-
-	size, err = DirSize(dir)
-	require.NoError(t, err)
-	require.Equal(t, int64(26), size)
+			size, err := DirSize(dir)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, size)
+		})
+	}
 }

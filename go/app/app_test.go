@@ -64,44 +64,37 @@ func TestRun_FailedRun_ReportsIssue(t *testing.T) {
 	)
 }
 
-func TestParseOverwriteStateRootPolicy_AcceptsValidValues(t *testing.T) {
+func TestParseOverwriteStateRootPolicy_AcceptsOnlyValidValues(t *testing.T) {
 	cases := map[string]struct {
-		input string
-		want  replay.OverwriteStateRootPolicy
+		input   string
+		want    replay.OverwriteStateRootPolicy
+		wantErr bool
 	}{
-		"Empty":              {"", replay.OverwriteStateRootPolicyOff},
-		"Off":                {"off", replay.OverwriteStateRootPolicyOff},
-		"False":              {"false", replay.OverwriteStateRootPolicyOff},
-		"OffUpperCase":       {"OFF", replay.OverwriteStateRootPolicyOff},
-		"OffWithWhitespace":  {"  off  ", replay.OverwriteStateRootPolicyOff},
-		"Uninitialized":      {"uninitialized", replay.OverwriteStateRootPolicyUninitialized},
-		"UninitializedMixed": {"Uninitialized", replay.OverwriteStateRootPolicyUninitialized},
-		"On":                 {"on", replay.OverwriteStateRootPolicyOn},
-		"True":               {"true", replay.OverwriteStateRootPolicyOn},
-		"OnUpperCase":        {"ON", replay.OverwriteStateRootPolicyOn},
+		"Empty":              {input: "", want: replay.OverwriteStateRootPolicyOff},
+		"Off":                {input: "off", want: replay.OverwriteStateRootPolicyOff},
+		"False":              {input: "false", want: replay.OverwriteStateRootPolicyOff},
+		"OffUpperCase":       {input: "OFF", want: replay.OverwriteStateRootPolicyOff},
+		"OffWithWhitespace":  {input: "  off  ", want: replay.OverwriteStateRootPolicyOff},
+		"Uninitialized":      {input: "uninitialized", want: replay.OverwriteStateRootPolicyUninitialized},
+		"UninitializedMixed": {input: "Uninitialized", want: replay.OverwriteStateRootPolicyUninitialized},
+		"On":                 {input: "on", want: replay.OverwriteStateRootPolicyOn},
+		"True":               {input: "true", want: replay.OverwriteStateRootPolicyOn},
+		"OnUpperCase":        {input: "ON", want: replay.OverwriteStateRootPolicyOn},
+		"Garbage":            {input: "maybe", wantErr: true},
+		"AbbreviatedYes":     {input: "y", wantErr: true},
+		"AbbreviatedNo":      {input: "n", wantErr: true},
+		"NumericTrue":        {input: "1", wantErr: true},
+		"NumericFalse":       {input: "0", wantErr: true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			got, err := parseOverwriteStateRootPolicy(tc.input)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "`off`, `uninitialized`, `on`")
+				return
+			}
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got)
-		})
-	}
-}
-
-func TestParseOverwriteStateRootPolicy_RejectsInvalidValues(t *testing.T) {
-	cases := map[string]string{
-		"Garbage":        "maybe",
-		"AbbreviatedYes": "y",
-		"AbbreviatedNo":  "n",
-		"NumericTrue":    "1",
-		"NumericFalse":   "0",
-	}
-	for name, input := range cases {
-		t.Run(name, func(t *testing.T) {
-			_, err := parseOverwriteStateRootPolicy(input)
-			require.Error(t, err)
-			require.ErrorContains(t, err, "`off`, `uninitialized`, `on`")
 		})
 	}
 }

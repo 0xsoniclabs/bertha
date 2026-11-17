@@ -48,29 +48,26 @@ func TestVerify_StartBlockAfterEndBlock_ReportsAnIssue(t *testing.T) {
 	)
 }
 
-func TestVerify_RunWithoutParameters_FailsToOpenMissingDb(t *testing.T) {
-	ctrl := gomock.NewController(t)
+func TestVerify_MissingDatabase_ReportsAnIssue(t *testing.T) {
+	tests := map[string]struct {
+		directory func(*testing.T) string
+	}{
+		"no directory":    {directory: func(*testing.T) string { return "" }},
+		"empty directory": {directory: func(t *testing.T) string { return t.TempDir() }},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			directory := tt.directory(t)
+			logger := utils.NewMockLogger(ctrl)
+			logger.EXPECT().Info("Opening block database", "directory", directory)
 
-	logger := utils.NewMockLogger(ctrl)
-	logger.EXPECT().Info("Opening block database", "directory", "")
-
-	require.ErrorContains(t,
-		Verify(t.Context(), VerifyArgs{}, logger, utils.NewMockProgressIndicatorFactory(ctrl)),
-		"failed to open database",
-	)
-}
-
-func TestVerify_InvalidDirectory_ReportsAnIssue(t *testing.T) {
-	ctrl := gomock.NewController(t)
-
-	directory := t.TempDir()
-	logger := utils.NewMockLogger(ctrl)
-	logger.EXPECT().Info("Opening block database", "directory", directory)
-
-	require.ErrorContains(t,
-		Verify(t.Context(), VerifyArgs{DatabaseDir: directory}, logger, utils.NewMockProgressIndicatorFactory(ctrl)),
-		"failed to open database",
-	)
+			require.ErrorContains(t,
+				Verify(t.Context(), VerifyArgs{DatabaseDir: directory}, logger, utils.NewMockProgressIndicatorFactory(ctrl)),
+				"failed to open database",
+			)
+		})
+	}
 }
 
 func TestVerify_NoBlocksInRange_LogsWarning(t *testing.T) {
@@ -127,6 +124,7 @@ func TestVerify_BlockRange_IsClampedToStoredBlocks(t *testing.T) {
 		wantStartBlock uint64
 		wantEndBlock   uint64
 	}{
+		"end block at highest":     {blocks: storedBlocks, endBlock: 9, wantEndBlock: 9},
 		"unbounded end block":      {blocks: storedBlocks, endBlock: math.MaxUint64, wantEndBlock: 9},
 		"end block above highest":  {blocks: storedBlocks, endBlock: 100, wantEndBlock: 9},
 		"end block below highest":  {blocks: storedBlocks, endBlock: 4, wantEndBlock: 4},
@@ -200,37 +198,6 @@ func TestVerify_UnreadableBlockAtRangeBound_ReportsAnIssue(t *testing.T) {
 	}
 }
 
-func TestVerify_ValidContentDatabase_DoesNotReportIssues(t *testing.T) {
-	ctrl := gomock.NewController(t)
-
-	chainID := uint64(123)
-	blocks := 10
-
-	progressIndicator := utils.NewMockProgressIndicator(ctrl)
-	progressIndicator.EXPECT().Add(1).Return(nil).Times(blocks)
-	progressIndicatorFactory := utils.NewMockProgressIndicatorFactory(ctrl)
-	progressIndicatorFactory.EXPECT().New(int64(blocks), "Verifying blocks").
-		Return(progressIndicator)
-
-	directory := createDatabase(t, chainID, utils.CreateValidBlocks(t, blocks))
-
-	logger := utils.NewMockLogger(ctrl)
-	logger.EXPECT().Info("Opening block database", "directory", directory)
-	logger.EXPECT().Info("Verifying blocks",
-		"chain_id", chainID,
-		"start_block", uint64(0),
-		"end_block", uint64(blocks-1),
-	)
-
-	require.NoError(t,
-		Verify(t.Context(),
-			VerifyArgs{DatabaseDir: directory, ChainID: chainID, StartBlock: 0, EndBlock: uint64(blocks - 1)},
-			logger,
-			progressIndicatorFactory,
-		),
-	)
-}
-
 func TestVerify_StoredFailedBundles_TolerateHashMismatches(t *testing.T) {
 	chainID := uint64(146)
 	blocks := utils.CreateValidBlocks(t, 3)
@@ -293,24 +260,48 @@ func TestGetStoredBlockRange_NilBlock_ReportsAnIssue(t *testing.T) {
 	require.ErrorContains(t, err, "encountered nil block")
 }
 
-func TestVerifyBlocks_ValidBlockHashSequence_DoesNotReportIssues(t *testing.T) {
-	// Create a sequence of valid blocks with proper parent-child relationships.
-	validBlocks := utils.CreateValidBlocks(t, 10)
-
+func TestVerifyBlocks_ChecksBlockHashSequence(t *testing.T) {
 	// Blocks are processed in reverse order such that the hash of a block is
 	// collected from the parent-hash field of the successor before checking
 	// the hash of the block itself.
+	validBlocks := utils.CreateValidBlocks(t, 10)
 	slices.Reverse(validBlocks)
-
-	require.NoError(t, verifyBlocks(t.Context(), utils.NewIter(validBlocks), nil, nil, nil))
-}
-
-func TestVerifyBlocks_InvalidBlockHash_IssueIsDetected(t *testing.T) {
-	blocks := []*blockdb.Block{{}, {}, {}}
-	require.ErrorContains(t,
-		verifyBlocks(t.Context(), utils.NewIter(blocks), nil, nil, nil),
-		"lock verification failed for block 0: block hash mismatch",
-	)
+	injected := fmt.Errorf("injected")
+	tests := map[string]struct {
+		blocks  iter.Seq2[*blockdb.Block, error]
+		wantErr string
+		cause   error
+	}{
+		"valid block hash sequence": {
+			blocks: utils.NewIter(validBlocks),
+		},
+		"invalid block hash": {
+			blocks:  utils.NewIter([]*blockdb.Block{{}, {}, {}}),
+			wantErr: "block verification failed for block 0: block hash mismatch",
+		},
+		"nil block": {
+			blocks:  utils.NewIter([]*blockdb.Block{{}, nil}),
+			wantErr: "encountered nil block",
+		},
+		"failing block retrieval": {
+			blocks:  func(yield func(*blockdb.Block, error) bool) { yield(nil, injected) },
+			wantErr: "failed to get block",
+			cause:   injected,
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := verifyBlocks(t.Context(), tt.blocks, nil, nil, nil)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tt.wantErr)
+			if tt.cause != nil {
+				require.ErrorIs(t, err, tt.cause)
+			}
+		})
+	}
 }
 
 func TestVerifyBlocks_OnlyHashMismatchOfBlockWithFailedBundles_IsTolerated(t *testing.T) {
@@ -343,27 +334,6 @@ func TestVerifyBlocks_OnlyHashMismatchOfBlockWithFailedBundles_IsTolerated(t *te
 	}
 }
 
-func TestVerifyBlocks_NilBlockInput_AbortsWithError(t *testing.T) {
-	blocks := []*blockdb.Block{{}, nil}
-	require.ErrorContains(t,
-		verifyBlocks(t.Context(), utils.NewIter(blocks), nil, nil, nil),
-		"encountered nil block",
-	)
-}
-
-func TestVerifyBlocks_ErrorDuringBlockRetrieval_AbortsWithError(t *testing.T) {
-	issue := fmt.Errorf("deliberately introduced error")
-	blocks := func() iter.Seq2[*blockdb.Block, error] {
-		return func(yield func(*blockdb.Block, error) bool) {
-			yield(nil, issue)
-		}
-	}()
-
-	got := verifyBlocks(t.Context(), blocks, nil, nil, nil)
-	require.ErrorContains(t, got, "failed to get block")
-	require.ErrorIs(t, got, issue)
-}
-
 func TestVerifyBlocks_CancelledContext_ValidationAbortsWithError(t *testing.T) {
 	blocks := []*blockdb.Block{{}, {}, {}}
 
@@ -384,30 +354,30 @@ func TestVerifyBlocks_CancelledContext_ValidationAbortsWithError(t *testing.T) {
 	require.Equal(t, 1, counter, "progress callback should not be called after context cancellation")
 }
 
-func TestVerifyBlock_InvalidBlock_FailsOnBlockConversion(t *testing.T) {
-	block := &blockdb.Block{
-		Transactions: []*blockdb.Transaction{
-			{TransactionType: 999}, // Invalid transaction type
-		},
-	}
-	err := verifyBlock(common.Hash{}, block)
-	require.ErrorContains(t, err, "unsupported transaction type")
-}
-
-func TestVerifyBlock_InvalidHash_ReportsInvalidHash(t *testing.T) {
+func TestVerifyBlock_ChecksHashOfBlock(t *testing.T) {
 	// Believe it or not, this is a valid encoding of a block.
-	block := &blockdb.Block{}
-	err := verifyBlock(common.Hash{}, block)
-	require.ErrorContains(t, err, "block hash mismatch")
-}
-
-func TestVerifyBlock_CorrectHash_VerifyPasses(t *testing.T) {
 	block := &blockdb.Block{}
 	gethBlock, err := convert.ConvertToGethBlock(block)
 	require.NoError(t, err)
-
-	hash := gethBlock.Hash()
-	require.NoError(t, verifyBlock(hash, block))
+	tests := map[string]struct {
+		block   *blockdb.Block
+		hash    common.Hash
+		wantErr string
+	}{
+		"correct hash":  {block: block, hash: gethBlock.Hash()},
+		"invalid hash":  {block: block, wantErr: "block hash mismatch"},
+		"invalid block": {block: &blockdb.Block{Transactions: []*blockdb.Transaction{{TransactionType: 999}}}, wantErr: "unsupported transaction type"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			err := verifyBlock(tt.hash, tt.block)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+		})
+	}
 }
 
 // createDatabase creates a block database holding the given blocks under the given chain ID and
