@@ -22,6 +22,7 @@ import (
 	"log"
 	"log/slog"
 	"math/big"
+	"slices"
 	"testing"
 	"time"
 
@@ -304,6 +305,34 @@ func TestExecutor_ExecuteBlock_ReturnsHeaderOfExecutedBlockWithRecordedStateRoot
 	require.NoError(t, err)
 	require.NotEqual(t, root, block.Root())
 	require.Equal(t, block.Root(), header.Root)
+}
+
+func TestExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_RunBlockWithItsTimeAndPrevRandao(t *testing.T) {
+	// Init code that logs PREVRANDAO and TIMESTAMP.
+	code := program.New().
+		Op(vm.PREVRANDAO).Push(0).Op(vm.MSTORE).
+		Op(vm.TIMESTAMP).Push(32).Op(vm.MSTORE).
+		Push(64).Push(0).Op(vm.LOG0).
+		Bytes()
+	tests := map[string]func(*Executor, *state.State, *types.Block) (types.Receipts, error){
+		"ExecuteBlock":          executeLiveBlock,
+		"ExecuteBlockOnArchive": executeArchiveBlock,
+	}
+
+	for name, execute := range tests {
+		t.Run(name, func(t *testing.T) {
+			executor, state, blocks := newTestExecutor(t, sonicMetadataStore())
+			require.NoError(t, state.DB.Flush())
+			blocks[1].PrevRandao = common.Hash{1}.Bytes()
+			block := withTransactions(t, blocks[1], sign(&types.LegacyTx{Gas: 100_000, GasPrice: big.NewInt(1e11), Data: code}))
+
+			receipts, err := execute(executor, state, block)
+			require.NoError(t, err)
+			require.Len(t, receipts, 1)
+			require.Len(t, receipts[0].Logs, 1)
+			require.Equal(t, slices.Concat(common.Hash{1}.Bytes(), common.BigToHash(new(big.Int).SetUint64(block.Time())).Bytes()), receipts[0].Logs[0].Data)
+		})
+	}
 }
 
 func TestExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ReportFailures(t *testing.T) {
