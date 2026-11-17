@@ -48,18 +48,6 @@ func TestFailedBundles_UnmarshalJSON_GroupsSortedEntriesByBlock(t *testing.T) {
 		want    map[uint64][]failedBundleHash
 		wantErr string
 	}{
-		"sorted entries": {
-			content: fmt.Sprintf(`[
-				{"block": 7, "pos": 0, "tx": "%s"},
-				{"block": 7, "pos": 2, "tx": "%s"},
-				{"block": 7, "pos": 2, "tx": "%s"},
-				{"block": 9, "pos": 1, "tx": "%s"}
-			]`, txs[0], txs[1], txs[2], txs[3]),
-			want: map[uint64][]failedBundleHash{
-				7: {{0, hashes[0]}, {2, hashes[1]}, {2, hashes[2]}},
-				9: {{1, hashes[3]}},
-			},
-		},
 		"invalid entry": {
 			content: `[{"block": "1"}]`,
 			wantErr: "cannot unmarshal string",
@@ -87,6 +75,18 @@ func TestFailedBundles_UnmarshalJSON_GroupsSortedEntriesByBlock(t *testing.T) {
 		"unsorted positions": {
 			content: fmt.Sprintf(`[{"block": 1, "pos": 2, "tx": "%s"}, {"block": 1, "pos": 1, "tx": "%s"}]`, txs[0], txs[1]),
 			wantErr: "failed bundle 1 at block 1, position 1 is not sorted by block and position",
+		},
+		"sorted entries": {
+			content: fmt.Sprintf(`[
+				{"block": 7, "pos": 0, "tx": "%s"},
+				{"block": 7, "pos": 2, "tx": "%s"},
+				{"block": 7, "pos": 2, "tx": "%s"},
+				{"block": 9, "pos": 1, "tx": "%s"}
+			]`, txs[0], txs[1], txs[2], txs[3]),
+			want: map[uint64][]failedBundleHash{
+				7: {{0, hashes[0]}, {2, hashes[1]}, {2, hashes[2]}},
+				9: {{1, hashes[3]}},
+			},
 		},
 	}
 
@@ -116,12 +116,12 @@ func TestInsertFailedBundles_InsertsEnvelopesBeforeTheTransactionAtTheirPosition
 		wantErr       string
 	}{
 		"no failed bundles":   {want: types.Transactions{a, b}},
+		"beyond transactions": {failedBundles: []FailedBundle{{Pos: 3, Tx: x}}, wantErr: "position 3 of failed bundle exceeds the number of transactions 2"},
 		"first":               {failedBundles: []FailedBundle{{Pos: 0, Tx: x}}, want: types.Transactions{x, a, b}},
 		"middle":              {failedBundles: []FailedBundle{{Pos: 1, Tx: x}}, want: types.Transactions{a, x, b}},
 		"last":                {failedBundles: []FailedBundle{{Pos: 2, Tx: x}}, want: types.Transactions{a, b, x}},
 		"same position":       {failedBundles: []FailedBundle{{Pos: 1, Tx: x}, {Pos: 1, Tx: y}}, want: types.Transactions{a, x, y, b}},
 		"different positions": {failedBundles: []FailedBundle{{Pos: 0, Tx: x}, {Pos: 2, Tx: y}}, want: types.Transactions{x, a, b, y}},
-		"beyond transactions": {failedBundles: []FailedBundle{{Pos: 3, Tx: x}}, wantErr: "position 3 of failed bundle exceeds the number of transactions 2"},
 	}
 
 	for name, tt := range tests {
@@ -151,23 +151,23 @@ func TestBlockReceipts_ReturnsReceiptsUnlessTxsAreSkippedOrCausedByFailedBundles
 		want      types.Receipts
 		wantErr   string
 	}{
-		"receipts": {
-			processed: []evmcore.ProcessedTransaction{{Transaction: txA, Receipt: receiptA}, {Transaction: txB, Receipt: receiptB}},
-			causedBy:  map[common.Hash]common.Hash{txA.Hash(): txA.Hash(), txB.Hash(): succeededBundle.Hash()},
-			want:      types.Receipts{receiptA, receiptB},
+		"skipped failed bundle": {
+			processed: []evmcore.ProcessedTransaction{{Transaction: failedBundle}},
+			wantErr:   fmt.Sprintf("failed bundle %v was skipped", failedBundle.Hash()),
 		},
 		"skipped tx": {
 			processed: []evmcore.ProcessedTransaction{{Transaction: txA}},
 			wantErr:   fmt.Sprintf("tx %v was skipped", txA.Hash()),
 		},
-		"skipped failed bundle": {
-			processed: []evmcore.ProcessedTransaction{{Transaction: failedBundle}},
-			wantErr:   fmt.Sprintf("failed bundle %v was skipped", failedBundle.Hash()),
-		},
 		"receipt of failed bundle": {
 			processed: []evmcore.ProcessedTransaction{{Transaction: txA, Receipt: receiptA}},
 			causedBy:  map[common.Hash]common.Hash{txA.Hash(): failedBundle.Hash()},
 			wantErr:   fmt.Sprintf("failed bundle %v added a receipt for tx %v", failedBundle.Hash(), txA.Hash()),
+		},
+		"receipts": {
+			processed: []evmcore.ProcessedTransaction{{Transaction: txA, Receipt: receiptA}, {Transaction: txB, Receipt: receiptB}},
+			causedBy:  map[common.Hash]common.Hash{txA.Hash(): txA.Hash(), txB.Hash(): succeededBundle.Hash()},
+			want:      types.Receipts{receiptA, receiptB},
 		},
 	}
 

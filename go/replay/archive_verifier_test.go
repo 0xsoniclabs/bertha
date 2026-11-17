@@ -40,11 +40,11 @@ func TestArchiveVerifier_NewArchiveVerifier_ChecksArchiveRate(t *testing.T) {
 		err      bool
 		verifier bool
 	}{
+		"ZeroRate":     {rate: 0, err: false},
 		"NegativeRate": {rate: -1, err: true},
 		"NaNRate":      {rate: math.NaN(), err: true},
 		"InfRate":      {rate: math.Inf(1), err: true},
 		"TooHighRate":  {rate: math.MaxFloat64, err: true},
-		"ZeroRate":     {rate: 0, err: false},
 		"ValidRate":    {rate: 1000, err: false, verifier: true},
 	}
 
@@ -258,12 +258,12 @@ func TestArchiveVerifier_verifyBlock(t *testing.T) {
 		wantApply       bool
 		wantErr         string
 	}{
-		"matching receipts are accepted":                         {blockNumber: 2, storedGasUsed: matchingGasUsed, wantApply: true},
+		"failing archive height is reported":                     {archiveErr: fmt.Errorf("injected"), wantErr: "failed to get archive height"},
+		"block is skipped while archive is empty":                {archiveEmpty: true, blockNumber: 2},
+		"block above archive height is skipped":                  {blockNumber: 3},
 		"differing receipts are rejected":                        {blockNumber: 2, storedGasUsed: differingGasUsed, wantApply: true, wantErr: "receipt check failed for block 2"},
 		"differing receipts are accepted without receipts check": {blockNumber: 2, storedGasUsed: differingGasUsed, noReceiptsCheck: true, wantApply: true},
-		"block above archive height is skipped":                  {blockNumber: 3},
-		"block is skipped while archive is empty":                {archiveEmpty: true, blockNumber: 2},
-		"failing archive height is reported":                     {archiveErr: fmt.Errorf("injected"), wantErr: "failed to get archive height"},
+		"matching receipts are accepted":                         {blockNumber: 2, storedGasUsed: matchingGasUsed, wantApply: true},
 	}
 
 	for name, tc := range tests {

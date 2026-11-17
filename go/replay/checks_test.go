@@ -208,6 +208,12 @@ func Test_checkStateRoot(t *testing.T) {
 		expectedError               string
 		expectedStateRootNotSetSeen bool
 	}{
+		"Off errors on failed state root": {
+			policy:          OverwriteStateRootPolicyOff,
+			storedStateRoot: computedStateRoot,
+			stateRootErr:    fmt.Errorf("injected"),
+			expectedError:   "failed to get state root after applying block 5",
+		},
 		"On overwrites when stored matches": {
 			policy:          OverwriteStateRootPolicyOn,
 			storedStateRoot: computedStateRoot,
@@ -223,19 +229,10 @@ func Test_checkStateRoot(t *testing.T) {
 			storedStateRoot: otherStateRoot,
 			expectUpdate:    true,
 		},
-		"Uninitialized passes when stored matches": {
-			policy:          OverwriteStateRootPolicyUninitialized,
-			storedStateRoot: computedStateRoot,
-		},
 		"Uninitialized writes when stored is zero": {
 			policy:          OverwriteStateRootPolicyUninitialized,
 			storedStateRoot: zeroStateRoot,
 			expectUpdate:    true,
-		},
-		"Uninitialized errors on mismatch": {
-			policy:          OverwriteStateRootPolicyUninitialized,
-			storedStateRoot: otherStateRoot,
-			expectedError:   "state root mismatch",
 		},
 		"Uninitialized with skipStateRootCheck writes when stored is zero": {
 			policy:             OverwriteStateRootPolicyUninitialized,
@@ -248,9 +245,24 @@ func Test_checkStateRoot(t *testing.T) {
 			storedStateRoot:    otherStateRoot,
 			skipStateRootCheck: true,
 		},
-		"Off passes when stored matches": {
-			policy:          OverwriteStateRootPolicyOff,
+		"Uninitialized errors on mismatch": {
+			policy:          OverwriteStateRootPolicyUninitialized,
+			storedStateRoot: otherStateRoot,
+			expectedError:   "state root mismatch",
+		},
+		"Uninitialized passes when stored matches": {
+			policy:          OverwriteStateRootPolicyUninitialized,
 			storedStateRoot: computedStateRoot,
+		},
+		"Off with skipStateRootCheck ignores zero stored root without warning": {
+			policy:             OverwriteStateRootPolicyOff,
+			storedStateRoot:    zeroStateRoot,
+			skipStateRootCheck: true,
+		},
+		"Off with skipStateRootCheck ignores mismatch": {
+			policy:             OverwriteStateRootPolicyOff,
+			storedStateRoot:    otherStateRoot,
+			skipStateRootCheck: true,
 		},
 		"Off warns when stored is zero and not yet seen": {
 			policy:                      OverwriteStateRootPolicyOff,
@@ -269,21 +281,9 @@ func Test_checkStateRoot(t *testing.T) {
 			storedStateRoot: otherStateRoot,
 			expectedError:   "state root mismatch",
 		},
-		"Off errors on failed state root": {
+		"Off passes when stored matches": {
 			policy:          OverwriteStateRootPolicyOff,
 			storedStateRoot: computedStateRoot,
-			stateRootErr:    fmt.Errorf("injected"),
-			expectedError:   "failed to get state root after applying block 5",
-		},
-		"Off with skipStateRootCheck ignores zero stored root without warning": {
-			policy:             OverwriteStateRootPolicyOff,
-			storedStateRoot:    zeroStateRoot,
-			skipStateRootCheck: true,
-		},
-		"Off with skipStateRootCheck ignores mismatch": {
-			policy:             OverwriteStateRootPolicyOff,
-			storedStateRoot:    otherStateRoot,
-			skipStateRootCheck: true,
 		},
 	}
 
@@ -351,9 +351,9 @@ func Test_checkParentHash_FailsIfHashOfPreviousBlockMismatchesParentHash(t *test
 		expectWarning bool
 		expectedError string
 	}{
-		"matching":       {hashOfParent: common.Hash{0xAB}},
-		"mismatching":    {hashOfParent: common.Hash{0xCD}, expectedError: "parent hash mismatch: hash of block 2 is cd"},
 		"previous unset": {expectWarning: true},
+		"mismatching":    {hashOfParent: common.Hash{0xCD}, expectedError: "parent hash mismatch: hash of block 2 is cd"},
+		"matching":       {hashOfParent: common.Hash{0xAB}},
 	}
 
 	for name, tc := range cases {

@@ -298,11 +298,6 @@ func TestReplay_BlockDBAccessMode(t *testing.T) {
 		writeRulesUpdateHeights bool
 		requiresWriteAccess     bool
 	}{
-		"NoOverwriteStateRootAndNoWriteRulesUpdateHeightsRequiresOnlyReadAccess": {
-			overwriteStateRoot:      OverwriteStateRootPolicyOff,
-			writeRulesUpdateHeights: false,
-			requiresWriteAccess:     false,
-		},
 		"OverwriteStateRootOnRequiresWriteAccess": {
 			overwriteStateRoot:      OverwriteStateRootPolicyOn,
 			writeRulesUpdateHeights: false,
@@ -322,6 +317,11 @@ func TestReplay_BlockDBAccessMode(t *testing.T) {
 			overwriteStateRoot:      OverwriteStateRootPolicyOn,
 			writeRulesUpdateHeights: true,
 			requiresWriteAccess:     true,
+		},
+		"NoOverwriteStateRootAndNoWriteRulesUpdateHeightsRequiresOnlyReadAccess": {
+			overwriteStateRoot:      OverwriteStateRootPolicyOff,
+			writeRulesUpdateHeights: false,
+			requiresWriteAccess:     false,
 		},
 	}
 
@@ -350,6 +350,221 @@ func TestReplay_BlockDBAccessMode(t *testing.T) {
 					require.NoError(t, err)
 				}
 			}
+		})
+	}
+}
+
+// synthetic block hash for tests that encodes the block number in the last 8
+// bytes so hashes are unique across a 256-block window.
+func testBlockHash(n uint64) common.Hash {
+	var h common.Hash
+	binary.BigEndian.PutUint64(h[24:], n)
+	return h
+}
+
+func TestSeedBlockHashHistory(t *testing.T) {
+	// makeParents constructs count blocks starting at startNum with ParentHash
+	// set to testBlockHash(number-1), matching the invariant that block N's
+	// ParentHash equals hash(N-1).
+	makeParents := func(startNum uint64, count int) []*blockdb.Block {
+		blocks := make([]*blockdb.Block, count)
+		for i := range blocks {
+			n := startNum + uint64(i)
+			blocks[i] = &blockdb.Block{
+				Number:     n,
+				ParentHash: testBlockHash(n - 1).Bytes(),
+			}
+		}
+		return blocks
+	}
+	// expectedHashes returns the map of block-number → seeded hash for the
+	// inclusive range [first, last].
+	expectedHashes := func(first, last uint64) map[uint64]common.Hash {
+		m := map[uint64]common.Hash{}
+		for n := first; n <= last; n++ {
+			m[n] = testBlockHash(n)
+		}
+		return m
+	}
+
+	const chainID uint64 = 42
+
+	cases := map[string]struct {
+		firstBlockToApply uint64
+		dbBlocks          []*blockdb.Block // nil without dbErr → GetRange must not be called
+		dbErr             error
+		wantStart         uint64
+		wantEnd           uint64
+		wantHashes        map[uint64]common.Hash
+		wantErr           string
+	}{
+		"NoSeedingWhenStartBlockIsZero": {
+			firstBlockToApply: 0,
+			dbBlocks:          nil,
+			wantHashes:        map[uint64]common.Hash{},
+		},
+		"SeedsGenesisHashWhenStartingAtBlockOne": {
+			firstBlockToApply: 1,
+			dbBlocks:          makeParents(1, 1),
+			wantStart:         1,
+			wantEnd:           1,
+			wantHashes:        expectedHashes(0, 0),
+		},
+		"SeedsPartialWindowForLowStartBlock": {
+			firstBlockToApply: 100,
+			dbBlocks:          makeParents(1, 100),
+			wantStart:         1,
+			wantEnd:           100,
+			wantHashes:        expectedHashes(0, 99),
+		},
+		"SeedsPartialWindowFor255thBlock": {
+			firstBlockToApply: 255,
+			dbBlocks:          makeParents(1, 255),
+			wantStart:         1,
+			wantEnd:           255,
+			wantHashes:        expectedHashes(0, 254),
+		},
+		"SeedsFullWindowFor256thBlock": {
+			firstBlockToApply: 256,
+			dbBlocks:          makeParents(1, 256),
+			wantStart:         1,
+			wantEnd:           256,
+			wantHashes:        expectedHashes(0, 255),
+		},
+		"SeedsFullWindowForLaterBlock": {
+			firstBlockToApply: 1000,
+			dbBlocks:          makeParents(745, 256),
+			wantStart:         745,
+			wantEnd:           1000,
+			wantHashes:        expectedHashes(744, 999),
+		},
+		"PropagatesBlockDBError": {
+			firstBlockToApply: 100,
+			dbErr:             fmt.Errorf("boom"),
+			wantStart:         1,
+			wantEnd:           100,
+			wantErr:           "failed to read block for hash history seeding: boom",
+		},
+		"ErrorsWhenNoBlocksInRange": {
+			firstBlockToApply: 100,
+			dbBlocks:          []*blockdb.Block{},
+			wantStart:         1,
+			wantEnd:           100,
+			wantErr:           "expected 100 blocks in [1, 100] for chain 42, got 0",
+		},
+		"ErrorsWhenFewerBlocksThanExpected": {
+			firstBlockToApply: 1000,
+			dbBlocks:          makeParents(745, 100),
+			wantStart:         745,
+			wantEnd:           1000,
+			wantErr:           "expected 256 blocks in [745, 1000] for chain 42, got 100",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			db := blockdb.NewMockBlockDB(ctrl)
+			if tc.dbBlocks != nil || tc.dbErr != nil {
+				var blocks iter.Seq2[*blockdb.Block, error]
+				if tc.dbErr != nil {
+					blocks = func(yield func(*blockdb.Block, error) bool) { yield(nil, tc.dbErr) }
+				} else {
+					blocks = utils.NewIter(tc.dbBlocks)
+				}
+				db.EXPECT().GetRange(chainID, tc.wantStart, tc.wantEnd).Return(blocks)
+			}
+			history := &blockHashHistory{}
+			err := seedBlockHashHistory(db, chainID, tc.firstBlockToApply, history)
+			if tc.wantErr != "" {
+				require.EqualError(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			for num, expected := range tc.wantHashes {
+				require.Equal(t, expected, history.GetBlockHash(num))
+			}
+		})
+	}
+}
+
+func TestGetRecordedHeader_ReturnsHeaderOfRecordedBlockOrReportsFailure(t *testing.T) {
+	block := &blockdb.Block{Number: 4}
+	converted, err := convert.ConvertToGethBlock(block)
+	require.NoError(t, err)
+	tests := map[string]struct {
+		recorded *blockdb.Block
+		err      error
+		want     *types.Header
+		wantErr  string
+	}{
+		"block DB error": {
+			err:     fmt.Errorf("boom"),
+			wantErr: "failed to read recorded block 4: boom",
+		},
+		"block not recorded": {
+			wantErr: "block 4 is not recorded",
+		},
+		"invalid block": {
+			recorded: &blockdb.Block{Number: 4, Transactions: []*blockdb.Transaction{nil}},
+			wantErr:  "failed to convert recorded block 4: failed to convert transaction 0: cannot convert nil transaction",
+		},
+		"recorded block": {
+			recorded: block,
+			want:     converted.Header(),
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			db := blockdb.NewMockBlockDB(gomock.NewController(t))
+			db.EXPECT().Get(uint64(42), uint64(4)).Return(tt.recorded, tt.err)
+
+			header, err := getRecordedHeader(db, 42, 4)
+			if tt.wantErr != "" {
+				require.EqualError(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.want, header)
+		})
+	}
+}
+
+func TestGetLedgerHead_SearchesGasUsedOfRecordedHashUpToGasLimitOfFailedBundles(t *testing.T) {
+	recorded := &blockdb.Block{Number: 4}
+	converted, err := convert.ConvertToGethBlock(recorded)
+	require.NoError(t, err)
+	failedBundles := []sonic.FailedBundle{{Tx: types.NewTx(&types.LegacyTx{Gas: 400})}, {Tx: types.NewTx(&types.LegacyTx{Gas: 600})}}
+	tests := map[string]struct {
+		gasUsed       uint64
+		failedBundles []sonic.FailedBundle
+		wantErr       bool
+	}{
+		"gas used of receipts":                      {},
+		"gas used within failed bundles' gas limit": {gasUsed: 700, failedBundles: failedBundles},
+		"gas used up to failed bundles' gas limit":  {gasUsed: 1000, failedBundles: failedBundles},
+		"gas used beyond failed bundles' gas limit": {gasUsed: 1001, failedBundles: failedBundles, wantErr: true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			header := converted.Header()
+			header.GasUsed = tt.gasUsed
+
+			ctrl := gomock.NewController(t)
+			db := blockdb.NewMockBlockDB(ctrl)
+			db.EXPECT().Get(uint64(42), uint64(4)).Return(recorded, nil)
+			db.EXPECT().Get(uint64(42), uint64(5)).Return(&blockdb.Block{Number: 5, ParentHash: header.Hash().Bytes()}, nil)
+			metadataStore := sonic.NewMockMetadataStore(ctrl)
+			if tt.failedBundles != nil {
+				metadataStore.EXPECT().GetFailedBundlesAtBlock(uint64(4)).Return(tt.failedBundles)
+			}
+
+			head, err := getLedgerHead(db, metadataStore, 42, 4)
+			if tt.wantErr {
+				require.EqualError(t, err, fmt.Sprintf("no gas used of block 4 up to 1000 gives the hash %v recorded by block 5", header.Hash()))
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, header, head)
 		})
 	}
 }
@@ -833,221 +1048,6 @@ func TestHistoryExecutor_ApplyBlock_ReplacesHeaderAndRecordsItAsHead(t *testing.
 	require.Equal(t, header.Hash(), block.Hash())
 	require.Equal(t, header, executor.GetHeadHeader())
 	require.Equal(t, header.Hash(), executor.blockHashHistory.GetBlockHash(1))
-}
-
-// synthetic block hash for tests that encodes the block number in the last 8
-// bytes so hashes are unique across a 256-block window.
-func testBlockHash(n uint64) common.Hash {
-	var h common.Hash
-	binary.BigEndian.PutUint64(h[24:], n)
-	return h
-}
-
-func TestSeedBlockHashHistory(t *testing.T) {
-	// makeParents constructs count blocks starting at startNum with ParentHash
-	// set to testBlockHash(number-1), matching the invariant that block N's
-	// ParentHash equals hash(N-1).
-	makeParents := func(startNum uint64, count int) []*blockdb.Block {
-		blocks := make([]*blockdb.Block, count)
-		for i := range blocks {
-			n := startNum + uint64(i)
-			blocks[i] = &blockdb.Block{
-				Number:     n,
-				ParentHash: testBlockHash(n - 1).Bytes(),
-			}
-		}
-		return blocks
-	}
-	// expectedHashes returns the map of block-number → seeded hash for the
-	// inclusive range [first, last].
-	expectedHashes := func(first, last uint64) map[uint64]common.Hash {
-		m := map[uint64]common.Hash{}
-		for n := first; n <= last; n++ {
-			m[n] = testBlockHash(n)
-		}
-		return m
-	}
-
-	const chainID uint64 = 42
-
-	cases := map[string]struct {
-		firstBlockToApply uint64
-		dbBlocks          []*blockdb.Block // nil without dbErr → GetRange must not be called
-		dbErr             error
-		wantStart         uint64
-		wantEnd           uint64
-		wantHashes        map[uint64]common.Hash
-		wantErr           string
-	}{
-		"NoSeedingWhenStartBlockIsZero": {
-			firstBlockToApply: 0,
-			dbBlocks:          nil,
-			wantHashes:        map[uint64]common.Hash{},
-		},
-		"SeedsGenesisHashWhenStartingAtBlockOne": {
-			firstBlockToApply: 1,
-			dbBlocks:          makeParents(1, 1),
-			wantStart:         1,
-			wantEnd:           1,
-			wantHashes:        expectedHashes(0, 0),
-		},
-		"SeedsPartialWindowForLowStartBlock": {
-			firstBlockToApply: 100,
-			dbBlocks:          makeParents(1, 100),
-			wantStart:         1,
-			wantEnd:           100,
-			wantHashes:        expectedHashes(0, 99),
-		},
-		"SeedsPartialWindowFor255thBlock": {
-			firstBlockToApply: 255,
-			dbBlocks:          makeParents(1, 255),
-			wantStart:         1,
-			wantEnd:           255,
-			wantHashes:        expectedHashes(0, 254),
-		},
-		"SeedsFullWindowFor256thBlock": {
-			firstBlockToApply: 256,
-			dbBlocks:          makeParents(1, 256),
-			wantStart:         1,
-			wantEnd:           256,
-			wantHashes:        expectedHashes(0, 255),
-		},
-		"SeedsFullWindowForLaterBlock": {
-			firstBlockToApply: 1000,
-			dbBlocks:          makeParents(745, 256),
-			wantStart:         745,
-			wantEnd:           1000,
-			wantHashes:        expectedHashes(744, 999),
-		},
-		"ErrorsWhenNoBlocksInRange": {
-			firstBlockToApply: 100,
-			dbBlocks:          []*blockdb.Block{},
-			wantStart:         1,
-			wantEnd:           100,
-			wantErr:           "expected 100 blocks in [1, 100] for chain 42, got 0",
-		},
-		"ErrorsWhenFewerBlocksThanExpected": {
-			firstBlockToApply: 1000,
-			dbBlocks:          makeParents(745, 100),
-			wantStart:         745,
-			wantEnd:           1000,
-			wantErr:           "expected 256 blocks in [745, 1000] for chain 42, got 100",
-		},
-		"PropagatesBlockDBError": {
-			firstBlockToApply: 100,
-			dbErr:             fmt.Errorf("boom"),
-			wantStart:         1,
-			wantEnd:           100,
-			wantErr:           "failed to read block for hash history seeding: boom",
-		},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			db := blockdb.NewMockBlockDB(ctrl)
-			if tc.dbBlocks != nil || tc.dbErr != nil {
-				var blocks iter.Seq2[*blockdb.Block, error]
-				if tc.dbErr != nil {
-					blocks = func(yield func(*blockdb.Block, error) bool) { yield(nil, tc.dbErr) }
-				} else {
-					blocks = utils.NewIter(tc.dbBlocks)
-				}
-				db.EXPECT().GetRange(chainID, tc.wantStart, tc.wantEnd).Return(blocks)
-			}
-			history := &blockHashHistory{}
-			err := seedBlockHashHistory(db, chainID, tc.firstBlockToApply, history)
-			if tc.wantErr != "" {
-				require.EqualError(t, err, tc.wantErr)
-				return
-			}
-			require.NoError(t, err)
-			for num, expected := range tc.wantHashes {
-				require.Equal(t, expected, history.GetBlockHash(num))
-			}
-		})
-	}
-}
-
-func TestGetRecordedHeader_ReturnsHeaderOfRecordedBlockOrReportsFailure(t *testing.T) {
-	block := &blockdb.Block{Number: 4}
-	converted, err := convert.ConvertToGethBlock(block)
-	require.NoError(t, err)
-	tests := map[string]struct {
-		recorded *blockdb.Block
-		err      error
-		want     *types.Header
-		wantErr  string
-	}{
-		"recorded block": {
-			recorded: block,
-			want:     converted.Header(),
-		},
-		"block DB error": {
-			err:     fmt.Errorf("boom"),
-			wantErr: "failed to read recorded block 4: boom",
-		},
-		"block not recorded": {
-			wantErr: "block 4 is not recorded",
-		},
-		"invalid block": {
-			recorded: &blockdb.Block{Number: 4, Transactions: []*blockdb.Transaction{nil}},
-			wantErr:  "failed to convert recorded block 4: failed to convert transaction 0: cannot convert nil transaction",
-		},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			db := blockdb.NewMockBlockDB(gomock.NewController(t))
-			db.EXPECT().Get(uint64(42), uint64(4)).Return(tt.recorded, tt.err)
-
-			header, err := getRecordedHeader(db, 42, 4)
-			if tt.wantErr != "" {
-				require.EqualError(t, err, tt.wantErr)
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, tt.want, header)
-		})
-	}
-}
-
-func TestGetLedgerHead_SearchesGasUsedOfRecordedHashUpToGasLimitOfFailedBundles(t *testing.T) {
-	recorded := &blockdb.Block{Number: 4}
-	converted, err := convert.ConvertToGethBlock(recorded)
-	require.NoError(t, err)
-	failedBundles := []sonic.FailedBundle{{Tx: types.NewTx(&types.LegacyTx{Gas: 400})}, {Tx: types.NewTx(&types.LegacyTx{Gas: 600})}}
-	tests := map[string]struct {
-		gasUsed       uint64
-		failedBundles []sonic.FailedBundle
-		wantErr       bool
-	}{
-		"gas used of receipts":                      {},
-		"gas used within failed bundles' gas limit": {gasUsed: 700, failedBundles: failedBundles},
-		"gas used up to failed bundles' gas limit":  {gasUsed: 1000, failedBundles: failedBundles},
-		"gas used beyond failed bundles' gas limit": {gasUsed: 1001, failedBundles: failedBundles, wantErr: true},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			header := converted.Header()
-			header.GasUsed = tt.gasUsed
-
-			ctrl := gomock.NewController(t)
-			db := blockdb.NewMockBlockDB(ctrl)
-			db.EXPECT().Get(uint64(42), uint64(4)).Return(recorded, nil)
-			db.EXPECT().Get(uint64(42), uint64(5)).Return(&blockdb.Block{Number: 5, ParentHash: header.Hash().Bytes()}, nil)
-			metadataStore := sonic.NewMockMetadataStore(ctrl)
-			if tt.failedBundles != nil {
-				metadataStore.EXPECT().GetFailedBundlesAtBlock(uint64(4)).Return(tt.failedBundles)
-			}
-
-			head, err := getLedgerHead(db, metadataStore, 42, 4)
-			if tt.wantErr {
-				require.EqualError(t, err, fmt.Sprintf("no gas used of block 4 up to 1000 gives the hash %v recorded by block 5", header.Hash()))
-				return
-			}
-			require.NoError(t, err)
-			require.Equal(t, header, head)
-		})
-	}
 }
 
 func Test_getExpectedStateRoot_ReturnsStateRootOfSchema(t *testing.T) {

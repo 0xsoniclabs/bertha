@@ -123,6 +123,18 @@ func TestDecodeHexTo32Bytes_DecodesHexOfAtMost32Bytes(t *testing.T) {
 			input:    strings.TrimPrefix(input, "0x"),
 			expected: expected,
 		},
+		"odd length": {
+			input:   "0x123",
+			wantErr: "odd-length hex string",
+		},
+		"invalid hex": {
+			input:   "0x" + strings.Repeat("zz", 32),
+			wantErr: "invalid byte",
+		},
+		"too big": {
+			input:   "0x" + strings.Repeat("01", 33),
+			wantErr: "value exceeds 32 bytes (33)",
+		},
 		"empty string": {
 			input:    "",
 			expected: [32]byte{},
@@ -130,18 +142,6 @@ func TestDecodeHexTo32Bytes_DecodesHexOfAtMost32Bytes(t *testing.T) {
 		"short string": {
 			input:    "0x1234",
 			expected: [32]byte{30: 0x12, 31: 0x34},
-		},
-		"odd length": {
-			input:   "0x123",
-			wantErr: "odd-length hex string",
-		},
-		"too big": {
-			input:   "0x" + strings.Repeat("01", 33),
-			wantErr: "value exceeds 32 bytes (33)",
-		},
-		"invalid hex": {
-			input:   "0x" + strings.Repeat("zz", 32),
-			wantErr: "invalid byte",
 		},
 	}
 

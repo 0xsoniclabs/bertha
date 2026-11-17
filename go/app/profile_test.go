@@ -29,8 +29,8 @@ func TestStartProfiling_CreatesFileIfPathIsValid(t *testing.T) {
 		path    string
 		wantErr string
 	}{
-		"valid path":   {path: "cpu.prof"},
 		"invalid path": {path: filepath.Join("nonexistent", "cpu.prof"), wantErr: "no such file or directory"},
+		"valid path":   {path: "cpu.prof"},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {

@@ -35,12 +35,12 @@ func TestOnNewLog_PatchesRulesOnUpdateNetworkRulesEvent(t *testing.T) {
 		modify    func(*core_types.Log)
 		wantPatch bool
 	}{
-		"update network rules event": {modify: func(*core_types.Log) {}, wantPatch: true},
 		"wrong address":              {modify: func(l *core_types.Log) { l.Address = common.Address{0x42} }},
-		"wrong topic":                {modify: func(l *core_types.Log) { l.Topics = []common.Hash{{0xFF}} }},
 		"no topic":                   {modify: func(l *core_types.Log) { l.Topics = nil }},
+		"wrong topic":                {modify: func(l *core_types.Log) { l.Topics = []common.Hash{{0xFF}} }},
 		"too short data":             {modify: func(l *core_types.Log) { l.Data = make([]byte, 32) }},
 		"undecodable data":           {modify: func(l *core_types.Log) { l.Data[63]++ }},
+		"update network rules event": {modify: func(*core_types.Log) {}, wantPatch: true},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -63,10 +63,10 @@ func TestDecodeDataBytes(t *testing.T) {
 		want    []byte
 		wantErr error
 	}{
-		"bytes parameter":    {modify: func(d []byte) []byte { return d }, want: diff},
 		"no offset":          {modify: func(d []byte) []byte { return d[:31:31] }, wantErr: io.ErrUnexpectedEOF},
 		"offset beyond data": {modify: func(d []byte) []byte { d[31] = byte(len(d) - 31); return d }, wantErr: io.ErrUnexpectedEOF},
 		"length beyond data": {modify: func(d []byte) []byte { d[63]++; return d }, wantErr: io.ErrUnexpectedEOF},
+		"bytes parameter":    {modify: func(d []byte) []byte { return d }, want: diff},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {

@@ -391,17 +391,6 @@ func TestExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ReportFailures(t *testi
 			},
 			wantErr: "failed to insert failed bundles into block 1",
 		},
-		"failed bundle that did not fail": {
-			execute: both,
-			setup: func(_ *testing.T, e *Executor, _ *state.State) {
-				e.metadataStore.(*BlockDBMetadataStore).metadata = Metadata{
-					RulesUpdateHeights: []RulesUpdateHeight{{Rules: opera.FakeNetRules(bundleUpgrades)}},
-					FailedBundles:      FailedBundles{1: {{Pos: 0, Tx: succeedingBundle}}},
-				}
-			},
-			modifyBlock: func(b *blockdb.Block) { b.Transactions = nil },
-			wantErr:     fmt.Sprintf("failed bundle %v added a receipt", succeedingBundle.Hash()),
-		},
 		"failing ledger head": {
 			execute: live,
 			setup: func(t *testing.T, e *Executor, _ *state.State) {
@@ -436,6 +425,17 @@ func TestExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ReportFailures(t *testi
 				b.Transactions = []*blockdb.Transaction{sign(&types.LegacyTx{Nonce: 123, Gas: 21_000, GasPrice: big.NewInt(1e11), To: &common.Address{1}})}
 			},
 			wantErr: "was skipped",
+		},
+		"failed bundle that did not fail": {
+			execute: both,
+			setup: func(_ *testing.T, e *Executor, _ *state.State) {
+				e.metadataStore.(*BlockDBMetadataStore).metadata = Metadata{
+					RulesUpdateHeights: []RulesUpdateHeight{{Rules: opera.FakeNetRules(bundleUpgrades)}},
+					FailedBundles:      FailedBundles{1: {{Pos: 0, Tx: succeedingBundle}}},
+				}
+			},
+			modifyBlock: func(b *blockdb.Block) { b.Transactions = nil },
+			wantErr:     fmt.Sprintf("failed bundle %v added a receipt", succeedingBundle.Hash()),
 		},
 		"failing end block": {
 			execute: live,
@@ -609,8 +609,8 @@ func TestNewLedgerStore_RebuildsRecordedHead(t *testing.T) {
 		header  *types.Header
 		wantErr string
 	}{
-		"recorded head":      {header: head.Header()},
 		"invalid extra data": {header: &types.Header{Number: big.NewInt(4)}, wantErr: "failed to decode extra data of block 4"},
+		"recorded head":      {header: head.Header()},
 	}
 
 	for name, tt := range tests {

@@ -272,21 +272,21 @@ func TestVerifyBlocks_ChecksBlockHashSequence(t *testing.T) {
 		wantErr string
 		cause   error
 	}{
-		"valid block hash sequence": {
-			blocks: utils.NewIter(validBlocks),
-		},
-		"invalid block hash": {
-			blocks:  utils.NewIter([]*blockdb.Block{{}, {}, {}}),
-			wantErr: "block verification failed for block 0: block hash mismatch",
+		"failing block retrieval": {
+			blocks:  func(yield func(*blockdb.Block, error) bool) { yield(nil, injected) },
+			wantErr: "failed to get block",
+			cause:   injected,
 		},
 		"nil block": {
 			blocks:  utils.NewIter([]*blockdb.Block{{}, nil}),
 			wantErr: "encountered nil block",
 		},
-		"failing block retrieval": {
-			blocks:  func(yield func(*blockdb.Block, error) bool) { yield(nil, injected) },
-			wantErr: "failed to get block",
-			cause:   injected,
+		"invalid block hash": {
+			blocks:  utils.NewIter([]*blockdb.Block{{}, {}, {}}),
+			wantErr: "block verification failed for block 0: block hash mismatch",
+		},
+		"valid block hash sequence": {
+			blocks: utils.NewIter(validBlocks),
 		},
 	}
 	for name, tt := range tests {
@@ -364,9 +364,9 @@ func TestVerifyBlock_ChecksHashOfBlock(t *testing.T) {
 		hash    common.Hash
 		wantErr string
 	}{
-		"correct hash":  {block: block, hash: gethBlock.Hash()},
-		"invalid hash":  {block: block, wantErr: "block hash mismatch"},
 		"invalid block": {block: &blockdb.Block{Transactions: []*blockdb.Transaction{{TransactionType: 999}}}, wantErr: "unsupported transaction type"},
+		"invalid hash":  {block: block, wantErr: "block hash mismatch"},
+		"correct hash":  {block: block, hash: gethBlock.Hash()},
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {

@@ -24,29 +24,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func Test_SnapshotHandler_ShouldCreateSnapshot(t *testing.T) {
-	handler := &SnapshotHandler{
-		blockInterval: 1000,
-		startBlock:    1100,
-		endBlock:      3000,
-	}
-	tests := map[string]struct {
-		block uint64
-		want  bool
-	}{
-		"first interval":     {block: 2000, want: true},
-		"second interval":    {block: 3000, want: true},
-		"between intervals":  {block: 1500},
-		"before start block": {block: 1000},
-		"after end block":    {block: 4000},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			require.Equal(t, tt.want, handler.ShouldCreateSnapshot(tt.block))
-		})
-	}
-}
-
 func Test_NewSnapshotHandler_InitializeSnapshotHandlerCorrectly(t *testing.T) {
 	require := require.New(t)
 
@@ -57,6 +34,29 @@ func Test_NewSnapshotHandler_InitializeSnapshotHandlerCorrectly(t *testing.T) {
 	require.Len(handler.pastSnapshotList, 3)
 	for _, blockNumber := range handler.pastSnapshotList {
 		require.Nil(blockNumber)
+	}
+}
+
+func Test_SnapshotHandler_ShouldCreateSnapshot(t *testing.T) {
+	handler := &SnapshotHandler{
+		blockInterval: 1000,
+		startBlock:    1100,
+		endBlock:      3000,
+	}
+	tests := map[string]struct {
+		block uint64
+		want  bool
+	}{
+		"before start block": {block: 1000},
+		"after end block":    {block: 4000},
+		"between intervals":  {block: 1500},
+		"first interval":     {block: 2000, want: true},
+		"second interval":    {block: 3000, want: true},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, tt.want, handler.ShouldCreateSnapshot(tt.block))
+		})
 	}
 }
 
