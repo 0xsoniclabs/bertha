@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-package replay
+package ethereum
 
 import (
 	"encoding/binary"
@@ -24,10 +24,13 @@ import (
 
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
+	"github.com/0xsoniclabs/bertha/replay/state"
 	cc "github.com/0xsoniclabs/carmen/go/common"
+	"github.com/0xsoniclabs/carmen/go/common/amount"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/opera"
+	"github.com/0xsoniclabs/tosca/go/tosca"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -40,8 +43,8 @@ import (
 	"go.uber.org/mock/gomock"
 )
 
-func TestEthereumExecutor_ExecuteBlock_CompletesHeader(t *testing.T) {
-	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+func TestExecutor_ExecuteBlock_CompletesHeader(t *testing.T) {
+	state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, state.Close()) }()
 
@@ -55,8 +58,8 @@ func TestEthereumExecutor_ExecuteBlock_CompletesHeader(t *testing.T) {
 	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1), GasLimit: 100_000}).
 		WithBody(types.Body{Transactions: types.Transactions{tx}})
 
-	executor := &ethereumExecutor{chainID: 11155111, interpreter: testInterpreter(t)}
-	receipts, header, err := executor.ExecuteBlock(state, block, &blockHashHistory{})
+	executor := NewExecutor(11155111, testInterpreter(t))
+	receipts, header, err := executor.ExecuteBlock(state, block, blockHashes{})
 	require.NoError(t, err)
 	require.Len(t, receipts, 1)
 	require.Len(t, receipts[0].Logs, 1)
@@ -65,16 +68,16 @@ func TestEthereumExecutor_ExecuteBlock_CompletesHeader(t *testing.T) {
 	require.Equal(t, types.DeriveSha(receipts, trie.NewStackTrie(nil)), header.ReceiptHash)
 }
 
-func TestEthereumExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ServeBlockHashFromHashHistory(t *testing.T) {
-	executeBlock := func(e *ethereumExecutor, state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
+func TestExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ServeBlockHashFromHashHistory(t *testing.T) {
+	executeBlock := func(e *Executor, state *state.State, block *types.Block, hashHistory blockHashes) (types.Receipts, error) {
 		receipts, _, err := e.ExecuteBlock(state, block, hashHistory)
 		return receipts, err
 	}
-	executeBlockOnArchive := func(e *ethereumExecutor, state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, error) {
+	executeBlockOnArchive := func(e *Executor, state *state.State, block *types.Block, hashHistory blockHashes) (types.Receipts, error) {
 		return e.ExecuteBlockOnArchive(state, block, nil, hashHistory)
 	}
 	tests := map[string]struct {
-		execute      func(*ethereumExecutor, *State, *types.Block, *blockHashHistory) (types.Receipts, error)
+		execute      func(*Executor, *state.State, *types.Block, blockHashes) (types.Receipts, error)
 		hashOfBlock1 common.Hash
 		wantStatus   uint64
 	}{
@@ -86,16 +89,16 @@ func TestEthereumExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ServeBlockHashF
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
+			state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
 			require.NoError(t, err)
 			defer func() { require.NoError(t, state.Close()) }()
 
-			executor := &ethereumExecutor{chainID: 11155111, interpreter: testInterpreter(t)}
+			executor := NewExecutor(11155111, testInterpreter(t))
 			for number := range int64(2) {
-				_, _, err = executor.ExecuteBlock(state, types.NewBlockWithHeader(&types.Header{Number: big.NewInt(number + 1)}), &blockHashHistory{})
+				_, _, err = executor.ExecuteBlock(state, types.NewBlockWithHeader(&types.Header{Number: big.NewInt(number + 1)}), blockHashes{})
 				require.NoError(t, err)
 			}
-			require.NoError(t, state.db.Flush())
+			require.NoError(t, state.DB.Flush())
 
 			key, err := crypto.GenerateKey()
 			require.NoError(t, err)
@@ -107,8 +110,7 @@ func TestEthereumExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ServeBlockHashF
 			})
 			block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(3), GasLimit: 100_000}).
 				WithBody(types.Body{Transactions: types.Transactions{tx}})
-			hashHistory := &blockHashHistory{}
-			hashHistory.SetBlockHash(1, tt.hashOfBlock1)
+			hashHistory := blockHashes{1: tt.hashOfBlock1}
 
 			receipts, err := tt.execute(executor, state, block, hashHistory)
 			require.NoError(t, err)
@@ -131,7 +133,7 @@ func TestApplyBlockWithProcessor_ForwardsDifficultyToProcessor(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			processor := NewMockProcessor(ctrl)
 
-			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+			state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
 			require.NoError(t, err)
 			defer func() { require.NoError(t, state.Close()) }()
 
@@ -162,7 +164,7 @@ func TestApplyBlockWithProcessor_ForwardsDifficultyToProcessor(t *testing.T) {
 }
 
 func TestApplyBlockWithProcessor_CanApplyAnEmptyBlock(t *testing.T) {
-	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, state.Close())
@@ -175,7 +177,7 @@ func TestApplyBlockWithProcessor_CanApplyAnEmptyBlock(t *testing.T) {
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
-		&blockHashHistory{},
+		blockHashes{},
 		opera.Upgrades{},
 	)
 
@@ -185,7 +187,7 @@ func TestApplyBlockWithProcessor_CanApplyAnEmptyBlock(t *testing.T) {
 }
 
 func TestApplyBlockWithProcessor_FailsOnSkippedTransaction(t *testing.T) {
-	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
 	defer func() {
 		require.NoError(t, state.Close())
@@ -195,7 +197,7 @@ func TestApplyBlockWithProcessor_FailsOnSkippedTransaction(t *testing.T) {
 
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	setBalance(state.db, crypto.PubkeyToAddress(key.PublicKey), big.NewInt(1e18))
+	state.DB.AddBalance(cc.Address(crypto.PubkeyToAddress(key.PublicKey)), amount.New(1e18))
 	tx := types.MustSignNewTx(key, types.LatestSignerForChainID(chainConfig.ChainID), &types.LegacyTx{
 		Nonce:    1, // the sender's nonce is 0
 		Gas:      21_000,
@@ -207,7 +209,7 @@ func TestApplyBlockWithProcessor_FailsOnSkippedTransaction(t *testing.T) {
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
-		&blockHashHistory{},
+		blockHashes{},
 		opera.Upgrades{},
 	)
 
@@ -216,9 +218,9 @@ func TestApplyBlockWithProcessor_FailsOnSkippedTransaction(t *testing.T) {
 }
 
 func TestApplyBlockWithProcessor_CancunBlock_AppliesEIP4788(t *testing.T) {
-	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	st, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
-	defer func() { require.NoError(t, state.Close()) }()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	chainConfig := params.MainnetChainConfig
 	cancunTime := *chainConfig.CancunTime
@@ -227,11 +229,11 @@ func TestApplyBlockWithProcessor_CancunBlock_AppliesEIP4788(t *testing.T) {
 	blobGasUsed := uint64(0)
 
 	// Deploy the EIP-4788 beacon roots contract so the system call has an effect.
-	state.db.BeginBlock()
-	state.db.BeginTransaction()
-	state.db.SetCode(cc.Address(params.BeaconRootsAddress), params.BeaconRootsCode)
-	state.db.EndTransaction()
-	handle, err := endBlockAndCommit(state, 0)
+	st.DB.BeginBlock()
+	st.DB.BeginTransaction()
+	st.DB.SetCode(cc.Address(params.BeaconRootsAddress), params.BeaconRootsCode)
+	st.DB.EndTransaction()
+	handle, err := state.EndBlockAndCommit(st, 0)
 	require.NoError(t, err)
 	require.NoError(t, handle.Wait())
 
@@ -251,11 +253,11 @@ func TestApplyBlockWithProcessor_CancunBlock_AppliesEIP4788(t *testing.T) {
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
-		&blockHashHistory{},
+		blockHashes{},
 		opera.Upgrades{},
 	)
 
-	_, _, err = applyBlockWithProcessor(state, block, testInterpreter(t), processor, chainConfig, false)
+	_, _, err = applyBlockWithProcessor(st, block, testInterpreter(t), processor, chainConfig, false)
 	require.NoError(t, err)
 
 	// EIP-4788 stores the beacon root at storage slot (timestamp % 8191) + 8191.
@@ -264,14 +266,14 @@ func TestApplyBlockWithProcessor_CancunBlock_AppliesEIP4788(t *testing.T) {
 	rootSlot := cancunTime%historyBufferLen + historyBufferLen
 	var rootKey cc.Key
 	binary.BigEndian.PutUint64(rootKey[24:], rootSlot)
-	gotRoot := state.db.GetState(cc.Address(params.BeaconRootsAddress), rootKey)
+	gotRoot := st.DB.GetState(cc.Address(params.BeaconRootsAddress), rootKey)
 	require.Equal(t, cc.Value(beaconRoot), gotRoot)
 }
 
 func TestApplyBlockWithProcessor_PragueBlock_AppliesEIP7002(t *testing.T) {
-	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	st, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
-	defer func() { require.NoError(t, state.Close()) }()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	chainConfig := params.MainnetChainConfig
 	pragueTime := *chainConfig.PragueTime
@@ -283,12 +285,12 @@ func TestApplyBlockWithProcessor_PragueBlock_AppliesEIP7002(t *testing.T) {
 	// a prior block. The system call will compute new excess from this count.
 	requestCount := cc.Value{31: 3} // 3 requests queued
 	countSlot := cc.Key{31: 1}      // WITHDRAWAL_REQUEST_COUNT_SLOT = 1
-	state.db.BeginBlock()
-	state.db.BeginTransaction()
-	state.db.SetCode(cc.Address(params.WithdrawalQueueAddress), params.WithdrawalQueueCode)
-	state.db.SetState(cc.Address(params.WithdrawalQueueAddress), countSlot, requestCount)
-	state.db.EndTransaction()
-	handle, err := endBlockAndCommit(state, 0)
+	st.DB.BeginBlock()
+	st.DB.BeginTransaction()
+	st.DB.SetCode(cc.Address(params.WithdrawalQueueAddress), params.WithdrawalQueueCode)
+	st.DB.SetState(cc.Address(params.WithdrawalQueueAddress), countSlot, requestCount)
+	st.DB.EndTransaction()
+	handle, err := state.EndBlockAndCommit(st, 0)
 	require.NoError(t, err)
 	require.NoError(t, handle.Wait())
 
@@ -306,11 +308,11 @@ func TestApplyBlockWithProcessor_PragueBlock_AppliesEIP7002(t *testing.T) {
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
-		&blockHashHistory{},
+		blockHashes{},
 		opera.Upgrades{},
 	)
 
-	_, _, err = applyBlockWithProcessor(state, block, testInterpreter(t), processor, chainConfig, false)
+	_, _, err = applyBlockWithProcessor(st, block, testInterpreter(t), processor, chainConfig, false)
 	require.NoError(t, err)
 
 	// Verify the main side effects of the system calls:
@@ -318,16 +320,16 @@ func TestApplyBlockWithProcessor_PragueBlock_AppliesEIP7002(t *testing.T) {
 	//   EIP-7002: TARGET=2 → 0 + 3 - 2 = 1
 	// - WITHDRAWAL_REQUEST_COUNT (slot 1) reset to 0
 	excessSlot := cc.Key{} // EXCESS_WITHDRAWAL_REQUESTS_SLOT = 0
-	require.Equal(t, cc.Value{31: 1}, state.db.GetState(cc.Address(params.WithdrawalQueueAddress), excessSlot),
+	require.Equal(t, cc.Value{31: 1}, st.DB.GetState(cc.Address(params.WithdrawalQueueAddress), excessSlot),
 		"EIP-7002: excess should be count - TARGET_2 = 3 - 2 = 1")
-	require.Equal(t, cc.Value{}, state.db.GetState(cc.Address(params.WithdrawalQueueAddress), countSlot),
+	require.Equal(t, cc.Value{}, st.DB.GetState(cc.Address(params.WithdrawalQueueAddress), countSlot),
 		"EIP-7002: request count should be reset to 0")
 }
 
 func TestApplyBlockWithProcessor_PragueBlock_AppliesEIP7251(t *testing.T) {
-	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	st, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
-	defer func() { require.NoError(t, state.Close()) }()
+	defer func() { require.NoError(t, st.Close()) }()
 
 	chainConfig := params.MainnetChainConfig
 	pragueTime := *chainConfig.PragueTime
@@ -339,12 +341,12 @@ func TestApplyBlockWithProcessor_PragueBlock_AppliesEIP7251(t *testing.T) {
 	// a prior block. The system call will compute new excess from this count.
 	requestCount := cc.Value{31: 3} // 3 requests queued
 	countSlot := cc.Key{31: 1}      // CONSOLIDATION_REQUEST_COUNT_SLOT = 1
-	state.db.BeginBlock()
-	state.db.BeginTransaction()
-	state.db.SetCode(cc.Address(params.ConsolidationQueueAddress), params.ConsolidationQueueCode)
-	state.db.SetState(cc.Address(params.ConsolidationQueueAddress), countSlot, requestCount)
-	state.db.EndTransaction()
-	handle, err := endBlockAndCommit(state, 0)
+	st.DB.BeginBlock()
+	st.DB.BeginTransaction()
+	st.DB.SetCode(cc.Address(params.ConsolidationQueueAddress), params.ConsolidationQueueCode)
+	st.DB.SetState(cc.Address(params.ConsolidationQueueAddress), countSlot, requestCount)
+	st.DB.EndTransaction()
+	handle, err := state.EndBlockAndCommit(st, 0)
 	require.NoError(t, err)
 	require.NoError(t, handle.Wait())
 
@@ -362,11 +364,11 @@ func TestApplyBlockWithProcessor_PragueBlock_AppliesEIP7251(t *testing.T) {
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
-		&blockHashHistory{},
+		blockHashes{},
 		opera.Upgrades{},
 	)
 
-	_, _, err = applyBlockWithProcessor(state, block, testInterpreter(t), processor, chainConfig, false)
+	_, _, err = applyBlockWithProcessor(st, block, testInterpreter(t), processor, chainConfig, false)
 	require.NoError(t, err)
 
 	// Verify the main side effects of the system calls:
@@ -374,9 +376,9 @@ func TestApplyBlockWithProcessor_PragueBlock_AppliesEIP7251(t *testing.T) {
 	//   EIP-7251: TARGET=1 → 0 + 3 - 1 = 2
 	// - CONSOLIDATION_REQUEST_COUNT (slot 1) reset to 0
 	excessSlot := cc.Key{} // EXCESS_CONSOLIDATION_REQUESTS_SLOT = 0
-	require.Equal(t, cc.Value{31: 2}, state.db.GetState(cc.Address(params.ConsolidationQueueAddress), excessSlot),
+	require.Equal(t, cc.Value{31: 2}, st.DB.GetState(cc.Address(params.ConsolidationQueueAddress), excessSlot),
 		"EIP-7251: excess should be count - TARGET_1 = 3 - 1 = 2")
-	require.Equal(t, cc.Value{}, state.db.GetState(cc.Address(params.ConsolidationQueueAddress), countSlot),
+	require.Equal(t, cc.Value{}, st.DB.GetState(cc.Address(params.ConsolidationQueueAddress), countSlot),
 		"EIP-7251: request count should be reset to 0")
 }
 
@@ -400,7 +402,7 @@ func TestApplyBlockWithProcessor_CreditsWithdrawalsOnlyPostMerge(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+			state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
 			require.NoError(t, err)
 			defer func() { require.NoError(t, state.Close()) }()
 
@@ -415,14 +417,14 @@ func TestApplyBlockWithProcessor_CreditsWithdrawalsOnlyPostMerge(t *testing.T) {
 
 			processor := evmcore.NewStateProcessorForReplay(
 				params.MainnetChainConfig,
-				&blockHashHistory{},
+				blockHashes{},
 				opera.Upgrades{},
 			)
 
 			_, _, err = applyBlockWithProcessor(state, block, testInterpreter(t), processor, params.MainnetChainConfig, false)
 			require.NoError(t, err)
 
-			require.Equal(t, tt.wantBalanceWei, state.db.GetBalance(cc.Address(withdrawalAddr)).Uint64())
+			require.Equal(t, tt.wantBalanceWei, state.DB.GetBalance(cc.Address(withdrawalAddr)).Uint64())
 		})
 	}
 }
@@ -463,7 +465,7 @@ func TestApplyBlockWithProcessor_AccumulatesRewardsOnlyPreMerge(t *testing.T) {
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+			state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
 			require.NoError(t, err)
 			defer func() { require.NoError(t, state.Close()) }()
 
@@ -480,21 +482,21 @@ func TestApplyBlockWithProcessor_AccumulatesRewardsOnlyPreMerge(t *testing.T) {
 
 			processor := evmcore.NewStateProcessorForReplay(
 				params.MainnetChainConfig,
-				&blockHashHistory{},
+				blockHashes{},
 				opera.Upgrades{},
 			)
 
 			_, _, err = applyBlockWithProcessor(state, block, testInterpreter(t), processor, params.MainnetChainConfig, false)
 			require.NoError(t, err)
 
-			require.Equal(t, tt.wantMinerBalance.ToBig(), state.db.GetBalance(cc.Address(coinbase)).ToBig())
-			require.Equal(t, tt.wantUncleBalance.ToBig(), state.db.GetBalance(cc.Address(uncleCoinbase)).ToBig())
+			require.Equal(t, tt.wantMinerBalance.ToBig(), state.DB.GetBalance(cc.Address(coinbase)).ToBig())
+			require.Equal(t, tt.wantUncleBalance.ToBig(), state.DB.GetBalance(cc.Address(uncleCoinbase)).ToBig())
 		})
 	}
 }
 
 func TestApplyBlockWithProcessor_CanApplyBlockToArchiveState(t *testing.T) {
-	state, err := NewState(StateParameters{
+	state, err := state.NewState(state.StateParameters{
 		Directory:   t.TempDir(),
 		WithArchive: true,
 		Schema:      5,
@@ -506,7 +508,7 @@ func TestApplyBlockWithProcessor_CanApplyBlockToArchiveState(t *testing.T) {
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
-		&blockHashHistory{},
+		blockHashes{},
 		opera.Upgrades{},
 	)
 
@@ -517,7 +519,7 @@ func TestApplyBlockWithProcessor_CanApplyBlockToArchiveState(t *testing.T) {
 		_, _, err = applyBlockWithProcessor(state, block, testInterpreter(t), processor, chainConfig, false)
 		require.NoError(t, err)
 	}
-	require.NoError(t, state.db.Flush())
+	require.NoError(t, state.DB.Flush())
 
 	// Apply block 1 using archive mode.
 	block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: 1})
@@ -530,7 +532,7 @@ func TestApplyBlockWithProcessor_CanApplyBlockToArchiveState(t *testing.T) {
 
 func TestApplyBlockWithProcessor_CommitsBlockToTheArchiveState(t *testing.T) {
 	require := require.New(t)
-	state, err := NewState(StateParameters{
+	state, err := state.NewState(state.StateParameters{
 		Directory:   t.TempDir(),
 		WithArchive: true,
 		Schema:      5,
@@ -542,7 +544,7 @@ func TestApplyBlockWithProcessor_CommitsBlockToTheArchiveState(t *testing.T) {
 
 	processor := evmcore.NewStateProcessorForReplay(
 		chainConfig,
-		&blockHashHistory{},
+		blockHashes{},
 		opera.Upgrades{},
 	)
 
@@ -556,19 +558,19 @@ func TestApplyBlockWithProcessor_CommitsBlockToTheArchiveState(t *testing.T) {
 		_, _, err = applyBlockWithProcessor(state, block, testInterpreter(t), processor, chainConfig, false)
 		require.NoError(err)
 	}
-	require.NoError(state.db.Flush())
+	require.NoError(state.DB.Flush())
 
 	height, empty, err := state.GetArchiveBlockHeight()
 	require.NoError(err)
 	require.False(empty)
 	require.Equal(uint64(2), height)
 
-	before, err := state.db.GetArchiveStateDB(0)
+	before, err := state.DB.GetArchiveStateDB(0)
 	require.NoError(err)
 	defer before.Release()
 	require.Zero(before.GetBalance(cc.Address{1}).Uint64())
 
-	after, err := state.db.GetArchiveStateDB(1)
+	after, err := state.DB.GetArchiveStateDB(1)
 	require.NoError(err)
 	defer after.Release()
 	require.Equal(uint64(1000*params.GWei), after.GetBalance(cc.Address{1}).Uint64())
@@ -597,7 +599,21 @@ func TestApplyBlockWithProcessor_ReturnsErrorIfEndBlockFails(t *testing.T) {
 	})
 	chainConfig := params.MainnetChainConfig
 
-	state := &State{db: db}
+	state := &state.State{DB: db}
 	_, _, err := applyBlockWithProcessor(state, block, testInterpreter(t), processor, chainConfig, false)
 	require.ErrorIs(err, issue)
+}
+
+func testInterpreter(t *testing.T) tosca.Interpreter {
+	t.Helper()
+	interpreter, err := tosca.NewInterpreter("sfvm")
+	require.NoError(t, err)
+	return interpreter
+}
+
+// blockHashes serves BLOCKHASH from the hashes of the blocks it holds.
+type blockHashes map[uint64]common.Hash
+
+func (h blockHashes) Header(_ common.Hash, number uint64) *evmcore.EvmHeader {
+	return &evmcore.EvmHeader{Number: new(big.Int).SetUint64(number), Hash: h[number], ParentHash: h[number-1]}
 }

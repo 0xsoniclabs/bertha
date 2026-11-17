@@ -35,6 +35,9 @@ import (
 
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
+	"github.com/0xsoniclabs/bertha/replay/ethereum"
+	"github.com/0xsoniclabs/bertha/replay/sonic"
+	"github.com/0xsoniclabs/bertha/replay/state"
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
@@ -155,8 +158,8 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	headBlock := firstReplayedBlock - 1           // the live state starts with the head at the previous block
 	var blockExecutor BlockExecutor
 	var headHeader *types.Header
-	if isEthereum(chainID) {
-		blockExecutor = &ethereumExecutor{chainID: chainID, interpreter: interpreter}
+	if ethereum.IsEthereum(chainID) {
+		blockExecutor = ethereum.NewExecutor(chainID, interpreter)
 		headHeader, err = getRecordedHeader(blockDb, chainID, headBlock)
 		if err != nil {
 			return fmt.Errorf("failed to get head header: %w", err)
@@ -164,7 +167,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	} else {
 		// Create the metadata store
 		slog.Info("Initializing metadata store")
-		metadataStore, err := NewBlockDBMetadataStore(blockDb, genesis.Rules, slog.Default(), args.WriteRulesUpdateHeights)
+		metadataStore, err := sonic.NewBlockDBMetadataStore(blockDb, genesis.Rules, slog.Default(), args.WriteRulesUpdateHeights)
 		if err != nil {
 			return fmt.Errorf("failed to create metadata store for chain ID %d: %w", chainID, err)
 		}
@@ -172,7 +175,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 		if err != nil {
 			return fmt.Errorf("failed to get head header: %w", err)
 		}
-		blockExecutor, err = newSonicExecutor(metadataStore, interpreter, headHeader)
+		blockExecutor, err = sonic.NewExecutor(metadataStore, interpreter, headHeader)
 		if err != nil {
 			return fmt.Errorf("failed to open ledger: %w", err)
 		}
@@ -193,7 +196,7 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 
 	// Open the state database
 	slog.Info("Opening state database", "directory", args.StateDBDir)
-	state, err := NewState(StateParameters{
+	state, err := state.NewState(state.StateParameters{
 		Directory:   args.StateDBDir,
 		WithArchive: args.WithArchive,
 		Schema:      args.DBSchema,
@@ -440,7 +443,7 @@ func getRecordedHeader(blockDb blockdb.BlockDB, chainID, number uint64) (*types.
 // parent hash. The block DB derives the gas used from the receipts, which miss
 // the gas of failed bundles after the last transaction, so the gas used is
 // searched up to the gas limit of the block's failed bundles.
-func getLedgerHead(blockDb blockdb.BlockDB, metadataStore MetadataStore, chainID, number uint64) (*types.Header, error) {
+func getLedgerHead(blockDb blockdb.BlockDB, metadataStore sonic.MetadataStore, chainID, number uint64) (*types.Header, error) {
 	head, err := getRecordedHeader(blockDb, chainID, number)
 	if err != nil {
 		return nil, err
@@ -759,11 +762,11 @@ type StateFlusher interface {
 type BlockExecutor interface {
 	// ExecuteBlock executes the given block on the live state, serving BLOCKHASH
 	// from hashHistory, and returns its receipts and complete header.
-	ExecuteBlock(state *State, block *types.Block, hashHistory *blockHashHistory) (types.Receipts, *types.Header, error)
+	ExecuteBlock(state *state.State, block *types.Block, hashHistory evmcore.DummyChain) (types.Receipts, *types.Header, error)
 	// ExecuteBlockOnArchive executes the given block on the archived state of its
 	// parent, whose header is parentHeader, serving BLOCKHASH from hashHistory,
 	// and returns its receipts.
-	ExecuteBlockOnArchive(state *State, block *types.Block, parentHeader *types.Header, hashHistory *blockHashHistory) (types.Receipts, error)
+	ExecuteBlockOnArchive(state *state.State, block *types.Block, parentHeader *types.Header, hashHistory evmcore.DummyChain) (types.Receipts, error)
 }
 
 // historyExecutor implements HistoryExecutor, ArchiveExecutor and StateFlusher
@@ -771,7 +774,7 @@ type BlockExecutor interface {
 //
 // Concurrency: two mutexes coordinate access to the historyExecutor.
 //
-//   - stateSwitchMutex guards accesses to the underlying *State pointer.
+//   - stateSwitchMutex guards accesses to the underlying *state.State pointer.
 //     RLock is held during operations that use the current state (block
 //     application via ApplyBlock, archive queries via GetArchiveBlockHeight
 //     and ApplyBlockOnArchive, flushes via FlushState). Lock is held only for
@@ -794,7 +797,7 @@ type historyExecutor struct {
 	blockHashHistory *blockHashHistory
 	// headHeader is the header of the block whose state the live state holds.
 	headHeader       *types.Header
-	state            *State
+	state            *state.State
 	stateSwitchMutex sync.RWMutex
 	stateModifyMutex sync.Mutex
 	schema           carmen.Schema
@@ -911,7 +914,7 @@ func (e *historyExecutor) MaybeSnapshot(
 func (e *historyExecutor) FlushState() error {
 	e.stateSwitchMutex.RLock()
 	defer e.stateSwitchMutex.RUnlock()
-	return e.state.db.Flush()
+	return e.state.DB.Flush()
 }
 
 // GetArchiveBlockHeight returns the highest block currently available in the

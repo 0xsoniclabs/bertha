@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-package replay
+package ethereum
 
 import (
 	"math/big"
@@ -36,15 +36,15 @@ var ethereumChainConfigMap = map[uint64]*params.ChainConfig{
 	params.HoodiChainConfig.ChainID.Uint64():   params.HoodiChainConfig,
 }
 
-// isEthereum checks if the given chain ID corresponds to a known Ethereum chain.
-func isEthereum(chainID uint64) bool {
+// IsEthereum checks if the given chain ID corresponds to a known Ethereum chain.
+func IsEthereum(chainID uint64) bool {
 	_, exists := ethereumChainConfigMap[chainID]
 	return exists
 }
 
-// getEthereumChainConfigAndUpgrades returns the config of the given Ethereum
-// chain and the upgrades in effect at the given block.
-func getEthereumChainConfigAndUpgrades(block *types.Block, chainID uint64) (*params.ChainConfig, opera.Upgrades) {
+// getChainConfigAndUpgrades returns the config of the given Ethereum chain and
+// the upgrades in effect at the given block.
+func getChainConfigAndUpgrades(block *types.Block, chainID uint64) (*params.ChainConfig, opera.Upgrades) {
 	cfg := ethereumChainConfigMap[chainID]
 	rules := cfg.Rules(block.Number(), true, block.Time())
 	return cfg, opera.Upgrades{

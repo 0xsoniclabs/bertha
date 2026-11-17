@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Bertha. If not, see <http://www.gnu.org/licenses/>.
 
-package replay
+package ethereum
 
 import (
 	"math/big"
@@ -30,7 +30,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetEthereumChainConfigAndUpgrades_MapsUpgradesInEffectAtBlock(t *testing.T) {
+func TestIsEthereum_IdentifiesEthereumChains(t *testing.T) {
+	tests := map[string]struct {
+		chainID uint64
+		want    bool
+	}{
+		"Mainnet":       {chainID: 1, want: true},
+		"Sepolia":       {chainID: 11155111, want: true},
+		"Holesky":       {chainID: 17000, want: true},
+		"Hoodi":         {chainID: 560048, want: true},
+		"Sonic":         {chainID: 146},
+		"Sonic testnet": {chainID: 14601},
+		"Unknown chain": {chainID: 9999},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			require.Equal(t, tt.want, IsEthereum(tt.chainID))
+		})
+	}
+}
+
+func TestGetChainConfigAndUpgrades_MapsUpgradesInEffectAtBlock(t *testing.T) {
 	cfg := params.MainnetChainConfig
 	tests := map[string]struct {
 		number   uint64
@@ -48,7 +68,7 @@ func TestGetEthereumChainConfigAndUpgrades_MapsUpgradesInEffectAtBlock(t *testin
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
 			block := types.NewBlockWithHeader(&types.Header{Number: new(big.Int).SetUint64(tt.number), Time: tt.time})
-			gotCfg, upgrades := getEthereumChainConfigAndUpgrades(block, cfg.ChainID.Uint64())
+			gotCfg, upgrades := getChainConfigAndUpgrades(block, cfg.ChainID.Uint64())
 			require.Same(t, cfg, gotCfg)
 			require.Equal(t, tt.upgrades, upgrades)
 		})

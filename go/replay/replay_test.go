@@ -32,9 +32,12 @@ import (
 
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
+	"github.com/0xsoniclabs/bertha/replay/sonic"
+	"github.com/0xsoniclabs/bertha/replay/state"
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
+	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -155,7 +158,7 @@ func TestReplay_InvalidFlagCombinationsAreRejected(t *testing.T) {
 
 func TestReplay_ReportsUnusableSonicHead(t *testing.T) {
 	rules := opera.FakeNetRules(opera.GetSonicUpgrades())
-	blocks := createSonicBlocks(t, rules, newGenesisState(t, nil), 3)
+	blocks := utils.CreateSonicBlocks(t, rules, utils.NewGenesisState(t, nil), 3)
 	blocks[1].ExtraData = nil
 	invalid, err := convert.ConvertToGethBlock(blocks[1])
 	require.NoError(t, err)
@@ -244,10 +247,10 @@ func TestReplay_StateDbAndSnapshotCleanupBehavior(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
 
-			var corrections Corrections
+			var corrections sonic.Corrections
 			if tc.invalidReplay {
 				// Correct a block after a snapshot to trigger a state root mismatch
-				corrections = Corrections{15: {common.HexToAddress("0x01"): {Balance: uint256.NewInt(1)}}}
+				corrections = sonic.Corrections{15: {common.HexToAddress("0x01"): {Balance: uint256.NewInt(1)}}}
 			}
 			stateDBDir := filepath.Join(dir, "state-db")
 			args := defaultReplayArgs()
@@ -405,15 +408,15 @@ type replayer func(
 
 func canProcessEmptyBlocks(t *testing.T, run replayer) {
 	chainID := uint64(1)
-	state, err := NewState(
-		StateParameters{Directory: t.TempDir(), Schema: 5},
+	st, err := state.NewState(
+		state.StateParameters{Directory: t.TempDir(), Schema: 5},
 	)
 	require.NoError(t, err)
 	defer func() {
-		require.NoError(t, state.Close())
+		require.NoError(t, st.Close())
 	}()
 
-	stateRoot, err := state.GetStateRoot().Await().Get()
+	stateRoot, err := st.GetStateRoot().Await().Get()
 	require.NoError(t, err)
 
 	// A block history where nothing ever is happening.
@@ -431,11 +434,11 @@ func canProcessEmptyBlocks(t *testing.T, run replayer) {
 		chainID:          chainID,
 		blockExecutor:    blockExecutor,
 		blockHashHistory: &blockHashHistory{},
-		state:            state,
+		state:            st,
 		snapshotHandler:  NewSnapshotHandler(0, 0, math.MaxUint64, 1),
 	}
-	blockExecutor.EXPECT().ExecuteBlock(state, gomock.Any(), executor.blockHashHistory).
-		DoAndReturn(func(_ *State, block *types.Block, _ *blockHashHistory) (types.Receipts, *types.Header, error) {
+	blockExecutor.EXPECT().ExecuteBlock(st, gomock.Any(), executor.blockHashHistory).
+		DoAndReturn(func(_ *state.State, block *types.Block, _ evmcore.DummyChain) (types.Receipts, *types.Header, error) {
 			return nil, block.Header(), nil
 		}).Times(2)
 
@@ -991,7 +994,7 @@ func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_SkipBlockZero(t *tes
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			state, err := NewState(StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
+			state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), WithArchive: true, Schema: 5})
 			require.NoError(t, err)
 			defer func() { require.NoError(t, state.Close()) }()
 
@@ -1039,7 +1042,7 @@ func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_ForwardToBlockExecut
 		t.Run(name, func(t *testing.T) {
 			blockExecutor := NewMockBlockExecutor(gomock.NewController(t))
 			// The executor's head header and hash history differ from the empty ones of applyBlockOnArchive.
-			executor := &historyExecutor{blockExecutor: blockExecutor, blockHashHistory: &blockHashHistory{}, headHeader: &types.Header{GasUsed: 1}, state: &State{}}
+			executor := &historyExecutor{blockExecutor: blockExecutor, blockHashHistory: &blockHashHistory{}, headHeader: &types.Header{GasUsed: 1}, state: &state.State{}}
 			executor.blockHashHistory.SetBlockHash(0, common.Hash{1})
 			block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1)})
 			tt.expect(blockExecutor.EXPECT(), executor, block)
@@ -1051,7 +1054,7 @@ func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_ForwardToBlockExecut
 }
 
 func TestHistoryExecutor_ApplyBlock_ReplacesHeaderAndRecordsItAsHead(t *testing.T) {
-	state, err := NewState(StateParameters{Directory: t.TempDir(), Schema: 5})
+	state, err := state.NewState(state.StateParameters{Directory: t.TempDir(), Schema: 5})
 	require.NoError(t, err)
 	defer func() { require.NoError(t, state.Close()) }()
 
@@ -1252,10 +1255,10 @@ func TestGetLedgerHead_SearchesGasUsedOfRecordedHashUpToGasLimitOfFailedBundles(
 	recorded := &blockdb.Block{Number: 4}
 	converted, err := convert.ConvertToGethBlock(recorded)
 	require.NoError(t, err)
-	failedBundles := []FailedBundle{{Tx: types.NewTx(&types.LegacyTx{Gas: 400})}, {Tx: types.NewTx(&types.LegacyTx{Gas: 600})}}
+	failedBundles := []sonic.FailedBundle{{Tx: types.NewTx(&types.LegacyTx{Gas: 400})}, {Tx: types.NewTx(&types.LegacyTx{Gas: 600})}}
 	tests := map[string]struct {
 		gasUsed       uint64
-		failedBundles []FailedBundle
+		failedBundles []sonic.FailedBundle
 		wantErr       bool
 	}{
 		"gas used of receipts":                      {},
@@ -1272,7 +1275,7 @@ func TestGetLedgerHead_SearchesGasUsedOfRecordedHashUpToGasLimitOfFailedBundles(
 			db := blockdb.NewMockBlockDB(ctrl)
 			db.EXPECT().Get(uint64(42), uint64(4)).Return(recorded, nil)
 			db.EXPECT().Get(uint64(42), uint64(5)).Return(&blockdb.Block{Number: 5, ParentHash: header.Hash().Bytes()}, nil)
-			metadataStore := NewMockMetadataStore(ctrl)
+			metadataStore := sonic.NewMockMetadataStore(ctrl)
 			if tt.failedBundles != nil {
 				metadataStore.EXPECT().GetFailedBundlesAtBlock(uint64(4)).Return(tt.failedBundles)
 			}
@@ -1294,7 +1297,7 @@ func Test_getExpectedStateRoot_ReturnsCorrectStateRoot(t *testing.T) {
 	chainID := uint64(123)
 
 	dir := t.TempDir()
-	state, err := NewState(StateParameters{
+	state, err := state.NewState(state.StateParameters{
 		Directory: dir,
 		Schema:    5,
 	})
@@ -1330,7 +1333,7 @@ func Test_updateStateRoot_UpdatesCorrectStateRoot(t *testing.T) {
 	chainID := uint64(123)
 
 	dir := t.TempDir()
-	state, err := NewState(StateParameters{
+	state, err := state.NewState(state.StateParameters{
 		Directory: dir,
 		Schema:    5,
 	})
