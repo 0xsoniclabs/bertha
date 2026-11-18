@@ -492,7 +492,8 @@ func runReplayLoop(
 			return fmt.Errorf("failed to get next block: %w", err)
 		}
 		if ctx.Err() != nil {
-			return ctx.Err()
+			// The cause tells an archive verifier abort apart from a user interrupt.
+			return context.Cause(ctx)
 		}
 
 		gethBlock, err := convert.ConvertToGethBlock(block)
@@ -613,7 +614,8 @@ func runReplayPipeline(
 				return
 			}
 			if ctx.Err() != nil {
-				reportIssue(ctx.Err())
+				// The cause tells an archive verifier abort apart from a user interrupt.
+				reportIssue(context.Cause(ctx))
 				return
 			}
 			gethBlock, err := convert.ConvertToGethBlock(block)
