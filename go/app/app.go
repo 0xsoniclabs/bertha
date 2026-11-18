@@ -231,13 +231,13 @@ var (
 	dbSchema = &cli.IntFlag{
 		Name:    "db-schema",
 		Aliases: []string{"schema"},
-		Usage:   "Block database schema version to use",
+		Usage:   "State database schema version to use",
 		Value:   5,
 	}
 	dbVariant = &cli.StringFlag{
 		Name:    "db-variant",
 		Aliases: []string{"variant"},
-		Usage:   "Block database variant to use [" + strings.Join(getListOfCarmenVariants(), ", ") + "]",
+		Usage:   "State database variant to use [" + strings.Join(getListOfCarmenVariants(), ", ") + "]",
 		Value:   "go-file",
 	}
 	usePipelineFlag = &cli.BoolFlag{
