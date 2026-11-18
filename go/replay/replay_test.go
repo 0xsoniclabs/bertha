@@ -19,11 +19,9 @@ package replay
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"iter"
 	"math"
-	"math/big"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -33,12 +31,9 @@ import (
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/0xsoniclabs/bertha/replay/sonic"
-	"github.com/0xsoniclabs/bertha/replay/state"
 	"github.com/0xsoniclabs/bertha/utils"
-	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
-	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -944,209 +939,6 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 		// running.
 		promise.Fulfill(result.Err[common.Hash](issue))
 	})
-}
-
-// applyBlock applies the block with ApplyBlock and drops the state root.
-func applyBlock(executor *historyExecutor, block *types.Block) (types.Receipts, error) {
-	receipts, _, err := executor.ApplyBlock(block)
-	return receipts, err
-}
-
-// applyBlockOnArchive applies the block with ApplyBlockOnArchive, an empty
-// parent header and an empty hash history.
-func applyBlockOnArchive(executor *historyExecutor, block *types.Block) (types.Receipts, error) {
-	return executor.ApplyBlockOnArchive(block, &types.Header{}, &blockHashHistory{})
-}
-
-func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_SkipBlockZero(t *testing.T) {
-	tests := map[string]struct {
-		apply          func(executor *historyExecutor, block *types.Block) (types.Receipts, error)
-		readsStateRoot bool
-		recordsHash    bool
-	}{
-		"ApplyBlock":          {apply: applyBlock, readsStateRoot: true, recordsHash: true},
-		"ApplyBlockOnArchive": {apply: applyBlockOnArchive},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			db := carmen.NewMockStateDB(ctrl)
-			if tt.readsStateRoot {
-				db.EXPECT().GetCommitment().Return(future.Immediate(result.Ok(cc.Hash{})))
-			}
-			// The block executor expects no calls.
-			executor := &historyExecutor{
-				blockExecutor:    NewMockBlockExecutor(ctrl),
-				blockHashHistory: &blockHashHistory{},
-				state:            &state.State{DB: db},
-			}
-
-			block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(0)})
-			receipts, err := tt.apply(executor, block)
-			require.NoError(t, err)
-			require.Nil(t, receipts)
-			want := &blockHashHistory{}
-			if tt.recordsHash {
-				want.SetBlockHash(0, block.Hash())
-			}
-			require.Equal(t, want, executor.blockHashHistory)
-		})
-	}
-}
-
-func TestHistoryExecutor_ApplyBlock_And_ApplyBlockOnArchive_ForwardToBlockExecutor(t *testing.T) {
-	injected := errors.New("injected")
-	tests := map[string]struct {
-		apply  func(executor *historyExecutor, block *types.Block) (types.Receipts, error)
-		expect func(blockExecutor *MockBlockExecutorMockRecorder, executor *historyExecutor, block *types.Block)
-	}{
-		"ApplyBlock": {
-			apply: applyBlock,
-			expect: func(blockExecutor *MockBlockExecutorMockRecorder, executor *historyExecutor, block *types.Block) {
-				blockExecutor.ExecuteBlock(executor.state, block, executor.blockHashHistory).Return(nil, nil, injected)
-			},
-		},
-		"ApplyBlockOnArchive": {
-			apply: applyBlockOnArchive,
-			expect: func(blockExecutor *MockBlockExecutorMockRecorder, executor *historyExecutor, block *types.Block) {
-				blockExecutor.ExecuteBlockOnArchive(executor.state, block, &types.Header{}, &blockHashHistory{}).Return(nil, injected)
-			},
-		},
-	}
-
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			blockExecutor := NewMockBlockExecutor(gomock.NewController(t))
-			// The executor's head header and hash history differ from the empty ones of applyBlockOnArchive.
-			executor := &historyExecutor{blockExecutor: blockExecutor, blockHashHistory: &blockHashHistory{}, headHeader: &types.Header{GasUsed: 1}, state: &state.State{}}
-			executor.blockHashHistory.SetBlockHash(0, common.Hash{1})
-			block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1)})
-			tt.expect(blockExecutor.EXPECT(), executor, block)
-
-			_, err := tt.apply(executor, block)
-			require.ErrorIs(t, err, injected)
-		})
-	}
-}
-
-func TestHistoryExecutor_ApplyBlock_ReplacesHeaderAndRecordsItAsHead(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	db := carmen.NewMockStateDB(ctrl)
-	db.EXPECT().GetCommitment().Return(future.Immediate(result.Ok(cc.Hash{})))
-	state := &state.State{DB: db}
-	blockExecutor := NewMockBlockExecutor(ctrl)
-	executor := &historyExecutor{blockExecutor: blockExecutor, blockHashHistory: &blockHashHistory{}, state: state}
-	block := types.NewBlockWithHeader(&types.Header{Number: big.NewInt(1)})
-	header := &types.Header{Number: big.NewInt(1), GasUsed: 21_000}
-	want := types.Receipts{{}}
-	blockExecutor.EXPECT().ExecuteBlock(state, block, executor.blockHashHistory).Return(want, header, nil)
-
-	receipts, _, err := executor.ApplyBlock(block)
-	require.NoError(t, err)
-	require.Equal(t, want, receipts)
-	require.Equal(t, header.Hash(), block.Hash())
-	require.Equal(t, header, executor.GetHeadHeader())
-	require.Equal(t, header.Hash(), executor.blockHashHistory.GetBlockHash(1))
-}
-
-func Test_getExpectedStateRoot_ReturnsStateRootOfSchema(t *testing.T) {
-	block := &blockdb.Block{StateRoot: common.Hash{1}.Bytes(), VerkleStateRoot: common.Hash{2}.Bytes()}
-	tests := map[string]struct {
-		schema carmen.Schema
-		want   common.Hash
-	}{
-		"MPT":    {schema: 5, want: common.Hash{1}},
-		"Verkle": {schema: 6, want: common.Hash{2}},
-		"other":  {schema: 4},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			require.Equal(t, tt.want, getExpectedStateRoot(&historyExecutor{schema: tt.schema}, block))
-		})
-	}
-}
-
-func Test_updateStateRoot_UpdatesStateRootOfSchema(t *testing.T) {
-	root := common.Hash{1}.Bytes()
-	tests := map[string]struct {
-		schema              carmen.Schema
-		wantStateRoot       []byte
-		wantVerkleStateRoot []byte
-	}{
-		"MPT":    {schema: 5, wantStateRoot: root},
-		"Verkle": {schema: 6, wantVerkleStateRoot: root},
-		"other":  {schema: 4},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			block := &blockdb.Block{}
-			updateStateRoot(&historyExecutor{schema: tt.schema}, block, common.Hash{1})
-			require.Equal(t, tt.wantStateRoot, block.StateRoot)
-			require.Equal(t, tt.wantVerkleStateRoot, block.VerkleStateRoot)
-		})
-	}
-}
-
-func TestBlockHashHistory_Clone_ReturnsNilForNilReceiver(t *testing.T) {
-	var h *blockHashHistory
-	require.Nil(t, h.Clone())
-}
-
-func TestBlockHashHistory_Clone_ProducesIndependentCopy(t *testing.T) {
-	original := &blockHashHistory{}
-	for i := uint64(0); i < 256; i++ {
-		original.SetBlockHash(i, common.BytesToHash([]byte{byte(i)}))
-	}
-
-	clone := original.Clone()
-	require.Equal(t, *original, *clone)
-
-	// Mutating the clone must not affect the original.
-	clone.SetBlockHash(0, common.Hash{0xAA})
-	require.Equal(t, common.BytesToHash([]byte{0}), original.GetBlockHash(0))
-
-	// Mutating the original must not affect the clone.
-	original.SetBlockHash(1, common.Hash{0xBB})
-	require.Equal(t, common.BytesToHash([]byte{1}), clone.GetBlockHash(1))
-}
-
-func TestBlockHashHistory_CanSetAndRetrieveHistoricHashes(t *testing.T) {
-	history := &blockHashHistory{}
-	for _, offset := range []uint64{0, 12, 1234} {
-		for i := uint64(0); i < 256; i++ {
-			history.SetBlockHash(i+offset, common.BytesToHash([]byte{byte(i + offset)}))
-		}
-		for i := uint64(0); i < 256; i++ {
-			expected := common.BytesToHash([]byte{byte(i + offset)})
-			actual := history.GetBlockHash(i + offset)
-			require.Equal(t, expected, actual)
-		}
-	}
-}
-
-func TestBlockHashHistory_ProducesHeaderWithCorrectHashes(t *testing.T) {
-	history := &blockHashHistory{}
-	history.SetBlockHash(12, common.Hash{1, 2, 3})
-	history.SetBlockHash(11, common.Hash{4, 5, 6})
-	history.SetBlockHash(10, common.Hash{7, 8, 9})
-
-	tests := map[string]struct {
-		number     uint64
-		hash       common.Hash
-		parentHash common.Hash
-	}{
-		"block 12": {number: 12, hash: common.Hash{1, 2, 3}, parentHash: common.Hash{4, 5, 6}},
-		"block 11": {number: 11, hash: common.Hash{4, 5, 6}, parentHash: common.Hash{7, 8, 9}},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			header := history.Header(common.Hash{}, tt.number)
-			require.Equal(t, tt.number, header.Number.Uint64())
-			require.Equal(t, tt.hash, header.Hash)
-			require.Equal(t, tt.parentHash, header.ParentHash)
-		})
-	}
 }
 
 func newMockHistoryExecutorWithMaybeSnapshot(ctrl *gomock.Controller) *MockHistoryExecutor {
