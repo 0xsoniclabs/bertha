@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/replay/state"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
@@ -36,8 +35,7 @@ import (
 // HistoryExecutor executes a sequence of blocks, one after another, on a state.
 type HistoryExecutor interface {
 	ChainID() uint64
-	IsMptConformant() bool
-	IsVerkleConformant() bool
+	Schema() carmen.Schema
 	ApplyBlock(*types.Block) (
 		types.Receipts,
 		future.Future[result.Result[common.Hash]],
@@ -126,12 +124,8 @@ func (e *historyExecutor) ChainID() uint64 {
 	return e.chainID
 }
 
-func (e *historyExecutor) IsMptConformant() bool {
-	return e.schema == 5
-}
-
-func (e *historyExecutor) IsVerkleConformant() bool {
-	return e.schema == 6
+func (e *historyExecutor) Schema() carmen.Schema {
+	return e.schema
 }
 
 func (e *historyExecutor) GetBlockHash(blockNumber uint64) common.Hash {
@@ -255,24 +249,4 @@ func (e *historyExecutor) ApplyBlockOnArchive(block *types.Block, parentHeader *
 	e.stateSwitchMutex.RLock()
 	defer e.stateSwitchMutex.RUnlock()
 	return e.blockExecutor.ExecuteBlockOnArchive(e.state, block, parentHeader, hashHistory)
-}
-
-// getExpectedStateRoot returns the expected state root for the given block, based on the DB schema.
-func getExpectedStateRoot(executor HistoryExecutor, block *blockdb.Block) common.Hash {
-	var stateRoot []byte
-	if executor.IsMptConformant() {
-		stateRoot = block.StateRoot
-	} else if executor.IsVerkleConformant() {
-		stateRoot = block.VerkleStateRoot
-	}
-	return common.BytesToHash(stateRoot)
-}
-
-// updateStateRoot updates the state root in the block based on the DB schema.
-func updateStateRoot(executor HistoryExecutor, block *blockdb.Block, stateRoot common.Hash) {
-	if executor.IsMptConformant() {
-		block.StateRoot = stateRoot.Bytes()
-	} else if executor.IsVerkleConformant() {
-		block.VerkleStateRoot = stateRoot.Bytes()
-	}
 }

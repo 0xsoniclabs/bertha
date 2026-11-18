@@ -21,7 +21,6 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/replay/state"
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	"github.com/0xsoniclabs/carmen/go/common/future"
@@ -135,42 +134,4 @@ func TestHistoryExecutor_ApplyBlock_ReplacesHeaderAndRecordsItAsHead(t *testing.
 	require.Equal(t, header.Hash(), block.Hash())
 	require.Equal(t, header, executor.GetHeadHeader())
 	require.Equal(t, header.Hash(), executor.blockHashHistory.GetBlockHash(1))
-}
-
-func Test_getExpectedStateRoot_ReturnsStateRootOfSchema(t *testing.T) {
-	block := &blockdb.Block{StateRoot: common.Hash{1}.Bytes(), VerkleStateRoot: common.Hash{2}.Bytes()}
-	tests := map[string]struct {
-		schema carmen.Schema
-		want   common.Hash
-	}{
-		"MPT":    {schema: 5, want: common.Hash{1}},
-		"Verkle": {schema: 6, want: common.Hash{2}},
-		"other":  {schema: 4},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			require.Equal(t, tt.want, getExpectedStateRoot(&historyExecutor{schema: tt.schema}, block))
-		})
-	}
-}
-
-func Test_updateStateRoot_UpdatesStateRootOfSchema(t *testing.T) {
-	root := common.Hash{1}.Bytes()
-	tests := map[string]struct {
-		schema              carmen.Schema
-		wantStateRoot       []byte
-		wantVerkleStateRoot []byte
-	}{
-		"MPT":    {schema: 5, wantStateRoot: root},
-		"Verkle": {schema: 6, wantVerkleStateRoot: root},
-		"other":  {schema: 4},
-	}
-	for name, tt := range tests {
-		t.Run(name, func(t *testing.T) {
-			block := &blockdb.Block{}
-			updateStateRoot(&historyExecutor{schema: tt.schema}, block, common.Hash{1})
-			require.Equal(t, tt.wantStateRoot, block.StateRoot)
-			require.Equal(t, tt.wantVerkleStateRoot, block.VerkleStateRoot)
-		})
-	}
 }

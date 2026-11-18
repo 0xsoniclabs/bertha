@@ -24,6 +24,7 @@ import (
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
+	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/stretchr/testify/require"
@@ -81,7 +82,7 @@ func Test_checkBlockResults_ForwardsErrorsOfChecks(t *testing.T) {
 
 			executor := NewMockHistoryExecutor(ctrl)
 			if !tc.failsOnReceipts {
-				executor.EXPECT().IsMptConformant().Return(true)
+				executor.EXPECT().Schema().Return(carmen.Schema(5))
 			}
 
 			block := &blockdb.Block{
@@ -293,7 +294,7 @@ func Test_checkStateRoot(t *testing.T) {
 
 			executor := NewMockHistoryExecutor(ctrl)
 			executor.EXPECT().ChainID().Return(chainID).AnyTimes()
-			executor.EXPECT().IsMptConformant().Return(true).AnyTimes()
+			executor.EXPECT().Schema().Return(carmen.Schema(5)).AnyTimes()
 
 			block := &blockdb.Block{
 				Number:    5,
@@ -341,6 +342,73 @@ func Test_checkStateRoot(t *testing.T) {
 				require.ErrorContains(t, err, tc.expectedError)
 			}
 			require.Equal(t, tc.expectedStateRootNotSetSeen, replayLoopContext.stateRootNotSetSeen)
+		})
+	}
+}
+
+func Test_checkStateRoot_ReadsAndOverwritesStateRootOfSchema(t *testing.T) {
+	stored, computed := common.Hash{1}.Bytes(), common.Hash{2}.Bytes()
+	tests := map[string]struct {
+		schema  carmen.Schema
+		block   *blockdb.Block
+		want    *blockdb.Block // nil if the block is not updated
+		wantErr string
+	}{
+		"MPT stored": {
+			schema:  5,
+			block:   &blockdb.Block{StateRoot: stored},
+			wantErr: "state root mismatch",
+		},
+		"MPT matches": {
+			schema: 5,
+			block:  &blockdb.Block{StateRoot: computed, VerkleStateRoot: stored},
+		},
+		"MPT missing": {
+			schema: 5,
+			block:  &blockdb.Block{VerkleStateRoot: stored},
+			want:   &blockdb.Block{StateRoot: computed, VerkleStateRoot: stored},
+		},
+		"Verkle stored": {
+			schema:  6,
+			block:   &blockdb.Block{VerkleStateRoot: stored},
+			wantErr: "state root mismatch",
+		},
+		"Verkle matches": {
+			schema: 6,
+			block:  &blockdb.Block{StateRoot: stored, VerkleStateRoot: computed},
+		},
+		"Verkle missing": {
+			schema: 6,
+			block:  &blockdb.Block{StateRoot: stored},
+			want:   &blockdb.Block{StateRoot: stored, VerkleStateRoot: computed},
+		},
+		"other": {
+			schema: 4,
+			block:  &blockdb.Block{StateRoot: stored, VerkleStateRoot: stored},
+			want:   &blockdb.Block{StateRoot: stored, VerkleStateRoot: stored},
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			executor := NewMockHistoryExecutor(ctrl)
+			blockDB := blockdb.NewMockBlockDB(ctrl)
+			if tt.want == nil {
+				executor.EXPECT().Schema().Return(tt.schema)
+			} else {
+				executor.EXPECT().Schema().Return(tt.schema).Times(2)
+				executor.EXPECT().ChainID().Return(uint64(1))
+				blockDB.EXPECT().Update(uint64(1), tt.want).Return(nil)
+			}
+
+			err := checkStateRoot(executor, tt.block, future.Immediate(result.Ok(common.BytesToHash(computed))), blockDB,
+				&ReplayLoopContext{overwriteStateRoot: OverwriteStateRootPolicyUninitialized}, nil)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.ErrorContains(t, err, tt.wantErr)
+			}
 		})
 	}
 }
