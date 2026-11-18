@@ -17,7 +17,10 @@
 package blockdb
 
 import (
+	"bytes"
 	"encoding/binary"
+	"iter"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -427,6 +430,73 @@ func TestRocksDB_GetRangeRev_ReturnsErrorIfBlockIsInvalid(t *testing.T) {
 				1, chainID, blockNumber, blockNumber, count)
 
 		})
+	}
+}
+
+func TestRocksDB_GetRange_And_GetRangeRev_StopWithErrorIfReadFails(t *testing.T) {
+	chainID := uint64(3)
+	path := t.TempDir()
+	options := grocksdb.NewDefaultOptions()
+	defer options.Destroy()
+	options.SetCreateIfMissing(true)
+	options.SetCompression(grocksdb.NoCompression)
+	tableOptions := grocksdb.NewDefaultBlockBasedTableOptions()
+	defer tableOptions.Destroy()
+	tableOptions.SetBlockSize(1) // every entry gets a data block of its own
+	options.SetBlockBasedTableFactory(tableOptions)
+	rocks, err := grocksdb.OpenDb(options, path)
+	require.NoError(t, err)
+	db := writeDB{db: rocks}
+	require.NoError(t, db.putVersion(CurrentVersion))
+	for number := uint64(1); number <= 4; number++ {
+		require.NoError(t, db.putBlock(chainID, &Block{Number: number}))
+	}
+	flushOptions := grocksdb.NewDefaultFlushOptions()
+	defer flushOptions.Destroy()
+	require.NoError(t, db.db.Flush(flushOptions))
+	db.close()
+
+	files, err := filepath.Glob(filepath.Join(path, "*.sst"))
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+	data, err := os.ReadFile(files[0])
+	require.NoError(t, err)
+	i := bytes.Index(data, MakeBlockKey(chainID, 2))
+	require.GreaterOrEqual(t, i, 0)
+	data[i] ^= 0xFF // breaks the checksum of the data block of block 2
+	require.NoError(t, os.WriteFile(files[0], data, 0o644))
+
+	getters := map[string]struct {
+		get  func(RocksDB, uint64, uint64, uint64) iter.Seq2[*Block, error]
+		want []uint64
+	}{
+		"GetRange": {get: RocksDB.GetRange, want: []uint64{1}},
+		// Reverse iteration already fails when it steps from block 4 to block 3:
+		// RocksDB sorts the versions of a key newest first, so it reads on to
+		// block 2 to be sure it returns the newest version of block 3.
+		"GetRangeRev": {get: RocksDB.GetRangeRev, want: []uint64{4}},
+	}
+	for name, dbOpener := range dbOpeners {
+		for getterName, tt := range getters {
+			t.Run(name+"/"+getterName, func(t *testing.T) {
+				rocksDB, err := dbOpener(path)
+				require.NoError(t, err)
+				defer func() { require.NoError(t, rocksDB.Close()) }()
+
+				var got []uint64
+				var gotErr error
+				for block, err := range tt.get(rocksDB, chainID, 0, 10) {
+					require.NoError(t, gotErr) // nothing is yielded after the error
+					if err != nil {
+						gotErr = err
+						continue
+					}
+					got = append(got, block.Number)
+				}
+				require.Equal(t, tt.want, got)
+				require.ErrorContains(t, gotErr, "Corruption")
+			})
+		}
 	}
 }
 
