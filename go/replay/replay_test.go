@@ -34,6 +34,7 @@ import (
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
+	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -587,7 +588,7 @@ func TestReplayLoop_CanProcessBlocks(t *testing.T) {
 			// ChainID is only called by the pipeline (for signer creation), not by
 			// the linear loop, so the exact count varies with the runner.
 			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-			executor.EXPECT().IsMptConformant().Return(true).Times(3)
+			executor.EXPECT().Schema().Return(carmen.Schema(5)).Times(3)
 			executor.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).Times(2)
 
 			// A block history with a few transactions.
@@ -702,7 +703,7 @@ func TestReplayLoop_ReportsFailures(t *testing.T) {
 		"incorrect state root": {
 			blocks: utils.NewIter([]*blockdb.Block{{StateRoot: common.Hash{0x2}.Bytes()}}),
 			expect: func(executor *MockHistoryExecutor) {
-				executor.EXPECT().IsMptConformant().Return(true)
+				executor.EXPECT().Schema().Return(carmen.Schema(5))
 				applyBlock(nil, common.Hash{0x1}, nil)(executor)
 			},
 			wantErr: "state root mismatch",
@@ -710,7 +711,7 @@ func TestReplayLoop_ReportsFailures(t *testing.T) {
 		"parent hash mismatch": {
 			blocks: utils.NewIter([]*blockdb.Block{{Number: 1, ParentHash: common.Hash{0xCD}.Bytes()}}),
 			expect: func(executor *MockHistoryExecutor) {
-				executor.EXPECT().IsMptConformant().Return(true)
+				executor.EXPECT().Schema().Return(carmen.Schema(5))
 				executor.EXPECT().GetBlockHash(uint64(0)).Return(common.Hash{0xAB})
 				applyBlock(nil, common.Hash{0x1}, nil)(executor)
 			},
@@ -751,7 +752,7 @@ func TestReplayLoop_StopsOnArchiveVerifierFailure(t *testing.T) {
 			// ChainID is only called by the pipeline (for signer creation), not by
 			// the linear loop, so the exact count varies with the runner.
 			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-			executor.EXPECT().IsMptConformant().Return(true).MinTimes(1)
+			executor.EXPECT().Schema().Return(carmen.Schema(5)).MinTimes(1)
 			executor.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{}).MinTimes(1)
 			executor.EXPECT().CloneBlockHashHistory().Return(nil).MinTimes(1)
 			executor.EXPECT().GetHeadHeader().Return(nil).MinTimes(1)
@@ -815,7 +816,7 @@ func TestReplayLoop_SubmitsBlocksWithParentHeaderAndHashHistory(t *testing.T) {
 			// ChainID is only called by the pipeline (for signer creation), not by
 			// the linear loop, so the exact count varies with the runner.
 			executor.EXPECT().ChainID().Return(uint64(12)).AnyTimes()
-			executor.EXPECT().IsMptConformant().Return(true)
+			executor.EXPECT().Schema().Return(carmen.Schema(5))
 			executor.EXPECT().GetBlockHash(uint64(0)).Return(common.Hash{})
 
 			// Both are captured before the block is applied.
@@ -848,9 +849,9 @@ func TestReplayLoop_OverwriteStateRootHash(t *testing.T) {
 			// additionally calls it in stage 1 for signer creation, so the exact count
 			// depends on the runner.
 			executor.EXPECT().ChainID().Return(uint64(12)).MinTimes(1)
-			// IsMptConformant is called twice per block: once in getExpectedStateRoot
-			// and once in updateStateRoot when overwriting is enabled.
-			executor.EXPECT().IsMptConformant().Return(true).Times(2)
+			// Schema is called twice per block: once to read the stored state root
+			// and once to overwrite it when overwriting is enabled.
+			executor.EXPECT().Schema().Return(carmen.Schema(5)).Times(2)
 			executor.EXPECT().GetBlockHash(gomock.Any()).Return(common.Hash{})
 
 			executor.EXPECT().
@@ -892,9 +893,9 @@ func TestRunReplayPipeline_IssueInThirdStageAbortsOtherStages(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		executor := newMockHistoryExecutorWithMaybeSnapshot(ctrl)
 		// Pipeline-only test: ChainID is called once by stage 1 for signer
-		// creation. IsMptConformant is never called: stage 3 processes the
-		// first block whose state-root future returns an error before
-		// getExpectedStateRoot runs, aborting the pipeline.
+		// creation. Schema is never called: stage 3 processes the first block
+		// whose state-root future returns an error before the stored state root
+		// is read, aborting the pipeline.
 		executor.EXPECT().ChainID().Return(uint64(12))
 		// All blocks have Number=0, so GetBlockHash is never called.
 

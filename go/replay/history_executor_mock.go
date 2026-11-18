@@ -15,6 +15,7 @@ import (
 	state "github.com/0xsoniclabs/bertha/replay/state"
 	future "github.com/0xsoniclabs/carmen/go/common/future"
 	result "github.com/0xsoniclabs/carmen/go/common/result"
+	state0 "github.com/0xsoniclabs/carmen/go/state"
 	evmcore "github.com/0xsoniclabs/sonic/evmcore"
 	common "github.com/ethereum/go-ethereum/common"
 	types "github.com/ethereum/go-ethereum/core/types"
@@ -117,34 +118,6 @@ func (mr *MockHistoryExecutorMockRecorder) GetHeadHeader() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetHeadHeader", reflect.TypeOf((*MockHistoryExecutor)(nil).GetHeadHeader))
 }
 
-// IsMptConformant mocks base method.
-func (m *MockHistoryExecutor) IsMptConformant() bool {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsMptConformant")
-	ret0, _ := ret[0].(bool)
-	return ret0
-}
-
-// IsMptConformant indicates an expected call of IsMptConformant.
-func (mr *MockHistoryExecutorMockRecorder) IsMptConformant() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsMptConformant", reflect.TypeOf((*MockHistoryExecutor)(nil).IsMptConformant))
-}
-
-// IsVerkleConformant mocks base method.
-func (m *MockHistoryExecutor) IsVerkleConformant() bool {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "IsVerkleConformant")
-	ret0, _ := ret[0].(bool)
-	return ret0
-}
-
-// IsVerkleConformant indicates an expected call of IsVerkleConformant.
-func (mr *MockHistoryExecutorMockRecorder) IsVerkleConformant() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsVerkleConformant", reflect.TypeOf((*MockHistoryExecutor)(nil).IsVerkleConformant))
-}
-
 // MaybeSnapshot mocks base method.
 func (m *MockHistoryExecutor) MaybeSnapshot(blockNumber uint64, stateRoot future.Future[result.Result[common.Hash]]) (future.Future[result.Result[common.Hash]], error) {
 	m.ctrl.T.Helper()
@@ -158,6 +131,20 @@ func (m *MockHistoryExecutor) MaybeSnapshot(blockNumber uint64, stateRoot future
 func (mr *MockHistoryExecutorMockRecorder) MaybeSnapshot(blockNumber, stateRoot any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaybeSnapshot", reflect.TypeOf((*MockHistoryExecutor)(nil).MaybeSnapshot), blockNumber, stateRoot)
+}
+
+// Schema mocks base method.
+func (m *MockHistoryExecutor) Schema() state0.Schema {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Schema")
+	ret0, _ := ret[0].(state0.Schema)
+	return ret0
+}
+
+// Schema indicates an expected call of Schema.
+func (mr *MockHistoryExecutorMockRecorder) Schema() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Schema", reflect.TypeOf((*MockHistoryExecutor)(nil).Schema))
 }
 
 // MockArchiveExecutor is a mock of ArchiveExecutor interface.

@@ -140,7 +140,13 @@ func checkStateRoot(
 	if err != nil {
 		return fmt.Errorf("failed to get state root after applying block %d: %w", block.Number, err)
 	}
-	expectedStateRoot := getExpectedStateRoot(executor, block)
+	var expectedStateRoot common.Hash
+	switch executor.Schema() {
+	case 5:
+		expectedStateRoot = common.BytesToHash(block.StateRoot)
+	case 6:
+		expectedStateRoot = common.BytesToHash(block.VerkleStateRoot)
+	}
 
 	switch replayLoopContext.overwriteStateRoot {
 	case OverwriteStateRootPolicyOn:
@@ -176,7 +182,12 @@ func overwriteAndPersistStateRoot(
 	computedStateRoot common.Hash,
 	blockDB blockdb.BlockDB,
 ) error {
-	updateStateRoot(executor, block, computedStateRoot)
+	switch executor.Schema() {
+	case 5:
+		block.StateRoot = computedStateRoot.Bytes()
+	case 6:
+		block.VerkleStateRoot = computedStateRoot.Bytes()
+	}
 	if err := blockDB.Update(executor.ChainID(), block); err != nil {
 		return fmt.Errorf("failed to update block %d in database: %w", block.Number, err)
 	}
