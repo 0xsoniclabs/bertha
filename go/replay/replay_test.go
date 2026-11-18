@@ -797,7 +797,7 @@ func TestReplayLoop_StopsOnArchiveVerifierFailure(t *testing.T) {
 			}
 
 			err = run(ctx, utils.NewIter(blocks), executor, nil, ReplayLoopContext{}, nil, verifier)
-			require.ErrorIs(t, err, context.Canceled)
+			require.ErrorIs(t, err, injectedErr)
 			require.ErrorIs(t, context.Cause(ctx), injectedErr)
 			// Only a small number of blocks should have been applied before the
 			// cancellation propagates. The pipeline may buffer up to a few hundred
