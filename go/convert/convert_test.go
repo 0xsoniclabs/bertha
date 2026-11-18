@@ -86,7 +86,7 @@ func TestConvertToGethBlock_ConvertsBlockToGethBlock(t *testing.T) {
 
 	transactions := types.Transactions{}
 	for _, tx := range input.Transactions {
-		tx, err := toGethTransaction(tx)
+		tx, err := ToGethTransaction(tx)
 		require.NoError(t, err)
 		transactions = append(transactions, tx)
 	}
@@ -224,7 +224,7 @@ func TestToGethTransaction_ReportsInvalidTransactions(t *testing.T) {
 	}
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			_, err := toGethTransaction(tt.tx)
+			_, err := ToGethTransaction(tt.tx)
 			require.ErrorContains(t, err, tt.wantErr)
 		})
 	}
@@ -485,7 +485,7 @@ func TestToGethTransaction_ConvertsTransactionToGethTransaction(t *testing.T) {
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			require := require.New(t)
-			got, err := toGethTransaction(tc.input)
+			got, err := ToGethTransaction(tc.input)
 			require.NoError(err)
 			require.Equal(tc.want.ChainId(), got.ChainId())
 			require.Equal(tc.want.Nonce(), got.Nonce())

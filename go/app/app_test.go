@@ -58,10 +58,20 @@ func TestRun_RunWithProfileFlag_ProducesProfile(t *testing.T) {
 }
 
 func TestRun_FailedRun_ReportsIssue(t *testing.T) {
-	require.ErrorContains(t,
-		Run([]string{"test", "verify"}),
-		"failed to open database",
-	)
+	tests := map[string]struct {
+		command string
+	}{
+		"verify":         {command: "verify"},
+		"check blob txs": {command: "check-blob-txs"},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			require.ErrorContains(t,
+				Run([]string{"test", tt.command}),
+				"failed to open database",
+			)
+		})
+	}
 }
 
 func TestParseOverwriteStateRootPolicy_AcceptsOnlyValidValues(t *testing.T) {

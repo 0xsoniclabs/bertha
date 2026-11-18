@@ -43,7 +43,7 @@ func ConvertToGethBlock(block *blockdb.Block) (*types.Block, error) {
 	// Start by converting the transactions.
 	transactions := types.Transactions{}
 	for i, tx := range block.Transactions {
-		transaction, err := toGethTransaction(tx)
+		transaction, err := ToGethTransaction(tx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert transaction %d: %w", i, err)
 		}
@@ -130,7 +130,7 @@ func ToBerthaTransaction(tx *types.Transaction) *blockdb.Transaction {
 	}
 }
 
-func toGethTransaction(tx *blockdb.Transaction) (*types.Transaction, error) {
+func ToGethTransaction(tx *blockdb.Transaction) (*types.Transaction, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("cannot convert nil transaction")
 	}

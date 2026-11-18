@@ -92,6 +92,15 @@ func getApp() *cli.Command {
 					endBlockFlag,
 				},
 			},
+			{
+				Name:   "check-blob-txs",
+				Usage:  "Check that the block database contains no blob transactions, including those in bundles",
+				Action: parseArgsAndRunCheckBlobTxs,
+				Flags: []cli.Flag{
+					blockDatabaseDirectoryFlag,
+					chainIDFlag,
+				},
+			},
 		},
 		Flags: []cli.Flag{
 			cpuProfileFlag,
@@ -373,6 +382,15 @@ func parseVerifyArgsAndRunVerify(ctx context.Context, c *cli.Command) error {
 		EndBlock:    c.Uint64(endBlockFlag.Name),
 	}
 	return verify.Verify(ctx, args, slog.Default(), &utils.ProgressBarFactory{})
+}
+
+func parseArgsAndRunCheckBlobTxs(ctx context.Context, c *cli.Command) error {
+	return verify.CheckBlobTxs(ctx,
+		c.String(blockDatabaseDirectoryFlag.Name),
+		c.Uint64(chainIDFlag.Name),
+		slog.Default(),
+		&utils.ProgressBarFactory{},
+	)
 }
 
 // parseOverwriteStateRootPolicy parses a string into an
