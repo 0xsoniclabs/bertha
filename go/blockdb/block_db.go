@@ -144,6 +144,7 @@ func (db RocksDB) Update(chainID uint64, block *Block) error {
 // This function returns an iterator that yields blocks in the specified range.
 // If there are no blocks in the range in the database, the iterator will not yield any blocks.
 // If parsing the block fails, the block will be nil and an error is returned.
+// If reading from the database fails, a nil block and the error are yielded last.
 // The iterator needs to be used in a range loop because otherwise the inner iterator will not be closed properly.
 func (db RocksDB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error] {
 	startKey := MakeBlockKey(chainID, startBlockNumber)
@@ -178,6 +179,9 @@ func (db RocksDB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) ite
 			}
 			it.Next()
 		}
+		if err := it.Err(); err != nil {
+			yield(nil, fmt.Errorf("block iteration failed: %w", err))
+		}
 	}
 }
 
@@ -185,6 +189,7 @@ func (db RocksDB) GetRange(chainID, startBlockNumber, endBlockNumber uint64) ite
 // This function returns an iterator that yields blocks in the specified range.
 // If there are no blocks in the range in the database, the iterator will not yield any blocks.
 // If parsing the block fails, the block will be nil and an error is returned.
+// If reading from the database fails, a nil block and the error are yielded last.
 // The iterator needs to be used in a range loop because otherwise the inner iterator will not be closed properly.
 func (db RocksDB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) iter.Seq2[*Block, error] {
 	endKey := MakeBlockKey(chainID, endBlockNumber)
@@ -218,6 +223,9 @@ func (db RocksDB) GetRangeRev(chainID, startBlockNumber, endBlockNumber uint64) 
 				break
 			}
 			it.Prev()
+		}
+		if err := it.Err(); err != nil {
+			yield(nil, fmt.Errorf("block iteration failed: %w", err))
 		}
 	}
 }
