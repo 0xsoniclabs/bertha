@@ -56,6 +56,8 @@ func OpenRocksDBForWriting(path string) (RocksDB, error) {
 	options := grocksdb.NewDefaultOptions()
 	defer options.Destroy()
 	options.SetCreateIfMissing(false)
+	// same as the blockservice, which owns the database
+	options.SetCompression(grocksdb.LZ4Compression)
 	db, err := grocksdb.OpenDb(options, path)
 	if err != nil {
 		return RocksDB{}, err
