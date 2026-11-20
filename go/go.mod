@@ -20,8 +20,8 @@ go 1.27.3
 
 require (
 	github.com/0xsoniclabs/carmen/go v0.0.0-20260930140317-c18d5fe77790
-	github.com/0xsoniclabs/sonic v0.0.0-20261119145824-2dd59e7a6a35
-	github.com/0xsoniclabs/tosca v0.0.0-20261105105212-5794ee2f5cac
+	github.com/0xsoniclabs/sonic v0.0.0-20261120124942-19c66ada1ef2
+	github.com/0xsoniclabs/tosca v0.0.0-20261120122000-57789c2642fd
 	github.com/0xsoniclabs/tracy v0.0.0-20251027125423-00a5ab7968fb
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00
 	github.com/ethereum/go-ethereum v1.17.10
@@ -143,7 +143,7 @@ require (
 	pgregory.net/rand v1.0.2 // indirect
 )
 
-replace github.com/ethereum/go-ethereum => github.com/0xsoniclabs/go-ethereum v0.0.0-20261118192104-b24f07ee2441
+replace github.com/ethereum/go-ethereum => github.com/0xsoniclabs/go-ethereum v0.0.0-20261120094246-1d388d218ec0
 
 replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundation/lachesis-base-sonic v0.0.0-20260429065829-930ae462cd09
 
