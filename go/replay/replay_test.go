@@ -131,7 +131,7 @@ func TestReplay_EthereumChainEndsSuccessfullyBeforeUnsupportedFork(t *testing.T)
 			args.UsePipeline = usePipeline
 			require.NoError(Replay(t.Context(), args))
 
-			st, err := state.NewState(state.StateParameters{Directory: args.StateDBDir, WithArchive: true, Schema: 5, Variant: "go-file"})
+			st, err := state.NewState(state.StateParameters{Directory: args.StateDBDir, WithArchive: true, Schema: args.DBSchema, Variant: args.DBVariant})
 			require.NoError(err)
 			defer func() { require.NoError(st.Close()) }()
 			height, _, err := st.GetArchiveBlockHeight()
