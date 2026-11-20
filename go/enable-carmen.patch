@@ -1,8 +1,8 @@
 diff --git a/go/replay/state/state.go b/go/replay/state/state.go
-index 3aed964..653c395 100644
+index 2a844ca..5257efb 100644
 --- a/go/replay/state/state.go
 +++ b/go/replay/state/state.go
-@@ -29,7 +29,8 @@ import (
+@@ -30,7 +30,8 @@ import (
  	"github.com/0xsoniclabs/sonic/integration/makefakegenesis"
  	"github.com/ethereum/go-ethereum/common"
  	// Uncomment to enable experimental Carmen features.
@@ -13,10 +13,10 @@ index 3aed964..653c395 100644
  
  // State is an abstraction of the Chain State Database. It tracks the balances,
 diff --git a/go/go.mod b/go/go.mod
-index c039660..775ce8f 100644
+index 25b89fd..8642efd 100644
 --- a/go/go.mod
 +++ b/go/go.mod
-@@ -53,14 +53,14 @@ require (
+@@ -58,14 +58,14 @@ require (
  	github.com/crate-crypto/go-eth-kzg v1.5.0 // indirect
  	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
  	github.com/deckarep/golang-set v1.8.0 // indirect
@@ -31,9 +31,9 @@ index c039660..775ce8f 100644
 -	//github.com/ethereum/go-verkle v0.2.3-0.20260102081149-aa0a270c0ed0 // indirect
 +	github.com/ethereum/go-verkle v0.2.3-0.20260102081149-aa0a270c0ed0 // indirect
  	github.com/ferranbt/fastssz v1.0.0 // indirect
+ 	github.com/fjl/jsonw v0.1.0 // indirect
  	github.com/fsnotify/fsnotify v1.10.1 // indirect
- 	github.com/gballet/go-libpcsclite v0.0.0-20191108122812-4678299bea08 // indirect
-@@ -145,7 +145,7 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
+@@ -149,7 +149,7 @@ replace github.com/Fantom-foundation/lachesis-base => github.com/Fantom-foundati
  
  // This line is automatically uncommented by the `go-run-with-carmen.sh` and `go-run-with-carmen-and-tracy.sh` scripts.
  //

@@ -235,6 +235,9 @@ func Replay(ctx context.Context, args ReplayArgs) (err error) {
 	defer func() { progressLogger.LogSummary() }()
 
 	blocks := blockDb.GetRange(chainID, args.StartBlock, args.EndBlock)
+	if ethereum.IsEthereum(chainID) {
+		blocks = ethereum.EndBeforeUnsupportedFork(blocks, chainID, slog.Default())
+	}
 
 	replayLoopContext := ReplayLoopContext{
 		overwriteStateRoot:  args.OverwriteStateRoot,

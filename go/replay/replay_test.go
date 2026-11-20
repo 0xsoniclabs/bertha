@@ -31,6 +31,7 @@ import (
 	"github.com/0xsoniclabs/bertha/blockdb"
 	"github.com/0xsoniclabs/bertha/convert"
 	"github.com/0xsoniclabs/bertha/replay/sonic"
+	"github.com/0xsoniclabs/bertha/replay/state"
 	"github.com/0xsoniclabs/bertha/utils"
 	"github.com/0xsoniclabs/carmen/go/common/future"
 	"github.com/0xsoniclabs/carmen/go/common/result"
@@ -38,6 +39,7 @@ import (
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -107,6 +109,34 @@ func TestReplay_ResumesOnKeptState(t *testing.T) {
 			args.EndBlock = math.MaxUint64
 			args.StartBlock = 26
 			require.NoError(Replay(t.Context(), args))
+		})
+	}
+}
+
+func TestReplay_EthereumChainEndsSuccessfullyBeforeUnsupportedFork(t *testing.T) {
+	config := params.SepoliaChainConfig
+	genesisBlock, err := convert.ConvertToGethBlock(&blockdb.Block{})
+	require.NoError(t, err)
+	blocks := []*blockdb.Block{{Number: 0}, {Number: 1, ParentHash: genesisBlock.Hash().Bytes()}, {Number: 2, Timestamp: *config.AmsterdamTime}}
+	blockDbDir, genesisFile := writeBlockDb(t, opera.Rules{NetworkID: config.ChainID.Uint64()}, nil, blocks, nil)
+
+	for _, usePipeline := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pipeline=%t", usePipeline), func(t *testing.T) {
+			require := require.New(t)
+			args := defaultReplayArgs()
+			args.BlockDBDir, args.JSONGenesisFile = blockDbDir, genesisFile
+			args.StateDBDir = filepath.Join(t.TempDir(), "state")
+			args.KeepDB = true
+			args.WithArchive = true
+			args.UsePipeline = usePipeline
+			require.NoError(Replay(t.Context(), args))
+
+			st, err := state.NewState(state.StateParameters{Directory: args.StateDBDir, WithArchive: true, Schema: args.DBSchema, Variant: args.DBVariant})
+			require.NoError(err)
+			defer func() { require.NoError(st.Close()) }()
+			height, _, err := st.GetArchiveBlockHeight()
+			require.NoError(err)
+			require.Equal(uint64(1), height)
 		})
 	}
 }

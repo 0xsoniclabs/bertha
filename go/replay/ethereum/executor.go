@@ -17,6 +17,7 @@
 package ethereum
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"math/big"
@@ -147,11 +148,12 @@ func applyBlockWithProcessor(
 
 	// EVM for the system calls; the chain is not needed for the current system calls.
 	evm := vm.NewEVM(evmcore.NewEVMBlockContextWithDifficulty(&evmBlock.EvmHeader, nil, nil, big.NewInt(0)), stateDB, chainConfig, vmConfig)
+	defer evm.Release()
 
 	if chainConfig.IsCancun(block.Number(), block.Time()) {
 		// EIP-4788: store the parent beacon block root in the beacon roots contract.
 		if beaconRoot := block.BeaconRoot(); beaconRoot != nil {
-			core.ProcessBeaconBlockRoot(*beaconRoot, evm)
+			core.ProcessBeaconBlockRoot(*beaconRoot, evm, nil)
 			stateDB.EndTransaction()
 		}
 	}
@@ -179,25 +181,18 @@ func applyBlockWithProcessor(
 		receipts = append(receipts, proc.Receipt)
 	}
 
-	if chainConfig.IsPrague(block.Number(), block.Time()) {
-		// EIP-7002: call the withdrawal request contract as a system call. The
-		// requests are not needed for replay.
-		err := core.ProcessWithdrawalQueue(&[][]byte{}, evm)
-		stateDB.EndTransaction()
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to process EIP-7002 system call: %v", err)
-		}
-
-		// EIP-7251: call the consolidation request contract as a system call. The
-		// requests are not needed for replay.
-		err = core.ProcessConsolidationQueue(&[][]byte{}, evm)
-		stateDB.EndTransaction()
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to process EIP-7251 system call: %v", err)
-		}
+	// Credit the withdrawals and call the request contracts as system calls.
+	// The logs are only needed to collect the requests, which replay does not need.
+	_, _, err := core.PostExecution(
+		context.Background(), chainConfig, block.Number(), block.Time(), nil,
+		block.Withdrawals(), evm, uint32(len(block.Transactions())+1),
+	)
+	stateDB.EndTransaction()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to process post-execution of block %d: %w", block.NumberU64(), err)
 	}
 
-	// Credit the block and uncle rewards pre-merge and the withdrawals post-merge.
+	// Credit the block and uncle rewards pre-merge.
 	beacon.New(ethash.NewFaker()).Finalize(chainConfigReader{config: chainConfig}, block.Header(), stateDB, block.Body())
 
 	if !isArchive {

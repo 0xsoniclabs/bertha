@@ -67,7 +67,7 @@ func CreateSonicBlocks(t *testing.T, rules opera.Rules, db *state.StateDB, num i
 	config := opera.CreateTransientEvmChainConfig(rules.NetworkID, []opera.UpgradeHeight{{Upgrades: rules.Upgrades}}, 0)
 
 	parent := inter.NewBlockBuilder().
-		WithStateRoot(db.IntermediateRoot(true)).
+		WithStateRoot(db.IntermediateRoot(params.Rules{IsEIP158: true})).
 		WithTime(inter.Timestamp(time.Unix(1_700_000_000, 0).UnixNano())).
 		WithGasLimit(rules.Blocks.MaxBlockGas).
 		WithBaseFee(gasprice.GetInitialBaseFee(rules.Economy)).
@@ -79,11 +79,11 @@ func CreateSonicBlocks(t *testing.T, rules opera.Rules, db *state.StateDB, num i
 			BlockNumber: big.NewInt(int64(i)),
 			Time:        uint64(timestamp.Unix()),
 			Random:      &prevRandao,
-		}, db, config, vm.Config{}))
+		}, db, config, vm.Config{}), nil)
 		block := inter.NewBlockBuilder().
 			WithNumber(uint64(i)).
 			WithParentHash(parent.Hash()).
-			WithStateRoot(db.IntermediateRoot(true)).
+			WithStateRoot(db.IntermediateRoot(params.Rules{IsEIP158: true})).
 			WithTime(timestamp).
 			WithPrevRandao(prevRandao).
 			WithDuration(time.Second).
@@ -130,16 +130,15 @@ func CreateEthereumBlocks(t *testing.T, config *params.ChainConfig, db *state.St
 				Time:        header.Time,
 				Random:      &header.MixDigest,
 			}, db, config, vm.Config{})
-			core.ProcessBeaconBlockRoot(*header.ParentBeaconRoot, evm)
+			core.ProcessBeaconBlockRoot(*header.ParentBeaconRoot, evm, nil)
 			if config.IsPrague(header.Number, header.Time) {
-				core.ProcessParentBlockHash(header.ParentHash, evm)
-				var requests [][]byte
-				require.NoError(t, core.ProcessWithdrawalQueue(&requests, evm))
-				require.NoError(t, core.ProcessConsolidationQueue(&requests, evm))
+				core.ProcessParentBlockHash(header.ParentHash, evm, nil)
+				requests, _, err := core.PostExecution(t.Context(), config, header.Number, header.Time, nil, nil, evm, 0)
+				require.NoError(t, err)
 				header.RequestsHash = new(types.CalcRequestsHash(requests))
 			}
 		}
-		header.Root = db.IntermediateRoot(true)
+		header.Root = db.IntermediateRoot(params.Rules{IsEIP158: true})
 		blocks = append(blocks, ToBlockDbBlock(t, header))
 		parent = header
 	}

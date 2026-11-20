@@ -242,7 +242,7 @@ func TestApplyBlockWithProcessor_RunsSystemCallsOfActiveUpgradesAndReportsTheirF
 			time:    *chainConfig.PragueTime,
 			address: params.WithdrawalQueueAddress,
 			code:    revert,
-			wantErr: "failed to process EIP-7002 system call",
+			wantErr: "failed to process post-execution of block 20000000: failed to process withdrawal queue",
 		},
 		"EIP-7251 dequeues consolidation requests in Prague": {
 			time:    *chainConfig.PragueTime,
@@ -263,7 +263,7 @@ func TestApplyBlockWithProcessor_RunsSystemCallsOfActiveUpgradesAndReportsTheirF
 			time:    *chainConfig.PragueTime,
 			address: params.ConsolidationQueueAddress,
 			code:    revert,
-			wantErr: "failed to process EIP-7251 system call",
+			wantErr: "failed to process post-execution of block 20000000: failed to process consolidation queue",
 		},
 	}
 
@@ -275,6 +275,9 @@ func TestApplyBlockWithProcessor_RunsSystemCallsOfActiveUpgradesAndReportsTheirF
 
 			st.DB.BeginBlock()
 			st.DB.BeginTransaction()
+			// Prague calls both request contracts.
+			st.DB.SetCode(cc.Address(params.WithdrawalQueueAddress), params.WithdrawalQueueCode)
+			st.DB.SetCode(cc.Address(params.ConsolidationQueueAddress), params.ConsolidationQueueCode)
 			st.DB.SetCode(cc.Address(tt.address), tt.code)
 			for key, value := range tt.storage {
 				st.DB.SetState(cc.Address(tt.address), key, value)
@@ -313,7 +316,7 @@ func TestApplyBlockWithProcessor_RunsSystemCallsOfActiveUpgradesAndReportsTheirF
 	}
 }
 
-func TestApplyBlockWithProcessor_CreditsWithdrawalsPostMergeAndRewardsPreMerge(t *testing.T) {
+func TestApplyBlockWithProcessor_CreditsWithdrawalsPostShanghaiAndRewardsPreMerge(t *testing.T) {
 	const amountGwei = uint64(1000)
 	withdrawalAddr := common.Address{0xAB}
 	coinbase := common.Address{0x01}
@@ -332,10 +335,13 @@ func TestApplyBlockWithProcessor_CreditsWithdrawalsPostMergeAndRewardsPreMerge(t
 	minerReward := new(uint256.Int).Set(blockReward)
 	minerReward.Add(minerReward, new(uint256.Int).Div(blockReward, uint256.NewInt(32)))
 
-	withdrawalBlock := func(difficulty uint64) *blockdb.Block {
+	shanghai := *params.MainnetChainConfig.ShanghaiTime
+	withdrawalBlock := func(timestamp uint64) *blockdb.Block {
 		return &blockdb.Block{
+			// London, a prerequisite of Shanghai, is active at this block.
+			Number:      20_000_000,
+			Timestamp:   timestamp,
 			GasLimit:    8_000_000,
-			Difficulty:  difficulty,
 			Withdrawals: []*blockdb.Withdrawal{{Address: withdrawalAddr.Bytes(), Amount: amountGwei}},
 		}
 	}
@@ -353,12 +359,12 @@ func TestApplyBlockWithProcessor_CreditsWithdrawalsPostMergeAndRewardsPreMerge(t
 		block        *blockdb.Block
 		wantBalances map[common.Address]*uint256.Int
 	}{
-		"withdrawals post-merge": {
-			block:        withdrawalBlock(0),
+		"withdrawals post-Shanghai": {
+			block:        withdrawalBlock(shanghai),
 			wantBalances: map[common.Address]*uint256.Int{withdrawalAddr: uint256.NewInt(amountGwei * params.GWei)},
 		},
-		"withdrawals pre-merge": {
-			block:        withdrawalBlock(1),
+		"withdrawals pre-Shanghai": {
+			block:        withdrawalBlock(shanghai - 1),
 			wantBalances: map[common.Address]*uint256.Int{withdrawalAddr: uint256.NewInt(0)},
 		},
 		"rewards pre-merge": {
@@ -449,12 +455,15 @@ func TestApplyBlockWithProcessor_CommitsBlockToTheArchiveState(t *testing.T) {
 		opera.Upgrades{},
 	)
 
-	withdrawals := map[uint64][]*blockdb.Withdrawal{
-		1: {{Address: common.Address{1}.Bytes(), Amount: 1000}},
+	blocks := []*blockdb.Block{
+		{Number: 0},
+		// Pre-merge, the block rewards its beneficiary.
+		{Number: 1, Difficulty: 1, Beneficiary: common.Address{1}.Bytes()},
+		{Number: 2},
 	}
 
-	for i := range 3 {
-		block, err := convert.ConvertToGethBlock(&blockdb.Block{Number: uint64(i), Withdrawals: withdrawals[uint64(i)]})
+	for _, b := range blocks {
+		block, err := convert.ConvertToGethBlock(b)
 		require.NoError(err)
 		_, _, err = applyBlockWithProcessor(state, block, testInterpreter(t), processor, chainConfig, false)
 		require.NoError(err)
@@ -474,7 +483,7 @@ func TestApplyBlockWithProcessor_CommitsBlockToTheArchiveState(t *testing.T) {
 	after, err := state.DB.GetArchiveStateDB(1)
 	require.NoError(err)
 	defer after.Release()
-	require.Equal(uint64(1000*params.GWei), after.GetBalance(cc.Address{1}).Uint64())
+	require.Equal(ethash.FrontierBlockReward.Uint64(), after.GetBalance(cc.Address{1}).Uint64())
 }
 
 func TestApplyBlockWithProcessor_ReportsFailures(t *testing.T) {
@@ -522,6 +531,7 @@ func TestApplyBlockWithProcessor_ReportsFailures(t *testing.T) {
 					processor.EXPECT().
 						ProcessWithDifficulty(anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg).
 						Return(evmcore.ProcessSummary{}),
+					db.EXPECT().EndTransaction(),
 					db.EXPECT().EndBlock(uint64(5)).Return(nil, injected),
 				)
 			},
