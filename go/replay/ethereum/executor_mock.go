@@ -15,6 +15,7 @@ import (
 
 	evmcore "github.com/0xsoniclabs/sonic/evmcore"
 	core_types "github.com/0xsoniclabs/sonic/evmcore/core_types"
+	freeze "github.com/0xsoniclabs/sonic/gossip/blockproc/freeze"
 	state "github.com/0xsoniclabs/sonic/inter/state"
 	vm "github.com/ethereum/go-ethereum/core/vm"
 	gomock "go.uber.org/mock/gomock"
@@ -45,15 +46,15 @@ func (m *MockProcessor) EXPECT() *MockProcessorMockRecorder {
 }
 
 // ProcessWithDifficulty mocks base method.
-func (m *MockProcessor) ProcessWithDifficulty(block *evmcore.EvmBlock, statedb state.StateDB, cfg vm.Config, gasLimit uint64, usedGas *uint64, trueTxOffset int, onNewLog func(*core_types.Log), difficulty *big.Int, remainingSize uint64) evmcore.ProcessSummary {
+func (m *MockProcessor) ProcessWithDifficulty(block *evmcore.EvmBlock, statedb state.StateDB, freezeChecker freeze.Checker, cfg vm.Config, gasLimit uint64, usedGas *uint64, trueTxOffset int, onNewLog func(*core_types.Log), difficulty *big.Int, remainingSize uint64) evmcore.ProcessSummary {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ProcessWithDifficulty", block, statedb, cfg, gasLimit, usedGas, trueTxOffset, onNewLog, difficulty, remainingSize)
+	ret := m.ctrl.Call(m, "ProcessWithDifficulty", block, statedb, freezeChecker, cfg, gasLimit, usedGas, trueTxOffset, onNewLog, difficulty, remainingSize)
 	ret0, _ := ret[0].(evmcore.ProcessSummary)
 	return ret0
 }
 
 // ProcessWithDifficulty indicates an expected call of ProcessWithDifficulty.
-func (mr *MockProcessorMockRecorder) ProcessWithDifficulty(block, statedb, cfg, gasLimit, usedGas, trueTxOffset, onNewLog, difficulty, remainingSize any) *gomock.Call {
+func (mr *MockProcessorMockRecorder) ProcessWithDifficulty(block, statedb, freezeChecker, cfg, gasLimit, usedGas, trueTxOffset, onNewLog, difficulty, remainingSize any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessWithDifficulty", reflect.TypeOf((*MockProcessor)(nil).ProcessWithDifficulty), block, statedb, cfg, gasLimit, usedGas, trueTxOffset, onNewLog, difficulty, remainingSize)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessWithDifficulty", reflect.TypeOf((*MockProcessor)(nil).ProcessWithDifficulty), block, statedb, freezeChecker, cfg, gasLimit, usedGas, trueTxOffset, onNewLog, difficulty, remainingSize)
 }

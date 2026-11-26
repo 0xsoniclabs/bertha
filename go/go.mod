@@ -20,7 +20,7 @@ go 1.27.3
 
 require (
 	github.com/0xsoniclabs/carmen/go v0.0.0-20260930140317-c18d5fe77790
-	github.com/0xsoniclabs/sonic v0.0.0-20261120124942-19c66ada1ef2
+	github.com/0xsoniclabs/sonic v0.0.0-20261125144852-cd5aad082e91
 	github.com/0xsoniclabs/tosca v0.0.0-20261120122000-57789c2642fd
 	github.com/0xsoniclabs/tracy v0.0.0-20251027125423-00a5ab7968fb
 	github.com/Fantom-foundation/lachesis-base v0.0.0-20240116072301-a75735c4ef00

@@ -26,6 +26,7 @@ import (
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/evmcore"
 	"github.com/0xsoniclabs/sonic/evmcore/core_types"
+	"github.com/0xsoniclabs/sonic/gossip/blockproc/freeze"
 	"github.com/0xsoniclabs/sonic/gossip/evmstore"
 	"github.com/0xsoniclabs/sonic/inter"
 	sonicstate "github.com/0xsoniclabs/sonic/inter/state"
@@ -97,6 +98,7 @@ type Processor interface {
 	ProcessWithDifficulty(
 		block *evmcore.EvmBlock,
 		statedb sonicstate.StateDB,
+		freezeChecker freeze.Checker,
 		cfg vm.Config,
 		gasLimit uint64,
 		usedGas *uint64,
@@ -162,6 +164,7 @@ func applyBlockWithProcessor(
 	processed := processor.ProcessWithDifficulty(
 		evmBlock,
 		stateDB,
+		freeze.NewRegistryChecker(false, stateDB),
 		vmConfig,
 		block.GasLimit(),
 		&usedGas,

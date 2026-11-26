@@ -28,6 +28,7 @@ import (
 	cc "github.com/0xsoniclabs/carmen/go/common"
 	carmen "github.com/0xsoniclabs/carmen/go/state"
 	"github.com/0xsoniclabs/sonic/evmcore"
+	"github.com/0xsoniclabs/sonic/gossip/blockproc/freeze"
 	"github.com/0xsoniclabs/sonic/inter"
 	"github.com/0xsoniclabs/sonic/opera"
 	"github.com/0xsoniclabs/tosca/go/tosca"
@@ -121,7 +122,7 @@ func TestExecutor_ExecuteBlock_And_ExecuteBlockOnArchive_ServeBlockHashFromHashH
 	}
 }
 
-func TestApplyBlockWithProcessor_ForwardsDifficultyToProcessor(t *testing.T) {
+func TestApplyBlockWithProcessor_ForwardsDifficultyAndDisabledFreezeCheckerToProcessor(t *testing.T) {
 	tests := map[string]struct {
 		difficulty *big.Int
 	}{
@@ -148,12 +149,14 @@ func TestApplyBlockWithProcessor_ForwardsDifficultyToProcessor(t *testing.T) {
 			processor.EXPECT().ProcessWithDifficulty(
 				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
 				gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(),
-				gomock.Any(),
+				gomock.Any(), gomock.Any(),
 			).DoAndReturn(func(
-				_ *evmcore.EvmBlock, _ interface{}, _ vm.Config,
+				_ *evmcore.EvmBlock, _ interface{}, freezeChecker freeze.Checker, _ vm.Config,
 				_ uint64, _ *uint64, _ int, _ interface{},
 				difficulty *big.Int, _ uint64,
 			) evmcore.ProcessSummary {
+				require.NotNil(t, freezeChecker)
+				require.False(t, freezeChecker.IsEnabled())
 				require.Equal(t, tt.difficulty, difficulty)
 				return evmcore.ProcessSummary{}
 			})
@@ -517,7 +520,7 @@ func TestApplyBlockWithProcessor_ReportsFailures(t *testing.T) {
 				gomock.InOrder(
 					db.EXPECT().BeginBlock(),
 					processor.EXPECT().
-						ProcessWithDifficulty(anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg).
+						ProcessWithDifficulty(anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg).
 						Return(evmcore.ProcessSummary{ProcessedTransactions: []evmcore.ProcessedTransaction{{Transaction: skipped}}}),
 				)
 			},
@@ -529,7 +532,7 @@ func TestApplyBlockWithProcessor_ReportsFailures(t *testing.T) {
 				gomock.InOrder(
 					db.EXPECT().BeginBlock(),
 					processor.EXPECT().
-						ProcessWithDifficulty(anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg).
+						ProcessWithDifficulty(anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg, anyArg).
 						Return(evmcore.ProcessSummary{}),
 					db.EXPECT().EndTransaction(),
 					db.EXPECT().EndBlock(uint64(5)).Return(nil, injected),
